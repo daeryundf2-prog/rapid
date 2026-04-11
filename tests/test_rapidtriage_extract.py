@@ -1,51 +1,26 @@
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import os
 import tempfile
 import unittest
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from rapidtriage.cli import build_parser, main
+from rapidtriage.cli import main
 
 
-INPUT_DESTS = {
-    "input",
-    "input_json",
-    "input_path",
-    "json",
-    "json_path",
-    "source",
-    "source_json",
-    "results",
-    "results_json",
-    "report",
-    "report_json",
-}
-OUTPUT_DIR_DESTS = {
-    "output_dir",
-    "destination",
-    "destination_dir",
-    "dest",
-    "dest_dir",
-    "target_dir",
-    "extract_dir",
-    "directory",
-}
-MANIFEST_DESTS = {
-    "manifest",
-    "manifest_path",
-    "manifest_output",
-    "manifest_json",
-    "output_manifest",
-}
-SOURCE_PATH_KEYS = ("original_path", "source_path", "path")
-EXTRACTED_PATH_KEYS = ("extracted_path", "output_path", "destination_path", "copied_path", "target_path")
-HASH_KEYS = ("hash", "sha256", "md5")
-MODIFIED_AT_KEYS = ("modified_at", "source_modified_at", "mtime")
+def write_minimal_docx(path: Path, text: str) -> None:
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body></w:document>"
+    )
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("[Content_Types].xml", "")
+        archive.writestr("word/document.xml", xml)
 
 
 def write_minimal_pdf(path: Path, text: str) -> None:
@@ -74,179 +49,107 @@ def write_minimal_pdf(path: Path, text: str) -> None:
     path.write_bytes(bytes(output))
 
 
-def choose_option(option_strings: list[str]) -> str:
-    long_options = [item for item in option_strings if item.startswith("--")]
-    return long_options[0] if long_options else option_strings[0]
-
-
-def build_extract_argv(input_json: Path, output_dir: Path, manifest_path: Path) -> list[str]:
-    parser = build_parser()
-    subparser_action = next(
-        action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
-    )
-    extract_parser = subparser_action.choices.get("extract")
-    if extract_parser is None:
-        return [
-            "extract",
-            str(input_json),
-            "--output-dir",
-            str(output_dir),
-            "--manifest",
-            str(manifest_path),
-        ]
-
-    argv = ["extract"]
-    positional_actions = [
-        action
-        for action in extract_parser._actions
-        if not action.option_strings and action.dest != "help"
-    ]
-    positional_values = [input_json, output_dir, manifest_path]
-    positional_index = 0
-
-    for action in positional_actions:
-        if action.dest in INPUT_DESTS:
-            argv.append(str(input_json))
-        elif action.dest in OUTPUT_DIR_DESTS:
-            argv.append(str(output_dir))
-        elif action.dest in MANIFEST_DESTS:
-            argv.append(str(manifest_path))
-        else:
-            argv.append(str(positional_values[positional_index]))
-            positional_index += 1
-
-    for action in extract_parser._actions:
-        if not action.option_strings:
-            continue
-        if action.dest in INPUT_DESTS:
-            argv.extend([choose_option(action.option_strings), str(input_json)])
-        elif action.dest in OUTPUT_DIR_DESTS:
-            argv.extend([choose_option(action.option_strings), str(output_dir)])
-        elif action.dest in MANIFEST_DESTS:
-            argv.extend([choose_option(action.option_strings), str(manifest_path)])
-
-    return argv
-
-
-def find_record_list(payload: dict[str, object]) -> list[dict[str, object]]:
-    for key in ("records", "results", "entries", "items", "files", "extractions"):
-        value = payload.get(key)
-        if isinstance(value, list) and all(isinstance(item, dict) for item in value):
-            return value
-    raise AssertionError(f"Could not find extraction records list in manifest keys: {sorted(payload)}")
-
-
-def get_value(record: dict[str, object], candidates: tuple[str, ...]) -> object:
-    for key in candidates:
-        if key in record:
-            return record[key]
-    raise AssertionError(f"Missing any of {candidates} in record keys: {sorted(record)}")
-
-
-def resolve_output_path(raw_path: str, output_dir: Path) -> Path:
-    path = Path(raw_path)
-    if path.is_absolute():
-        return path.resolve()
-    return (output_dir / path).resolve()
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 class RapidTriageExtractTests(unittest.TestCase):
-    def test_extract_accepts_files_json_and_copies_candidates_with_manifest(self) -> None:
+    def test_extract_command_copies_selected_files_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            alpha_dir = root / "Users" / "alice" / "Desktop"
-            beta_dir = root / "Users" / "bob" / "Downloads"
-            alpha_dir.mkdir(parents=True)
-            beta_dir.mkdir(parents=True)
+            evidence_dir = root / "evidence"
+            evidence_dir.mkdir()
+            note_path = evidence_dir / "case-notes.txt"
+            note_path.write_text("incident notes", encoding="utf-8")
+            mtime = datetime(2024, 3, 4, 5, 6, 7).timestamp()
+            os.utime(note_path, (mtime, mtime))
+            (root / "bundle.zip").write_bytes(b"PK\x03\x04")
+            input_json = root / "files.json"
+            extract_dir = root / "extract-out"
+            manifest_json = root / "extract-manifest.json"
 
-            alpha = alpha_dir / "report.txt"
-            beta = beta_dir / "report.txt"
-            alpha.write_text("alpha incident", encoding="utf-8")
-            beta.write_text("beta incident", encoding="utf-8")
+            self.assertEqual(main(["files", str(root), "--output", str(input_json)]), 0)
+            exit_code = main(
+                [
+                    "extract",
+                    str(input_json),
+                    str(extract_dir),
+                    "--manifest",
+                    str(manifest_json),
+                    "--category",
+                    "documents",
+                    "--ext",
+                    "txt",
+                ]
+            )
 
-            alpha_mtime = datetime(2024, 1, 2, 3, 4, 5).timestamp()
-            beta_mtime = datetime(2024, 2, 3, 4, 5, 6).timestamp()
-            os.utime(alpha, (alpha_mtime, alpha_mtime))
-            os.utime(beta, (beta_mtime, beta_mtime))
-
-            files_json = root / "files.json"
-            extract_dir = root / "extracted-files"
-            manifest_json = root / "extract-files-manifest.json"
-
-            files_exit_code = main(["files", str(root), "--output", str(files_json)])
-            self.assertEqual(files_exit_code, 0)
-
-            extract_exit_code = main(build_extract_argv(files_json, extract_dir, manifest_json))
-            self.assertEqual(extract_exit_code, 0)
-            self.assertTrue(manifest_json.exists())
-
+            self.assertEqual(exit_code, 0)
             manifest = json.loads(manifest_json.read_text(encoding="utf-8"))
-            records = find_record_list(manifest)
-            self.assertEqual(len(records), 2)
+            self.assertEqual(manifest["command"], "extract")
+            self.assertEqual(manifest["source_command"], "files")
+            self.assertEqual(manifest["summary"]["selected_count"], 1)
+            self.assertEqual(manifest["summary"]["extracted_count"], 1)
+            self.assertEqual(manifest["summary"]["skipped_count"], 0)
 
-            by_source = {
-                Path(str(get_value(record, SOURCE_PATH_KEYS))).resolve(): record
-                for record in records
-            }
-            self.assertEqual(set(by_source), {alpha.resolve(), beta.resolve()})
+            entry = manifest["entries"][0]
+            extracted_path = Path(entry["extracted_path"])
+            self.assertEqual(Path(entry["original_path"]), note_path.resolve())
+            self.assertEqual(extracted_path, (extract_dir / "evidence" / "case-notes.txt").resolve())
+            self.assertEqual(extracted_path.read_text(encoding="utf-8"), "incident notes")
+            self.assertEqual(entry["sha256"], sha256_file(note_path))
+            self.assertEqual(entry["modified_at"], datetime.fromtimestamp(mtime).isoformat())
+            self.assertEqual(entry["categories"], ["documents"])
 
-            extracted_paths: set[Path] = set()
-            for source_path, expected_mtime in (
-                (alpha.resolve(), datetime.fromtimestamp(alpha_mtime).isoformat()),
-                (beta.resolve(), datetime.fromtimestamp(beta_mtime).isoformat()),
-            ):
-                record = by_source[source_path]
-                extracted_path = resolve_output_path(str(get_value(record, EXTRACTED_PATH_KEYS)), extract_dir)
-                extracted_paths.add(extracted_path)
-                self.assertTrue(extracted_path.exists())
-                self.assertTrue(str(extracted_path).startswith(str(extract_dir.resolve())))
-                self.assertEqual(extracted_path.read_bytes(), source_path.read_bytes())
-                self.assertEqual(get_value(record, MODIFIED_AT_KEYS), expected_mtime)
-
-                digest = str(get_value(record, HASH_KEYS))
-                source_bytes = source_path.read_bytes()
-                self.assertIn(
-                    digest,
-                    {
-                        hashlib.md5(source_bytes).hexdigest(),
-                        hashlib.sha256(source_bytes).hexdigest(),
-                    },
-                )
-
-            self.assertEqual(len(extracted_paths), 2)
-
-    def test_extract_uses_docs_results_instead_of_all_doc_candidates(self) -> None:
+    def test_extract_command_uses_docs_results_and_kind_filter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            matched = root / "matched.txt"
-            unmatched = root / "unmatched.pdf"
-            matched.write_text("incident keyword hit", encoding="utf-8")
-            write_minimal_pdf(unmatched, "background text only")
-
+            (root / "note.txt").write_text("incident keyword hit", encoding="utf-8")
+            write_minimal_docx(root / "report.docx", "registry keyword hit")
+            pdf_path = root / "evidence.pdf"
+            write_minimal_pdf(pdf_path, "shellbags keyword hit")
             docs_json = root / "docs.json"
-            extract_dir = root / "extracted-docs"
-            manifest_json = root / "extract-docs-manifest.json"
+            extract_dir = root / "docs-extract"
 
-            docs_exit_code = main(["docs", str(root), "-k", "keyword", "--output", str(docs_json)])
-            self.assertEqual(docs_exit_code, 0)
+            self.assertEqual(
+                main(["docs", str(root), "-k", "keyword", "--output", str(docs_json)]),
+                0,
+            )
+            exit_code = main(["extract", str(docs_json), str(extract_dir), "--kind", "pdf"])
 
-            payload = json.loads(docs_json.read_text(encoding="utf-8"))
-            result_paths = {Path(item["path"]).resolve() for item in payload["results"]}
-            self.assertEqual(result_paths, {matched.resolve()})
+            self.assertEqual(exit_code, 0)
+            manifest = json.loads((extract_dir / "rapidtriage-extract-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["source_command"], "docs")
+            self.assertEqual(manifest["summary"]["input_count"], 3)
+            self.assertEqual(manifest["summary"]["selected_count"], 1)
+            self.assertEqual(manifest["summary"]["extracted_count"], 1)
+            entry = manifest["entries"][0]
+            self.assertEqual(entry["kind"], "pdf")
+            self.assertEqual(entry["matched_keywords"], ["keyword"])
+            self.assertEqual(Path(entry["original_path"]), pdf_path.resolve())
+            self.assertTrue((extract_dir / "evidence.pdf").is_file())
 
-            extract_exit_code = main(build_extract_argv(docs_json, extract_dir, manifest_json))
-            self.assertEqual(extract_exit_code, 0)
+    def test_extract_command_records_missing_source_in_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            note_path = root / "note.txt"
+            note_path.write_text("to be removed", encoding="utf-8")
+            input_json = root / "files.json"
+            extract_dir = root / "extract-out"
 
-            manifest = json.loads(manifest_json.read_text(encoding="utf-8"))
-            records = find_record_list(manifest)
-            self.assertEqual(len(records), 1)
-            record = records[0]
-            self.assertEqual(Path(str(get_value(record, SOURCE_PATH_KEYS))).resolve(), matched.resolve())
+            self.assertEqual(main(["files", str(root), "--output", str(input_json)]), 0)
+            note_path.unlink()
 
-            extracted_path = resolve_output_path(str(get_value(record, EXTRACTED_PATH_KEYS)), extract_dir)
-            self.assertTrue(extracted_path.exists())
-            self.assertEqual(extracted_path.read_bytes(), matched.read_bytes())
-            self.assertTrue(str(extracted_path).startswith(str(extract_dir.resolve())))
+            exit_code = main(["extract", str(input_json), str(extract_dir)])
+
+            self.assertEqual(exit_code, 0)
+            manifest = json.loads((extract_dir / "rapidtriage-extract-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["summary"]["selected_count"], 1)
+            self.assertEqual(manifest["summary"]["extracted_count"], 0)
+            self.assertEqual(manifest["summary"]["skipped_count"], 1)
+            self.assertEqual(manifest["skipped"][0]["original_path"], str(note_path.resolve()))
+            self.assertEqual(manifest["skipped"][0]["reason"], "missing")
 
 
 if __name__ == "__main__":

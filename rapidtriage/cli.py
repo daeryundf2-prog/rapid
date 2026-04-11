@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from .core.docs import build_manifest, run_docs_search, write_result
+from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
 from .core.files import DEFAULT_FILE_CATEGORIES, FileScanError, run_files_scan
 
 
@@ -39,12 +40,65 @@ def build_parser() -> argparse.ArgumentParser:
     files.add_argument("--ext", action="append", help="Only keep files with this extension (repeatable)")
     files.add_argument("--modified-after", help="Only keep files modified at or after this ISO timestamp/date")
     files.add_argument("--modified-before", help="Only keep files modified at or before this ISO timestamp/date")
+
+    extract = sub.add_parser(
+        "extract",
+        help="Copy files referenced by files/docs JSON into an output directory and save a manifest JSON",
+    )
+    extract.add_argument("input_json", help="Path to rapidtriage files/docs JSON")
+    extract.add_argument("output_dir", help="Directory to copy matching files into")
+    extract.add_argument(
+        "--manifest",
+        help=f"Manifest JSON output path (default: OUTPUT_DIR/{DEFAULT_EXTRACT_MANIFEST_NAME})",
+    )
+    extract.add_argument("--limit", type=int, default=0, help="Stop after extracting N matching files (0 means all)")
+    extract.add_argument("--name-contains", action="append", help="Only extract files whose basename contains this text")
+    extract.add_argument("--path-contains", action="append", help="Only extract files whose path contains this text")
+    extract.add_argument("--ext", action="append", help="Only extract files with this extension (repeatable)")
+    extract.add_argument(
+        "--category",
+        action="append",
+        choices=sorted(DEFAULT_FILE_CATEGORIES),
+        help="Only for files JSON: restrict extracted candidates by category",
+    )
+    extract.add_argument(
+        "--kind",
+        action="append",
+        choices=sorted(SUPPORTED_DOC_KINDS),
+        help="Only for docs JSON: restrict extracted matches by document kind",
+    )
     return parser
 
 
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "extract":
+        input_json = Path(args.input_json).expanduser().resolve()
+        output_dir = Path(args.output_dir).expanduser().resolve()
+        manifest_output = (
+            Path(args.manifest).expanduser().resolve()
+            if args.manifest
+            else output_dir / DEFAULT_EXTRACT_MANIFEST_NAME
+        )
+        try:
+            payload = run_extract(
+                input_json,
+                output_dir,
+                name_contains=args.name_contains,
+                path_contains=args.path_contains,
+                extensions=args.ext,
+                categories=args.category,
+                kinds=args.kind,
+                limit=args.limit,
+            )
+        except ExtractError as exc:
+            parser.error(str(exc))
+        write_result(payload, manifest_output)
+        print(f"Saved extract manifest JSON: {manifest_output}")
+        print(f"Selected: {payload['summary']['selected_count']}  Extracted: {payload['summary']['extracted_count']}")
+        return 0
 
     root = Path(args.root).expanduser().resolve()
     output = Path(args.output).expanduser().resolve()
