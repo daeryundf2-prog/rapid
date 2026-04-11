@@ -1,0 +1,135 @@
+{
+  "command": "docs",
+  "root": "/cases/case-001",
+  "generated_at": "2026-04-11T12:01:00",
+  "summary": {
+    "candidate_count": 3,
+    "match_count": 2,
+    "supported_extensions": [
+      ".docx",
+      ".pdf",
+      ".txt"
+    ]
+  },
+  "manifest": {
+    "generated_at": "2026-04-11T12:01:00",
+    "root": "/cases/case-001",
+    "platform": "Windows-11-10.0.22631-SP0",
+    "keywords": [
+      "incident",
+      "registry"
+    ],
+    "providers": [
+      {
+        "name": "generic-documents",
+        "description": "Cross-platform document candidates discovered from the filesystem",
+        "target_platform": "any",
+        "supported": true,
+        "artifacts": [
+          {
+            "provider": "generic-documents",
+            "artifact_type": "document-pattern",
+            "path": "/cases/case-001",
+            "supported": true,
+            "details": {
+              "extension": ".txt"
+            }
+          },
+          {
+            "provider": "generic-documents",
+            "artifact_type": "document-pattern",
+            "path": "/cases/case-001",
+            "supported": true,
+            "details": {
+              "extension": ".docx"
+            }
+          },
+          {
+            "provider": "generic-documents",
+            "artifact_type": "document-pattern",
+            "path": "/cases/case-001",
+            "supported": true,
+            "details": {
+              "extension": ".pdf"
+            }
+          }
+        ]
+      },
+      {
+        "name": "windows-browser-artifacts",
+        "description": "Windows browser history/download collectors backed by real profile files",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-recent-files",
+        "description": "Windows Recent items and Jump Lists collected from per-user profile directories",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-eventlog",
+        "description": "Windows Event Log artifacts exposed via a dedicated provider boundary",
+        "target_platform": "windows",
+        "supported": false,
+        "artifacts": []
+      },
+      {
+        "name": "windows-registry",
+        "description": "Windows Registry artifacts behind a separate implementation module",
+        "target_platform": "windows",
+        "supported": false,
+        "artifacts": []
+      },
+      {
+        "name": "windows-shellbags",
+        "description": "Windows Shellbags artifacts behind a separate implementation module",
+        "target_platform": "windows",
+        "supported": false,
+        "artifacts": []
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "path": "/cases/case-001/Documents/incident-notes.txt",
+      "kind": "txt",
+      "size": 1842,
+      "modified_at": "2026-04-10T08:55:00"
+    },
+    {
+      "path": "/cases/case-001/Documents/registry-report.docx",
+      "kind": "docx",
+      "size": 9216,
+      "modified_at": "2026-04-10T09:05:00"
+    },
+    {
+      "path": "/cases/case-001/Documents/reference.pdf",
+      "kind": "pdf",
+      "size": 184320,
+      "modified_at": "2026-04-10T10:00:00"
+    }
+  ],
+  "results": [
+    {
+      "path": "/cases/case-001/Documents/incident-notes.txt",
+      "kind": "txt",
+      "matched_keywords": [
+        "incident"
+      ],
+      "preview": "...incident alpha timeline and witness summary...",
+      "size": 1842
+    },
+    {
+      "path": "/cases/case-001/Documents/registry-report.docx",
+      "kind": "docx",
+      "matched_keywords": [
+        "registry"
+      ],
+      "preview": "...registry persistence keys reviewed during triage...",
+      "size": 9216
+    }
+  ]
+}

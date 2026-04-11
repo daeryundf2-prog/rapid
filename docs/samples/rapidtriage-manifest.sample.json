@@ -1,0 +1,149 @@
+{
+  "generated_at": "2026-04-11T12:00:00",
+  "root": "/cases/case-001",
+  "platform": "Windows-11-10.0.22631-SP0",
+  "keywords": [
+    "incident",
+    "registry"
+  ],
+  "providers": [
+    {
+      "name": "generic-documents",
+      "description": "Cross-platform document candidates discovered from the filesystem",
+      "target_platform": "any",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "generic-documents",
+          "artifact_type": "document-pattern",
+          "path": "/cases/case-001",
+          "supported": true,
+          "details": {
+            "extension": ".pdf"
+          }
+        },
+        {
+          "provider": "generic-documents",
+          "artifact_type": "document-pattern",
+          "path": "/cases/case-001",
+          "supported": true,
+          "details": {
+            "extension": ".docx"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-browser-artifacts",
+      "description": "Windows browser history/download collectors backed by real profile files",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "windows-browser-artifacts",
+          "artifact_type": "browser-history-downloads",
+          "path": "/cases/case-001/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+          "supported": true,
+          "details": {
+            "user": "alice",
+            "browser": "chrome",
+            "profile": "Default",
+            "history_count": 1,
+            "download_count": 1,
+            "history": [
+              {
+                "url": "https://portal.example.local/incident/42",
+                "title": "Incident Portal",
+                "visit_count": 3,
+                "last_visited_at": "2026-04-10T09:30:00+00:00"
+              }
+            ],
+            "downloads": [
+              {
+                "source_url": "https://download.example.local/evidence/report.zip",
+                "target_path": "C:\\Users\\alice\\Downloads\\report.zip",
+                "tab_url": "https://download.example.local/evidence/report.zip",
+                "total_bytes": 48291,
+                "state": 1,
+                "started_at": "2026-04-10T09:31:00+00:00",
+                "ended_at": "2026-04-10T09:31:12+00:00"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-recent-files",
+      "description": "Windows Recent items and Jump Lists collected from per-user profile directories",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "windows-recent-files",
+          "artifact_type": "recent-shortcut",
+          "path": "/cases/case-001/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/Case Notes.lnk",
+          "supported": true,
+          "details": {
+            "user": "alice",
+            "entry_name": "Case Notes.lnk",
+            "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+            "last_opened_at": "2026-04-10T09:15:00+00:00",
+            "evidence_type": "recent-items"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-eventlog",
+      "description": "Windows Event Log artifacts exposed via a dedicated provider boundary",
+      "target_platform": "windows",
+      "supported": false,
+      "artifacts": [
+        {
+          "provider": "windows-eventlog",
+          "artifact_type": "eventlog",
+          "path": "/cases/case-001/artifacts/windows/eventlog",
+          "supported": false,
+          "details": {
+            "note": "Windows-specific provider placeholder"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-registry",
+      "description": "Windows Registry artifacts behind a separate implementation module",
+      "target_platform": "windows",
+      "supported": false,
+      "artifacts": [
+        {
+          "provider": "windows-registry",
+          "artifact_type": "registry",
+          "path": "/cases/case-001/artifacts/windows/registry",
+          "supported": false,
+          "details": {
+            "note": "Windows-specific provider placeholder"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-shellbags",
+      "description": "Windows Shellbags artifacts behind a separate implementation module",
+      "target_platform": "windows",
+      "supported": false,
+      "artifacts": [
+        {
+          "provider": "windows-shellbags",
+          "artifact_type": "shellbags",
+          "path": "/cases/case-001/artifacts/windows/shellbags",
+          "supported": false,
+          "details": {
+            "note": "Windows-specific provider placeholder"
+          }
+        }
+      ]
+    }
+  ]
+}

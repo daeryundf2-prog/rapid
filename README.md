@@ -185,13 +185,32 @@ Current structure:
 Current usage:
 
 ```bash
+rapidtriage --help
+rapidtriage manifest --help
+rapidtriage docs --help
+rapidtriage files --help
+rapidtriage extract --help
+```
+
+Common command examples:
+
+```bash
 rapidtriage manifest . --output rapidtriage-manifest.json
 rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
 rapidtriage files . --output rapidtriage-files.json
 rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
-rapidtriage extract rapidtriage-files.json ./extract-out
-rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
+rapidtriage files . --name-contains note --path-contains desktop --output desktop-notes.json
+rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
+rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/rapidtriage-extract-manifest.json
 ```
+
+Output contract reference:
+
+- Schema doc: `docs/rapidtriage-output-schema.md`
+- Sample manifest JSON: `docs/samples/rapidtriage-manifest.sample.json`
+- Sample docs JSON: `docs/samples/rapidtriage-docs.sample.json`
+- Sample files JSON: `docs/samples/rapidtriage-files.sample.json`
+- Sample extract JSON: `docs/samples/rapidtriage-extract.sample.json`
 
 Current `docs` support:
 - `txt`
