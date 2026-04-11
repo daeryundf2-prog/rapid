@@ -1,4 +1,0 @@
-{"timestamp":"2026-03-06T12:02:10.972Z","type":"watcher_start","cwd":"/Users/shinyoohag/Documents/untitled folder","notify_script":"/opt/homebrew/lib/node_modules/oh-my-codex/scripts/notify-hook.js","poll_ms":700,"once":false}
-{"timestamp":"2026-03-06T12:02:11.022Z","type":"watcher_start","cwd":"/Users/shinyoohag/Documents/untitled folder","notify_script":"/opt/homebrew/lib/node_modules/oh-my-codex/scripts/notify-hook.js","poll_ms":700,"once":true}
-{"timestamp":"2026-03-06T12:02:11.024Z","type":"watcher_once_complete","seen_turns":0}
-{"timestamp":"2026-03-06T12:02:11.026Z","type":"watcher_stop","signal":"SIGTERM"}

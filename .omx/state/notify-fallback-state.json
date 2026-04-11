@@ -1,9 +1,0 @@
-{
-  "pid": 61107,
-  "started_at": "2026-03-06T12:02:11.021Z",
-  "cwd": "/Users/shinyoohag/Documents/untitled folder",
-  "notify_script": "/opt/homebrew/lib/node_modules/oh-my-codex/scripts/notify-hook.js",
-  "poll_ms": 700,
-  "tracked_files": 0,
-  "seen_turns": 0
-}
