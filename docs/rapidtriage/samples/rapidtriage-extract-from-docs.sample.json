@@ -1,0 +1,39 @@
+{
+  "command": "extract",
+  "source_command": "docs",
+  "input_json": "/cases/case-001/rapidtriage-docs.json",
+  "root": "/cases/case-001",
+  "generated_at": "2026-04-11T16:08:00",
+  "output_dir": "/cases/case-001/docs-out",
+  "filters": {
+    "name_contains": [],
+    "path_contains": [],
+    "extensions": [],
+    "categories": [],
+    "kinds": [
+      "pdf"
+    ],
+    "limit": 0
+  },
+  "summary": {
+    "input_count": 2,
+    "selected_count": 1,
+    "extracted_count": 1,
+    "skipped_count": 0
+  },
+  "entries": [
+    {
+      "original_path": "/cases/case-001/evidence/receipt.pdf",
+      "extracted_path": "/cases/case-001/docs-out/evidence/receipt.pdf",
+      "relative_path": "evidence/receipt.pdf",
+      "sha256": "85d16db11f51eda929c5fda9c26b4c64d8d4d9f8727f8b6869de94fdd9a63d07",
+      "modified_at": "2026-04-10T08:45:00",
+      "size": 16384,
+      "kind": "pdf",
+      "matched_keywords": [
+        "incident"
+      ]
+    }
+  ],
+  "skipped": []
+}

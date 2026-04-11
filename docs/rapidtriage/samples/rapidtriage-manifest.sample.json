@@ -1,0 +1,209 @@
+{
+  "generated_at": "2026-04-11T16:00:00",
+  "root": "/cases/windows-fixture",
+  "platform": "Darwin-24.4.0-arm64-arm-64bit",
+  "keywords": [],
+  "providers": [
+    {
+      "name": "generic-documents",
+      "description": "Cross-platform document candidates discovered from the filesystem",
+      "target_platform": "any",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "generic-documents",
+          "artifact_type": "document-pattern",
+          "path": "/cases/windows-fixture",
+          "supported": true,
+          "details": {
+            "extension": ".txt"
+          }
+        },
+        {
+          "provider": "generic-documents",
+          "artifact_type": "document-pattern",
+          "path": "/cases/windows-fixture",
+          "supported": true,
+          "details": {
+            "extension": ".pdf"
+          }
+        },
+        {
+          "provider": "generic-documents",
+          "artifact_type": "document-pattern",
+          "path": "/cases/windows-fixture",
+          "supported": true,
+          "details": {
+            "extension": ".docx"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-browser-artifacts",
+      "description": "Windows browser history/download collectors backed by real profile files",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "windows-browser-artifacts",
+          "artifact_type": "browser-history-downloads",
+          "path": "/cases/windows-fixture/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+          "supported": true,
+          "details": {
+            "user": "alice",
+            "browser": "chrome",
+            "profile": "Default",
+            "history_count": 2,
+            "download_count": 1,
+            "history": [
+              {
+                "url": "https://example.com/browser-history",
+                "title": "Browser History",
+                "visit_count": 4,
+                "last_visited_at": "2024-01-02T03:04:05+00:00"
+              },
+              {
+                "url": "https://example.com/login",
+                "title": "Login",
+                "visit_count": 1,
+                "last_visited_at": "2024-01-01T23:59:59+00:00"
+              }
+            ],
+            "downloads": [
+              {
+                "source_url": "https://download.example.com/report.zip",
+                "target_path": "C:\\Users\\alice\\Downloads\\report.zip",
+                "tab_url": "https://download.example.com/report.zip",
+                "total_bytes": 4096,
+                "state": 1,
+                "started_at": "2024-01-02T04:05:06+00:00",
+                "ended_at": "2024-01-02T04:05:08+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "provider": "windows-browser-artifacts",
+          "artifact_type": "browser-history",
+          "path": "/cases/windows-fixture/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+          "supported": true,
+          "details": {
+            "user": "alice",
+            "browser": "firefox",
+            "profile": "default-release",
+            "history_count": 1,
+            "download_count": 0,
+            "history": [
+              {
+                "url": "https://support.mozilla.org/kb/download-firefox",
+                "title": "Download Firefox",
+                "visit_count": 2,
+                "last_visited_at": "2024-01-02T07:08:09+00:00"
+              }
+            ],
+            "downloads": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-recent-files",
+      "description": "Windows Recent items and Jump Lists collected from per-user profile directories",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "windows-recent-files",
+          "artifact_type": "recent-shortcut",
+          "path": "/cases/windows-fixture/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/Case Notes.lnk",
+          "supported": true,
+          "details": {
+            "user": "alice",
+            "entry_name": "Case Notes.lnk",
+            "entry_hint": "Case Notes",
+            "size": 512,
+            "modified_at": "2024-01-03T10:11:12+00:00"
+          }
+        },
+        {
+          "provider": "windows-recent-files",
+          "artifact_type": "jumplist-automatic",
+          "path": "/cases/windows-fixture/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/5f7b5f1e01b83767.automaticDestinations-ms",
+          "supported": true,
+          "details": {
+            "user": "alice",
+            "entry_name": "5f7b5f1e01b83767.automaticDestinations-ms",
+            "entry_hint": "5f7b5f1e01b83767",
+            "size": 2048,
+            "modified_at": "2024-01-03T10:15:00+00:00"
+          }
+        },
+        {
+          "provider": "windows-recent-files",
+          "artifact_type": "jumplist-custom",
+          "path": "/cases/windows-fixture/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/CustomDestinations/9b9cdc69c1c24e2b.customDestinations-ms",
+          "supported": true,
+          "details": {
+            "user": "alice",
+            "entry_name": "9b9cdc69c1c24e2b.customDestinations-ms",
+            "entry_hint": "9b9cdc69c1c24e2b",
+            "size": 1024,
+            "modified_at": "2024-01-03T10:16:00+00:00"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-eventlog",
+      "description": "Windows Event Log artifacts exposed via a dedicated provider boundary",
+      "target_platform": "windows",
+      "supported": false,
+      "artifacts": [
+        {
+          "provider": "windows-eventlog",
+          "artifact_type": "eventlog",
+          "path": "/cases/windows-fixture/artifacts/windows/eventlog",
+          "supported": false,
+          "details": {
+            "note": "Windows-specific provider placeholder"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-registry",
+      "description": "Windows Registry artifacts behind a separate implementation module",
+      "target_platform": "windows",
+      "supported": false,
+      "artifacts": [
+        {
+          "provider": "windows-registry",
+          "artifact_type": "registry",
+          "path": "/cases/windows-fixture/artifacts/windows/registry",
+          "supported": false,
+          "details": {
+            "note": "Windows-specific provider placeholder"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-shellbags",
+      "description": "Windows Shellbags artifacts behind a separate implementation module",
+      "target_platform": "windows",
+      "supported": false,
+      "artifacts": [
+        {
+          "provider": "windows-shellbags",
+          "artifact_type": "shellbags",
+          "path": "/cases/windows-fixture/artifacts/windows/shellbags",
+          "supported": false,
+          "details": {
+            "note": "Windows-specific provider placeholder"
+          }
+        }
+      ]
+    }
+  ]
+}

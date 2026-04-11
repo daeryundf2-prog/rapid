@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import textwrap
 from pathlib import Path
 
 from .core.docs import build_manifest, run_docs_search, write_result
@@ -38,27 +39,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rapidtriage",
         description="Lightweight forensic triage CLI with OS-independent core and pluggable artifact providers",
-        epilog=(
-            "Examples:\n"
-            "  rapidtriage manifest . --output rapidtriage-manifest.json\n"
-            "  rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json\n"
-            "  rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 "
-            "--output recent-executables.json\n"
-            "  rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf\n"
-        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage manifest . --output rapidtriage-manifest.json
+              rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
+              rapidtriage files . --output rapidtriage-files.json
+              rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
+              rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
+              rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
+            """
+        ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     docs = sub.add_parser(
         "docs",
         help="Search document bodies for keywords and save JSON output",
-        epilog=(
-            "Examples:\n"
-            "  rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json\n"
-            "  rapidtriage docs ./evidence -k credential --limit 25 --output hits.json\n"
-        ),
+        description="Search document bodies for keywords and save JSON output",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
+              rapidtriage docs ./evidence -k shellbags --limit 25 --output shellbags-docs.json
+            """
+        ),
     )
     docs.add_argument("root", help="Directory to scan")
     docs.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
@@ -68,12 +75,14 @@ def build_parser() -> argparse.ArgumentParser:
     manifest = sub.add_parser(
         "manifest",
         help="Write provider manifest JSON",
-        epilog=(
-            "Examples:\n"
-            "  rapidtriage manifest . --output rapidtriage-manifest.json\n"
-            "  rapidtriage manifest /mnt/evidence --output provider-manifest.json\n"
-        ),
+        description="Write provider manifest JSON",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Example:
+              rapidtriage manifest . --output rapidtriage-manifest.json
+            """
+        ),
     )
     manifest.add_argument("root", help="Directory to describe")
     manifest.add_argument("--output", default="rapidtriage-manifest.json", help="JSON output path")
@@ -81,13 +90,15 @@ def build_parser() -> argparse.ArgumentParser:
     files = sub.add_parser(
         "files",
         help="Scan file metadata for likely forensic candidates and save JSON output",
-        epilog=(
-            "Examples:\n"
-            "  rapidtriage files . --output rapidtriage-files.json\n"
-            "  rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 "
-            "--output recent-executables.json\n"
-        ),
+        description="Scan file metadata for likely forensic candidates and save JSON output",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage files . --output rapidtriage-files.json
+              rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
+            """
+        ),
     )
     files.add_argument("root", help="Directory to scan")
     files.add_argument("--output", default="rapidtriage-files.json", help="JSON output path")
@@ -107,12 +118,15 @@ def build_parser() -> argparse.ArgumentParser:
     extract = sub.add_parser(
         "extract",
         help="Copy files referenced by files/docs JSON into an output directory and save a manifest JSON",
-        epilog=(
-            "Examples:\n"
-            "  rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt\n"
-            "  rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf\n"
-        ),
+        description="Copy files referenced by files/docs JSON into an output directory and save a manifest JSON",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
+              rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
+            """
+        ),
     )
     extract.add_argument("input_json", help="Path to rapidtriage files/docs JSON")
     extract.add_argument("output_dir", help="Directory to copy matching files into")

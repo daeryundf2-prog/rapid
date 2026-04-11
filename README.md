@@ -181,8 +181,18 @@ Current structure:
 - `rapidtriage/core`: OS-independent orchestration, manifest generation, document scanning, file metadata triage, and keyword search.
 - `rapidtriage/artifacts/windows`: Windows-only artifact providers kept behind provider interfaces.
 - `rapidtriage/artifacts/generic.py`: cross-platform document candidate provider.
+- `docs/rapidtriage/output-schemas.md`: field-by-field JSON schema reference for `manifest`, `docs`, `files`, and `extract`.
+- `docs/rapidtriage/samples/`: representative sample JSON outputs, including embedded Windows artifact collector rows inside `manifest`.
 
-Current usage:
+CLI help now includes copy/paste examples:
+
+```bash
+rapidtriage --help
+rapidtriage files --help
+rapidtriage extract --help
+```
+
+Current usage examples:
 
 ```bash
 rapidtriage --help
@@ -204,15 +214,13 @@ rapidtriage extract rapidtriage-files.json ./extract-out --category documents --
 rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/rapidtriage-extract-manifest.json
 ```
 
-Schema reference and contract samples:
-- `docs/rapidtriage-output-schemas.md`
-- `docs/rapidtriage-output-samples/manifest-windows-artifacts.json`
-- `docs/rapidtriage-output-samples/docs-keyword-search.json`
-- `docs/rapidtriage-output-samples/files-default-scan.json`
-- `docs/rapidtriage-output-samples/extract-from-files.json`
-- `docs/rapidtriage-output-samples/extract-from-docs.json`
+Schema and sample references:
 
-The sample JSON files above are regression-checked by `tests/test_rapidtriage_output_samples.py`, and the CLI help now carries matching examples in `rapidtriage --help`, `rapidtriage files --help`, and `rapidtriage extract --help`.
+- `manifest`: `docs/rapidtriage/output-schemas.md#rapidtriage-manifest` + `docs/rapidtriage/samples/rapidtriage-manifest.sample.json`
+- `docs`: `docs/rapidtriage/output-schemas.md#rapidtriage-docs` + `docs/rapidtriage/samples/rapidtriage-docs.sample.json`
+- `files`: `docs/rapidtriage/output-schemas.md#rapidtriage-files` + `docs/rapidtriage/samples/rapidtriage-files.sample.json`
+- `extract` from `files`: `docs/rapidtriage/samples/rapidtriage-extract-from-files.sample.json`
+- `extract` from `docs`: `docs/rapidtriage/samples/rapidtriage-extract-from-docs.sample.json`
 
 Current `docs` support:
 - `txt`
@@ -230,12 +238,6 @@ Current `extract` behavior:
 - copies selected source files into an output directory while preserving relative paths where possible.
 - writes a manifest JSON containing original path, extracted path, sha256 hash, modified timestamp, size, and source-specific metadata.
 - records missing source files in `skipped` instead of failing the whole run.
-
-Recommended review points for the current `files`/`extract` implementation:
-- preserve metadata-only scanning for `files`; avoid content parsing there.
-- keep timestamps normalized as ISO-8601 strings across `docs`, `files`, and `extract`.
-- preserve relative paths for extracted files to avoid collisions when duplicate basenames exist.
-- keep category and kind filters deterministic so repeated scans on the same tree produce stable JSON.
 
 Smoke test:
 

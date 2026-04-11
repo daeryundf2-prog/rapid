@@ -1,0 +1,40 @@
+{
+  "command": "extract",
+  "source_command": "files",
+  "input_json": "/cases/case-001/rapidtriage-files.json",
+  "root": "/cases/case-001",
+  "generated_at": "2026-04-11T16:07:00",
+  "output_dir": "/cases/case-001/extract-out",
+  "filters": {
+    "name_contains": [],
+    "path_contains": [],
+    "extensions": [
+      ".txt"
+    ],
+    "categories": [
+      "documents"
+    ],
+    "kinds": [],
+    "limit": 0
+  },
+  "summary": {
+    "input_count": 4,
+    "selected_count": 1,
+    "extracted_count": 1,
+    "skipped_count": 0
+  },
+  "entries": [
+    {
+      "original_path": "/cases/case-001/evidence/case-notes.txt",
+      "extracted_path": "/cases/case-001/extract-out/evidence/case-notes.txt",
+      "relative_path": "evidence/case-notes.txt",
+      "sha256": "ddb7b1c532f8d5a4e4f70d0ec6bb5bb9a6a9e7d9813d021fd8f31580e0f5e7d1",
+      "modified_at": "2026-04-10T08:15:00",
+      "size": 42,
+      "categories": [
+        "documents"
+      ]
+    }
+  ],
+  "skipped": []
+}

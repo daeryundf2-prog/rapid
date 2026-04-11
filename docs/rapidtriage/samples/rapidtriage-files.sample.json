@@ -1,0 +1,99 @@
+{
+  "command": "files",
+  "root": "/cases/case-001",
+  "generated_at": "2026-04-11T16:05:00",
+  "filters": {
+    "categories": [
+      "documents",
+      "archives",
+      "databases",
+      "executables"
+    ],
+    "name_contains": [],
+    "path_contains": [],
+    "extensions": [],
+    "modified_after": null,
+    "modified_before": null,
+    "limit": 0
+  },
+  "summary": {
+    "scanned_file_count": 6,
+    "candidate_count": 4,
+    "category_counts": {
+      "documents": 1,
+      "archives": 1,
+      "databases": 1,
+      "executables": 1
+    },
+    "newest_modified_at": "2026-04-10T09:30:00",
+    "oldest_modified_at": "2026-04-08T20:00:00"
+  },
+  "candidates": [
+    {
+      "path": "/cases/case-001/bin/loader.exe",
+      "name": "loader.exe",
+      "extension": ".exe",
+      "size": 20480,
+      "modified_at": "2026-04-10T09:30:00",
+      "modified_epoch": 1775813400.0,
+      "categories": [
+        "executables"
+      ],
+      "reasons": {
+        "executables": [
+          "extension:.exe"
+        ]
+      }
+    },
+    {
+      "path": "/cases/case-001/evidence/case-notes.txt",
+      "name": "case-notes.txt",
+      "extension": ".txt",
+      "size": 42,
+      "modified_at": "2026-04-10T08:15:00",
+      "modified_epoch": 1775808900.0,
+      "categories": [
+        "documents"
+      ],
+      "reasons": {
+        "documents": [
+          "extension:.txt",
+          "name:note"
+        ]
+      }
+    },
+    {
+      "path": "/cases/case-001/archive/bundle.zip",
+      "name": "bundle.zip",
+      "extension": ".zip",
+      "size": 1024,
+      "modified_at": "2026-04-09T12:00:00",
+      "modified_epoch": 1775736000.0,
+      "categories": [
+        "archives"
+      ],
+      "reasons": {
+        "archives": [
+          "extension:.zip"
+        ]
+      }
+    },
+    {
+      "path": "/cases/case-001/db/browser.sqlite",
+      "name": "browser.sqlite",
+      "extension": ".sqlite",
+      "size": 4096,
+      "modified_at": "2026-04-08T20:00:00",
+      "modified_epoch": 1775678400.0,
+      "categories": [
+        "databases"
+      ],
+      "reasons": {
+        "databases": [
+          "extension:.sqlite",
+          "name:sqlite"
+        ]
+      }
+    }
+  ]
+}
