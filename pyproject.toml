@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.17.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dashcam-tools"
+version = "0.1.0"
+description = "Dashcam OCR-based renamer and E01 ingest CLI"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "shinyoohag", email = "" }]
+keywords = ["dashcam", "ocr", "rename", "forensics", "E01", "ewf"]
+license = { text = "Proprietary" }
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Environment :: Console",
+  "Intended Audience :: Legal Industry",
+  "License :: Other/Proprietary License",
+  "Topic :: Multimedia :: Video",
+  "Topic :: Utilities",
+]
+dependencies = [
+  "opencv-python>=4.7",
+  "pytesseract>=0.3.10",
+  "numpy>=1.23",
+]
+
+[project.optional-dependencies]
+# E01 extraction uses external tools (ewfmount, sleuthkit) not python deps
+full = []
+
+[project.scripts]
+ dashcam-report = "dashcam_tools.report:main"
+ dashcam-gui = "dashcam_tools.gui:main"
+dashcam-rename = "dashcam_tools.rename:cli"
+dashcam-ingest = "dashcam_tools.ingest:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["dashcam_tools"]
+

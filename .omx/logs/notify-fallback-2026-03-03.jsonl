@@ -1,0 +1,12 @@
+{"timestamp":"2026-03-03T06:32:13.901Z","type":"watcher_start","cwd":"/Users/shinyoohag/Documents/untitled folder","notify_script":"/opt/homebrew/lib/node_modules/oh-my-codex/scripts/notify-hook.js","poll_ms":700,"once":false}
+{"timestamp":"2026-03-03T06:32:13.951Z","type":"watcher_start","cwd":"/Users/shinyoohag/Documents/untitled folder","notify_script":"/opt/homebrew/lib/node_modules/oh-my-codex/scripts/notify-hook.js","poll_ms":700,"once":true}
+{"timestamp":"2026-03-03T06:32:13.953Z","type":"watcher_once_complete","seen_turns":0}
+{"timestamp":"2026-03-03T06:32:13.955Z","type":"watcher_stop","signal":"SIGTERM"}
+{"timestamp":"2026-03-03T06:35:20.675Z","type":"watcher_start","cwd":"/Users/shinyoohag/Documents/untitled folder","notify_script":"/opt/homebrew/lib/node_modules/oh-my-codex/scripts/notify-hook.js","poll_ms":700,"once":false}
+{"timestamp":"2026-03-03T06:35:20.708Z","type":"watcher_start","cwd":"/Users/shinyoohag/Documents/untitled folder","notify_script":"/opt/homebrew/lib/node_modules/oh-my-codex/scripts/notify-hook.js","poll_ms":700,"once":true}
+{"timestamp":"2026-03-03T06:35:20.711Z","type":"watcher_once_complete","seen_turns":0}
+{"timestamp":"2026-03-03T06:35:20.713Z","type":"watcher_stop","signal":"SIGTERM"}
+{"timestamp":"2026-03-03T06:35:26.221Z","type":"watcher_start","cwd":"/Users/shinyoohag/Documents/untitled folder","notify_script":"/opt/homebrew/lib/node_modules/oh-my-codex/scripts/notify-hook.js","poll_ms":700,"once":false}
+{"timestamp":"2026-03-03T06:35:26.249Z","type":"watcher_start","cwd":"/Users/shinyoohag/Documents/untitled folder","notify_script":"/opt/homebrew/lib/node_modules/oh-my-codex/scripts/notify-hook.js","poll_ms":700,"once":true}
+{"timestamp":"2026-03-03T06:35:26.251Z","type":"watcher_once_complete","seen_turns":0}
+{"timestamp":"2026-03-03T06:35:26.253Z","type":"watcher_stop","signal":"SIGTERM"}
