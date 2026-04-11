@@ -178,7 +178,7 @@ Windows: install ffmpeg+tesseract manually; E01 not supported here.
 `rapidtriage` is a lightweight forensic triage CLI added alongside the dashcam tools.
 
 Current structure:
-- `rapidtriage/core`: OS-independent orchestration, manifest generation, document scanning, and keyword search.
+- `rapidtriage/core`: OS-independent orchestration, manifest generation, document scanning, file metadata triage, and keyword search.
 - `rapidtriage/artifacts/windows`: Windows-only artifact providers kept behind provider interfaces.
 - `rapidtriage/artifacts/generic.py`: cross-platform document candidate provider.
 
@@ -187,12 +187,19 @@ Example usage:
 ```bash
 rapidtriage manifest . --output rapidtriage-manifest.json
 rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
+rapidtriage files . --output rapidtriage-files.json
+rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
 ```
 
 Current `docs` support:
 - `txt`
 - `pdf`
 - `docx`
+
+Current `files` defaults:
+- categories: `documents`, `archives`, `databases`, `executables`
+- metadata filters: basename/path substring, extension, modified-after, modified-before
+- output fields include file path, name, extension, size, modified time, matched categories, and match reasons
 
 Smoke test:
 

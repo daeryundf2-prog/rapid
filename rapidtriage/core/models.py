@@ -28,6 +28,21 @@ class DocumentCandidate:
 
 
 @dataclass
+class FileCandidate:
+    path: str
+    name: str
+    extension: str
+    size: int
+    modified_at: str
+    modified_epoch: float
+    categories: List[str]
+    reasons: Dict[str, List[str]]
+
+    def to_dict(self) -> Dict[str, object]:
+        return asdict(self)
+
+
+@dataclass
 class DocumentMatch:
     path: str
     kind: str
