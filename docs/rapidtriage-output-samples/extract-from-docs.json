@@ -1,0 +1,39 @@
+{
+  "command": "extract",
+  "source_command": "docs",
+  "input_json": "<ROOT>/rapidtriage-docs.json",
+  "root": "<ROOT>",
+  "generated_at": "<GENERATED_AT>",
+  "output_dir": "<ROOT>/docs-out",
+  "filters": {
+    "name_contains": [],
+    "path_contains": [],
+    "extensions": [],
+    "categories": [],
+    "kinds": [
+      "pdf"
+    ],
+    "limit": 0
+  },
+  "summary": {
+    "input_count": 3,
+    "selected_count": 1,
+    "extracted_count": 1,
+    "skipped_count": 0
+  },
+  "entries": [
+    {
+      "original_path": "<ROOT>/evidence.pdf",
+      "extracted_path": "<ROOT>/docs-out/evidence.pdf",
+      "relative_path": "evidence.pdf",
+      "sha256": "0ea49c7a1b72d926ddab960636010dd0be9b65577704622aea5d16741b547fae",
+      "modified_at": "2024-01-02T12:06:07",
+      "size": 467,
+      "kind": "pdf",
+      "matched_keywords": [
+        "keyword"
+      ]
+    }
+  ],
+  "skipped": []
+}

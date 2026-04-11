@@ -1,0 +1,174 @@
+{
+  "command": "docs",
+  "root": "<ROOT>",
+  "generated_at": "<GENERATED_AT>",
+  "summary": {
+    "candidate_count": 3,
+    "match_count": 3,
+    "supported_extensions": [
+      ".docx",
+      ".pdf",
+      ".txt"
+    ]
+  },
+  "manifest": {
+    "generated_at": "<GENERATED_AT>",
+    "root": "<ROOT>",
+    "platform": "<PLATFORM>",
+    "keywords": [
+      "secret",
+      "keyword"
+    ],
+    "providers": [
+      {
+        "name": "generic-documents",
+        "description": "Cross-platform document candidates discovered from the filesystem",
+        "target_platform": "any",
+        "supported": true,
+        "artifacts": [
+          {
+            "provider": "generic-documents",
+            "artifact_type": "document-pattern",
+            "path": "<ROOT>",
+            "supported": true,
+            "details": {
+              "extension": ".docx"
+            }
+          },
+          {
+            "provider": "generic-documents",
+            "artifact_type": "document-pattern",
+            "path": "<ROOT>",
+            "supported": true,
+            "details": {
+              "extension": ".pdf"
+            }
+          },
+          {
+            "provider": "generic-documents",
+            "artifact_type": "document-pattern",
+            "path": "<ROOT>",
+            "supported": true,
+            "details": {
+              "extension": ".txt"
+            }
+          }
+        ]
+      },
+      {
+        "name": "windows-browser-artifacts",
+        "description": "Windows browser history/download collectors backed by real profile files",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-recent-files",
+        "description": "Windows Recent items and Jump Lists collected from per-user profile directories",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-eventlog",
+        "description": "Windows Event Log artifacts exposed via a dedicated provider boundary",
+        "target_platform": "windows",
+        "supported": false,
+        "artifacts": [
+          {
+            "provider": "windows-eventlog",
+            "artifact_type": "eventlog",
+            "path": "<ROOT>/artifacts/windows/eventlog",
+            "supported": false,
+            "details": {
+              "note": "Windows-specific provider placeholder"
+            }
+          }
+        ]
+      },
+      {
+        "name": "windows-registry",
+        "description": "Windows Registry artifacts behind a separate implementation module",
+        "target_platform": "windows",
+        "supported": false,
+        "artifacts": [
+          {
+            "provider": "windows-registry",
+            "artifact_type": "registry",
+            "path": "<ROOT>/artifacts/windows/registry",
+            "supported": false,
+            "details": {
+              "note": "Windows-specific provider placeholder"
+            }
+          }
+        ]
+      },
+      {
+        "name": "windows-shellbags",
+        "description": "Windows Shellbags artifacts behind a separate implementation module",
+        "target_platform": "windows",
+        "supported": false,
+        "artifacts": [
+          {
+            "provider": "windows-shellbags",
+            "artifact_type": "shellbags",
+            "path": "<ROOT>/artifacts/windows/shellbags",
+            "supported": false,
+            "details": {
+              "note": "Windows-specific provider placeholder"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "path": "<ROOT>/evidence.pdf",
+      "kind": "pdf",
+      "size": 467,
+      "modified_at": "2024-01-02T12:06:07"
+    },
+    {
+      "path": "<ROOT>/note.txt",
+      "kind": "txt",
+      "size": 21,
+      "modified_at": "2024-01-02T12:04:05"
+    },
+    {
+      "path": "<ROOT>/report.docx",
+      "kind": "docx",
+      "size": 476,
+      "modified_at": "2024-01-02T12:05:06"
+    }
+  ],
+  "results": [
+    {
+      "path": "<ROOT>/evidence.pdf",
+      "kind": "pdf",
+      "matched_keywords": [
+        "keyword"
+      ],
+      "preview": "shellbags keyword hit",
+      "size": 467
+    },
+    {
+      "path": "<ROOT>/note.txt",
+      "kind": "txt",
+      "matched_keywords": [
+        "secret"
+      ],
+      "preview": "incident alpha secret",
+      "size": 21
+    },
+    {
+      "path": "<ROOT>/report.docx",
+      "kind": "docx",
+      "matched_keywords": [
+        "keyword"
+      ],
+      "preview": "registry artifact keyword hit",
+      "size": 476
+    }
+  ]
+}

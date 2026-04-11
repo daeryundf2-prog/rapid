@@ -204,13 +204,15 @@ rapidtriage extract rapidtriage-files.json ./extract-out --category documents --
 rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/rapidtriage-extract-manifest.json
 ```
 
-Output contract reference:
+Schema reference and contract samples:
+- `docs/rapidtriage-output-schemas.md`
+- `docs/rapidtriage-output-samples/manifest-windows-artifacts.json`
+- `docs/rapidtriage-output-samples/docs-keyword-search.json`
+- `docs/rapidtriage-output-samples/files-default-scan.json`
+- `docs/rapidtriage-output-samples/extract-from-files.json`
+- `docs/rapidtriage-output-samples/extract-from-docs.json`
 
-- Schema doc: `docs/rapidtriage-output-schema.md`
-- Sample manifest JSON: `docs/samples/rapidtriage-manifest.sample.json`
-- Sample docs JSON: `docs/samples/rapidtriage-docs.sample.json`
-- Sample files JSON: `docs/samples/rapidtriage-files.sample.json`
-- Sample extract JSON: `docs/samples/rapidtriage-extract.sample.json`
+The sample JSON files above are regression-checked by `tests/test_rapidtriage_output_samples.py`, and the CLI help now carries matching examples in `rapidtriage --help`, `rapidtriage files --help`, and `rapidtriage extract --help`.
 
 Current `docs` support:
 - `txt`

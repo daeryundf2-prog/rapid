@@ -1,0 +1,241 @@
+{
+  "generated_at": "<GENERATED_AT>",
+  "root": "<ROOT>",
+  "platform": "<PLATFORM>",
+  "keywords": [],
+  "providers": [
+    {
+      "name": "generic-documents",
+      "description": "Cross-platform document candidates discovered from the filesystem",
+      "target_platform": "any",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "generic-documents",
+          "artifact_type": "document-pattern",
+          "path": "<ROOT>",
+          "supported": true,
+          "details": {
+            "extension": ".docx"
+          }
+        },
+        {
+          "provider": "generic-documents",
+          "artifact_type": "document-pattern",
+          "path": "<ROOT>",
+          "supported": true,
+          "details": {
+            "extension": ".pdf"
+          }
+        },
+        {
+          "provider": "generic-documents",
+          "artifact_type": "document-pattern",
+          "path": "<ROOT>",
+          "supported": true,
+          "details": {
+            "extension": ".txt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-browser-artifacts",
+      "description": "Windows browser history/download collectors backed by real profile files",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "windows-browser-artifacts",
+          "artifact_type": "browser-history",
+          "path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+          "supported": true,
+          "details": {
+            "user": "alice",
+            "browser": "firefox",
+            "profile": "default-release",
+            "history_count": 1,
+            "download_count": 0,
+            "history": [
+              {
+                "url": "https://support.mozilla.org/kb/download-firefox",
+                "title": "Firefox Support",
+                "visit_count": 3,
+                "last_visited_at": "2026-04-06T08:00:00+00:00"
+              }
+            ],
+            "downloads": []
+          }
+        },
+        {
+          "provider": "windows-browser-artifacts",
+          "artifact_type": "browser-history-downloads",
+          "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+          "supported": true,
+          "details": {
+            "user": "alice",
+            "browser": "chrome",
+            "profile": "Default",
+            "history_count": 2,
+            "download_count": 1,
+            "history": [
+              {
+                "url": "https://example.com/case",
+                "title": "Case Portal",
+                "visit_count": 4,
+                "last_visited_at": "2026-04-09T10:30:00+00:00"
+              },
+              {
+                "url": "https://download.example.com/report.zip",
+                "title": "Evidence Download",
+                "visit_count": 2,
+                "last_visited_at": "2026-04-08T16:05:00+00:00"
+              }
+            ],
+            "downloads": [
+              {
+                "source_url": "https://download.example.com/report.zip",
+                "target_path": "C:\\Users\\alice\\Downloads\\report.zip",
+                "tab_url": "https://portal.example.com/downloads",
+                "total_bytes": 4096,
+                "state": 1,
+                "started_at": "2026-04-08T16:01:00+00:00",
+                "ended_at": "2026-04-08T16:02:00+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "provider": "windows-browser-artifacts",
+          "artifact_type": "browser-history-downloads",
+          "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+          "supported": true,
+          "details": {
+            "user": "alice",
+            "browser": "edge",
+            "profile": "Profile 1",
+            "history_count": 1,
+            "download_count": 1,
+            "history": [
+              {
+                "url": "https://contoso.example/recent",
+                "title": "Recent Activity",
+                "visit_count": 7,
+                "last_visited_at": "2026-04-07T09:15:00+00:00"
+              }
+            ],
+            "downloads": [
+              {
+                "source_url": "https://contoso.example/recent",
+                "target_path": "C:\\Users\\alice\\Downloads\\briefing.pdf",
+                "tab_url": "https://contoso.example/recent",
+                "total_bytes": 8192,
+                "state": 1,
+                "started_at": "2026-04-07T09:10:00+00:00",
+                "ended_at": "2026-04-07T09:11:00+00:00"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-recent-files",
+      "description": "Windows Recent items and Jump Lists collected from per-user profile directories",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "windows-recent-files",
+          "artifact_type": "jumplist-automatic",
+          "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/5f7b5f1e01b83767.automaticDestinations-ms",
+          "supported": true,
+          "details": {
+            "user": "alice",
+            "entry_name": "5f7b5f1e01b83767.automaticDestinations-ms",
+            "entry_hint": "5f7b5f1e01b83767",
+            "size": 13,
+            "modified_at": "2024-03-05T06:08:09+00:00"
+          }
+        },
+        {
+          "provider": "windows-recent-files",
+          "artifact_type": "jumplist-custom",
+          "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/CustomDestinations/9b9cdc69c1c24e2b.customDestinations-ms",
+          "supported": true,
+          "details": {
+            "user": "alice",
+            "entry_name": "9b9cdc69c1c24e2b.customDestinations-ms",
+            "entry_hint": "9b9cdc69c1c24e2b",
+            "size": 15,
+            "modified_at": "2024-03-05T06:09:10+00:00"
+          }
+        },
+        {
+          "provider": "windows-recent-files",
+          "artifact_type": "recent-shortcut",
+          "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/Case Notes.lnk",
+          "supported": true,
+          "details": {
+            "user": "alice",
+            "entry_name": "Case Notes.lnk",
+            "entry_hint": "Case Notes",
+            "size": 15,
+            "modified_at": "2024-03-05T06:07:08+00:00"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-eventlog",
+      "description": "Windows Event Log artifacts exposed via a dedicated provider boundary",
+      "target_platform": "windows",
+      "supported": false,
+      "artifacts": [
+        {
+          "provider": "windows-eventlog",
+          "artifact_type": "eventlog",
+          "path": "<ROOT>/artifacts/windows/eventlog",
+          "supported": false,
+          "details": {
+            "note": "Windows-specific provider placeholder"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-registry",
+      "description": "Windows Registry artifacts behind a separate implementation module",
+      "target_platform": "windows",
+      "supported": false,
+      "artifacts": [
+        {
+          "provider": "windows-registry",
+          "artifact_type": "registry",
+          "path": "<ROOT>/artifacts/windows/registry",
+          "supported": false,
+          "details": {
+            "note": "Windows-specific provider placeholder"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-shellbags",
+      "description": "Windows Shellbags artifacts behind a separate implementation module",
+      "target_platform": "windows",
+      "supported": false,
+      "artifacts": [
+        {
+          "provider": "windows-shellbags",
+          "artifact_type": "shellbags",
+          "path": "<ROOT>/artifacts/windows/shellbags",
+          "supported": false,
+          "details": {
+            "note": "Windows-specific provider placeholder"
+          }
+        }
+      ]
+    }
+  ]
+}

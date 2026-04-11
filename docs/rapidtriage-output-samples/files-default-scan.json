@@ -1,0 +1,101 @@
+{
+  "command": "files",
+  "root": "<ROOT>",
+  "generated_at": "<GENERATED_AT>",
+  "filters": {
+    "categories": [
+      "documents",
+      "archives",
+      "databases",
+      "executables"
+    ],
+    "name_contains": [],
+    "path_contains": [],
+    "extensions": [],
+    "modified_after": null,
+    "modified_before": null,
+    "limit": 0
+  },
+  "summary": {
+    "scanned_file_count": 4,
+    "candidate_count": 4,
+    "category_counts": {
+      "documents": 1,
+      "archives": 1,
+      "databases": 1,
+      "executables": 1
+    },
+    "newest_modified_at": "2024-02-03T13:05:09",
+    "oldest_modified_at": "2024-02-03T13:05:06"
+  },
+  "candidates": [
+    {
+      "path": "<ROOT>/bundle.zip",
+      "name": "bundle.zip",
+      "extension": ".zip",
+      "size": 4,
+      "modified_at": "2024-02-03T13:05:07",
+      "modified_epoch": 1706933107.0,
+      "categories": [
+        "archives"
+      ],
+      "reasons": {
+        "archives": [
+          "extension:.zip",
+          "name:bundle"
+        ]
+      }
+    },
+    {
+      "path": "<ROOT>/notes.txt",
+      "name": "notes.txt",
+      "extension": ".txt",
+      "size": 14,
+      "modified_at": "2024-02-03T13:05:06",
+      "modified_epoch": 1706933106.0,
+      "categories": [
+        "documents"
+      ],
+      "reasons": {
+        "documents": [
+          "extension:.txt",
+          "name:note"
+        ]
+      }
+    },
+    {
+      "path": "<ROOT>/records.sqlite",
+      "name": "records.sqlite",
+      "extension": ".sqlite",
+      "size": 15,
+      "modified_at": "2024-02-03T13:05:08",
+      "modified_epoch": 1706933108.0,
+      "categories": [
+        "databases"
+      ],
+      "reasons": {
+        "databases": [
+          "extension:.sqlite",
+          "name:sqlite",
+          "path:sqlite"
+        ]
+      }
+    },
+    {
+      "path": "<ROOT>/tool.exe",
+      "name": "tool.exe",
+      "extension": ".exe",
+      "size": 4,
+      "modified_at": "2024-02-03T13:05:09",
+      "modified_epoch": 1706933109.0,
+      "categories": [
+        "executables"
+      ],
+      "reasons": {
+        "executables": [
+          "extension:.exe"
+        ]
+      }
+    }
+  ]
+}
