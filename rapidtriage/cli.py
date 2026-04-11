@@ -63,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
             """\
             Examples:
               rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
-              rapidtriage docs ./evidence -k shellbags --limit 25 --output shellbags-docs.json
+              rapidtriage docs /cases/image-mount -k password --limit 250 --output docs-hits.json
             """
         ),
     )
@@ -79,8 +79,9 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent(
             """\
-            Example:
+            Examples:
               rapidtriage manifest . --output rapidtriage-manifest.json
+              rapidtriage manifest /cases/image-mount --output case-manifest.json
             """
         ),
     )
@@ -97,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
             Examples:
               rapidtriage files . --output rapidtriage-files.json
               rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
+              rapidtriage files . --name-contains note --path-contains desktop --output desktop-notes.json
             """
         ),
     )
@@ -124,7 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
             """\
             Examples:
               rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
-              rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
+              rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/rapidtriage-extract-manifest.json
             """
         ),
     )

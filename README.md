@@ -181,8 +181,8 @@ Current structure:
 - `rapidtriage/core`: OS-independent orchestration, manifest generation, document scanning, file metadata triage, and keyword search.
 - `rapidtriage/artifacts/windows`: Windows-only artifact providers kept behind provider interfaces.
 - `rapidtriage/artifacts/generic.py`: cross-platform document candidate provider.
-- `docs/rapidtriage/output-schemas.md`: field-by-field JSON schema reference for `manifest`, `docs`, `files`, and `extract`.
-- `docs/rapidtriage/samples/`: representative sample JSON outputs, including embedded Windows artifact collector rows inside `manifest`.
+- `docs/rapidtriage-output-schema.md`: field-by-field JSON schema reference for `manifest`, `docs`, `files`, and `extract`.
+- `docs/samples/`: representative sample JSON outputs, including embedded Windows artifact collector rows inside `manifest`.
 
 CLI help now includes copy/paste examples:
 
@@ -216,11 +216,10 @@ rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./doc
 
 Schema and sample references:
 
-- `manifest`: `docs/rapidtriage/output-schemas.md#rapidtriage-manifest` + `docs/rapidtriage/samples/rapidtriage-manifest.sample.json`
-- `docs`: `docs/rapidtriage/output-schemas.md#rapidtriage-docs` + `docs/rapidtriage/samples/rapidtriage-docs.sample.json`
-- `files`: `docs/rapidtriage/output-schemas.md#rapidtriage-files` + `docs/rapidtriage/samples/rapidtriage-files.sample.json`
-- `extract` from `files`: `docs/rapidtriage/samples/rapidtriage-extract-from-files.sample.json`
-- `extract` from `docs`: `docs/rapidtriage/samples/rapidtriage-extract-from-docs.sample.json`
+- `manifest`: `docs/rapidtriage-output-schema.md#rapidtriage-manifest` + `docs/samples/rapidtriage-manifest.sample.json`
+- `docs`: `docs/rapidtriage-output-schema.md#rapidtriage-docs` + `docs/samples/rapidtriage-docs.sample.json`
+- `files`: `docs/rapidtriage-output-schema.md#rapidtriage-files` + `docs/samples/rapidtriage-files.sample.json`
+- `extract`: `docs/samples/rapidtriage-extract.sample.json`
 
 Current `docs` support:
 - `txt`
