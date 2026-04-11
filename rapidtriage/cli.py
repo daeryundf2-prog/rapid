@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from .core.docs import build_manifest, run_docs_search, write_result
+from .core.files import DEFAULT_FILE_CATEGORIES, FileScanError, run_files_scan
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,6 +23,22 @@ def build_parser() -> argparse.ArgumentParser:
     manifest = sub.add_parser("manifest", help="Write provider manifest JSON")
     manifest.add_argument("root", help="Directory to describe")
     manifest.add_argument("--output", default="rapidtriage-manifest.json", help="JSON output path")
+
+    files = sub.add_parser("files", help="Scan file metadata for likely forensic candidates and save JSON output")
+    files.add_argument("root", help="Directory to scan")
+    files.add_argument("--output", default="rapidtriage-files.json", help="JSON output path")
+    files.add_argument("--limit", type=int, default=0, help="Stop after collecting N candidates (0 means all)")
+    files.add_argument(
+        "--category",
+        action="append",
+        choices=sorted(DEFAULT_FILE_CATEGORIES),
+        help="Restrict categories (repeatable; defaults to all built-in categories)",
+    )
+    files.add_argument("--name-contains", action="append", help="Only keep files whose basename contains this text")
+    files.add_argument("--path-contains", action="append", help="Only keep files whose path contains this text")
+    files.add_argument("--ext", action="append", help="Only keep files with this extension (repeatable)")
+    files.add_argument("--modified-after", help="Only keep files modified at or after this ISO timestamp/date")
+    files.add_argument("--modified-before", help="Only keep files modified at or before this ISO timestamp/date")
     return parser
 
 
@@ -43,6 +60,25 @@ def main(argv=None) -> int:
         payload = build_manifest(root, [])
         write_result(payload, output)
         print(f"Saved manifest JSON: {output}")
+        return 0
+
+    if args.command == "files":
+        try:
+            payload = run_files_scan(
+                root,
+                categories=args.category,
+                name_contains=args.name_contains,
+                path_contains=args.path_contains,
+                extensions=args.ext,
+                modified_after=args.modified_after,
+                modified_before=args.modified_before,
+                limit=args.limit,
+            )
+        except FileScanError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        print(f"Saved file scan JSON: {output}")
+        print(f"Scanned: {payload['summary']['scanned_file_count']}  Candidates: {payload['summary']['candidate_count']}")
         return 0
 
     parser.error(f"unknown command: {args.command}")
