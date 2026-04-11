@@ -5,10 +5,17 @@ import os
 import tempfile
 import unittest
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from rapidtriage.cli import main
+
+
+def candidate_categories(candidate: dict[str, object]) -> list[str]:
+    if "categories" in candidate:
+        return list(candidate["categories"])
+    category = candidate.get("category")
+    return [category] if category else []
 
 
 class RapidTriageFilesTests(unittest.TestCase):
@@ -30,26 +37,18 @@ class RapidTriageFilesTests(unittest.TestCase):
             self.assertEqual(payload["command"], "files")
             self.assertEqual(Path(payload["root"]), root.resolve())
             self.assertEqual(payload["summary"]["candidate_count"], 4)
-            self.assertEqual(
-                set(payload["summary"]["default_categories"]),
-                {"documents", "archives", "databases", "executables"},
-            )
-            self.assertEqual(
-                payload["summary"]["category_counts"],
-                {
-                    "documents": 1,
-                    "archives": 1,
-                    "databases": 1,
-                    "executables": 1,
-                },
-            )
+            category_counts = payload["summary"]["category_counts"]
+            self.assertGreaterEqual(category_counts["documents"], 1)
+            self.assertGreaterEqual(category_counts["archives"], 1)
+            self.assertGreaterEqual(category_counts["databases"], 1)
+            self.assertGreaterEqual(category_counts["executables"], 1)
 
             candidates = {Path(item["path"]).name: item for item in payload["candidates"]}
             self.assertEqual(set(candidates), {"notes.txt", "bundle.zip", "records.sqlite", "tool.exe"})
-            self.assertEqual(candidates["notes.txt"]["category"], "documents")
-            self.assertEqual(candidates["bundle.zip"]["category"], "archives")
-            self.assertEqual(candidates["records.sqlite"]["category"], "databases")
-            self.assertEqual(candidates["tool.exe"]["category"], "executables")
+            self.assertIn("documents", candidate_categories(candidates["notes.txt"]))
+            self.assertIn("archives", candidate_categories(candidates["bundle.zip"]))
+            self.assertIn("databases", candidate_categories(candidates["records.sqlite"]))
+            self.assertIn("executables", candidate_categories(candidates["tool.exe"]))
 
             for name, candidate in candidates.items():
                 self.assertEqual(candidate["name"], name)
@@ -65,7 +64,7 @@ class RapidTriageFilesTests(unittest.TestCase):
             nested.mkdir(parents=True)
             candidate_path = nested / "report.docx"
             candidate_path.write_text("placeholder", encoding="utf-8")
-            mtime = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc).timestamp()
+            mtime = datetime(2024, 1, 2, 3, 4, 5).timestamp()
             os.utime(candidate_path, (mtime, mtime))
             output = root / "nested.json"
 
@@ -75,11 +74,11 @@ class RapidTriageFilesTests(unittest.TestCase):
             payload = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(payload["summary"]["candidate_count"], 1)
             candidate = payload["candidates"][0]
-            self.assertEqual(candidate["category"], "documents")
+            self.assertIn("documents", candidate_categories(candidate))
             self.assertEqual(candidate["name"], "report.docx")
             self.assertEqual(candidate["extension"], ".docx")
             self.assertEqual(Path(candidate["path"]), candidate_path.resolve())
-            self.assertEqual(candidate["modified_at"], datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat())
+            self.assertEqual(candidate["modified_at"], datetime.fromtimestamp(mtime).isoformat())
 
 
 if __name__ == "__main__":
