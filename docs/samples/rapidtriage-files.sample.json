@@ -1,0 +1,101 @@
+{
+  "command": "files",
+  "root": "/cases/case-001",
+  "generated_at": "2026-04-11T12:02:00",
+  "filters": {
+    "categories": [
+      "documents",
+      "archives",
+      "databases",
+      "executables"
+    ],
+    "name_contains": [],
+    "path_contains": [],
+    "extensions": [],
+    "modified_after": null,
+    "modified_before": null,
+    "limit": 0
+  },
+  "summary": {
+    "scanned_file_count": 5,
+    "candidate_count": 4,
+    "category_counts": {
+      "documents": 1,
+      "archives": 1,
+      "databases": 1,
+      "executables": 1
+    },
+    "newest_modified_at": "2026-04-10T10:30:00",
+    "oldest_modified_at": "2026-04-10T08:30:00"
+  },
+  "candidates": [
+    {
+      "path": "/cases/case-001/Users/alice/Desktop/incident-notes.txt",
+      "name": "incident-notes.txt",
+      "extension": ".txt",
+      "size": 1842,
+      "modified_at": "2026-04-10T08:30:00",
+      "modified_epoch": 1775819400.0,
+      "categories": [
+        "documents"
+      ],
+      "reasons": {
+        "documents": [
+          "extension:.txt",
+          "name:note",
+          "path:desktop"
+        ]
+      }
+    },
+    {
+      "path": "/cases/case-001/Users/alice/Downloads/evidence-bundle.zip",
+      "name": "evidence-bundle.zip",
+      "extension": ".zip",
+      "size": 48291,
+      "modified_at": "2026-04-10T09:00:00",
+      "modified_epoch": 1775821200.0,
+      "categories": [
+        "archives"
+      ],
+      "reasons": {
+        "archives": [
+          "extension:.zip",
+          "name:bundle"
+        ]
+      }
+    },
+    {
+      "path": "/cases/case-001/Users/alice/AppData/Local/History.sqlite",
+      "name": "History.sqlite",
+      "extension": ".sqlite",
+      "size": 40960,
+      "modified_at": "2026-04-10T09:20:00",
+      "modified_epoch": 1775822400.0,
+      "categories": [
+        "databases"
+      ],
+      "reasons": {
+        "databases": [
+          "extension:.sqlite",
+          "name:sqlite"
+        ]
+      }
+    },
+    {
+      "path": "/cases/case-001/Users/alice/Downloads/installer.exe",
+      "name": "installer.exe",
+      "extension": ".exe",
+      "size": 204800,
+      "modified_at": "2026-04-10T10:30:00",
+      "modified_epoch": 1775826600.0,
+      "categories": [
+        "executables"
+      ],
+      "reasons": {
+        "executables": [
+          "extension:.exe"
+        ]
+      }
+    }
+  ]
+}

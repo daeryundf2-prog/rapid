@@ -7,25 +7,68 @@ from .core.docs import build_manifest, run_docs_search, write_result
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
 from .core.files import DEFAULT_FILE_CATEGORIES, FileScanError, run_files_scan
 
+HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
+TOP_LEVEL_EPILOG = """Examples:
+  rapidtriage manifest . --output rapidtriage-manifest.json
+  rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
+  rapidtriage files . --category documents --ext docx --modified-after 2025-01-01
+  rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
+"""
+MANIFEST_EPILOG = """Examples:
+  rapidtriage manifest .
+  rapidtriage manifest /cases/image-mount --output case-manifest.json
+"""
+DOCS_EPILOG = """Examples:
+  rapidtriage docs . -k incident -k registry
+  rapidtriage docs /cases/image-mount -k password --limit 250 --output docs-hits.json
+"""
+FILES_EPILOG = """Examples:
+  rapidtriage files .
+  rapidtriage files /cases/image-mount --category executables --ext exe --modified-after 2025-01-01
+  rapidtriage files . --name-contains note --path-contains desktop --output desktop-notes.json
+"""
+EXTRACT_EPILOG = f"""Examples:
+  rapidtriage extract rapidtriage-files.json ./extract-out
+  rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
+  rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/{DEFAULT_EXTRACT_MANIFEST_NAME}
+"""
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rapidtriage",
         description="Lightweight forensic triage CLI with OS-independent core and pluggable artifact providers",
+        formatter_class=HELP_FORMATTER,
+        epilog=TOP_LEVEL_EPILOG,
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    docs = sub.add_parser("docs", help="Search document bodies for keywords and save JSON output")
+    docs = sub.add_parser(
+        "docs",
+        help="Search document bodies for keywords and save JSON output",
+        formatter_class=HELP_FORMATTER,
+        epilog=DOCS_EPILOG,
+    )
     docs.add_argument("root", help="Directory to scan")
     docs.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
     docs.add_argument("--output", default="rapidtriage-docs.json", help="JSON output path")
     docs.add_argument("--limit", type=int, default=0, help="Stop after scanning N candidates (0 means all)")
 
-    manifest = sub.add_parser("manifest", help="Write provider manifest JSON")
+    manifest = sub.add_parser(
+        "manifest",
+        help="Write provider manifest JSON",
+        formatter_class=HELP_FORMATTER,
+        epilog=MANIFEST_EPILOG,
+    )
     manifest.add_argument("root", help="Directory to describe")
     manifest.add_argument("--output", default="rapidtriage-manifest.json", help="JSON output path")
 
-    files = sub.add_parser("files", help="Scan file metadata for likely forensic candidates and save JSON output")
+    files = sub.add_parser(
+        "files",
+        help="Scan file metadata for likely forensic candidates and save JSON output",
+        formatter_class=HELP_FORMATTER,
+        epilog=FILES_EPILOG,
+    )
     files.add_argument("root", help="Directory to scan")
     files.add_argument("--output", default="rapidtriage-files.json", help="JSON output path")
     files.add_argument("--limit", type=int, default=0, help="Stop after collecting N candidates (0 means all)")
@@ -44,6 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
     extract = sub.add_parser(
         "extract",
         help="Copy files referenced by files/docs JSON into an output directory and save a manifest JSON",
+        formatter_class=HELP_FORMATTER,
+        epilog=EXTRACT_EPILOG,
     )
     extract.add_argument("input_json", help="Path to rapidtriage files/docs JSON")
     extract.add_argument("output_dir", help="Directory to copy matching files into")
