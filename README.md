@@ -189,6 +189,8 @@ rapidtriage manifest . --output rapidtriage-manifest.json
 rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
 rapidtriage files . --output rapidtriage-files.json
 rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
+rapidtriage extract rapidtriage-files.json ./extract-out
+rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
 ```
 
 Current `docs` support:
@@ -196,23 +198,23 @@ Current `docs` support:
 - `pdf`
 - `docx`
 
-Planned `files` command contract:
-- performs a fast metadata-only sweep; it should rely on file name, full path, extension, and modification time instead of parsing file contents.
-- writes JSON output so the results can be consumed by later triage steps or external tooling.
-- includes the default heuristic categories `documents`, `archives`, `databases`, and `executables` in the summary/output.
-- keeps the output reviewable by exposing the path, extension/type, size, modified timestamp, and the reason or category assigned to each candidate.
+Current `files` behavior:
+- performs a fast metadata-only sweep; it relies on file name, full path, extension, and modification time instead of parsing file contents.
+- writes JSON output that later triage steps can consume directly.
+- includes the built-in heuristic categories `documents`, `archives`, `databases`, and `executables`.
+- exposes path, extension, size, modified timestamp, and matched categories per candidate.
 
-Planned usage once `files` lands:
+Current `extract` behavior:
+- accepts `files` or `docs` result JSON as input.
+- copies selected source files into an output directory while preserving relative paths where possible.
+- writes a manifest JSON containing original path, extracted path, sha256 hash, modified timestamp, size, and source-specific metadata.
+- records missing source files in `skipped` instead of failing the whole run.
 
-```bash
-rapidtriage files . --output rapidtriage-files.json
-```
-
-Recommended review points for the `files` implementation:
-- preserve speed by using filesystem metadata only and avoiding content extraction.
-- normalize timestamps as ISO-8601 strings so `docs`, `manifest`, and `files` outputs stay consistent.
-- keep category heuristics deterministic so repeated scans on the same tree produce stable JSON.
-- reuse the existing JSON writer/output shape conventions where possible (`command`, `root`, `generated_at`, `summary`, `results`).
+Recommended review points for the current `files`/`extract` implementation:
+- preserve metadata-only scanning for `files`; avoid content parsing there.
+- keep timestamps normalized as ISO-8601 strings across `docs`, `files`, and `extract`.
+- preserve relative paths for extracted files to avoid collisions when duplicate basenames exist.
+- keep category and kind filters deterministic so repeated scans on the same tree produce stable JSON.
 
 Smoke test:
 

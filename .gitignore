@@ -1,6 +1,7 @@
 .omx/state/
 .omx/logs/
 .omx/reports/
+.omx/team/
 .venv/
 __pycache__/
 *.pyc
