@@ -36,13 +36,14 @@ Recommended `details` keys for the first collector wave:
 
 - `browser`
 - `profile`
-- `username`
+- `user`
 - `source_path`
 - `target_path`
 - `url`
 - `title`
-- `visited_at`
-- `downloaded_at`
+- `last_visited_at`
+- `started_at`
+- `ended_at`
 - `last_opened_at`
 - `evidence_type`
 
