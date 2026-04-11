@@ -182,7 +182,7 @@ Current structure:
 - `rapidtriage/artifacts/windows`: Windows-only artifact providers kept behind provider interfaces.
 - `rapidtriage/artifacts/generic.py`: cross-platform document candidate provider.
 
-Example usage:
+Current usage:
 
 ```bash
 rapidtriage manifest . --output rapidtriage-manifest.json
@@ -196,10 +196,23 @@ Current `docs` support:
 - `pdf`
 - `docx`
 
-Current `files` defaults:
-- categories: `documents`, `archives`, `databases`, `executables`
-- metadata filters: basename/path substring, extension, modified-after, modified-before
-- output fields include file path, name, extension, size, modified time, matched categories, and match reasons
+Planned `files` command contract:
+- performs a fast metadata-only sweep; it should rely on file name, full path, extension, and modification time instead of parsing file contents.
+- writes JSON output so the results can be consumed by later triage steps or external tooling.
+- includes the default heuristic categories `documents`, `archives`, `databases`, and `executables` in the summary/output.
+- keeps the output reviewable by exposing the path, extension/type, size, modified timestamp, and the reason or category assigned to each candidate.
+
+Planned usage once `files` lands:
+
+```bash
+rapidtriage files . --output rapidtriage-files.json
+```
+
+Recommended review points for the `files` implementation:
+- preserve speed by using filesystem metadata only and avoiding content extraction.
+- normalize timestamps as ISO-8601 strings so `docs`, `manifest`, and `files` outputs stay consistent.
+- keep category heuristics deterministic so repeated scans on the same tree produce stable JSON.
+- reuse the existing JSON writer/output shape conventions where possible (`command`, `root`, `generated_at`, `summary`, `results`).
 
 Smoke test:
 
