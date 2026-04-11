@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from rapidtriage.cli import main
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
@@ -29,7 +29,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
 
             self.assertIn(fixture.chrome_visit.url, manifest_blob)
             self.assertIn(fixture.edge_visit.url, manifest_blob)
-            self.assertIn(Path(fixture.download.target_path).name, manifest_blob)
+            self.assertIn(PureWindowsPath(fixture.download.target_path).name, manifest_blob)
             self.assertIn(fixture.recent_shortcut.name, manifest_blob)
 
     def test_manifest_windows_artifact_rows_point_inside_fixture_root(self) -> None:
