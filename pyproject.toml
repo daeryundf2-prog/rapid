@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "dashcam-tools"
 version = "0.1.0"
-description = "Dashcam OCR-based renamer and E01 ingest CLI"
+description = "Dashcam tools plus a lightweight rapid forensic triage CLI"
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [{ name = "shinyoohag", email = "" }]
@@ -30,11 +30,11 @@ dependencies = [
 full = []
 
 [project.scripts]
- dashcam-report = "dashcam_tools.report:main"
+dashcam-report = "dashcam_tools.report:main"
  dashcam-gui = "dashcam_tools.gui:main"
 dashcam-rename = "dashcam_tools.rename:cli"
 dashcam-ingest = "dashcam_tools.ingest:cli"
+rapidtriage = "rapidtriage.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["dashcam_tools"]
-
+packages = ["dashcam_tools", "rapidtriage"]

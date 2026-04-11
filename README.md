@@ -173,6 +173,33 @@ Windows: install ffmpeg+tesseract manually; E01 not supported here.
 - If tesseract is missing, OCR will fail; install system package first.
 - E01 support shells out to ewfmount/mmls/tsk_recover and is read-only.
 
+## rapidtriage
+
+`rapidtriage` is a lightweight forensic triage CLI added alongside the dashcam tools.
+
+Current structure:
+- `rapidtriage/core`: OS-independent orchestration, manifest generation, document scanning, and keyword search.
+- `rapidtriage/artifacts/windows`: Windows-only artifact providers kept behind provider interfaces.
+- `rapidtriage/artifacts/generic.py`: cross-platform document candidate provider.
+
+Example usage:
+
+```bash
+rapidtriage manifest . --output rapidtriage-manifest.json
+rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
+```
+
+Current `docs` support:
+- `txt`
+- `pdf`
+- `docx`
+
+Smoke test:
+
+```bash
+python -m unittest discover -s tests
+```
+
 ## GUI
 
 Run:

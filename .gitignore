@@ -1,0 +1,5 @@
+.omx/state/
+.omx/logs/
+.venv/
+__pycache__/
+*.pyc
