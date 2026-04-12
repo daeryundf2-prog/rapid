@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Mapping, Sequence, Union
 
+from .audit import audit_path_for, write_audit_record
 from .artifacts import run_artifact_collection
 from .docs import build_manifest, run_docs_search, write_result
 from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, run_extract
@@ -78,7 +79,18 @@ class RunModeError(ValueError):
     """Raised when the requested run mode is invalid or unsupported."""
 
 
-def run_triage_mode(root: Union[InputRoot, Path], *, mode: str, output_dir: Path, input_kind: str | None = None) -> Dict[str, object]:
+def run_triage_mode(
+    root: Union[InputRoot, Path],
+    *,
+    mode: str,
+    output_dir: Path,
+    input_kind: str | None = None,
+    dry_run: bool = False,
+    read_only: bool = False,
+    max_extract_size_bytes: int = 0,
+    max_file_count: int = 0,
+    overwrite: bool = False,
+) -> Dict[str, object]:
     input_root = resolve_input_root(root, kind=input_kind)
     normalized_mode = mode.lower()
     if normalized_mode not in SUPPORTED_RUN_MODES:
@@ -130,8 +142,26 @@ def run_triage_mode(root: Union[InputRoot, Path], *, mode: str, output_dir: Path
         artifact_payloads[kind] = artifact_payload
         write_result(artifact_payload, artifact_path)
 
-    docs_extract_payload = run_extract(docs_path, docs_extract_dir, kinds=profile.docs_extract_kinds)
-    files_extract_payload = run_extract(files_path, files_extract_dir, categories=profile.file_extract_categories)
+    docs_extract_payload = run_extract(
+        docs_path,
+        docs_extract_dir,
+        kinds=profile.docs_extract_kinds,
+        dry_run=dry_run,
+        read_only=read_only,
+        max_extract_size_bytes=max_extract_size_bytes,
+        max_file_count=max_file_count,
+        overwrite=overwrite,
+    )
+    files_extract_payload = run_extract(
+        files_path,
+        files_extract_dir,
+        categories=profile.file_extract_categories,
+        dry_run=dry_run,
+        read_only=read_only,
+        max_extract_size_bytes=max_extract_size_bytes,
+        max_file_count=max_file_count,
+        overwrite=overwrite,
+    )
     write_result(docs_extract_payload, docs_extract_manifest)
     write_result(files_extract_payload, files_extract_manifest)
 
@@ -156,9 +186,52 @@ def run_triage_mode(root: Union[InputRoot, Path], *, mode: str, output_dir: Path
         files_extract_payload=files_extract_payload,
         artifact_payloads=artifact_payloads,
         outputs=outputs,
+        safety={
+            "dry_run": dry_run,
+            "read_only": read_only,
+            "max_extract_size_bytes": max_extract_size_bytes,
+            "max_file_count": max_file_count,
+            "overwrite": overwrite,
+        },
     )
     report_path.write_text(build_markdown_report(summary_payload), encoding="utf-8")
     write_result(summary_payload, summary_path)
+    audit_output = output_dir / "rapidtriage-run-audit.json"
+    write_audit_record(
+        audit_output,
+        command="run",
+        options={
+            "mode": normalized_mode,
+            "output_dir": str(output_dir),
+            "input_kind": input_root.kind,
+            "scan_scope_root": str(scan_input_root.root_path),
+            "dry_run": dry_run,
+            "read_only": read_only,
+            "max_extract_size_bytes": max_extract_size_bytes,
+            "max_file_count": max_file_count,
+            "overwrite": overwrite,
+        },
+        input_root=input_root,
+        output_files=[
+            ("manifest", manifest_path),
+            ("docs", docs_path),
+            ("files", files_path),
+            ("docs-extract-manifest", docs_extract_manifest),
+            ("files-extract-manifest", files_extract_manifest),
+            *[(f"artifacts-{kind}", path) for kind, path in artifact_outputs.items()],
+            ("run-summary", summary_path),
+            ("run-report", report_path),
+            *[
+                (f"docs-extract:{entry['relative_path']}", Path(entry["extracted_path"]).resolve())
+                for entry in docs_extract_payload.get("entries", [])
+            ],
+            *[
+                (f"files-extract:{entry['relative_path']}", Path(entry["extracted_path"]).resolve())
+                for entry in files_extract_payload.get("entries", [])
+            ],
+        ],
+    )
+    summary_payload["audit"] = str(audit_output)
     return summary_payload
 
 
@@ -174,6 +247,7 @@ def build_run_summary(
     files_extract_payload: Mapping[str, object],
     artifact_payloads: Mapping[str, Mapping[str, object]],
     outputs: Mapping[str, Path],
+    safety: Mapping[str, object],
 ) -> Dict[str, object]:
     provider_counts = {
         str(provider["name"]): len(provider.get("artifacts", []))
@@ -218,6 +292,7 @@ def build_run_summary(
             "preferred_locations": list(profile.preferred_locations),
             "artifacts_kinds": list(profile.artifacts_kinds),
         },
+        "safety": dict(safety),
         "outputs": {name: str(path) for name, path in outputs.items()},
         "steps": build_step_rows(
             manifest_payload=manifest_payload,

@@ -17,6 +17,13 @@
     "kinds": [],
     "limit": 0
   },
+  "safety": {
+    "dry_run": false,
+    "read_only": false,
+    "max_extract_size_bytes": 0,
+    "max_file_count": 0,
+    "overwrite": false
+  },
   "summary": {
     "input_count": 2,
     "selected_count": 1,

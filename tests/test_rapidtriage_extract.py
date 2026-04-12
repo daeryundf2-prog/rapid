@@ -151,6 +151,45 @@ class RapidTriageExtractTests(unittest.TestCase):
             self.assertEqual(manifest["skipped"][0]["original_path"], str(note_path.resolve()))
             self.assertEqual(manifest["skipped"][0]["reason"], "missing")
 
+    def test_extract_command_supports_dry_run_and_preserves_source_files_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            note_path = root / "note.txt"
+            note_path.write_text("dry run note", encoding="utf-8")
+            input_json = root / "files.json"
+            extract_dir = root / "extract-out"
+
+            self.assertEqual(main(["files", str(root), "--output", str(input_json)]), 0)
+            exit_code = main(["extract", str(input_json), str(extract_dir), "--dry-run"])
+
+            self.assertEqual(exit_code, 0)
+            manifest = json.loads((extract_dir / "rapidtriage-extract-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["safety"]["dry_run"], True)
+            self.assertEqual(manifest["summary"]["selected_count"], 1)
+            self.assertEqual(manifest["summary"]["extracted_count"], 0)
+            self.assertEqual(manifest["summary"]["skipped_count"], 1)
+            self.assertEqual(manifest["skipped"][0]["reason"], "dry-run")
+            self.assertFalse((extract_dir / "note.txt").exists())
+
+    def test_extract_command_blocks_overwrite_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            note_path = root / "note.txt"
+            note_path.write_text("original", encoding="utf-8")
+            input_json = root / "files.json"
+            extract_dir = root / "extract-out"
+            extract_dir.mkdir()
+            (extract_dir / "note.txt").write_text("existing", encoding="utf-8")
+
+            self.assertEqual(main(["files", str(root), "--output", str(input_json)]), 0)
+            exit_code = main(["extract", str(input_json), str(extract_dir)])
+
+            self.assertEqual(exit_code, 0)
+            manifest = json.loads((extract_dir / "rapidtriage-extract-manifest.json").read_text(encoding="utf-8"))
+            self.assertGreaterEqual(manifest["summary"]["skipped_count"], 1)
+            self.assertIn("destination-exists", {item["reason"] for item in manifest["skipped"]})
+            self.assertEqual((extract_dir / "note.txt").read_text(encoding="utf-8"), "existing")
+
 
 if __name__ == "__main__":
     unittest.main()

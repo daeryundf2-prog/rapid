@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 import json
 import shutil
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+from .audit import compute_sha256
 from .files import (
     ALL_FILE_CATEGORIES,
     DEFAULT_FILE_CATEGORIES,
@@ -36,6 +36,11 @@ def run_extract(
     categories: Optional[Sequence[str]] = None,
     kinds: Optional[Sequence[str]] = None,
     limit: int = 0,
+    dry_run: bool = False,
+    read_only: bool = False,
+    max_extract_size_bytes: int = 0,
+    max_file_count: int = 0,
+    overwrite: bool = False,
 ) -> Dict[str, object]:
     payload = load_extract_payload(input_json)
     source_command = payload["command"]
@@ -63,6 +68,7 @@ def run_extract(
     output_dir.mkdir(parents=True, exist_ok=True)
     extracted_entries: List[Dict[str, object]] = []
     skipped_entries: List[Dict[str, object]] = []
+    copied_bytes = 0
     for item, source_path in selected_items:
         if not source_path.exists() or not source_path.is_file():
             skipped_entries.append(
@@ -76,9 +82,26 @@ def run_extract(
         destination_relative = build_destination_relative_path(source_path, root)
         destination_path = output_dir / destination_relative
         destination_path.parent.mkdir(parents=True, exist_ok=True)
+        source_stat = source_path.stat()
+
+        if dry_run:
+            skipped_entries.append({"original_path": str(source_path), "reason": "dry-run"})
+            continue
+        if read_only:
+            skipped_entries.append({"original_path": str(source_path), "reason": "read-only"})
+            continue
+        if max_file_count and len(extracted_entries) >= max_file_count:
+            skipped_entries.append({"original_path": str(source_path), "reason": "max-file-count"})
+            continue
+        if max_extract_size_bytes and copied_bytes + source_stat.st_size > max_extract_size_bytes:
+            skipped_entries.append({"original_path": str(source_path), "reason": "max-extract-size"})
+            continue
+        if destination_path.exists() and not overwrite:
+            skipped_entries.append({"original_path": str(source_path), "reason": "destination-exists"})
+            continue
+
         shutil.copy2(source_path, destination_path)
 
-        source_stat = source_path.stat()
         entry: Dict[str, object] = {
             "original_path": str(source_path),
             "extracted_path": str(destination_path),
@@ -95,6 +118,7 @@ def run_extract(
             if item.get("matched_keywords"):
                 entry["matched_keywords"] = list(item["matched_keywords"])
         extracted_entries.append(entry)
+        copied_bytes += source_stat.st_size
 
     return {
         "command": "extract",
@@ -110,6 +134,13 @@ def run_extract(
             "categories": normalized_categories if source_command == "files" else [],
             "kinds": normalized_kinds if source_command == "docs" else [],
             "limit": limit,
+        },
+        "safety": {
+            "dry_run": dry_run,
+            "read_only": read_only,
+            "max_extract_size_bytes": max_extract_size_bytes,
+            "max_file_count": max_file_count,
+            "overwrite": overwrite,
         },
         "summary": {
             "input_count": len(source_items),
@@ -274,11 +305,3 @@ def extract_candidate_categories(item: Dict[str, object]) -> List[str]:
     if category:
         return [str(category).lower()]
     return []
-
-
-def compute_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()

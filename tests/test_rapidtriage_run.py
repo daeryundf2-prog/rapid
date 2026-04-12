@@ -115,6 +115,32 @@ class RapidTriageRunTests(unittest.TestCase):
     def test_run_recovery_mode_writes_component_outputs_summary_and_report(self) -> None:
         self.assert_run_mode_outputs("recovery")
 
+    def test_run_supports_read_only_extract_safety(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+
+            exit_code = main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir), "--read-only"])
+
+            self.assertEqual(exit_code, 0)
+            summary_payload: dict[str, Any] = json.loads(
+                (output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(summary_payload["safety"]["read_only"], True)
+
+            docs_extract_payload = json.loads(
+                (output_dir / "docs-extract" / "rapidtriage-extract-manifest.json").read_text(encoding="utf-8")
+            )
+            files_extract_payload = json.loads(
+                (output_dir / "files-extract" / "rapidtriage-extract-manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(docs_extract_payload["summary"]["extracted_count"], 0)
+            self.assertGreaterEqual(docs_extract_payload["summary"]["skipped_count"], 1)
+            self.assertEqual(files_extract_payload["summary"]["extracted_count"], 0)
+            self.assertGreaterEqual(files_extract_payload["summary"]["skipped_count"], 1)
+
     def assert_run_mode_outputs(self, mode: str) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"

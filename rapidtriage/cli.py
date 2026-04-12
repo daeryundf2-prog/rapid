@@ -4,11 +4,12 @@ import argparse
 import textwrap
 from pathlib import Path
 
+from .core.audit import audit_path_for, write_audit_record
 from .core.artifacts import ArtifactCollectionError, SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
 from .core.docs import build_manifest, run_docs_search, write_result
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
 from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
-from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS
+from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS, resolve_input_root
 from .core.run import RunModeError, SUPPORTED_RUN_MODES, run_triage_mode
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
@@ -35,6 +36,7 @@ EXTRACT_EPILOG = f"""Examples:
   rapidtriage extract rapidtriage-files.json ./extract-out
   rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
   rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/{DEFAULT_EXTRACT_MANIFEST_NAME}
+  rapidtriage extract rapidtriage-files.json ./extract-out --dry-run --max-file-count 100
 """
 
 
@@ -52,9 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
               rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
               rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
+              rapidtriage extract rapidtriage-files.json ./extract-out --dry-run --max-file-count 100
               rapidtriage artifacts . --kind browser --output rapidtriage-artifacts-browser.json
               rapidtriage manifest /Volumes/case-mount --input-kind mounted-image
-              rapidtriage run . --mode fraud --output-dir ./rapidtriage-run
+              rapidtriage run . --mode fraud --output-dir ./rapidtriage-run --read-only
             """
         ),
     )
@@ -154,6 +157,7 @@ def build_parser() -> argparse.ArgumentParser:
             Examples:
               rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
               rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/rapidtriage-extract-manifest.json
+              rapidtriage extract rapidtriage-files.json ./extract-out --dry-run --max-extract-size-bytes 104857600
             """
         ),
     )
@@ -179,6 +183,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=sorted(SUPPORTED_DOC_KINDS),
         help="Only for docs JSON: restrict extracted matches by document kind",
     )
+    extract.add_argument("--dry-run", action="store_true", help="Select files and write manifest without copying evidence")
+    extract.add_argument("--read-only", action="store_true", help="Do not copy source files; only record what would be extracted")
+    extract.add_argument("--max-extract-size-bytes", type=int, default=0, help="Stop copying when total extracted bytes would exceed this value (0 means unlimited)")
+    extract.add_argument("--max-file-count", type=int, default=0, help="Maximum number of files to copy (0 means unlimited)")
+    extract.add_argument("--overwrite", action="store_true", help="Allow overwriting existing output files")
 
     run = sub.add_parser(
         "run",
@@ -191,6 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage run . --mode fraud
               rapidtriage run /cases/image-mount --mode seizure --output-dir ./rapidtriage-run
               rapidtriage run /cases/image-mount --mode recovery --output-dir ./rapidtriage-run-recovery
+              rapidtriage run . --mode hacking --read-only --max-file-count 50
             """
         ),
     )
@@ -202,6 +212,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory that receives the generated JSON, extract manifests, and execution report "
         "(default: ROOT/rapidtriage-run-MODE)",
     )
+    run.add_argument("--dry-run", action="store_true", help="Skip evidence copying during extract stages")
+    run.add_argument("--read-only", action="store_true", help="Run triage without copying evidence files during extract stages")
+    run.add_argument("--max-extract-size-bytes", type=int, default=0, help="Cap total copied bytes per extract stage (0 means unlimited)")
+    run.add_argument("--max-file-count", type=int, default=0, help="Cap copied files per extract stage (0 means unlimited)")
+    run.add_argument("--overwrite", action="store_true", help="Allow extract stages to overwrite existing output files")
     return parser
 
 
@@ -227,15 +242,49 @@ def main(argv=None) -> int:
                 categories=args.category,
                 kinds=args.kind,
                 limit=args.limit,
+                dry_run=args.dry_run,
+                read_only=args.read_only,
+                max_extract_size_bytes=args.max_extract_size_bytes,
+                max_file_count=args.max_file_count,
+                overwrite=args.overwrite,
             )
         except ExtractError as exc:
             parser.error(str(exc))
         write_result(payload, manifest_output)
+        audit_output = audit_path_for(manifest_output)
+        write_audit_record(
+            audit_output,
+            command="extract",
+            options={
+                "manifest": str(manifest_output),
+                "output_dir": str(output_dir),
+                "name_contains": args.name_contains or [],
+                "path_contains": args.path_contains or [],
+                "extensions": args.ext or [],
+                "categories": args.category or [],
+                "kinds": args.kind or [],
+                "limit": args.limit,
+                "dry_run": args.dry_run,
+                "read_only": args.read_only,
+                "max_extract_size_bytes": args.max_extract_size_bytes,
+                "max_file_count": args.max_file_count,
+                "overwrite": args.overwrite,
+            },
+            input_root=Path(payload["root"]).resolve() if payload.get("root") else None,
+            input_files=[("input-json", input_json)],
+            output_files=[("extract-manifest", manifest_output)]
+            + [
+                (f"extracted:{entry['relative_path']}", Path(entry["extracted_path"]).resolve())
+                for entry in payload.get("entries", [])
+            ],
+        )
         print(f"Saved extract manifest JSON: {manifest_output}")
+        print(f"Saved audit JSON: {audit_output}")
         print(f"Selected: {payload['summary']['selected_count']}  Extracted: {payload['summary']['extracted_count']}")
         return 0
 
     root = Path(args.root).expanduser().resolve()
+    input_root = resolve_input_root(root, kind=getattr(args, "input_kind", None))
     if args.command == "run":
         output_dir = (
             Path(args.output_dir).expanduser().resolve()
@@ -243,11 +292,23 @@ def main(argv=None) -> int:
             else root / f"rapidtriage-run-{args.mode.lower()}"
         )
         try:
-            payload = run_triage_mode(root, mode=args.mode, output_dir=output_dir, input_kind=args.input_kind)
+            payload = run_triage_mode(
+                root,
+                mode=args.mode,
+                output_dir=output_dir,
+                input_kind=args.input_kind,
+                dry_run=args.dry_run,
+                read_only=args.read_only,
+                max_extract_size_bytes=args.max_extract_size_bytes,
+                max_file_count=args.max_file_count,
+                overwrite=args.overwrite,
+            )
         except RunModeError as exc:
             parser.error(str(exc))
         print(f"Saved run summary JSON: {payload['outputs']['summary']}")
         print(f"Saved run report: {payload['outputs']['report']}")
+        if payload.get("audit"):
+            print(f"Saved audit JSON: {payload['audit']}")
         print(
             f"Docs matches: {payload['summary']['document_match_count']}  "
             f"File candidates: {payload['summary']['file_candidate_count']}"
@@ -265,7 +326,16 @@ def main(argv=None) -> int:
         except ArtifactCollectionError as exc:
             parser.error(str(exc))
         write_result(payload, output)
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="artifacts",
+            options={"kind": args.kind, "output": str(output), "input_kind": args.input_kind},
+            input_root=input_root,
+            output_files=[("artifacts-json", output)],
+        )
         print(f"Saved artifact collector JSON: {output}")
+        print(f"Saved audit JSON: {audit_output}")
         print(f"Kind: {payload['kind']}  Artifacts: {payload['summary']['artifact_count']}")
         return 0
 
@@ -274,14 +344,37 @@ def main(argv=None) -> int:
     if args.command == "docs":
         payload = run_docs_search(root, args.keyword, limit=args.limit, input_kind=args.input_kind)
         write_result(payload, output)
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="docs",
+            options={
+                "keywords": args.keyword,
+                "limit": args.limit,
+                "output": str(output),
+                "input_kind": args.input_kind,
+            },
+            input_root=input_root,
+            output_files=[("docs-json", output)],
+        )
         print(f"Saved docs search JSON: {output}")
+        print(f"Saved audit JSON: {audit_output}")
         print(f"Candidates: {payload['summary']['candidate_count']}  Matches: {payload['summary']['match_count']}")
         return 0
 
     if args.command == "manifest":
         payload = build_manifest(root, [], input_kind=args.input_kind)
         write_result(payload, output)
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="manifest",
+            options={"keywords": [], "output": str(output), "input_kind": args.input_kind},
+            input_root=input_root,
+            output_files=[("manifest-json", output)],
+        )
         print(f"Saved manifest JSON: {output}")
+        print(f"Saved audit JSON: {audit_output}")
         return 0
 
     if args.command == "files":
@@ -300,7 +393,26 @@ def main(argv=None) -> int:
         except FileScanError as exc:
             parser.error(str(exc))
         write_result(payload, output)
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="files",
+            options={
+                "categories": args.category or [],
+                "name_contains": args.name_contains or [],
+                "path_contains": args.path_contains or [],
+                "extensions": args.ext or [],
+                "modified_after": args.modified_after,
+                "modified_before": args.modified_before,
+                "limit": args.limit,
+                "output": str(output),
+                "input_kind": args.input_kind,
+            },
+            input_root=input_root,
+            output_files=[("files-json", output)],
+        )
         print(f"Saved file scan JSON: {output}")
+        print(f"Saved audit JSON: {audit_output}")
         print(f"Scanned: {payload['summary']['scanned_file_count']}  Candidates: {payload['summary']['candidate_count']}")
         return 0
 

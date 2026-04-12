@@ -261,6 +261,16 @@ Current `extract` behavior:
 - copies selected source files into an output directory while preserving relative paths where possible.
 - writes a manifest JSON containing original path, extracted path, sha256 hash, modified timestamp, size, and source-specific metadata.
 - records missing source files in `skipped` instead of failing the whole run.
+- defaults to overwrite protection; use `--overwrite` only when replacement is intentional.
+- supports `--dry-run`, `--read-only`, `--max-extract-size-bytes`, and `--max-file-count` for safer evidence handling.
+
+Integrity and provenance:
+- every top-level `manifest`, `docs`, `files`, `extract`, `artifacts`, and `run` execution writes a sibling audit JSON.
+- audit sidecars record the input root fingerprint, command options, input file hashes, and generated output hashes.
+- naming pattern:
+  - `rapidtriage-files.json` -> `rapidtriage-files.audit.json`
+  - `rapidtriage-extract-manifest.json` -> `rapidtriage-extract-manifest.audit.json`
+  - `run` writes `rapidtriage-run-audit.json` in the output directory.
 
 Current `artifacts` behavior:
 - exposes independent collector runs outside the `manifest`/`run` pipeline.
@@ -273,6 +283,7 @@ Current `run` behavior:
 - writes dedicated artifact collector outputs under `artifacts/` when the mode profile uses them.
 - writes `rapidtriage-run-summary.json` and `rapidtriage-run-report.md` alongside the component outputs.
 - records per-step output paths, artifact counts, keyword hit counts, recent/large file highlights, and preferred-location candidates in the summary JSON.
+- accepts the same extract safety controls (`--dry-run`, `--read-only`, `--max-extract-size-bytes`, `--max-file-count`, `--overwrite`) and forwards them to both extract stages.
 
 Smoke test:
 

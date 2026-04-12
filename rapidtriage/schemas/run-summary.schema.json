@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["command", "mode", "generated_at", "root", "scan_scope_root", "output_dir", "profile", "outputs", "steps", "summary", "highlights"],
+  "required": ["command", "mode", "generated_at", "root", "scan_scope_root", "output_dir", "profile", "safety", "outputs", "steps", "summary", "highlights"],
   "properties": {
     "command": { "const": "run" },
     "mode": { "enum": ["seizure", "fraud", "hacking", "recovery"] },
@@ -23,6 +23,18 @@
         "file_scan_path_contains": { "type": "array", "items": { "type": "string" } },
         "preferred_locations": { "type": "array", "items": { "type": "string" } },
         "artifacts_kinds": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dry_run", "read_only", "max_extract_size_bytes", "max_file_count", "overwrite"],
+      "properties": {
+        "dry_run": { "type": "boolean" },
+        "read_only": { "type": "boolean" },
+        "max_extract_size_bytes": { "type": "integer" },
+        "max_file_count": { "type": "integer" },
+        "overwrite": { "type": "boolean" }
       }
     },
     "outputs": {
