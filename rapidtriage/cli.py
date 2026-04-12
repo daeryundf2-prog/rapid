@@ -11,6 +11,7 @@ from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED
 from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
 from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS, resolve_input_root
 from .core.run import RunModeError, SUPPORTED_RUN_MODES, run_triage_mode
+from .core.timeline import TimelineError, build_timeline_report, run_timeline
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 TOP_LEVEL_EPILOG = """Examples:
@@ -56,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
               rapidtriage extract rapidtriage-files.json ./extract-out --dry-run --max-file-count 100
               rapidtriage artifacts . --kind browser --output rapidtriage-artifacts-browser.json
+              rapidtriage timeline . --output rapidtriage-timeline.json --report rapidtriage-timeline-report.md
               rapidtriage manifest /Volumes/case-mount --input-kind mounted-image
               rapidtriage run . --mode fraud --output-dir ./rapidtriage-run --read-only
             """
@@ -189,6 +191,28 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--max-file-count", type=int, default=0, help="Maximum number of files to copy (0 means unlimited)")
     extract.add_argument("--overwrite", action="store_true", help="Allow overwriting existing output files")
 
+    timeline = sub.add_parser(
+        "timeline",
+        help="Merge files/docs/artifacts JSON outputs into a time-ordered timeline and Markdown report",
+        description="Merge files/docs/artifacts JSON outputs into a time-ordered timeline and Markdown report",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage timeline .
+              rapidtriage timeline /cases/image-mount --output rapidtriage-timeline.json --report rapidtriage-timeline-report.md
+              rapidtriage timeline . --files rapidtriage-files.json --docs rapidtriage-docs.json --artifacts ./browser.json --artifacts ./recent.json
+            """
+        ),
+    )
+    timeline.add_argument("root", nargs="?", default=".", help="Directory to scan (default: current directory)")
+    timeline.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
+    timeline.add_argument("--files", action="append", help="Path to a rapidtriage files JSON output (repeatable)")
+    timeline.add_argument("--docs", action="append", help="Path to a rapidtriage docs JSON output (repeatable)")
+    timeline.add_argument("--artifacts", action="append", help="Path to a rapidtriage artifacts JSON output (repeatable)")
+    timeline.add_argument("--output", default="rapidtriage-timeline.json", help="Timeline JSON output path")
+    timeline.add_argument("--report", help="Markdown report output path (default: OUTPUT stem + -report.md)")
+
     run = sub.add_parser(
         "run",
         help="Run an incident-mode triage workflow and write summary/report outputs",
@@ -223,6 +247,53 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "timeline":
+        root = Path(args.root).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        report_output = (
+            Path(args.report).expanduser().resolve()
+            if args.report
+            else output.with_name(f"{output.stem}-report.md")
+        )
+        try:
+            payload = run_timeline(
+                root=root,
+                input_kind=args.input_kind,
+                files_inputs=[Path(value) for value in (args.files or [])],
+                docs_inputs=[Path(value) for value in (args.docs or [])],
+                artifacts_inputs=[Path(value) for value in (args.artifacts or [])],
+            )
+        except TimelineError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        report_output.parent.mkdir(parents=True, exist_ok=True)
+        report_output.write_text(build_timeline_report(payload), encoding="utf-8")
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="timeline",
+            options={
+                "files": args.files or [],
+                "docs": args.docs or [],
+                "artifacts": args.artifacts or [],
+                "input_kind": args.input_kind,
+                "output": str(output),
+                "report": str(report_output),
+            },
+            input_root=resolve_input_root(root, kind=args.input_kind),
+            input_files=[
+                *[(f"files:{index}", Path(path)) for index, path in enumerate(args.files or [], start=1)],
+                *[(f"docs:{index}", Path(path)) for index, path in enumerate(args.docs or [], start=1)],
+                *[(f"artifacts:{index}", Path(path)) for index, path in enumerate(args.artifacts or [], start=1)],
+            ],
+            output_files=[("timeline-json", output), ("timeline-report", report_output)],
+        )
+        print(f"Saved timeline JSON: {output}")
+        print(f"Saved timeline report: {report_output}")
+        print(f"Saved audit JSON: {audit_output}")
+        print(f"Events: {payload['summary']['event_count']}")
+        return 0
 
     if args.command == "extract":
         input_json = Path(args.input_json).expanduser().resolve()
