@@ -7,6 +7,7 @@ from pathlib import Path
 from .core.docs import build_manifest, run_docs_search, write_result
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
 from .core.files import DEFAULT_FILE_CATEGORIES, FileScanError, run_files_scan
+from .core.run import RunModeError, SUPPORTED_RUN_MODES, run_triage_mode
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 TOP_LEVEL_EPILOG = """Examples:
@@ -49,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
               rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
               rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
+              rapidtriage run . --mode fraud --output-dir ./rapidtriage-run
             """
         ),
     )
@@ -152,6 +154,27 @@ def build_parser() -> argparse.ArgumentParser:
         choices=sorted(SUPPORTED_DOC_KINDS),
         help="Only for docs JSON: restrict extracted matches by document kind",
     )
+
+    run = sub.add_parser(
+        "run",
+        help="Run an incident-mode triage workflow and write summary/report outputs",
+        description="Run an incident-mode triage workflow and write summary/report outputs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage run . --mode fraud
+              rapidtriage run /cases/image-mount --mode hacking --output-dir ./rapidtriage-run
+            """
+        ),
+    )
+    run.add_argument("root", help="Directory to triage")
+    run.add_argument("--mode", required=True, choices=sorted(SUPPORTED_RUN_MODES), help="Incident mode to execute")
+    run.add_argument(
+        "--output-dir",
+        help="Directory that receives the generated JSON, extract manifests, and execution report "
+        "(default: ROOT/rapidtriage-run-MODE)",
+    )
     return parser
 
 
@@ -186,6 +209,24 @@ def main(argv=None) -> int:
         return 0
 
     root = Path(args.root).expanduser().resolve()
+    if args.command == "run":
+        output_dir = (
+            Path(args.output_dir).expanduser().resolve()
+            if args.output_dir
+            else root / f"rapidtriage-run-{args.mode.lower()}"
+        )
+        try:
+            payload = run_triage_mode(root, mode=args.mode, output_dir=output_dir)
+        except RunModeError as exc:
+            parser.error(str(exc))
+        print(f"Saved run summary JSON: {payload['outputs']['summary']}")
+        print(f"Saved run report: {payload['outputs']['report']}")
+        print(
+            f"Docs matches: {payload['summary']['document_match_count']}  "
+            f"File candidates: {payload['summary']['file_candidate_count']}"
+        )
+        return 0
+
     output = Path(args.output).expanduser().resolve()
 
     if args.command == "docs":
