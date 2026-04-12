@@ -193,6 +193,7 @@ rapidtriage files --help
 rapidtriage extract --help
 rapidtriage artifacts --help
 rapidtriage run --help
+rapidtriage timeline --help
 ```
 
 Current usage examples:
@@ -205,6 +206,7 @@ rapidtriage files --help
 rapidtriage extract --help
 rapidtriage artifacts --help
 rapidtriage run --help
+rapidtriage timeline --help
 ```
 
 Common command examples:
@@ -224,6 +226,7 @@ rapidtriage run . --mode seizure --output-dir ./rapidtriage-run-seizure
 rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud
 rapidtriage run . --mode hacking --output-dir ./rapidtriage-run-hacking
 rapidtriage run . --mode recovery --output-dir ./rapidtriage-run-recovery
+rapidtriage timeline . --output ./rapidtriage-timeline.json --report ./rapidtriage-timeline-report.md
 ```
 
 Input root abstraction:
@@ -243,6 +246,7 @@ Schema and sample references:
 - `extract`: `rapidtriage/schemas/extract.schema.json` + `docs/samples/rapidtriage-extract.sample.json`
 - `artifacts`: `rapidtriage/schemas/artifacts.schema.json` + `docs/samples/rapidtriage-artifacts.sample.json`
 - `run-summary`: `rapidtriage/schemas/run-summary.schema.json` + `docs/samples/rapidtriage-run-summary.sample.json`
+- `timeline`: `rapidtriage/schemas/timeline.schema.json`
 
 Current `docs` support:
 - `txt`
@@ -284,6 +288,11 @@ Current `run` behavior:
 - writes `rapidtriage-run-summary.json` and `rapidtriage-run-report.md` alongside the component outputs.
 - records per-step output paths, artifact counts, keyword hit counts, recent/large file highlights, and preferred-location candidates in the summary JSON.
 - accepts the same extract safety controls (`--dry-run`, `--read-only`, `--max-extract-size-bytes`, `--max-file-count`, `--overwrite`) and forwards them to both extract stages.
+
+Current `timeline` behavior:
+- accepts `files`, `docs`, and one or more `artifacts` JSON outputs, or auto-discovers the default component outputs under a root.
+- merges those sources into a chronological event list with `timestamp`, `source`, `path`, and `type`.
+- writes both timeline JSON and a markdown report, plus an audit sidecar for provenance/integrity tracking.
 
 Smoke test:
 
