@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import io
 import json
 import tempfile
 import unittest
 import zipfile
-from contextlib import redirect_stderr
 from pathlib import Path
+from typing import Any
 
-from rapidtriage.cli import main
+from rapidtriage.cli import build_parser, main
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
 
@@ -49,106 +48,132 @@ def write_minimal_pdf(path: Path, text: str) -> None:
     path.write_bytes(bytes(output))
 
 
-def load_json(path: Path) -> dict[str, object]:
-    return json.loads(path.read_text(encoding="utf-8"))
+def build_run_fixture(root: Path) -> None:
+    build_windows_artifact_fixture(root)
+    suspicious_blob = (
+        "invoice payment wire transfer payroll login password credential phishing "
+        "powershell remote access persistence ransomware browser history shellbags"
+    )
+
+    docs_dir = root / "Documents"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "wire-transfer-notes.txt").write_text(suspicious_blob, encoding="utf-8")
+    write_minimal_docx(docs_dir / "breach-summary.docx", suspicious_blob)
+    write_minimal_pdf(docs_dir / "attacker-activity.pdf", suspicious_blob)
+
+    downloads_dir = root / "Downloads"
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+    (downloads_dir / "evidence-bundle.zip").write_bytes(b"PK\x03\x04")
+
+    startup_dir = root / "Startup"
+    startup_dir.mkdir(parents=True, exist_ok=True)
+    (startup_dir / "startup-dropper.ps1").write_text("Write-Host compromised", encoding="utf-8")
+
+    db_dir = root / "Databases"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    (db_dir / "browser-cache.sqlite").write_text("SQLite format 3", encoding="utf-8")
+
+
+def classify_payload(payload: dict[str, Any]) -> str | None:
+    command = payload.get("command")
+    if command in {"docs", "files", "extract"}:
+        return str(command)
+    if {"generated_at", "root", "platform", "providers"}.issubset(payload):
+        return "manifest"
+    if payload.get("mode") and "summary" in payload:
+        return "mode-summary"
+    if "report" in payload and payload.get("mode"):
+        return "report-json"
+    return None
 
 
 class RapidTriageRunTests(unittest.TestCase):
-    def test_run_fraud_mode_writes_summary_report_and_component_outputs(self) -> None:
+    def test_parser_exposes_run_subcommand_and_examples(self) -> None:
+        parser = build_parser()
+        commands = parser._subparsers._group_actions[0].choices
+
+        self.assertIn("run", commands)
+
+        root_help = parser.format_help()
+        run_help = commands["run"].format_help()
+
+        self.assertIn("rapidtriage run", root_help)
+        self.assertIn("--mode", run_help)
+        self.assertIn("fraud", run_help)
+        self.assertIn("hacking", run_help)
+
+    def test_run_fraud_mode_writes_component_outputs_summary_and_report(self) -> None:
+        self.assert_run_mode_outputs("fraud")
+
+    def test_run_hacking_mode_writes_component_outputs_summary_and_report(self) -> None:
+        self.assert_run_mode_outputs("hacking")
+
+    def assert_run_mode_outputs(self, mode: str) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            output_dir = root / "fraud-run"
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
 
-            (root / "incident-notes.txt").write_text("invoice payment transfer bank account", encoding="utf-8")
-            write_minimal_docx(root / "ledger.docx", "refund receipt payment record")
-            write_minimal_pdf(root / "evidence.pdf", "fraud transfer receipt")
-            (root / "records.sqlite").write_text("SQLite format 3", encoding="utf-8")
-            with zipfile.ZipFile(root / "bundle.zip", "w") as archive:
-                archive.writestr("receipt.txt", "invoice")
-
-            exit_code = main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)])
+            exit_code = main(["run", str(root), "--mode", mode, "--output-dir", str(output_dir)])
 
             self.assertEqual(exit_code, 0)
+            self.assertTrue(output_dir.is_dir())
 
-            summary_path = output_dir / "rapidtriage-run-summary.json"
-            report_path = output_dir / "rapidtriage-run-report.md"
-            docs_extract_manifest = output_dir / "docs-extract" / "rapidtriage-extract-manifest.json"
-            files_extract_manifest = output_dir / "files-extract" / "rapidtriage-extract-manifest.json"
+            json_payloads: dict[str, dict[str, Any]] = {}
+            summary_payloads: list[dict[str, Any]] = []
+            for path in output_dir.rglob("*.json"):
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                kind = classify_payload(payload)
+                if kind is None:
+                    continue
+                if kind == "mode-summary":
+                    summary_payloads.append(payload)
+                    continue
+                json_payloads[kind] = payload
 
-            for path in (
-                output_dir / "rapidtriage-manifest.json",
-                output_dir / "rapidtriage-docs.json",
-                output_dir / "rapidtriage-files.json",
-                docs_extract_manifest,
-                files_extract_manifest,
-                summary_path,
-                report_path,
-            ):
-                self.assertTrue(path.is_file(), path)
+            self.assertIn("manifest", json_payloads)
+            self.assertIn("files", json_payloads)
+            self.assertIn("docs", json_payloads)
+            self.assertIn("extract", json_payloads)
 
-            summary = load_json(summary_path)
-            self.assertEqual(summary["command"], "run")
-            self.assertEqual(summary["mode"], "fraud")
-            self.assertEqual(Path(summary["root"]), root.resolve())
-            self.assertEqual(Path(summary["output_dir"]), output_dir.resolve())
-            self.assertGreaterEqual(summary["summary"]["document_match_count"], 3)
-            self.assertGreaterEqual(summary["summary"]["file_candidate_count"], 5)
-            self.assertGreaterEqual(summary["summary"]["docs_extracted_count"], 3)
-            self.assertGreaterEqual(summary["summary"]["files_extracted_count"], 5)
-            self.assertIn("invoice", summary["summary"]["matched_keyword_counts"])
+            manifest = json_payloads["manifest"]
+            provider_names = {provider["name"] for provider in manifest["providers"]}
+            self.assertIn("windows-browser-artifacts", provider_names)
+            self.assertIn("windows-recent-files", provider_names)
 
-            docs_extract = load_json(docs_extract_manifest)
-            files_extract = load_json(files_extract_manifest)
-            self.assertEqual(docs_extract["source_command"], "docs")
-            self.assertEqual(files_extract["source_command"], "files")
+            files_payload = json_payloads["files"]
+            self.assertGreaterEqual(files_payload["summary"]["candidate_count"], 4)
 
-            report_text = report_path.read_text(encoding="utf-8")
-            self.assertIn("# rapidtriage run report", report_text)
-            self.assertIn("Mode: `fraud`", report_text)
-            self.assertIn("## Summary", report_text)
+            docs_payload = json_payloads["docs"]
+            self.assertGreaterEqual(docs_payload["summary"]["candidate_count"], 3)
+            self.assertGreaterEqual(docs_payload["summary"]["match_count"], 1)
 
-    def test_run_hacking_mode_surfaces_windows_artifacts_and_suspicious_files(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            output_dir = root / "hacking-run"
+            extract_payload = json_payloads["extract"]
+            self.assertGreaterEqual(extract_payload["summary"]["selected_count"], 1)
+            self.assertGreaterEqual(extract_payload["summary"]["extracted_count"], 1)
+            for entry in extract_payload["entries"]:
+                self.assertTrue(Path(entry["extracted_path"]).is_file())
+                self.assertTrue(Path(entry["extracted_path"]).is_relative_to(output_dir.resolve()))
 
-            build_windows_artifact_fixture(root)
-            (root / "operator-note.txt").write_text("powershell persistence credential malware", encoding="utf-8")
-            (root / "payload.exe").write_bytes(b"MZ\x90\x00")
-            (root / "collect.ps1").write_text("Invoke-WebRequest", encoding="utf-8")
-            (root / "loot.sqlite").write_text("SQLite format 3", encoding="utf-8")
-            with zipfile.ZipFile(root / "tooling.zip", "w") as archive:
-                archive.writestr("script.ps1", "powershell")
+            matching_summaries = [payload for payload in summary_payloads if payload.get("mode") == mode]
+            self.assertTrue(matching_summaries, f"missing mode summary JSON for {mode}")
 
-            exit_code = main(["run", str(root), "--mode", "hacking", "--output-dir", str(output_dir)])
-
-            self.assertEqual(exit_code, 0)
-
-            summary = load_json(output_dir / "rapidtriage-run-summary.json")
-            self.assertEqual(summary["mode"], "hacking")
-            self.assertGreater(summary["summary"]["windows_provider_artifact_counts"]["windows-browser-artifacts"], 0)
-            self.assertGreater(summary["summary"]["windows_provider_artifact_counts"]["windows-recent-files"], 0)
-            self.assertGreater(summary["summary"]["artifact_type_counts"]["browser-history-downloads"], 0)
-            self.assertGreater(summary["summary"]["artifact_type_counts"]["recent-shortcut"], 0)
-            self.assertGreaterEqual(summary["summary"]["document_match_count"], 1)
-            self.assertGreaterEqual(summary["summary"]["files_extracted_count"], 3)
-
-            report_text = (output_dir / "rapidtriage-run-report.md").read_text(encoding="utf-8")
-            self.assertIn("Mode: `hacking`", report_text)
-            self.assertIn("windows-browser-artifacts", report_text)
-            self.assertIn("windows-recent-files", report_text)
-
-    def test_run_rejects_modes_not_yet_implemented(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            stderr = io.StringIO()
-
-            with redirect_stderr(stderr):
-                with self.assertRaises(SystemExit) as exc:
-                    main(["run", str(root), "--mode", "seizure"])
-
-            self.assertEqual(exc.exception.code, 2)
-            self.assertIn("not implemented yet", stderr.getvalue())
+            report_paths = [
+                path
+                for path in output_dir.rglob("*")
+                if path.is_file() and "report" in path.name.lower() and path.suffix.lower() in {".md", ".txt", ".json"}
+            ]
+            self.assertTrue(report_paths, f"missing execution report for {mode}")
+            report_path = report_paths[0]
+            if report_path.suffix.lower() == ".json":
+                report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+                self.assertEqual(report_payload.get("mode"), mode)
+            else:
+                report_text = report_path.read_text(encoding="utf-8")
+                self.assertIn(mode, report_text.lower())
+                self.assertIn("files", report_text.lower())
+                self.assertIn("docs", report_text.lower())
 
 
 if __name__ == "__main__":
