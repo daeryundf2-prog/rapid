@@ -8,6 +8,7 @@ from .core.artifacts import ArtifactCollectionError, SUPPORTED_ARTIFACT_KINDS, r
 from .core.docs import build_manifest, run_docs_search, write_result
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
 from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
+from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS
 from .core.run import RunModeError, SUPPORTED_RUN_MODES, run_triage_mode
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
@@ -52,6 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
               rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
               rapidtriage artifacts . --kind browser --output rapidtriage-artifacts-browser.json
+              rapidtriage manifest /Volumes/case-mount --input-kind mounted-image
               rapidtriage run . --mode fraud --output-dir ./rapidtriage-run
             """
         ),
@@ -72,6 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     docs.add_argument("root", help="Directory to scan")
+    docs.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
     docs.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
     docs.add_argument("--output", default="rapidtriage-docs.json", help="JSON output path")
     docs.add_argument("--limit", type=int, default=0, help="Stop after scanning N candidates (0 means all)")
@@ -90,6 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     manifest.add_argument("root", help="Directory to describe")
+    manifest.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
     manifest.add_argument("--output", default="rapidtriage-manifest.json", help="JSON output path")
 
     artifacts = sub.add_parser(
@@ -106,6 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     artifacts.add_argument("root", nargs="?", default=".", help="Directory to scan (default: current directory)")
+    artifacts.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
     artifacts.add_argument("--kind", required=True, choices=sorted(SUPPORTED_ARTIFACT_KINDS), help="Artifact collector kind")
     artifacts.add_argument("--output", help="JSON output path (default: ./rapidtriage-artifacts-KIND.json)")
 
@@ -124,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     files.add_argument("root", help="Directory to scan")
+    files.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
     files.add_argument("--output", default="rapidtriage-files.json", help="JSON output path")
     files.add_argument("--limit", type=int, default=0, help="Stop after collecting N candidates (0 means all)")
     files.add_argument(
@@ -189,6 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run.add_argument("root", help="Directory to triage")
+    run.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
     run.add_argument("--mode", required=True, choices=sorted(SUPPORTED_RUN_MODES), help="Incident mode to execute")
     run.add_argument(
         "--output-dir",
@@ -236,7 +243,7 @@ def main(argv=None) -> int:
             else root / f"rapidtriage-run-{args.mode.lower()}"
         )
         try:
-            payload = run_triage_mode(root, mode=args.mode, output_dir=output_dir)
+            payload = run_triage_mode(root, mode=args.mode, output_dir=output_dir, input_kind=args.input_kind)
         except RunModeError as exc:
             parser.error(str(exc))
         print(f"Saved run summary JSON: {payload['outputs']['summary']}")
@@ -254,7 +261,7 @@ def main(argv=None) -> int:
             else (Path.cwd() / f"rapidtriage-artifacts-{args.kind}.json").resolve()
         )
         try:
-            payload = run_artifact_collection(root, kind=args.kind)
+            payload = run_artifact_collection(root, kind=args.kind, input_kind=args.input_kind)
         except ArtifactCollectionError as exc:
             parser.error(str(exc))
         write_result(payload, output)
@@ -265,14 +272,14 @@ def main(argv=None) -> int:
     output = Path(args.output).expanduser().resolve()
 
     if args.command == "docs":
-        payload = run_docs_search(root, args.keyword, limit=args.limit)
+        payload = run_docs_search(root, args.keyword, limit=args.limit, input_kind=args.input_kind)
         write_result(payload, output)
         print(f"Saved docs search JSON: {output}")
         print(f"Candidates: {payload['summary']['candidate_count']}  Matches: {payload['summary']['match_count']}")
         return 0
 
     if args.command == "manifest":
-        payload = build_manifest(root, [])
+        payload = build_manifest(root, [], input_kind=args.input_kind)
         write_result(payload, output)
         print(f"Saved manifest JSON: {output}")
         return 0
@@ -281,6 +288,7 @@ def main(argv=None) -> int:
         try:
             payload = run_files_scan(
                 root,
+                input_kind=args.input_kind,
                 categories=args.category,
                 name_contains=args.name_contains,
                 path_contains=args.path_contains,

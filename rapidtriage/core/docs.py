@@ -8,19 +8,21 @@ import re
 import zipfile
 import zlib
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence
+from typing import Dict, Iterable, List, Sequence, Union
 from xml.etree import ElementTree as ET
 
 from ..artifacts import all_providers
+from .input_root import InputRoot, resolve_input_root
 from .models import DocumentCandidate, DocumentMatch
 
 SUPPORTED_DOC_EXTS = {".txt", ".pdf", ".docx"}
 TEXT_EXTS = {"txt"}
 
 
-def scan_document_candidates(root: Path, limit: int = 0) -> List[DocumentCandidate]:
+def scan_document_candidates(root: Union[InputRoot, Path], limit: int = 0) -> List[DocumentCandidate]:
+    input_root = resolve_input_root(root)
     candidates: List[DocumentCandidate] = []
-    for dirpath, _, files in os.walk(root):
+    for dirpath, _, files in os.walk(input_root.root_path):
         for name in files:
             path = Path(dirpath) / name
             suffix = path.suffix.lower()
@@ -40,7 +42,8 @@ def scan_document_candidates(root: Path, limit: int = 0) -> List[DocumentCandida
     return candidates
 
 
-def build_manifest(root: Path, keywords: Sequence[str]) -> Dict[str, object]:
+def build_manifest(root: Union[InputRoot, Path], keywords: Sequence[str], *, input_kind: str | None = None) -> Dict[str, object]:
+    input_root = resolve_input_root(root, kind=input_kind)
     provider_rows = []
     for provider in all_providers():
         provider_rows.append(
@@ -49,21 +52,28 @@ def build_manifest(root: Path, keywords: Sequence[str]) -> Dict[str, object]:
                 "description": provider.description,
                 "target_platform": provider.target_platform,
                 "supported": provider.supported(),
-                "artifacts": [item.to_dict() for item in provider.collect(root)],
+                "artifacts": [item.to_dict() for item in provider.collect(input_root.root_path)],
             }
         )
     return {
         "generated_at": dt.datetime.now().isoformat(),
-        "root": str(root),
+        "root": str(input_root.root_path),
         "platform": platform.platform(),
         "keywords": list(keywords),
         "providers": provider_rows,
     }
 
 
-def run_docs_search(root: Path, keywords: Sequence[str], limit: int = 0) -> Dict[str, object]:
+def run_docs_search(
+    root: Union[InputRoot, Path],
+    keywords: Sequence[str],
+    limit: int = 0,
+    *,
+    input_kind: str | None = None,
+) -> Dict[str, object]:
+    input_root = resolve_input_root(root, kind=input_kind)
     normalized = [item.lower() for item in keywords]
-    candidates = scan_document_candidates(root, limit=limit)
+    candidates = scan_document_candidates(input_root, limit=limit)
     matches: List[DocumentMatch] = []
     for candidate in candidates:
         text = extract_text(Path(candidate.path), candidate.kind)
@@ -81,14 +91,14 @@ def run_docs_search(root: Path, keywords: Sequence[str], limit: int = 0) -> Dict
         )
     return {
         "command": "docs",
-        "root": str(root),
+        "root": str(input_root.root_path),
         "generated_at": dt.datetime.now().isoformat(),
         "summary": {
             "candidate_count": len(candidates),
             "match_count": len(matches),
             "supported_extensions": sorted(SUPPORTED_DOC_EXTS),
         },
-        "manifest": build_manifest(root, normalized),
+        "manifest": build_manifest(input_root, normalized),
         "candidates": [item.to_dict() for item in candidates],
         "results": [item.to_dict() for item in matches],
     }

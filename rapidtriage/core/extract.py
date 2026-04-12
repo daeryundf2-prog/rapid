@@ -15,6 +15,7 @@ from .files import (
     normalized_name_mismatch,
     normalized_path_mismatch,
 )
+from .input_root import InputRoot, resolve_input_root
 
 SUPPORTED_EXTRACT_COMMANDS: Tuple[str, ...] = ("docs", "files")
 SUPPORTED_DOC_KINDS: Tuple[str, ...] = ("docx", "pdf", "txt")
@@ -99,7 +100,7 @@ def run_extract(
         "command": "extract",
         "source_command": source_command,
         "input_json": str(input_json),
-        "root": str(root) if root else None,
+        "root": str(root.root_path) if root else None,
         "generated_at": dt.datetime.now().isoformat(),
         "output_dir": str(output_dir),
         "filters": {
@@ -227,28 +228,28 @@ def normalize_extract_kinds(kinds: Optional[Sequence[str]], source_command: str)
     return normalized
 
 
-def resolve_payload_root(root_value: object, base_dir: Path) -> Optional[Path]:
+def resolve_payload_root(root_value: object, base_dir: Path) -> Optional[InputRoot]:
     if not isinstance(root_value, str) or not root_value.strip():
         return None
     root_path = Path(root_value).expanduser()
     if root_path.is_absolute():
-        return root_path.resolve()
-    return (base_dir / root_path).resolve()
+        return resolve_input_root(root_path.resolve())
+    return resolve_input_root((base_dir / root_path).resolve())
 
 
-def resolve_source_path(path_value: str, root: Optional[Path], base_dir: Path) -> Path:
+def resolve_source_path(path_value: str, root: Optional[InputRoot], base_dir: Path) -> Path:
     source_path = Path(path_value).expanduser()
     if source_path.is_absolute():
         return source_path.resolve()
     if root is not None:
-        return (root / source_path).resolve()
+        return (root.root_path / source_path).resolve()
     return (base_dir / source_path).resolve()
 
 
-def build_destination_relative_path(source_path: Path, root: Optional[Path]) -> Path:
+def build_destination_relative_path(source_path: Path, root: Optional[InputRoot]) -> Path:
     if root is not None:
         try:
-            return source_path.relative_to(root)
+            return source_path.relative_to(root.root_path)
         except ValueError:
             pass
 

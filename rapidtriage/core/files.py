@@ -4,8 +4,9 @@ import datetime as dt
 import os
 import stat as stat_module
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
+from .input_root import InputRoot, resolve_input_root
 from .models import FileCandidate
 
 DEFAULT_FILE_CATEGORIES: Tuple[str, ...] = ("documents", "archives", "databases", "executables")
@@ -110,8 +111,9 @@ class FileScanError(ValueError):
 
 
 def run_files_scan(
-    root: Path,
+    root: Union[InputRoot, Path],
     *,
+    input_kind: str | None = None,
     categories: Optional[Sequence[str]] = None,
     name_contains: Optional[Sequence[str]] = None,
     path_contains: Optional[Sequence[str]] = None,
@@ -120,6 +122,7 @@ def run_files_scan(
     modified_before: Optional[str] = None,
     limit: int = 0,
 ) -> Dict[str, object]:
+    input_root = resolve_input_root(root, kind=input_kind)
     selected_categories = normalize_categories(categories)
     normalized_name_filters = normalize_text_filters(name_contains)
     normalized_path_filters = normalize_text_filters(path_contains)
@@ -128,7 +131,7 @@ def run_files_scan(
     modified_before_dt = parse_modified_bound(modified_before)
 
     candidates, scanned_files = scan_file_candidates(
-        root,
+        input_root.root_path,
         categories=selected_categories,
         name_contains=normalized_name_filters,
         path_contains=normalized_path_filters,
@@ -146,7 +149,7 @@ def run_files_scan(
     modified_values = [candidate.modified_at for candidate in candidates]
     return {
         "command": "files",
-        "root": str(root),
+        "root": str(input_root.root_path),
         "generated_at": dt.datetime.now().isoformat(),
         "filters": {
             "categories": list(selected_categories),

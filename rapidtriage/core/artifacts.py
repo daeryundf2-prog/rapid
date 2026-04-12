@@ -3,9 +3,10 @@ from __future__ import annotations
 import datetime as dt
 from collections import Counter
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Union
 
 from ..artifacts import artifact_collectors, get_artifact_collector
+from .input_root import InputRoot, resolve_input_root
 
 SUPPORTED_ARTIFACT_KINDS = tuple(sorted(artifact_collectors()))
 
@@ -14,13 +15,14 @@ class ArtifactCollectionError(ValueError):
     """Raised when the requested artifact collector is invalid."""
 
 
-def run_artifact_collection(root: Path, *, kind: str) -> Dict[str, object]:
+def run_artifact_collection(root: Union[InputRoot, Path], *, kind: str, input_kind: str | None = None) -> Dict[str, object]:
+    input_root = resolve_input_root(root, kind=input_kind)
     try:
         collector = get_artifact_collector(kind)
     except KeyError as exc:
         raise ArtifactCollectionError(str(exc)) from exc
 
-    artifacts = [item.to_dict() for item in collector.collect(root)]
+    artifacts = [item.to_dict() for item in collector.collect(input_root.root_path)]
     artifact_type_counts = Counter()
     for artifact in artifacts:
         artifact_type = artifact.get("artifact_type")
@@ -31,7 +33,7 @@ def run_artifact_collection(root: Path, *, kind: str) -> Dict[str, object]:
         "command": "artifacts",
         "kind": str(getattr(collector, "collector_kind", kind)),
         "generated_at": dt.datetime.now().isoformat(),
-        "root": str(root),
+        "root": str(input_root.root_path),
         "provider": {
             "name": str(collector.name),
             "description": str(collector.description),

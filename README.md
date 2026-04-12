@@ -211,6 +211,7 @@ Common command examples:
 
 ```bash
 rapidtriage manifest . --output rapidtriage-manifest.json
+rapidtriage manifest /Volumes/case-mount --input-kind mounted-image --output case-manifest.json
 rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
 rapidtriage files . --output rapidtriage-files.json
 rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
@@ -224,6 +225,15 @@ rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud
 rapidtriage run . --mode hacking --output-dir ./rapidtriage-run-hacking
 rapidtriage run . --mode recovery --output-dir ./rapidtriage-run-recovery
 ```
+
+Input root abstraction:
+
+- `folder`: ordinary case folder roots
+- `mounted-image`: mounted disk/image roots such as `/Volumes/...`
+- `e01-derived`: roots derived from E01/EWF handling or mount output
+- `live`: live filesystem roots such as `/`
+
+All root-based commands accept `--input-kind` to override auto-detection while keeping the existing positional `ROOT` interface unchanged.
 
 Schema and sample references:
 

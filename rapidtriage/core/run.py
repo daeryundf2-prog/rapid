@@ -4,12 +4,13 @@ import datetime as dt
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Mapping, Sequence
+from typing import Dict, List, Mapping, Sequence, Union
 
 from .artifacts import run_artifact_collection
 from .docs import build_manifest, run_docs_search, write_result
 from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, run_extract
 from .files import run_files_scan
+from .input_root import InputRoot, derive_child_input_root, resolve_input_root
 
 SUPPORTED_RUN_MODES: tuple[str, ...] = ("seizure", "fraud", "hacking", "recovery")
 IMPLEMENTED_RUN_MODES = set(SUPPORTED_RUN_MODES)
@@ -77,7 +78,8 @@ class RunModeError(ValueError):
     """Raised when the requested run mode is invalid or unsupported."""
 
 
-def run_triage_mode(root: Path, *, mode: str, output_dir: Path) -> Dict[str, object]:
+def run_triage_mode(root: Union[InputRoot, Path], *, mode: str, output_dir: Path, input_kind: str | None = None) -> Dict[str, object]:
+    input_root = resolve_input_root(root, kind=input_kind)
     normalized_mode = mode.lower()
     if normalized_mode not in SUPPORTED_RUN_MODES:
         supported = ", ".join(SUPPORTED_RUN_MODES)
@@ -88,7 +90,8 @@ def run_triage_mode(root: Path, *, mode: str, output_dir: Path) -> Dict[str, obj
 
     profile = RUN_PROFILES[normalized_mode]
     output_dir = output_dir.expanduser().resolve()
-    scan_root = resolve_scan_root(root, profile)
+    scan_root = resolve_scan_root(input_root.root_path, profile)
+    scan_input_root = derive_child_input_root(input_root, scan_root)
 
     manifest_path = output_dir / "rapidtriage-manifest.json"
     docs_path = output_dir / "rapidtriage-docs.json"
@@ -101,17 +104,17 @@ def run_triage_mode(root: Path, *, mode: str, output_dir: Path) -> Dict[str, obj
     summary_path = output_dir / "rapidtriage-run-summary.json"
     report_path = output_dir / "rapidtriage-run-report.md"
 
-    manifest_payload = build_manifest(root, profile.keywords)
-    docs_payload = run_docs_search(scan_root, profile.keywords)
+    manifest_payload = build_manifest(input_root, profile.keywords)
+    docs_payload = run_docs_search(scan_input_root, profile.keywords)
     docs_payload["manifest"] = manifest_payload
-    docs_payload["scan_scope_root"] = str(scan_root)
+    docs_payload["scan_scope_root"] = str(scan_input_root.root_path)
 
     files_payload = run_files_scan(
-        scan_root,
+        scan_input_root,
         categories=profile.file_scan_categories,
         path_contains=profile.file_scan_path_contains or None,
     )
-    files_payload["scan_scope_root"] = str(scan_root)
+    files_payload["scan_scope_root"] = str(scan_input_root.root_path)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     write_result(manifest_payload, manifest_path)
@@ -122,7 +125,7 @@ def run_triage_mode(root: Path, *, mode: str, output_dir: Path) -> Dict[str, obj
     artifact_payloads: Dict[str, Dict[str, object]] = {}
     for kind in profile.artifacts_kinds:
         artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
-        artifact_payload = run_artifact_collection(root, kind=kind)
+        artifact_payload = run_artifact_collection(input_root, kind=kind)
         artifact_outputs[kind] = artifact_path
         artifact_payloads[kind] = artifact_payload
         write_result(artifact_payload, artifact_path)
@@ -143,7 +146,7 @@ def run_triage_mode(root: Path, *, mode: str, output_dir: Path) -> Dict[str, obj
         "report": report_path,
     }
     summary_payload = build_run_summary(
-        root=root,
+        root=input_root.root_path,
         output_dir=output_dir,
         profile=profile,
         manifest_payload=manifest_payload,
