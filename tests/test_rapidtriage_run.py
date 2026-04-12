@@ -52,26 +52,40 @@ def build_run_fixture(root: Path) -> None:
     build_windows_artifact_fixture(root)
     suspicious_blob = (
         "invoice payment wire transfer payroll login password credential phishing "
-        "powershell remote access persistence ransomware browser history shellbags"
+        "powershell remote access persistence ransomware browser history shellbags "
+        "download recent evidence restore deleted"
     )
+    user_root = root / "Users" / "alice"
 
-    docs_dir = root / "Documents"
+    docs_dir = user_root / "Documents"
     docs_dir.mkdir(parents=True, exist_ok=True)
     (docs_dir / "wire-transfer-notes.txt").write_text(suspicious_blob, encoding="utf-8")
     write_minimal_docx(docs_dir / "breach-summary.docx", suspicious_blob)
     write_minimal_pdf(docs_dir / "attacker-activity.pdf", suspicious_blob)
 
-    downloads_dir = root / "Downloads"
+    downloads_dir = user_root / "Downloads"
     downloads_dir.mkdir(parents=True, exist_ok=True)
-    (downloads_dir / "evidence-bundle.zip").write_bytes(b"PK\x03\x04")
+    (downloads_dir / "evidence-bundle.zip").write_bytes(b"PK\x03\x04" + (b"A" * 262144))
+    (downloads_dir / "payload-installer.exe").write_bytes(b"MZ\x90\x00")
 
-    startup_dir = root / "Startup"
+    desktop_dir = user_root / "Desktop"
+    desktop_dir.mkdir(parents=True, exist_ok=True)
+    (desktop_dir / "persistence-runner.bat").write_text("@echo off\r\npowershell -enc AAA=", encoding="utf-8")
+    (desktop_dir / "screen-capture.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    startup_dir = user_root / "Startup"
     startup_dir.mkdir(parents=True, exist_ok=True)
     (startup_dir / "startup-dropper.ps1").write_text("Write-Host compromised", encoding="utf-8")
 
-    db_dir = root / "Databases"
+    db_dir = user_root / "Databases"
     db_dir.mkdir(parents=True, exist_ok=True)
     (db_dir / "browser-cache.sqlite").write_text("SQLite format 3", encoding="utf-8")
+
+    recycle_dir = root / "$Recycle.Bin" / "alice"
+    recycle_dir.mkdir(parents=True, exist_ok=True)
+    (recycle_dir / "deleted-wallet-note.txt").write_text("deleted recovery note with recent restore hints", encoding="utf-8")
+    (recycle_dir / "deleted-bundle.zip").write_bytes(b"PK\x03\x04" + (b"B" * 131072))
+    (recycle_dir / "deleted-photo.jpg").write_bytes(b"\xff\xd8\xff" + (b"\x00" * 4096))
 
 
 class RapidTriageRunTests(unittest.TestCase):
@@ -95,6 +109,12 @@ class RapidTriageRunTests(unittest.TestCase):
     def test_run_hacking_mode_writes_component_outputs_summary_and_report(self) -> None:
         self.assert_run_mode_outputs("hacking")
 
+    def test_run_seizure_mode_writes_component_outputs_summary_and_report(self) -> None:
+        self.assert_run_mode_outputs("seizure")
+
+    def test_run_recovery_mode_writes_component_outputs_summary_and_report(self) -> None:
+        self.assert_run_mode_outputs("recovery")
+
     def assert_run_mode_outputs(self, mode: str) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
@@ -114,6 +134,10 @@ class RapidTriageRunTests(unittest.TestCase):
             files_extract_manifest_path = output_dir / "files-extract" / "rapidtriage-extract-manifest.json"
             summary_path = output_dir / "rapidtriage-run-summary.json"
             report_path = output_dir / "rapidtriage-run-report.md"
+            artifact_paths = {
+                path.name: path
+                for path in (output_dir / "artifacts").glob("rapidtriage-artifacts-*.json")
+            }
 
             expected_output_paths = [
                 manifest_path,
@@ -138,10 +162,12 @@ class RapidTriageRunTests(unittest.TestCase):
             files_extract_payload = json.loads(files_extract_manifest_path.read_text(encoding="utf-8"))
             summary_payload: dict[str, Any] = json.loads(summary_path.read_text(encoding="utf-8"))
 
-            self.assertGreaterEqual(files_payload["summary"]["candidate_count"], 4)
+            min_file_candidates = {"fraud": 4, "hacking": 3, "seizure": 4, "recovery": 3}[mode]
+            min_doc_matches = {"fraud": 1, "hacking": 1, "seizure": 1, "recovery": 1}[mode]
 
-            self.assertGreaterEqual(docs_payload["summary"]["candidate_count"], 3)
-            self.assertGreaterEqual(docs_payload["summary"]["match_count"], 1)
+            self.assertGreaterEqual(files_payload["summary"]["candidate_count"], min_file_candidates)
+            self.assertGreaterEqual(docs_payload["summary"]["candidate_count"], 1)
+            self.assertGreaterEqual(docs_payload["summary"]["match_count"], min_doc_matches)
 
             self.assertGreaterEqual(docs_extract_payload["summary"]["selected_count"], 1)
             self.assertGreaterEqual(docs_extract_payload["summary"]["extracted_count"], 1)
@@ -167,11 +193,23 @@ class RapidTriageRunTests(unittest.TestCase):
             )
             self.assertEqual(Path(summary_payload["outputs"]["summary"]).resolve(), summary_path.resolve())
             self.assertEqual(Path(summary_payload["outputs"]["report"]).resolve(), report_path.resolve())
+            self.assertIn("recent_file_candidates", summary_payload["highlights"])
+            self.assertIn("large_file_candidates", summary_payload["highlights"])
+
+            if mode == "recovery":
+                self.assertIn("recent-files", summary_payload["summary"]["artifacts"])
+                self.assertIn("images", files_payload["summary"]["category_counts"])
+            else:
+                self.assertIn("browser", summary_payload["summary"]["artifacts"])
+                self.assertIn("recent-files", summary_payload["summary"]["artifacts"])
+            for artifact_path in artifact_paths.values():
+                self.assertTrue(artifact_path.is_file())
 
             report_text = report_path.read_text(encoding="utf-8")
             self.assertIn(mode, report_text.lower())
             self.assertIn("files-extract", report_text.lower())
             self.assertIn("docs-extract", report_text.lower())
+            self.assertIn("largest file candidates", report_text.lower())
 
 
 if __name__ == "__main__":

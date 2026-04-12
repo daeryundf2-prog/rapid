@@ -4,9 +4,10 @@ import argparse
 import textwrap
 from pathlib import Path
 
+from .core.artifacts import ArtifactCollectionError, SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
 from .core.docs import build_manifest, run_docs_search, write_result
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
-from .core.files import DEFAULT_FILE_CATEGORIES, FileScanError, run_files_scan
+from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
 from .core.run import RunModeError, SUPPORTED_RUN_MODES, run_triage_mode
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
@@ -50,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
               rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
               rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
+              rapidtriage artifacts . --kind browser --output rapidtriage-artifacts-browser.json
               rapidtriage run . --mode fraud --output-dir ./rapidtriage-run
             """
         ),
@@ -90,6 +92,23 @@ def build_parser() -> argparse.ArgumentParser:
     manifest.add_argument("root", help="Directory to describe")
     manifest.add_argument("--output", default="rapidtriage-manifest.json", help="JSON output path")
 
+    artifacts = sub.add_parser(
+        "artifacts",
+        help="Run a dedicated artifact collector and save JSON output",
+        description="Run a dedicated artifact collector and save JSON output",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage artifacts . --kind browser --output rapidtriage-artifacts-browser.json
+              rapidtriage artifacts /cases/image-mount --kind recent-files
+            """
+        ),
+    )
+    artifacts.add_argument("root", nargs="?", default=".", help="Directory to scan (default: current directory)")
+    artifacts.add_argument("--kind", required=True, choices=sorted(SUPPORTED_ARTIFACT_KINDS), help="Artifact collector kind")
+    artifacts.add_argument("--output", help="JSON output path (default: ./rapidtriage-artifacts-KIND.json)")
+
     files = sub.add_parser(
         "files",
         help="Scan file metadata for likely forensic candidates and save JSON output",
@@ -110,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     files.add_argument(
         "--category",
         action="append",
-        choices=sorted(DEFAULT_FILE_CATEGORIES),
+        choices=sorted(ALL_FILE_CATEGORIES),
         help="Restrict categories (repeatable; defaults to all built-in categories)",
     )
     files.add_argument("--name-contains", action="append", help="Only keep files whose basename contains this text")
@@ -145,7 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument(
         "--category",
         action="append",
-        choices=sorted(DEFAULT_FILE_CATEGORIES),
+        choices=sorted(ALL_FILE_CATEGORIES),
         help="Only for files JSON: restrict extracted candidates by category",
     )
     extract.add_argument(
@@ -164,7 +183,8 @@ def build_parser() -> argparse.ArgumentParser:
             """\
             Examples:
               rapidtriage run . --mode fraud
-              rapidtriage run /cases/image-mount --mode hacking --output-dir ./rapidtriage-run
+              rapidtriage run /cases/image-mount --mode seizure --output-dir ./rapidtriage-run
+              rapidtriage run /cases/image-mount --mode recovery --output-dir ./rapidtriage-run-recovery
             """
         ),
     )
@@ -225,6 +245,21 @@ def main(argv=None) -> int:
             f"Docs matches: {payload['summary']['document_match_count']}  "
             f"File candidates: {payload['summary']['file_candidate_count']}"
         )
+        return 0
+
+    if args.command == "artifacts":
+        output = (
+            Path(args.output).expanduser().resolve()
+            if args.output
+            else (Path.cwd() / f"rapidtriage-artifacts-{args.kind}.json").resolve()
+        )
+        try:
+            payload = run_artifact_collection(root, kind=args.kind)
+        except ArtifactCollectionError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        print(f"Saved artifact collector JSON: {output}")
+        print(f"Kind: {payload['kind']}  Artifacts: {payload['summary']['artifact_count']}")
         return 0
 
     output = Path(args.output).expanduser().resolve()

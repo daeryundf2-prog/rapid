@@ -181,8 +181,9 @@ Current structure:
 - `rapidtriage/core`: OS-independent orchestration, manifest generation, document scanning, file metadata triage, and keyword search.
 - `rapidtriage/artifacts/windows`: Windows-only artifact providers kept behind provider interfaces.
 - `rapidtriage/artifacts/generic.py`: cross-platform document candidate provider.
-- `docs/rapidtriage-output-schema.md`: field-by-field JSON schema reference for `manifest`, `docs`, `files`, `extract`, and `run`.
-- `docs/samples/`: representative sample JSON outputs, including embedded Windows artifact collector rows inside `manifest`.
+- `rapidtriage/schemas/`: JSON Schema contracts for `manifest`, `docs`, `files`, `extract`, `artifacts`, and `run-summary`.
+- `docs/rapidtriage-output-schema.md`: human-readable contract summary and sample index.
+- `docs/samples/`: representative sample JSON outputs for every published command family.
 
 CLI help now includes copy/paste examples:
 
@@ -190,6 +191,8 @@ CLI help now includes copy/paste examples:
 rapidtriage --help
 rapidtriage files --help
 rapidtriage extract --help
+rapidtriage artifacts --help
+rapidtriage run --help
 ```
 
 Current usage examples:
@@ -200,6 +203,7 @@ rapidtriage manifest --help
 rapidtriage docs --help
 rapidtriage files --help
 rapidtriage extract --help
+rapidtriage artifacts --help
 rapidtriage run --help
 ```
 
@@ -213,17 +217,22 @@ rapidtriage files . --category executables --ext exe --modified-after 2025-01-01
 rapidtriage files . --name-contains note --path-contains desktop --output desktop-notes.json
 rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
 rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/rapidtriage-extract-manifest.json
+rapidtriage artifacts . --kind browser --output ./rapidtriage-artifacts-browser.json
+rapidtriage artifacts . --kind recent-files --output ./rapidtriage-artifacts-recent-files.json
+rapidtriage run . --mode seizure --output-dir ./rapidtriage-run-seizure
 rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud
 rapidtriage run . --mode hacking --output-dir ./rapidtriage-run-hacking
+rapidtriage run . --mode recovery --output-dir ./rapidtriage-run-recovery
 ```
 
 Schema and sample references:
 
-- `manifest`: `docs/rapidtriage-output-schema.md#rapidtriage-manifest` + `docs/samples/rapidtriage-manifest.sample.json`
-- `docs`: `docs/rapidtriage-output-schema.md#rapidtriage-docs` + `docs/samples/rapidtriage-docs.sample.json`
-- `files`: `docs/rapidtriage-output-schema.md#rapidtriage-files` + `docs/samples/rapidtriage-files.sample.json`
-- `extract`: `docs/samples/rapidtriage-extract.sample.json`
-- `run`: `docs/rapidtriage-output-schema.md#run-json`
+- `manifest`: `rapidtriage/schemas/manifest.schema.json` + `docs/samples/rapidtriage-manifest.sample.json`
+- `docs`: `rapidtriage/schemas/docs.schema.json` + `docs/samples/rapidtriage-docs.sample.json`
+- `files`: `rapidtriage/schemas/files.schema.json` + `docs/samples/rapidtriage-files.sample.json`
+- `extract`: `rapidtriage/schemas/extract.schema.json` + `docs/samples/rapidtriage-extract.sample.json`
+- `artifacts`: `rapidtriage/schemas/artifacts.schema.json` + `docs/samples/rapidtriage-artifacts.sample.json`
+- `run-summary`: `rapidtriage/schemas/run-summary.schema.json` + `docs/samples/rapidtriage-run-summary.sample.json`
 
 Current `docs` support:
 - `txt`
@@ -234,6 +243,7 @@ Current `files` behavior:
 - performs a fast metadata-only sweep; it relies on file name, full path, extension, and modification time instead of parsing file contents.
 - writes JSON output that later triage steps can consume directly.
 - includes the built-in heuristic categories `documents`, `archives`, `databases`, and `executables`.
+- exposes `images` as an additional non-default category for recovery-oriented workflows.
 - exposes path, extension, size, modified timestamp, and matched categories per candidate.
 
 Current `extract` behavior:
@@ -242,12 +252,17 @@ Current `extract` behavior:
 - writes a manifest JSON containing original path, extracted path, sha256 hash, modified timestamp, size, and source-specific metadata.
 - records missing source files in `skipped` instead of failing the whole run.
 
+Current `artifacts` behavior:
+- exposes independent collector runs outside the `manifest`/`run` pipeline.
+- currently supports `browser` and `recent-files`.
+- writes JSON output with one provider block, artifact counts, and the collected artifact rows.
+
 Current `run` behavior:
 - orchestrates `manifest`, `docs`, `files`, and both extract passes into a single incident-mode workflow.
-- currently implements `fraud` and `hacking`.
-- reserves `seizure` and `recovery` as accepted CLI modes that currently return a clear not-yet-implemented error.
+- implements `seizure`, `fraud`, `hacking`, and `recovery`.
+- writes dedicated artifact collector outputs under `artifacts/` when the mode profile uses them.
 - writes `rapidtriage-run-summary.json` and `rapidtriage-run-report.md` alongside the component outputs.
-- records per-step output paths, artifact counts, keyword hit counts, and highlighted document/file rows in the summary JSON.
+- records per-step output paths, artifact counts, keyword hit counts, recent/large file highlights, and preferred-location candidates in the summary JSON.
 
 Smoke test:
 

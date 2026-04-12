@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["generated_at", "root", "platform", "keywords", "providers"],
+  "properties": {
+    "generated_at": { "type": "string", "format": "date-time" },
+    "root": { "type": "string" },
+    "platform": { "type": "string" },
+    "keywords": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "description", "target_platform", "supported", "artifacts"],
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "target_platform": { "type": "string" },
+          "supported": { "type": "boolean" },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["provider", "artifact_type", "path", "supported", "details"],
+              "properties": {
+                "provider": { "type": "string" },
+                "artifact_type": { "type": "string" },
+                "path": { "type": "string" },
+                "supported": { "type": "boolean" },
+                "details": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

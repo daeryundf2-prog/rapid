@@ -15,6 +15,7 @@ RECENT_PATTERNS: Tuple[Tuple[str, str, Sequence[str]], ...] = (
 
 
 class WindowsRecentFilesProvider:
+    collector_kind = "recent-files"
     name = "windows-recent-files"
     description = "Windows Recent items and Jump Lists collected from per-user profile directories"
     target_platform = "windows"

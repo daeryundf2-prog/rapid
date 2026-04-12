@@ -1,0 +1,206 @@
+{
+  "command": "run",
+  "mode": "seizure",
+  "generated_at": "2026-04-11T12:05:00",
+  "root": "/cases/case-001",
+  "scan_scope_root": "/cases/case-001/Users",
+  "output_dir": "/cases/case-001/rapidtriage-run-seizure",
+  "profile": {
+    "description": "Seizure triage focused on user folders, recent modifications, and high-value documents, archives, and databases.",
+    "keywords": [
+      "seizure",
+      "download",
+      "desktop",
+      "document",
+      "archive",
+      "database",
+      "recent",
+      "evidence"
+    ],
+    "docs_extract_kinds": [
+      "txt",
+      "pdf",
+      "docx"
+    ],
+    "file_extract_categories": [
+      "documents",
+      "archives",
+      "databases"
+    ],
+    "file_scan_categories": [
+      "documents",
+      "archives",
+      "databases"
+    ],
+    "file_scan_path_contains": [],
+    "preferred_locations": [
+      "downloads",
+      "desktop",
+      "documents"
+    ],
+    "artifacts_kinds": [
+      "browser",
+      "recent-files"
+    ]
+  },
+  "outputs": {
+    "manifest": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-manifest.json",
+    "docs": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-docs.json",
+    "files": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-files.json",
+    "artifacts_browser": "/cases/case-001/rapidtriage-run-seizure/artifacts/rapidtriage-artifacts-browser.json",
+    "artifacts_recent-files": "/cases/case-001/rapidtriage-run-seizure/artifacts/rapidtriage-artifacts-recent-files.json",
+    "docs_extract_manifest": "/cases/case-001/rapidtriage-run-seizure/docs-extract/rapidtriage-extract-manifest.json",
+    "files_extract_manifest": "/cases/case-001/rapidtriage-run-seizure/files-extract/rapidtriage-extract-manifest.json",
+    "summary": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-run-summary.json",
+    "report": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-run-report.md"
+  },
+  "steps": [
+    {
+      "name": "manifest",
+      "status": "completed",
+      "output": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-manifest.json",
+      "provider_count": 6
+    },
+    {
+      "name": "docs",
+      "status": "completed",
+      "output": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-docs.json",
+      "candidate_count": 3,
+      "match_count": 2
+    },
+    {
+      "name": "files",
+      "status": "completed",
+      "output": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-files.json",
+      "scanned_file_count": 18,
+      "candidate_count": 9
+    },
+    {
+      "name": "artifacts-browser",
+      "status": "completed",
+      "output": "/cases/case-001/rapidtriage-run-seizure/artifacts/rapidtriage-artifacts-browser.json",
+      "artifact_count": 1
+    },
+    {
+      "name": "artifacts-recent-files",
+      "status": "completed",
+      "output": "/cases/case-001/rapidtriage-run-seizure/artifacts/rapidtriage-artifacts-recent-files.json",
+      "artifact_count": 1
+    },
+    {
+      "name": "docs-extract",
+      "status": "completed",
+      "output": "/cases/case-001/rapidtriage-run-seizure/docs-extract/rapidtriage-extract-manifest.json",
+      "selected_count": 2,
+      "extracted_count": 2
+    },
+    {
+      "name": "files-extract",
+      "status": "completed",
+      "output": "/cases/case-001/rapidtriage-run-seizure/files-extract/rapidtriage-extract-manifest.json",
+      "selected_count": 6,
+      "extracted_count": 6
+    }
+  ],
+  "summary": {
+    "document_candidate_count": 3,
+    "document_match_count": 2,
+    "scanned_file_count": 18,
+    "file_candidate_count": 9,
+    "provider_artifact_counts": {
+      "generic-documents": 3,
+      "windows-browser-artifacts": 1,
+      "windows-recent-files": 1,
+      "windows-eventlog": 1,
+      "windows-registry": 1,
+      "windows-shellbags": 1
+    },
+    "windows_provider_artifact_counts": {
+      "windows-browser-artifacts": 1,
+      "windows-recent-files": 1,
+      "windows-eventlog": 1,
+      "windows-registry": 1,
+      "windows-shellbags": 1
+    },
+    "artifact_type_counts": {
+      "document-pattern": 3,
+      "browser-history-downloads": 1,
+      "recent-shortcut": 1,
+      "eventlog": 1,
+      "registry": 1,
+      "shellbags": 1
+    },
+    "matched_keyword_counts": {
+      "download": 2,
+      "evidence": 1
+    },
+    "file_category_counts": {
+      "documents": 4,
+      "archives": 2,
+      "databases": 1
+    },
+    "artifacts": {
+      "browser": {
+        "artifact_count": 1,
+        "artifact_type_counts": {
+          "browser-history-downloads": 1
+        },
+        "output": "/cases/case-001/rapidtriage-run-seizure/artifacts/rapidtriage-artifacts-browser.json"
+      },
+      "recent-files": {
+        "artifact_count": 1,
+        "artifact_type_counts": {
+          "recent-shortcut": 1
+        },
+        "output": "/cases/case-001/rapidtriage-run-seizure/artifacts/rapidtriage-artifacts-recent-files.json"
+      }
+    },
+    "docs_extracted_count": 2,
+    "files_extracted_count": 6,
+    "preferred_location_candidate_count": 5
+  },
+  "highlights": {
+    "document_hits": [
+      {
+        "path": "/cases/case-001/Users/alice/Documents/wire-transfer-notes.txt",
+        "kind": "txt",
+        "matched_keywords": [
+          "download",
+          "evidence"
+        ],
+        "preview": "download recent evidence restore deleted"
+      }
+    ],
+    "recent_file_candidates": [
+      {
+        "path": "/cases/case-001/Users/alice/Downloads/evidence-bundle.zip",
+        "categories": [
+          "archives"
+        ],
+        "extension": ".zip",
+        "size": 262148,
+        "modified_at": "2026-04-10T10:00:00"
+      }
+    ],
+    "large_file_candidates": [
+      {
+        "path": "/cases/case-001/Users/alice/Downloads/evidence-bundle.zip",
+        "categories": [
+          "archives"
+        ],
+        "size": 262148,
+        "modified_at": "2026-04-10T10:00:00"
+      }
+    ],
+    "preferred_location_candidates": [
+      {
+        "path": "/cases/case-001/Users/alice/Documents/wire-transfer-notes.txt",
+        "categories": [
+          "documents"
+        ],
+        "size": 160,
+        "modified_at": "2026-04-10T09:58:00"
+      }
+    ]
+  }
+}

@@ -1,0 +1,57 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from rapidtriage.cli import build_parser, main
+
+FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rapidtriage" / "windows_artifacts"
+
+
+class RapidTriageArtifactsCliTests(unittest.TestCase):
+    def test_parser_exposes_artifacts_subcommand_and_examples(self) -> None:
+        parser = build_parser()
+        commands = parser._subparsers._group_actions[0].choices
+
+        self.assertIn("artifacts", commands)
+        help_text = commands["artifacts"].format_help()
+        self.assertIn("--kind", help_text)
+        self.assertIn("rapidtriage artifacts . --kind browser", help_text)
+        self.assertIn("recent-files", help_text)
+
+    def test_browser_artifacts_command_writes_expected_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "browser.json"
+
+            exit_code = main(["artifacts", str(FIXTURE_ROOT), "--kind", "browser", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["command"], "artifacts")
+            self.assertEqual(payload["kind"], "browser")
+            self.assertEqual(payload["provider"]["name"], "windows-browser-artifacts")
+            self.assertEqual(payload["summary"]["artifact_type_counts"]["browser-history-downloads"], 2)
+            self.assertEqual(payload["summary"]["artifact_type_counts"]["browser-history"], 1)
+            self.assertEqual(len(payload["artifacts"]), 3)
+
+    def test_recent_files_artifacts_command_writes_expected_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "recent.json"
+
+            exit_code = main(["artifacts", str(FIXTURE_ROOT), "--kind", "recent-files", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["kind"], "recent-files")
+            self.assertEqual(payload["provider"]["name"], "windows-recent-files")
+            self.assertEqual(payload["summary"]["artifact_count"], 3)
+            self.assertEqual(
+                set(payload["summary"]["artifact_type_counts"]),
+                {"recent-shortcut", "jumplist-automatic", "jumplist-custom"},
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

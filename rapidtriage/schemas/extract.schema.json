@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["command", "source_command", "input_json", "root", "generated_at", "output_dir", "filters", "summary", "entries", "skipped"],
+  "properties": {
+    "command": { "const": "extract" },
+    "source_command": { "enum": ["docs", "files"] },
+    "input_json": { "type": "string" },
+    "root": { "type": ["string", "null"] },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "output_dir": { "type": "string" },
+    "filters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name_contains", "path_contains", "extensions", "categories", "kinds", "limit"],
+      "properties": {
+        "name_contains": { "type": "array", "items": { "type": "string" } },
+        "path_contains": { "type": "array", "items": { "type": "string" } },
+        "extensions": { "type": "array", "items": { "type": "string" } },
+        "categories": { "type": "array", "items": { "type": "string" } },
+        "kinds": { "type": "array", "items": { "type": "string" } },
+        "limit": { "type": "integer" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_count", "selected_count", "extracted_count", "skipped_count"],
+      "properties": {
+        "input_count": { "type": "integer" },
+        "selected_count": { "type": "integer" },
+        "extracted_count": { "type": "integer" },
+        "skipped_count": { "type": "integer" }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["original_path", "extracted_path", "relative_path", "sha256", "modified_at", "size"],
+        "properties": {
+          "original_path": { "type": "string" },
+          "extracted_path": { "type": "string" },
+          "relative_path": { "type": "string" },
+          "sha256": { "type": "string" },
+          "modified_at": { "type": "string", "format": "date-time" },
+          "size": { "type": "integer" },
+          "categories": { "type": "array", "items": { "type": "string" } },
+          "kind": { "type": "string" },
+          "matched_keywords": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["original_path", "reason"],
+        "properties": {
+          "original_path": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

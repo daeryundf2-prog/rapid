@@ -1,0 +1,52 @@
+{
+  "command": "artifacts",
+  "kind": "browser",
+  "generated_at": "2026-04-11T12:04:00",
+  "root": "/cases/case-001",
+  "provider": {
+    "name": "windows-browser-artifacts",
+    "description": "Windows browser history/download collectors backed by real profile files",
+    "target_platform": "windows",
+    "supported": true
+  },
+  "summary": {
+    "artifact_count": 1,
+    "artifact_type_counts": {
+      "browser-history-downloads": 1
+    }
+  },
+  "artifacts": [
+    {
+      "provider": "windows-browser-artifacts",
+      "artifact_type": "browser-history-downloads",
+      "path": "/cases/case-001/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+      "supported": true,
+      "details": {
+        "user": "alice",
+        "browser": "chrome",
+        "profile": "Default",
+        "history_count": 1,
+        "download_count": 1,
+        "history": [
+          {
+            "url": "https://portal.example.local/incident/42",
+            "title": "Incident Portal",
+            "visit_count": 3,
+            "last_visited_at": "2026-04-10T09:30:00+00:00"
+          }
+        ],
+        "downloads": [
+          {
+            "source_url": "https://download.example.local/evidence/report.zip",
+            "target_path": "C:\\Users\\alice\\Downloads\\report.zip",
+            "tab_url": "https://download.example.local/evidence/report.zip",
+            "total_bytes": 48291,
+            "state": 1,
+            "started_at": "2026-04-10T09:31:00+00:00",
+            "ended_at": "2026-04-10T09:31:12+00:00"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -165,6 +165,7 @@ class RapidTriageOutputSamplesTests(unittest.TestCase):
             help_text,
         )
         self.assertIn("rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf", help_text)
+        self.assertIn("rapidtriage artifacts . --kind browser --output rapidtriage-artifacts-browser.json", help_text)
 
     def test_subcommand_help_includes_files_and_extract_examples(self) -> None:
         parser = build_parser()
@@ -172,11 +173,15 @@ class RapidTriageOutputSamplesTests(unittest.TestCase):
 
         files_help = commands["files"].format_help()
         extract_help = commands["extract"].format_help()
+        artifacts_help = commands["artifacts"].format_help()
+        run_help = commands["run"].format_help()
 
         self.assertIn("rapidtriage files . --output rapidtriage-files.json", files_help)
         self.assertIn("--modified-after 2025-01-01", files_help)
         self.assertIn("rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt", extract_help)
         self.assertIn("rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf", extract_help)
+        self.assertIn("rapidtriage artifacts . --kind browser --output rapidtriage-artifacts-browser.json", artifacts_help)
+        self.assertIn("rapidtriage run /cases/image-mount --mode seizure --output-dir ./rapidtriage-run", run_help)
 
     def test_docs_sample_matches_contract_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

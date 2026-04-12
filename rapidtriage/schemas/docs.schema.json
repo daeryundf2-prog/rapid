@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["command", "root", "generated_at", "summary", "manifest", "candidates", "results"],
+  "properties": {
+    "command": { "const": "docs" },
+    "root": { "type": "string" },
+    "scan_scope_root": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_count", "match_count", "supported_extensions"],
+      "properties": {
+        "candidate_count": { "type": "integer" },
+        "match_count": { "type": "integer" },
+        "supported_extensions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generated_at", "root", "platform", "keywords", "providers"],
+      "properties": {
+        "generated_at": { "type": "string", "format": "date-time" },
+        "root": { "type": "string" },
+        "platform": { "type": "string" },
+        "keywords": { "type": "array", "items": { "type": "string" } },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "description", "target_platform", "supported", "artifacts"],
+            "properties": {
+              "name": { "type": "string" },
+              "description": { "type": "string" },
+              "target_platform": { "type": "string" },
+              "supported": { "type": "boolean" },
+              "artifacts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["provider", "artifact_type", "path", "supported", "details"],
+                  "properties": {
+                    "provider": { "type": "string" },
+                    "artifact_type": { "type": "string" },
+                    "path": { "type": "string" },
+                    "supported": { "type": "boolean" },
+                    "details": { "type": "object", "additionalProperties": true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "kind", "size", "modified_at"],
+        "properties": {
+          "path": { "type": "string" },
+          "kind": { "type": "string" },
+          "size": { "type": "integer" },
+          "modified_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "kind", "matched_keywords", "preview", "size"],
+        "properties": {
+          "path": { "type": "string" },
+          "kind": { "type": "string" },
+          "matched_keywords": { "type": "array", "items": { "type": "string" } },
+          "preview": { "type": "string" },
+          "size": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

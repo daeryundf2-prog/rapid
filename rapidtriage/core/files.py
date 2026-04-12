@@ -86,7 +86,23 @@ CATEGORY_RULES: Dict[str, Dict[str, Tuple[str, ...]]] = {
         "name_keywords": ("setup", "install", "run", "launcher", "dropper"),
         "path_keywords": ("bin", "sbin", "program files", "startup", "launchagents", "launchdaemons"),
     },
+    "images": {
+        "extensions": (
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".gif",
+            ".bmp",
+            ".tif",
+            ".tiff",
+            ".heic",
+            ".webp",
+        ),
+        "name_keywords": ("photo", "image", "screenshot", "scan", "camera", "picture"),
+        "path_keywords": ("pictures", "photos", "dcim", "camera", "images", "screenshots"),
+    },
 }
+ALL_FILE_CATEGORIES: Tuple[str, ...] = tuple(CATEGORY_RULES)
 
 
 class FileScanError(ValueError):
@@ -133,7 +149,7 @@ def run_files_scan(
         "root": str(root),
         "generated_at": dt.datetime.now().isoformat(),
         "filters": {
-            "categories": selected_categories,
+            "categories": list(selected_categories),
             "name_contains": normalized_name_filters,
             "path_contains": normalized_path_filters,
             "extensions": normalized_extensions,

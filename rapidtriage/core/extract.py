@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .files import (
+    ALL_FILE_CATEGORIES,
     DEFAULT_FILE_CATEGORIES,
     normalize_extensions,
     normalize_text_filters,
@@ -196,8 +197,8 @@ def normalize_extract_categories(categories: Optional[Sequence[str]], source_com
     seen = set()
     for category in categories:
         key = category.lower()
-        if key not in DEFAULT_FILE_CATEGORIES:
-            supported = ", ".join(sorted(DEFAULT_FILE_CATEGORIES))
+        if key not in ALL_FILE_CATEGORIES:
+            supported = ", ".join(sorted(ALL_FILE_CATEGORIES))
             raise ExtractError(f"unsupported category for extract: {category} (supported: {supported})")
         if key in seen:
             continue

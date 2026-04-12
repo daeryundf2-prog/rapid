@@ -21,6 +21,7 @@ FIREFOX_PROFILE_ROOT = ("AppData", "Roaming", "Mozilla", "Firefox", "Profiles")
 
 
 class WindowsBrowserArtifactsProvider:
+    collector_kind = "browser"
     name = "windows-browser-artifacts"
     description = "Windows browser history/download collectors backed by real profile files"
     target_platform = "windows"
