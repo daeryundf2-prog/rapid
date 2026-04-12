@@ -18,6 +18,7 @@ When the CLI changes a field name, nested object, or filter semantics, update th
 | `rapidtriage docs ROOT -k KEYWORD` | `rapidtriage-docs.json` | `candidates[]`, `results[]` |
 | `rapidtriage files ROOT` | `rapidtriage-files.json` | `candidates[]` |
 | `rapidtriage extract INPUT_JSON OUTPUT_DIR` | `OUTPUT_DIR/rapidtriage-extract-manifest.json` | `entries[]`, `skipped[]` |
+| `rapidtriage run ROOT --mode MODE` | `OUTPUT_DIR/rapidtriage-run-summary.json` | `steps[]`, `highlights.document_hits[]`, `highlights.file_candidates[]` |
 
 ## `manifest` JSON
 
@@ -134,6 +135,59 @@ Additional `entries[]` fields depend on `source_command`:
 
 `skipped[]` currently contains `original_path` and `reason`.
 
+## `run` JSON
+
+The `run` command is an orchestration wrapper over existing component commands.
+Current implemented modes are `fraud` and `hacking`.
+Accepted-but-not-yet-implemented modes are `seizure` and `recovery`, which currently fail with a clear CLI error instead of producing output.
+
+Top-level fields:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `command` | string | Always `run`. |
+| `mode` | string | Selected incident mode. |
+| `generated_at` | string | Local ISO-8601 timestamp. |
+| `root` | string | Resolved triage root. |
+| `output_dir` | string | Directory containing all generated outputs for this run. |
+| `profile` | object | Mode profile with description, keyword set, extract kinds, and extract categories. |
+| `outputs` | object | Absolute output paths for component JSON files, extract manifests, summary JSON, and markdown report. |
+| `steps` | array | One row per executed workflow step. |
+| `summary` | object | Aggregated counters across docs, files, providers, artifacts, and extracts. |
+| `highlights` | object | Short human-oriented slices of matched document hits and candidate files. |
+
+`profile` fields: `description`, `keywords`, `docs_extract_kinds`, `file_extract_categories`
+
+`outputs` fields currently include:
+
+- `manifest`
+- `docs`
+- `files`
+- `docs_extract_manifest`
+- `files_extract_manifest`
+- `summary`
+- `report`
+
+`steps[]` fields: `name`, `status`, `output`, plus step-specific metrics such as `provider_count`, `candidate_count`, `match_count`, `selected_count`, `extracted_count`
+
+`summary` fields currently include:
+
+- `document_candidate_count`
+- `document_match_count`
+- `scanned_file_count`
+- `file_candidate_count`
+- `provider_artifact_counts`
+- `windows_provider_artifact_counts`
+- `artifact_type_counts`
+- `matched_keyword_counts`
+- `file_category_counts`
+- `docs_extracted_count`
+- `files_extracted_count`
+
+`highlights.document_hits[]` fields: `path`, `kind`, `matched_keywords`, `preview`
+
+`highlights.file_candidates[]` fields: `path`, `categories`, `extension`, `modified_at`
+
 ## Help examples aligned to the current interface
 
 The CLI help now includes examples for:
@@ -143,5 +197,6 @@ The CLI help now includes examples for:
 - `rapidtriage docs --help`
 - `rapidtriage files --help`
 - `rapidtriage extract --help`
+- `rapidtriage run --help`
 
 Keep README examples, help epilog examples, and the sample JSON files aligned whenever the interface changes.

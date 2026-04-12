@@ -22,6 +22,7 @@ class RapidTriageDocumentationContractTests(unittest.TestCase):
         self.assertIn("`docs` JSON", schema_doc)
         self.assertIn("`files` JSON", schema_doc)
         self.assertIn("`extract` JSON", schema_doc)
+        self.assertIn("`run` JSON", schema_doc)
         self.assertIn("Windows artifact collector", schema_doc)
 
     def test_readme_links_schema_and_sample_json_files(self) -> None:
@@ -31,6 +32,7 @@ class RapidTriageDocumentationContractTests(unittest.TestCase):
         self.assertIn("docs/samples/rapidtriage-docs.sample.json", readme)
         self.assertIn("docs/samples/rapidtriage-files.sample.json", readme)
         self.assertIn("docs/samples/rapidtriage-extract.sample.json", readme)
+        self.assertIn("rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud", readme)
 
     def test_manifest_sample_includes_windows_collectors(self) -> None:
         payload = self.load_sample("rapidtriage-manifest.sample.json")
@@ -107,6 +109,7 @@ class RapidTriageDocumentationContractTests(unittest.TestCase):
             "extract",
             expected=f"rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/{'rapidtriage-extract-manifest.json'}",
         )
+        self.assert_help_contains("run", expected="rapidtriage run /cases/image-mount --mode hacking --output-dir ./rapidtriage-run")
 
 
 if __name__ == "__main__":

@@ -181,7 +181,7 @@ Current structure:
 - `rapidtriage/core`: OS-independent orchestration, manifest generation, document scanning, file metadata triage, and keyword search.
 - `rapidtriage/artifacts/windows`: Windows-only artifact providers kept behind provider interfaces.
 - `rapidtriage/artifacts/generic.py`: cross-platform document candidate provider.
-- `docs/rapidtriage-output-schema.md`: field-by-field JSON schema reference for `manifest`, `docs`, `files`, and `extract`.
+- `docs/rapidtriage-output-schema.md`: field-by-field JSON schema reference for `manifest`, `docs`, `files`, `extract`, and `run`.
 - `docs/samples/`: representative sample JSON outputs, including embedded Windows artifact collector rows inside `manifest`.
 
 CLI help now includes copy/paste examples:
@@ -200,6 +200,7 @@ rapidtriage manifest --help
 rapidtriage docs --help
 rapidtriage files --help
 rapidtriage extract --help
+rapidtriage run --help
 ```
 
 Common command examples:
@@ -212,6 +213,8 @@ rapidtriage files . --category executables --ext exe --modified-after 2025-01-01
 rapidtriage files . --name-contains note --path-contains desktop --output desktop-notes.json
 rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
 rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/rapidtriage-extract-manifest.json
+rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud
+rapidtriage run . --mode hacking --output-dir ./rapidtriage-run-hacking
 ```
 
 Schema and sample references:
@@ -220,6 +223,7 @@ Schema and sample references:
 - `docs`: `docs/rapidtriage-output-schema.md#rapidtriage-docs` + `docs/samples/rapidtriage-docs.sample.json`
 - `files`: `docs/rapidtriage-output-schema.md#rapidtriage-files` + `docs/samples/rapidtriage-files.sample.json`
 - `extract`: `docs/samples/rapidtriage-extract.sample.json`
+- `run`: `docs/rapidtriage-output-schema.md#run-json`
 
 Current `docs` support:
 - `txt`
@@ -237,6 +241,13 @@ Current `extract` behavior:
 - copies selected source files into an output directory while preserving relative paths where possible.
 - writes a manifest JSON containing original path, extracted path, sha256 hash, modified timestamp, size, and source-specific metadata.
 - records missing source files in `skipped` instead of failing the whole run.
+
+Current `run` behavior:
+- orchestrates `manifest`, `docs`, `files`, and both extract passes into a single incident-mode workflow.
+- currently implements `fraud` and `hacking`.
+- reserves `seizure` and `recovery` as accepted CLI modes that currently return a clear not-yet-implemented error.
+- writes `rapidtriage-run-summary.json` and `rapidtriage-run-report.md` alongside the component outputs.
+- records per-step output paths, artifact counts, keyword hit counts, and highlighted document/file rows in the summary JSON.
 
 Smoke test:
 
