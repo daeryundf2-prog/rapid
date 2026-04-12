@@ -74,19 +74,6 @@ def build_run_fixture(root: Path) -> None:
     (db_dir / "browser-cache.sqlite").write_text("SQLite format 3", encoding="utf-8")
 
 
-def classify_payload(payload: dict[str, Any]) -> str | None:
-    command = payload.get("command")
-    if command in {"docs", "files", "extract"}:
-        return str(command)
-    if {"generated_at", "root", "platform", "providers"}.issubset(payload):
-        return "manifest"
-    if payload.get("mode") and "summary" in payload:
-        return "mode-summary"
-    if "report" in payload and payload.get("mode"):
-        return "report-json"
-    return None
-
-
 class RapidTriageRunTests(unittest.TestCase):
     def test_parser_exposes_run_subcommand_and_examples(self) -> None:
         parser = build_parser()
@@ -120,60 +107,71 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertTrue(output_dir.is_dir())
 
-            json_payloads: dict[str, dict[str, Any]] = {}
-            summary_payloads: list[dict[str, Any]] = []
-            for path in output_dir.rglob("*.json"):
-                payload = json.loads(path.read_text(encoding="utf-8"))
-                kind = classify_payload(payload)
-                if kind is None:
-                    continue
-                if kind == "mode-summary":
-                    summary_payloads.append(payload)
-                    continue
-                json_payloads[kind] = payload
+            manifest_path = output_dir / "rapidtriage-manifest.json"
+            docs_path = output_dir / "rapidtriage-docs.json"
+            files_path = output_dir / "rapidtriage-files.json"
+            docs_extract_manifest_path = output_dir / "docs-extract" / "rapidtriage-extract-manifest.json"
+            files_extract_manifest_path = output_dir / "files-extract" / "rapidtriage-extract-manifest.json"
+            summary_path = output_dir / "rapidtriage-run-summary.json"
+            report_path = output_dir / "rapidtriage-run-report.md"
 
-            self.assertIn("manifest", json_payloads)
-            self.assertIn("files", json_payloads)
-            self.assertIn("docs", json_payloads)
-            self.assertIn("extract", json_payloads)
+            expected_output_paths = [
+                manifest_path,
+                docs_path,
+                files_path,
+                docs_extract_manifest_path,
+                files_extract_manifest_path,
+                summary_path,
+                report_path,
+            ]
+            for path in expected_output_paths:
+                self.assertTrue(path.is_file(), f"missing expected output: {path}")
 
-            manifest = json_payloads["manifest"]
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             provider_names = {provider["name"] for provider in manifest["providers"]}
             self.assertIn("windows-browser-artifacts", provider_names)
             self.assertIn("windows-recent-files", provider_names)
 
-            files_payload = json_payloads["files"]
+            docs_payload = json.loads(docs_path.read_text(encoding="utf-8"))
+            files_payload = json.loads(files_path.read_text(encoding="utf-8"))
+            docs_extract_payload = json.loads(docs_extract_manifest_path.read_text(encoding="utf-8"))
+            files_extract_payload = json.loads(files_extract_manifest_path.read_text(encoding="utf-8"))
+            summary_payload: dict[str, Any] = json.loads(summary_path.read_text(encoding="utf-8"))
+
             self.assertGreaterEqual(files_payload["summary"]["candidate_count"], 4)
 
-            docs_payload = json_payloads["docs"]
             self.assertGreaterEqual(docs_payload["summary"]["candidate_count"], 3)
             self.assertGreaterEqual(docs_payload["summary"]["match_count"], 1)
 
-            extract_payload = json_payloads["extract"]
-            self.assertGreaterEqual(extract_payload["summary"]["selected_count"], 1)
-            self.assertGreaterEqual(extract_payload["summary"]["extracted_count"], 1)
-            for entry in extract_payload["entries"]:
-                self.assertTrue(Path(entry["extracted_path"]).is_file())
-                self.assertTrue(Path(entry["extracted_path"]).is_relative_to(output_dir.resolve()))
+            self.assertGreaterEqual(docs_extract_payload["summary"]["selected_count"], 1)
+            self.assertGreaterEqual(docs_extract_payload["summary"]["extracted_count"], 1)
+            self.assertGreaterEqual(files_extract_payload["summary"]["selected_count"], 1)
+            self.assertGreaterEqual(files_extract_payload["summary"]["extracted_count"], 1)
+            for extract_payload in (docs_extract_payload, files_extract_payload):
+                for entry in extract_payload["entries"]:
+                    self.assertTrue(Path(entry["extracted_path"]).is_file())
+                    self.assertTrue(Path(entry["extracted_path"]).is_relative_to(output_dir.resolve()))
 
-            matching_summaries = [payload for payload in summary_payloads if payload.get("mode") == mode]
-            self.assertTrue(matching_summaries, f"missing mode summary JSON for {mode}")
+            self.assertEqual(summary_payload["mode"], mode)
+            self.assertEqual(summary_payload["command"], "run")
+            self.assertEqual(Path(summary_payload["outputs"]["manifest"]).resolve(), manifest_path.resolve())
+            self.assertEqual(Path(summary_payload["outputs"]["docs"]).resolve(), docs_path.resolve())
+            self.assertEqual(Path(summary_payload["outputs"]["files"]).resolve(), files_path.resolve())
+            self.assertEqual(
+                Path(summary_payload["outputs"]["docs_extract_manifest"]).resolve(),
+                docs_extract_manifest_path.resolve(),
+            )
+            self.assertEqual(
+                Path(summary_payload["outputs"]["files_extract_manifest"]).resolve(),
+                files_extract_manifest_path.resolve(),
+            )
+            self.assertEqual(Path(summary_payload["outputs"]["summary"]).resolve(), summary_path.resolve())
+            self.assertEqual(Path(summary_payload["outputs"]["report"]).resolve(), report_path.resolve())
 
-            report_paths = [
-                path
-                for path in output_dir.rglob("*")
-                if path.is_file() and "report" in path.name.lower() and path.suffix.lower() in {".md", ".txt", ".json"}
-            ]
-            self.assertTrue(report_paths, f"missing execution report for {mode}")
-            report_path = report_paths[0]
-            if report_path.suffix.lower() == ".json":
-                report_payload = json.loads(report_path.read_text(encoding="utf-8"))
-                self.assertEqual(report_payload.get("mode"), mode)
-            else:
-                report_text = report_path.read_text(encoding="utf-8")
-                self.assertIn(mode, report_text.lower())
-                self.assertIn("files", report_text.lower())
-                self.assertIn("docs", report_text.lower())
+            report_text = report_path.read_text(encoding="utf-8")
+            self.assertIn(mode, report_text.lower())
+            self.assertIn("files-extract", report_text.lower())
+            self.assertIn("docs-extract", report_text.lower())
 
 
 if __name__ == "__main__":
