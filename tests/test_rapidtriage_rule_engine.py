@@ -2,185 +2,262 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
-from rapidtriage.cli import main
+from rapidtriage.cli import build_parser, main
 from tests.test_rapidtriage_run import build_run_fixture
-from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
 
-def sha256_for(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def set_mtime(path: Path, value: datetime) -> None:
+    timestamp = value.timestamp()
+    os.utime(path, (timestamp, timestamp))
 
 
-def write_json_rules(path: Path, target_hash: str) -> None:
-    path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "rules": [
-                    {
-                        "id": "credential-doc-hash",
-                        "description": "Credential-bearing text document with a known hash",
-                        "ext": [".txt"],
-                        "path": ["documents"],
-                        "date": {"after": "2024-01-01T00:00:00+00:00"},
-                        "keyword": ["credential"],
-                        "hash": [target_hash],
-                    },
-                    {
-                        "id": "downloads-executable",
-                        "description": "Executable found under downloads",
-                        "ext": [".exe"],
-                        "path": ["downloads"],
-                    },
-                ],
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+def sha256_hex(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def write_yaml_rules(path: Path) -> None:
-    path.write_text(
-        """version: 1
-rules:
-  - id: browser-domain
-    description: Browser history or downloads with a known suspicious domain
-    artifact:
-      - browser-history
-      - browser-history-downloads
-    domain:
-      - download.example
-      - contoso.example
-  - id: recent-shortcut
-    description: Recent shortcut activity after the case cutoff
-    artifact:
-      - recent-shortcut
-    path:
-      - recent
-    date:
-      after: 2024-03-01T00:00:00+00:00
-""",
-        encoding="utf-8",
-    )
+def iter_objects(value: object) -> Iterable[dict[str, Any]]:
+    if isinstance(value, dict):
+        yield value
+        for nested in value.values():
+            yield from iter_objects(nested)
+        return
+    if isinstance(value, list):
+        for item in value:
+            yield from iter_objects(item)
 
 
 class RapidTriageRuleEngineTests(unittest.TestCase):
-    def test_json_rules_annotate_files_docs_and_run_summary(self) -> None:
+    def test_parser_exposes_rules_option_for_rule_aware_commands(self) -> None:
+        parser = build_parser()
+        commands = parser._subparsers._group_actions[0].choices
+
+        for name in ("files", "docs", "artifacts", "timeline", "run"):
+            with self.subTest(command=name):
+                self.assertIn("--rules", commands[name].format_help())
+
+    def test_json_rules_annotate_files_docs_artifacts_timeline_and_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
             root.mkdir(parents=True, exist_ok=True)
             build_run_fixture(root)
+            payload_installer, credential_note = self.add_rule_fixture_content(root)
+            json_rules, _yaml_rules = self.write_rule_files(Path(tmp_dir), payload_installer)
 
-            target = root / "Users" / "alice" / "Documents" / "wire-transfer-notes.txt"
-            rules_path = Path(tmp_dir) / "rules.json"
-            write_json_rules(rules_path, sha256_for(target))
+            files_output = Path(tmp_dir) / "rapidtriage-files.json"
+            docs_output = Path(tmp_dir) / "rapidtriage-docs.json"
+            artifacts_output = Path(tmp_dir) / "rapidtriage-artifacts-browser.json"
+            timeline_output = Path(tmp_dir) / "rapidtriage-timeline.json"
 
-            files_output = Path(tmp_dir) / "files.json"
-            docs_output = Path(tmp_dir) / "docs.json"
-            run_output = Path(tmp_dir) / "run-out"
-
-            self.assertEqual(main(["files", str(root), "--rules", str(rules_path), "--output", str(files_output)]), 0)
             self.assertEqual(
-                main(["docs", str(root), "-k", "credential", "--rules", str(rules_path), "--output", str(docs_output)]),
+                main(["files", str(root), "--rules", str(json_rules), "--output", str(files_output)]),
                 0,
             )
-            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--rules", str(rules_path), "--output-dir", str(run_output)]), 0)
+            self.assertEqual(
+                main(
+                    [
+                        "docs",
+                        str(root),
+                        "-k",
+                        "credential",
+                        "-k",
+                        "password",
+                        "--rules",
+                        str(json_rules),
+                        "--output",
+                        str(docs_output),
+                    ]
+                ),
+                0,
+            )
+            self.assertEqual(
+                main(
+                    [
+                        "artifacts",
+                        str(root),
+                        "--kind",
+                        "browser",
+                        "--rules",
+                        str(json_rules),
+                        "--output",
+                        str(artifacts_output),
+                    ]
+                ),
+                0,
+            )
+            self.assertEqual(
+                main(
+                    [
+                        "timeline",
+                        str(root),
+                        "--files",
+                        str(files_output),
+                        "--docs",
+                        str(docs_output),
+                        "--artifacts",
+                        str(artifacts_output),
+                        "--rules",
+                        str(json_rules),
+                        "--output",
+                        str(timeline_output),
+                    ]
+                ),
+                0,
+            )
+            self.assertEqual(
+                main(["run", str(root), "--mode", "hacking", "--rules", str(json_rules), "--output-dir", str(output_dir)]),
+                0,
+            )
 
-            files_payload: dict[str, Any] = json.loads(files_output.read_text(encoding="utf-8"))
-            docs_payload: dict[str, Any] = json.loads(docs_output.read_text(encoding="utf-8"))
-            run_payload: dict[str, Any] = json.loads((run_output / "rapidtriage-run-summary.json").read_text(encoding="utf-8"))
+            files_payload = json.loads(files_output.read_text(encoding="utf-8"))
+            docs_payload = json.loads(docs_output.read_text(encoding="utf-8"))
+            artifacts_payload = json.loads(artifacts_output.read_text(encoding="utf-8"))
+            timeline_payload = json.loads(timeline_output.read_text(encoding="utf-8"))
+            summary_payload = json.loads((output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8"))
 
-            note_candidate = next(item for item in files_payload["candidates"] if item["path"].endswith("wire-transfer-notes.txt"))
-            self.assertIn("credential-doc-hash", note_candidate["matched_rules"])
-            self.assertEqual({hit["type"] for hit in note_candidate["ioc_hits"]}, {"hash", "keyword"})
+            self.assertPayloadHasRule(files_payload, "downloads-exe-sha256")
+            self.assertPayloadHasIoc(files_payload, sha256_hex(payload_installer))
 
-            exe_candidate = next(item for item in files_payload["candidates"] if item["path"].endswith("payload-installer.exe"))
-            self.assertIn("downloads-executable", exe_candidate["matched_rules"])
-            self.assertNotIn("ioc_hits", exe_candidate)
+            self.assertPayloadHasRule(docs_payload, "credential-url-hit")
+            self.assertPayloadHasIoc(docs_payload, "malicious.example")
+            self.assertPayloadHasIoc(docs_payload, "https://malicious.example/login")
 
-            note_result = next(item for item in docs_payload["results"] if item["path"].endswith("wire-transfer-notes.txt"))
-            self.assertIn("credential-doc-hash", note_result["matched_rules"])
-            self.assertEqual({hit["type"] for hit in note_result["ioc_hits"]}, {"hash", "keyword"})
+            self.assertPayloadHasRule(artifacts_payload, "browser-download-ioc")
+            self.assertPayloadHasIoc(artifacts_payload, "download.example")
+            self.assertPayloadHasIoc(artifacts_payload, "https://download.example/tools/installer.exe")
 
-            self.assertEqual(run_payload["rule_set"]["rule_count"], 2)
-            self.assertIn("credential-doc-hash", run_payload["matched_rules"])
-            self.assertIn("downloads-executable", run_payload["matched_rules"])
-            self.assertGreaterEqual(run_payload["summary"]["matched_rule_count"], 2)
-            self.assertGreaterEqual(run_payload["summary"]["ioc_hit_count"], 2)
-            self.assertTrue(any(hit["type"] == "hash" for hit in run_payload["ioc_hits"]))
-            self.assertTrue(any(hit["type"] == "keyword" for hit in run_payload["ioc_hits"]))
+            self.assertPayloadHasRule(timeline_payload, "browser-download-ioc")
+            self.assertPayloadHasIoc(timeline_payload, "malicious.example")
 
-    def test_yaml_rules_annotate_artifacts_and_timeline(self) -> None:
+            self.assertPayloadHasRule(summary_payload, "downloads-exe-sha256")
+            self.assertPayloadHasRule(summary_payload, "credential-url-hit")
+            self.assertPayloadHasIoc(summary_payload, "download.example")
+            self.assertPayloadHasIoc(summary_payload, "malicious.example")
+
+    def test_run_accepts_yaml_rules_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
             root.mkdir(parents=True, exist_ok=True)
-            build_windows_artifact_fixture(root)
-
-            rules_path = Path(tmp_dir) / "rules.yaml"
-            write_yaml_rules(rules_path)
-
-            browser_output = Path(tmp_dir) / "browser.json"
-            recent_output = Path(tmp_dir) / "recent.json"
-            timeline_output = Path(tmp_dir) / "timeline.json"
-            timeline_report = Path(tmp_dir) / "timeline.md"
+            build_run_fixture(root)
+            payload_installer, _credential_note = self.add_rule_fixture_content(root)
+            _json_rules, yaml_rules = self.write_rule_files(Path(tmp_dir), payload_installer)
 
             self.assertEqual(
-                main(["artifacts", str(root), "--kind", "browser", "--rules", str(rules_path), "--output", str(browser_output)]),
-                0,
-            )
-            self.assertEqual(
-                main(["artifacts", str(root), "--kind", "recent-files", "--rules", str(rules_path), "--output", str(recent_output)]),
-                0,
-            )
-            self.assertEqual(
-                main([
-                    "timeline",
-                    str(root),
-                    "--rules",
-                    str(rules_path),
-                    "--output",
-                    str(timeline_output),
-                    "--report",
-                    str(timeline_report),
-                ]),
+                main(["run", str(root), "--mode", "hacking", "--rules", str(yaml_rules), "--output-dir", str(output_dir)]),
                 0,
             )
 
-            browser_payload: dict[str, Any] = json.loads(browser_output.read_text(encoding="utf-8"))
-            recent_payload: dict[str, Any] = json.loads(recent_output.read_text(encoding="utf-8"))
-            timeline_payload: dict[str, Any] = json.loads(timeline_output.read_text(encoding="utf-8"))
+            summary_payload = json.loads((output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8"))
+            self.assertPayloadHasRule(summary_payload, "downloads-exe-sha256")
+            self.assertPayloadHasIoc(summary_payload, "malicious.example")
 
-            browser_hits = [item for item in browser_payload["artifacts"] if "browser-domain" in item.get("matched_rules", [])]
-            self.assertGreaterEqual(len(browser_hits), 1)
-            self.assertTrue(any(hit["type"] == "domain" for item in browser_hits for hit in item.get("ioc_hits", [])))
+    def add_rule_fixture_content(self, root: Path) -> tuple[Path, Path]:
+        downloads_dir = root / "Users" / "alice" / "Downloads"
+        payload_installer = downloads_dir / "payload-installer.exe"
+        set_mtime(payload_installer, datetime(2024, 2, 6, 7, 8, 9, tzinfo=timezone.utc))
 
-            recent_hit = next(item for item in recent_payload["artifacts"] if item["artifact_type"] == "recent-shortcut")
-            self.assertIn("recent-shortcut", recent_hit["matched_rules"])
-            self.assertNotIn("ioc_hits", recent_hit)
+        docs_dir = root / "Users" / "alice" / "Documents"
+        credential_note = docs_dir / "credential-note.txt"
+        credential_note.write_text(
+            "credential password reset evidence https://malicious.example/login",
+            encoding="utf-8",
+        )
+        set_mtime(credential_note, datetime(2024, 2, 7, 8, 9, 10, tzinfo=timezone.utc))
+        return payload_installer, credential_note
 
-            self.assertIn("browser-domain", timeline_payload["matched_rules"])
-            self.assertIn("recent-shortcut", timeline_payload["matched_rules"])
-            self.assertGreaterEqual(timeline_payload["summary"]["matched_rule_count"], 2)
-            self.assertGreaterEqual(timeline_payload["summary"]["ioc_hit_count"], 1)
-            self.assertTrue(
-                any(
-                    "browser-domain" in event.get("matched_rules", []) and any(hit["type"] == "domain" for hit in event.get("ioc_hits", []))
-                    for event in timeline_payload["events"]
-                )
-            )
-            self.assertTrue(any("recent-shortcut" in event.get("matched_rules", []) for event in timeline_payload["events"]))
-            self.assertTrue(timeline_report.is_file())
+    def write_rule_files(self, directory: Path, payload_installer: Path) -> tuple[Path, Path]:
+        payload_hash = sha256_hex(payload_installer)
+        rule_payload = {
+            "rules": [
+                {
+                    "id": "downloads-exe-sha256",
+                    "description": "Match downloaded executables by extension, path, date, and sha256.",
+                    "ext": [".exe"],
+                    "path": ["downloads"],
+                    "date": {"after": "2024-02-01T00:00:00+00:00"},
+                    "hash": [payload_hash],
+                },
+                {
+                    "id": "credential-url-hit",
+                    "description": "Match credential-themed document hits and IOC strings.",
+                    "keyword": ["credential", "password"],
+                    "domain": ["malicious.example"],
+                    "url": ["https://malicious.example/login"],
+                },
+                {
+                    "id": "browser-download-ioc",
+                    "description": "Match browser download artifacts with IOC domains and URLs.",
+                    "artifact": ["browser-history-downloads"],
+                    "domain": ["download.example"],
+                    "url": ["https://download.example/tools/installer.exe"],
+                },
+            ]
+        }
+
+        json_rules = directory / "rapidtriage-rules.sample.json"
+        json_rules.write_text(json.dumps(rule_payload, indent=2), encoding="utf-8")
+
+        yaml_rules = directory / "rapidtriage-rules.sample.yaml"
+        yaml_rules.write_text(
+            """
+rules:
+  - id: downloads-exe-sha256
+    description: Match downloaded executables by extension, path, date, and sha256.
+    ext:
+      - .exe
+    path:
+      - downloads
+    date:
+      after: 2024-02-01T00:00:00+00:00
+    hash:
+      - __PAYLOAD_SHA256__
+  - id: credential-url-hit
+    description: Match credential-themed document hits and IOC strings.
+    keyword:
+      - credential
+      - password
+    domain:
+      - malicious.example
+    url:
+      - https://malicious.example/login
+  - id: browser-download-ioc
+    description: Match browser download artifacts with IOC domains and URLs.
+    artifact:
+      - browser-history-downloads
+    domain:
+      - download.example
+    url:
+      - https://download.example/tools/installer.exe
+""".strip().replace("__PAYLOAD_SHA256__", payload_hash)
+            + "\n",
+            encoding="utf-8",
+        )
+        return json_rules, yaml_rules
+
+    def assertPayloadHasRule(self, payload: object, rule_id: str) -> None:
+        for node in iter_objects(payload):
+            matched_rules = node.get("matched_rules")
+            if isinstance(matched_rules, list) and rule_id in [str(item) for item in matched_rules]:
+                return
+        self.fail(f"expected matched_rules to include {rule_id!r}: {json.dumps(payload, ensure_ascii=False, indent=2)}")
+
+    def assertPayloadHasIoc(self, payload: object, expected: str) -> None:
+        for node in iter_objects(payload):
+            ioc_hits = node.get("ioc_hits")
+            if not isinstance(ioc_hits, list):
+                continue
+            for hit in ioc_hits:
+                if expected in json.dumps(hit, ensure_ascii=False):
+                    return
+        self.fail(f"expected ioc_hits to include {expected!r}: {json.dumps(payload, ensure_ascii=False, indent=2)}")
 
 
 if __name__ == "__main__":
