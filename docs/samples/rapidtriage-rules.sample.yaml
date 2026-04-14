@@ -1,38 +1,78 @@
 version: 1
+defaults:
+  match: any
+  timezone: UTC
+  hash_algorithms:
+    - sha256
 rules:
-  - id: downloads-executables
-    description: Executables launched from download or startup paths
-    ext:
-      - .exe
-      - .bat
-      - .ps1
-    path:
-      - downloads
-      - startup
-  - id: known-browser-domain
-    description: Known suspicious browser domain IOC
-    artifact:
-      - browser-history
-      - browser-history-downloads
-    domain:
-      - download.example
-      - contoso.example
-  - id: credential-doc-hash
-    description: Credential-bearing documents or known file hash IOC
-    ext:
-      - .txt
-      - .docx
-      - .pdf
-    keyword:
-      - credential
-      - password
-      - wire transfer
-    hash:
-      - 0000000000000000000000000000000000000000000000000000000000000000
-  - id: february-browser-activity
-    description: Browser artifacts observed after a specific case date
-    artifact:
-      - browser-history
-      - browser-history-downloads
-    date:
-      after: 2024-02-01T00:00:00+00:00
+  - id: suspicious-download-bundle
+    name: Suspicious download bundle
+    description: Flags recent archive files staged in user download locations.
+    severity: medium
+    tags: [files, download, archive]
+    match: all
+    conditions:
+      ext:
+        any_of: [.zip, .7z, .rar]
+      path:
+        contains_any: [/Users/, /Downloads/]
+      date:
+        modified_after: 2026-04-01T00:00:00Z
+  - id: credential-doc-hit
+    name: Credential document keyword hit
+    description: Flags documents containing credential theft vocabulary.
+    severity: high
+    tags: [docs, keyword]
+    conditions:
+      keyword:
+        any_of: [password, credential, phishing, exfil]
+      ext:
+        any_of: [.txt, .pdf, .docx]
+  - id: browser-history-ioc
+    name: Browser history IOC hit
+    description: Flags browser artifacts referencing watched domains or URLs.
+    severity: high
+    tags: [artifacts, browser]
+    conditions:
+      artifact:
+        provider_any: [windows-browser-artifacts]
+        artifact_type_any: [browser-history, browser-history-downloads]
+      domain:
+        any_of: [evil.example, bad-c2.example]
+      url:
+        any_of:
+          - https://evil.example/login
+          - https://bad-c2.example/payload
+  - id: known-malware-hash
+    name: Known malware hash
+    description: Flags extracted files that match watched hashes.
+    severity: critical
+    tags: [files, hash]
+    conditions:
+      hash:
+        sha256_any:
+          - 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  - id: persistence-script
+    name: Persistence script in startup path
+    description: Flags startup scripts and binaries used for persistence.
+    severity: high
+    tags: [path, startup]
+    conditions:
+      path:
+        contains_any: [/Startup/, /Run/]
+      ext:
+        any_of: [.ps1, .bat, .vbs, .lnk]
+iocs:
+  source: analyst-seed-list
+  hashes:
+    sha256:
+      - 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  domains:
+    - evil.example
+    - bad-c2.example
+  urls:
+    - https://evil.example/login
+    - https://bad-c2.example/payload
+  keywords:
+    - credential
+    - phishing

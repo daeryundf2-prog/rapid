@@ -7,6 +7,8 @@
 
 Any change to command output, nested object layout, field naming, or timestamp/path semantics must update the schema files, sample JSON, README examples, and tests in the same change.
 
+Planned rule-engine / IOC lookup additions are tracked separately in `docs/rapidtriage-rule-engine.md` so the future additive fields are documented before the core implementation lands.
+
 ## Schema files
 
 - `rapidtriage/schemas/manifest.schema.json`

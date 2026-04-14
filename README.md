@@ -184,6 +184,8 @@ Current structure:
 - `rapidtriage/schemas/`: JSON Schema contracts for `manifest`, `docs`, `files`, `extract`, `artifacts`, and `run-summary`.
 - `docs/rapidtriage-output-schema.md`: human-readable contract summary and sample index.
 - `docs/samples/`: representative sample JSON outputs for every published command family.
+- `docs/rapidtriage-rule-engine.md`: planned additive contract for rule-engine / IOC lookup work.
+- `docs/samples/rapidtriage-rules.sample.yaml`: sample YAML rule file covering ext/path/date/artifact/keyword/hash/domain/url conditions.
 
 CLI help now includes copy/paste examples:
 
@@ -247,6 +249,7 @@ Schema and sample references:
 - `artifacts`: `rapidtriage/schemas/artifacts.schema.json` + `docs/samples/rapidtriage-artifacts.sample.json`
 - `run-summary`: `rapidtriage/schemas/run-summary.schema.json` + `docs/samples/rapidtriage-run-summary.sample.json`
 - `timeline`: `rapidtriage/schemas/timeline.schema.json`
+- `rule-engine plan`: `docs/rapidtriage-rule-engine.md` + `docs/samples/rapidtriage-rules.sample.yaml`
 
 Current `docs` support:
 - `txt`
