@@ -2,39 +2,123 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["command", "root", "generated_at", "filters", "summary", "candidates"],
+  "required": [
+    "command",
+    "root",
+    "generated_at",
+    "filters",
+    "summary",
+    "candidates"
+  ],
   "properties": {
-    "command": { "const": "files" },
-    "root": { "type": "string" },
-    "scan_scope_root": { "type": "string" },
-    "generated_at": { "type": "string", "format": "date-time" },
+    "command": {
+      "const": "files"
+    },
+    "root": {
+      "type": "string"
+    },
+    "scan_scope_root": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
     "filters": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["categories", "name_contains", "path_contains", "extensions", "modified_after", "modified_before", "limit"],
+      "required": [
+        "categories",
+        "name_contains",
+        "path_contains",
+        "extensions",
+        "modified_after",
+        "modified_before",
+        "limit"
+      ],
       "properties": {
-        "categories": { "type": "array", "items": { "type": "string" } },
-        "name_contains": { "type": "array", "items": { "type": "string" } },
-        "path_contains": { "type": "array", "items": { "type": "string" } },
-        "extensions": { "type": "array", "items": { "type": "string" } },
-        "modified_after": { "type": ["string", "null"] },
-        "modified_before": { "type": ["string", "null"] },
-        "limit": { "type": "integer" }
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "name_contains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "path_contains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "modified_after": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modified_before": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "type": "integer"
+        }
       }
     },
     "summary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scanned_file_count", "candidate_count", "category_counts", "newest_modified_at", "oldest_modified_at"],
+      "required": [
+        "scanned_file_count",
+        "candidate_count",
+        "category_counts",
+        "newest_modified_at",
+        "oldest_modified_at"
+      ],
       "properties": {
-        "scanned_file_count": { "type": "integer" },
-        "candidate_count": { "type": "integer" },
+        "scanned_file_count": {
+          "type": "integer"
+        },
+        "candidate_count": {
+          "type": "integer"
+        },
         "category_counts": {
           "type": "object",
-          "additionalProperties": { "type": "integer" }
+          "additionalProperties": {
+            "type": "integer"
+          }
         },
-        "newest_modified_at": { "type": ["string", "null"] },
-        "oldest_modified_at": { "type": ["string", "null"] }
+        "newest_modified_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "oldest_modified_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "matched_rule_count": {
+          "type": "integer"
+        },
+        "ioc_hit_count": {
+          "type": "integer"
+        }
       }
     },
     "candidates": {
@@ -42,21 +126,134 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "name", "extension", "size", "modified_at", "modified_epoch", "categories", "reasons"],
+        "required": [
+          "path",
+          "name",
+          "extension",
+          "size",
+          "modified_at",
+          "modified_epoch",
+          "categories",
+          "reasons"
+        ],
         "properties": {
-          "path": { "type": "string" },
-          "name": { "type": "string" },
-          "extension": { "type": "string" },
-          "size": { "type": "integer" },
-          "modified_at": { "type": "string", "format": "date-time" },
-          "modified_epoch": { "type": "number" },
-          "categories": { "type": "array", "items": { "type": "string" } },
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "extension": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "modified_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "modified_epoch": {
+            "type": "number"
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "reasons": {
             "type": "object",
             "additionalProperties": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             }
+          },
+          "matched_rules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ioc_hits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "rule_id",
+                "type",
+                "value"
+              ],
+              "properties": {
+                "rule_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "rule_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "format",
+        "rule_count"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "rule_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "matched_rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ioc_hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule_id",
+          "type",
+          "value"
+        ],
+        "properties": {
+          "rule_id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
           }
         }
       }

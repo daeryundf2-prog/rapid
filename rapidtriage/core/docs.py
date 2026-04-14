@@ -14,6 +14,7 @@ from xml.etree import ElementTree as ET
 from ..artifacts import all_providers
 from .input_root import InputRoot, resolve_input_root
 from .models import DocumentCandidate, DocumentMatch
+from .rules import RuleSet, annotate_docs_payload
 
 SUPPORTED_DOC_EXTS = {".txt", ".pdf", ".docx"}
 TEXT_EXTS = {"txt"}
@@ -70,13 +71,16 @@ def run_docs_search(
     limit: int = 0,
     *,
     input_kind: str | None = None,
+    rule_set: RuleSet | None = None,
 ) -> Dict[str, object]:
     input_root = resolve_input_root(root, kind=input_kind)
     normalized = [item.lower() for item in keywords]
     candidates = scan_document_candidates(input_root, limit=limit)
     matches: List[DocumentMatch] = []
+    text_by_path: Dict[str, str] = {}
     for candidate in candidates:
         text = extract_text(Path(candidate.path), candidate.kind)
+        text_by_path[candidate.path] = text
         matched = [keyword for keyword in normalized if keyword in text.lower()]
         if not matched:
             continue
@@ -89,7 +93,7 @@ def run_docs_search(
                 size=candidate.size,
             )
         )
-    return {
+    payload = {
         "command": "docs",
         "root": str(input_root.root_path),
         "generated_at": dt.datetime.now().isoformat(),
@@ -102,6 +106,9 @@ def run_docs_search(
         "candidates": [item.to_dict() for item in candidates],
         "results": [item.to_dict() for item in matches],
     }
+    if rule_set is not None:
+        annotate_docs_payload(payload, rule_set, text_by_path=text_by_path)
+    return payload
 
 
 def write_result(payload: Dict[str, object], output: Path) -> None:

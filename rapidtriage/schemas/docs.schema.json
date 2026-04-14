@@ -2,57 +2,139 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["command", "root", "generated_at", "summary", "manifest", "candidates", "results"],
+  "required": [
+    "command",
+    "root",
+    "generated_at",
+    "summary",
+    "manifest",
+    "candidates",
+    "results"
+  ],
   "properties": {
-    "command": { "const": "docs" },
-    "root": { "type": "string" },
-    "scan_scope_root": { "type": "string" },
-    "generated_at": { "type": "string", "format": "date-time" },
+    "command": {
+      "const": "docs"
+    },
+    "root": {
+      "type": "string"
+    },
+    "scan_scope_root": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
     "summary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["candidate_count", "match_count", "supported_extensions"],
+      "required": [
+        "candidate_count",
+        "match_count",
+        "supported_extensions"
+      ],
       "properties": {
-        "candidate_count": { "type": "integer" },
-        "match_count": { "type": "integer" },
+        "candidate_count": {
+          "type": "integer"
+        },
+        "match_count": {
+          "type": "integer"
+        },
         "supported_extensions": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
+        },
+        "matched_rule_count": {
+          "type": "integer"
+        },
+        "ioc_hit_count": {
+          "type": "integer"
         }
       }
     },
     "manifest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["generated_at", "root", "platform", "keywords", "providers"],
+      "required": [
+        "generated_at",
+        "root",
+        "platform",
+        "keywords",
+        "providers"
+      ],
       "properties": {
-        "generated_at": { "type": "string", "format": "date-time" },
-        "root": { "type": "string" },
-        "platform": { "type": "string" },
-        "keywords": { "type": "array", "items": { "type": "string" } },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "root": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "providers": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "description", "target_platform", "supported", "artifacts"],
+            "required": [
+              "name",
+              "description",
+              "target_platform",
+              "supported",
+              "artifacts"
+            ],
             "properties": {
-              "name": { "type": "string" },
-              "description": { "type": "string" },
-              "target_platform": { "type": "string" },
-              "supported": { "type": "boolean" },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "target_platform": {
+                "type": "string"
+              },
+              "supported": {
+                "type": "boolean"
+              },
               "artifacts": {
                 "type": "array",
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["provider", "artifact_type", "path", "supported", "details"],
+                  "required": [
+                    "provider",
+                    "artifact_type",
+                    "path",
+                    "supported",
+                    "details"
+                  ],
                   "properties": {
-                    "provider": { "type": "string" },
-                    "artifact_type": { "type": "string" },
-                    "path": { "type": "string" },
-                    "supported": { "type": "boolean" },
-                    "details": { "type": "object", "additionalProperties": true }
+                    "provider": {
+                      "type": "string"
+                    },
+                    "artifact_type": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "supported": {
+                      "type": "boolean"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
                   }
                 }
               }
@@ -66,12 +148,26 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "kind", "size", "modified_at"],
+        "required": [
+          "path",
+          "kind",
+          "size",
+          "modified_at"
+        ],
         "properties": {
-          "path": { "type": "string" },
-          "kind": { "type": "string" },
-          "size": { "type": "integer" },
-          "modified_at": { "type": "string", "format": "date-time" }
+          "path": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "modified_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       }
     },
@@ -80,13 +176,116 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "kind", "matched_keywords", "preview", "size"],
+        "required": [
+          "path",
+          "kind",
+          "matched_keywords",
+          "preview",
+          "size"
+        ],
         "properties": {
-          "path": { "type": "string" },
-          "kind": { "type": "string" },
-          "matched_keywords": { "type": "array", "items": { "type": "string" } },
-          "preview": { "type": "string" },
-          "size": { "type": "integer" }
+          "path": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "matched_keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "preview": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "matched_rules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ioc_hits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "rule_id",
+                "type",
+                "value"
+              ],
+              "properties": {
+                "rule_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "rule_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "format",
+        "rule_count"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "rule_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "matched_rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ioc_hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule_id",
+          "type",
+          "value"
+        ],
+        "properties": {
+          "rule_id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          }
         }
       }
     }

@@ -12,6 +12,7 @@ from .docs import build_manifest, run_docs_search, write_result
 from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, run_extract
 from .files import run_files_scan
 from .input_root import InputRoot, derive_child_input_root, resolve_input_root
+from .rules import RuleSet, summarize_payload_annotations
 
 SUPPORTED_RUN_MODES: tuple[str, ...] = ("seizure", "fraud", "hacking", "recovery")
 IMPLEMENTED_RUN_MODES = set(SUPPORTED_RUN_MODES)
@@ -90,6 +91,7 @@ def run_triage_mode(
     max_extract_size_bytes: int = 0,
     max_file_count: int = 0,
     overwrite: bool = False,
+    rule_set: RuleSet | None = None,
 ) -> Dict[str, object]:
     input_root = resolve_input_root(root, kind=input_kind)
     normalized_mode = mode.lower()
@@ -117,7 +119,7 @@ def run_triage_mode(
     report_path = output_dir / "rapidtriage-run-report.md"
 
     manifest_payload = build_manifest(input_root, profile.keywords)
-    docs_payload = run_docs_search(scan_input_root, profile.keywords)
+    docs_payload = run_docs_search(scan_input_root, profile.keywords, rule_set=rule_set)
     docs_payload["manifest"] = manifest_payload
     docs_payload["scan_scope_root"] = str(scan_input_root.root_path)
 
@@ -125,6 +127,7 @@ def run_triage_mode(
         scan_input_root,
         categories=profile.file_scan_categories,
         path_contains=profile.file_scan_path_contains or None,
+        rule_set=rule_set,
     )
     files_payload["scan_scope_root"] = str(scan_input_root.root_path)
 
@@ -137,7 +140,7 @@ def run_triage_mode(
     artifact_payloads: Dict[str, Dict[str, object]] = {}
     for kind in profile.artifacts_kinds:
         artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
-        artifact_payload = run_artifact_collection(input_root, kind=kind)
+        artifact_payload = run_artifact_collection(input_root, kind=kind, rule_set=rule_set)
         artifact_outputs[kind] = artifact_path
         artifact_payloads[kind] = artifact_payload
         write_result(artifact_payload, artifact_path)
@@ -193,6 +196,7 @@ def run_triage_mode(
             "max_file_count": max_file_count,
             "overwrite": overwrite,
         },
+        rule_set=rule_set,
     )
     report_path.write_text(build_markdown_report(summary_payload), encoding="utf-8")
     write_result(summary_payload, summary_path)
@@ -205,6 +209,7 @@ def run_triage_mode(
             "output_dir": str(output_dir),
             "input_kind": input_root.kind,
             "scan_scope_root": str(scan_input_root.root_path),
+            "rules": rule_set.path if rule_set else None,
             "dry_run": dry_run,
             "read_only": read_only,
             "max_extract_size_bytes": max_extract_size_bytes,
@@ -248,6 +253,7 @@ def build_run_summary(
     artifact_payloads: Mapping[str, Mapping[str, object]],
     outputs: Mapping[str, Path],
     safety: Mapping[str, object],
+    rule_set: RuleSet | None = None,
 ) -> Dict[str, object]:
     provider_counts = {
         str(provider["name"]): len(provider.get("artifacts", []))
@@ -275,7 +281,7 @@ def build_run_summary(
     recent_candidates = summarize_file_candidates(files_payload.get("candidates", []), limit=5)
     large_candidates = summarize_large_file_candidates(files_payload.get("candidates", []), limit=5)
 
-    return {
+    payload = {
         "command": "run",
         "mode": profile.mode,
         "generated_at": dt.datetime.now().isoformat(),
@@ -325,6 +331,20 @@ def build_run_summary(
             "preferred_location_candidates": preferred_candidates[:5],
         },
     }
+    if rule_set is not None:
+        annotation_summary = summarize_payload_annotations(files_payload, docs_payload, *artifact_payloads.values())
+        payload["rule_set"] = {
+            "path": rule_set.path,
+            "format": rule_set.format,
+            "rule_count": rule_set.rule_count,
+        }
+        if annotation_summary["matched_rules"]:
+            payload["matched_rules"] = annotation_summary["matched_rules"]
+        if annotation_summary["ioc_hits"]:
+            payload["ioc_hits"] = annotation_summary["ioc_hits"]
+        payload["summary"]["matched_rule_count"] = int(annotation_summary["matched_rule_count"])
+        payload["summary"]["ioc_hit_count"] = int(annotation_summary["ioc_hit_count"])
+    return payload
 
 
 def build_step_rows(

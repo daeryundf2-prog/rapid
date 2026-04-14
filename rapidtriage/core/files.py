@@ -8,6 +8,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from .input_root import InputRoot, resolve_input_root
 from .models import FileCandidate
+from .rules import RuleSet, annotate_files_payload
 
 DEFAULT_FILE_CATEGORIES: Tuple[str, ...] = ("documents", "archives", "databases", "executables")
 EXECUTABLE_BITS = stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOTH
@@ -121,6 +122,7 @@ def run_files_scan(
     modified_after: Optional[str] = None,
     modified_before: Optional[str] = None,
     limit: int = 0,
+    rule_set: RuleSet | None = None,
 ) -> Dict[str, object]:
     input_root = resolve_input_root(root, kind=input_kind)
     selected_categories = normalize_categories(categories)
@@ -147,7 +149,7 @@ def run_files_scan(
             category_counts[category] = category_counts.get(category, 0) + 1
 
     modified_values = [candidate.modified_at for candidate in candidates]
-    return {
+    payload = {
         "command": "files",
         "root": str(input_root.root_path),
         "generated_at": dt.datetime.now().isoformat(),
@@ -169,6 +171,9 @@ def run_files_scan(
         },
         "candidates": [item.to_dict() for item in candidates],
     }
+    if rule_set is not None:
+        annotate_files_payload(payload, rule_set)
+    return payload
 
 
 def scan_file_candidates(

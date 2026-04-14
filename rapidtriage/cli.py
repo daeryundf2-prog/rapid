@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import textwrap
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from .core.docs import build_manifest, run_docs_search, write_result
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
 from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
 from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS, resolve_input_root
+from .core.rules import RuleConfigError, load_rule_set
 from .core.run import RunModeError, SUPPORTED_RUN_MODES, run_triage_mode
 from .core.timeline import TimelineError, build_timeline_report, run_timeline
 
@@ -39,6 +41,10 @@ EXTRACT_EPILOG = f"""Examples:
   rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/{DEFAULT_EXTRACT_MANIFEST_NAME}
   rapidtriage extract rapidtriage-files.json ./extract-out --dry-run --max-file-count 100
 """
+
+
+def add_rules_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--rules", help="Path to a rapidtriage JSON/YAML rule file for matched_rules and IOC lookup")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -83,6 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     docs.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
     docs.add_argument("--output", default="rapidtriage-docs.json", help="JSON output path")
     docs.add_argument("--limit", type=int, default=0, help="Stop after scanning N candidates (0 means all)")
+    add_rules_argument(docs)
 
     manifest = sub.add_parser(
         "manifest",
@@ -118,6 +125,7 @@ def build_parser() -> argparse.ArgumentParser:
     artifacts.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
     artifacts.add_argument("--kind", required=True, choices=sorted(SUPPORTED_ARTIFACT_KINDS), help="Artifact collector kind")
     artifacts.add_argument("--output", help="JSON output path (default: ./rapidtriage-artifacts-KIND.json)")
+    add_rules_argument(artifacts)
 
     files = sub.add_parser(
         "files",
@@ -148,6 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
     files.add_argument("--ext", action="append", help="Only keep files with this extension (repeatable)")
     files.add_argument("--modified-after", help="Only keep files modified at or after this ISO timestamp/date")
     files.add_argument("--modified-before", help="Only keep files modified at or before this ISO timestamp/date")
+    add_rules_argument(files)
 
     extract = sub.add_parser(
         "extract",
@@ -212,6 +221,7 @@ def build_parser() -> argparse.ArgumentParser:
     timeline.add_argument("--artifacts", action="append", help="Path to a rapidtriage artifacts JSON output (repeatable)")
     timeline.add_argument("--output", default="rapidtriage-timeline.json", help="Timeline JSON output path")
     timeline.add_argument("--report", help="Markdown report output path (default: OUTPUT stem + -report.md)")
+    add_rules_argument(timeline)
 
     run = sub.add_parser(
         "run",
@@ -241,12 +251,19 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-extract-size-bytes", type=int, default=0, help="Cap total copied bytes per extract stage (0 means unlimited)")
     run.add_argument("--max-file-count", type=int, default=0, help="Cap copied files per extract stage (0 means unlimited)")
     run.add_argument("--overwrite", action="store_true", help="Allow extract stages to overwrite existing output files")
+    add_rules_argument(run)
     return parser
 
 
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    rule_set = None
+    if getattr(args, "rules", None):
+        try:
+            rule_set = load_rule_set(Path(args.rules).expanduser().resolve())
+        except (FileNotFoundError, OSError, json.JSONDecodeError, RuleConfigError) as exc:
+            parser.error(f"invalid rules file: {exc}")
 
     if args.command == "timeline":
         root = Path(args.root).expanduser().resolve()
@@ -263,6 +280,7 @@ def main(argv=None) -> int:
                 files_inputs=[Path(value) for value in (args.files or [])],
                 docs_inputs=[Path(value) for value in (args.docs or [])],
                 artifacts_inputs=[Path(value) for value in (args.artifacts or [])],
+                rule_set=rule_set,
             )
         except TimelineError as exc:
             parser.error(str(exc))
@@ -278,6 +296,7 @@ def main(argv=None) -> int:
                 "docs": args.docs or [],
                 "artifacts": args.artifacts or [],
                 "input_kind": args.input_kind,
+                "rules": str(rule_set.path) if rule_set else None,
                 "output": str(output),
                 "report": str(report_output),
             },
@@ -373,6 +392,7 @@ def main(argv=None) -> int:
                 max_extract_size_bytes=args.max_extract_size_bytes,
                 max_file_count=args.max_file_count,
                 overwrite=args.overwrite,
+                rule_set=rule_set,
             )
         except RunModeError as exc:
             parser.error(str(exc))
@@ -393,7 +413,7 @@ def main(argv=None) -> int:
             else (Path.cwd() / f"rapidtriage-artifacts-{args.kind}.json").resolve()
         )
         try:
-            payload = run_artifact_collection(root, kind=args.kind, input_kind=args.input_kind)
+            payload = run_artifact_collection(root, kind=args.kind, input_kind=args.input_kind, rule_set=rule_set)
         except ArtifactCollectionError as exc:
             parser.error(str(exc))
         write_result(payload, output)
@@ -401,7 +421,7 @@ def main(argv=None) -> int:
         write_audit_record(
             audit_output,
             command="artifacts",
-            options={"kind": args.kind, "output": str(output), "input_kind": args.input_kind},
+            options={"kind": args.kind, "output": str(output), "input_kind": args.input_kind, "rules": args.rules},
             input_root=input_root,
             output_files=[("artifacts-json", output)],
         )
@@ -413,7 +433,7 @@ def main(argv=None) -> int:
     output = Path(args.output).expanduser().resolve()
 
     if args.command == "docs":
-        payload = run_docs_search(root, args.keyword, limit=args.limit, input_kind=args.input_kind)
+        payload = run_docs_search(root, args.keyword, limit=args.limit, input_kind=args.input_kind, rule_set=rule_set)
         write_result(payload, output)
         audit_output = audit_path_for(output)
         write_audit_record(
@@ -424,6 +444,7 @@ def main(argv=None) -> int:
                 "limit": args.limit,
                 "output": str(output),
                 "input_kind": args.input_kind,
+                "rules": args.rules,
             },
             input_root=input_root,
             output_files=[("docs-json", output)],
@@ -460,6 +481,7 @@ def main(argv=None) -> int:
                 modified_after=args.modified_after,
                 modified_before=args.modified_before,
                 limit=args.limit,
+                rule_set=rule_set,
             )
         except FileScanError as exc:
             parser.error(str(exc))
@@ -478,6 +500,7 @@ def main(argv=None) -> int:
                 "limit": args.limit,
                 "output": str(output),
                 "input_kind": args.input_kind,
+                "rules": args.rules,
             },
             input_root=input_root,
             output_files=[("files-json", output)],

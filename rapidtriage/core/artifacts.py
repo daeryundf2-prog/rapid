@@ -7,6 +7,7 @@ from typing import Dict, Union
 
 from ..artifacts import artifact_collectors, get_artifact_collector
 from .input_root import InputRoot, resolve_input_root
+from .rules import RuleSet, annotate_artifacts_payload
 
 SUPPORTED_ARTIFACT_KINDS = tuple(sorted(artifact_collectors()))
 
@@ -15,7 +16,13 @@ class ArtifactCollectionError(ValueError):
     """Raised when the requested artifact collector is invalid."""
 
 
-def run_artifact_collection(root: Union[InputRoot, Path], *, kind: str, input_kind: str | None = None) -> Dict[str, object]:
+def run_artifact_collection(
+    root: Union[InputRoot, Path],
+    *,
+    kind: str,
+    input_kind: str | None = None,
+    rule_set: RuleSet | None = None,
+) -> Dict[str, object]:
     input_root = resolve_input_root(root, kind=input_kind)
     try:
         collector = get_artifact_collector(kind)
@@ -29,7 +36,7 @@ def run_artifact_collection(root: Union[InputRoot, Path], *, kind: str, input_ki
         if artifact_type:
             artifact_type_counts[str(artifact_type)] += 1
 
-    return {
+    payload = {
         "command": "artifacts",
         "kind": str(getattr(collector, "collector_kind", kind)),
         "generated_at": dt.datetime.now().isoformat(),
@@ -46,3 +53,6 @@ def run_artifact_collection(root: Union[InputRoot, Path], *, kind: str, input_ki
         },
         "artifacts": artifacts,
     }
+    if rule_set is not None:
+        annotate_artifacts_payload(payload, rule_set)
+    return payload

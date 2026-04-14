@@ -2,54 +2,159 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["command", "mode", "generated_at", "root", "scan_scope_root", "output_dir", "profile", "safety", "outputs", "steps", "summary", "highlights"],
+  "required": [
+    "command",
+    "mode",
+    "generated_at",
+    "root",
+    "scan_scope_root",
+    "output_dir",
+    "profile",
+    "safety",
+    "outputs",
+    "steps",
+    "summary",
+    "highlights"
+  ],
   "properties": {
-    "command": { "const": "run" },
-    "mode": { "enum": ["seizure", "fraud", "hacking", "recovery"] },
-    "generated_at": { "type": "string", "format": "date-time" },
-    "root": { "type": "string" },
-    "scan_scope_root": { "type": "string" },
-    "output_dir": { "type": "string" },
+    "command": {
+      "const": "run"
+    },
+    "mode": {
+      "enum": [
+        "seizure",
+        "fraud",
+        "hacking",
+        "recovery"
+      ]
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "root": {
+      "type": "string"
+    },
+    "scan_scope_root": {
+      "type": "string"
+    },
+    "output_dir": {
+      "type": "string"
+    },
     "profile": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["description", "keywords", "docs_extract_kinds", "file_extract_categories", "file_scan_categories", "file_scan_path_contains", "preferred_locations", "artifacts_kinds"],
+      "required": [
+        "description",
+        "keywords",
+        "docs_extract_kinds",
+        "file_extract_categories",
+        "file_scan_categories",
+        "file_scan_path_contains",
+        "preferred_locations",
+        "artifacts_kinds"
+      ],
       "properties": {
-        "description": { "type": "string" },
-        "keywords": { "type": "array", "items": { "type": "string" } },
-        "docs_extract_kinds": { "type": "array", "items": { "type": "string" } },
-        "file_extract_categories": { "type": "array", "items": { "type": "string" } },
-        "file_scan_categories": { "type": "array", "items": { "type": "string" } },
-        "file_scan_path_contains": { "type": "array", "items": { "type": "string" } },
-        "preferred_locations": { "type": "array", "items": { "type": "string" } },
-        "artifacts_kinds": { "type": "array", "items": { "type": "string" } }
+        "description": {
+          "type": "string"
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "docs_extract_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "file_extract_categories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "file_scan_categories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "file_scan_path_contains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "preferred_locations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "artifacts_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "safety": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["dry_run", "read_only", "max_extract_size_bytes", "max_file_count", "overwrite"],
+      "required": [
+        "dry_run",
+        "read_only",
+        "max_extract_size_bytes",
+        "max_file_count",
+        "overwrite"
+      ],
       "properties": {
-        "dry_run": { "type": "boolean" },
-        "read_only": { "type": "boolean" },
-        "max_extract_size_bytes": { "type": "integer" },
-        "max_file_count": { "type": "integer" },
-        "overwrite": { "type": "boolean" }
+        "dry_run": {
+          "type": "boolean"
+        },
+        "read_only": {
+          "type": "boolean"
+        },
+        "max_extract_size_bytes": {
+          "type": "integer"
+        },
+        "max_file_count": {
+          "type": "integer"
+        },
+        "overwrite": {
+          "type": "boolean"
+        }
       }
     },
     "outputs": {
       "type": "object",
-      "additionalProperties": { "type": "string" }
+      "additionalProperties": {
+        "type": "string"
+      }
     },
     "steps": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["name", "status", "output"],
+        "required": [
+          "name",
+          "status",
+          "output"
+        ],
         "properties": {
-          "name": { "type": "string" },
-          "status": { "type": "string" },
-          "output": { "type": "string" }
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          }
         },
         "additionalProperties": true
       }
@@ -57,51 +162,144 @@
     "summary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["document_candidate_count", "document_match_count", "scanned_file_count", "file_candidate_count", "provider_artifact_counts", "windows_provider_artifact_counts", "artifact_type_counts", "matched_keyword_counts", "file_category_counts", "artifacts", "docs_extracted_count", "files_extracted_count", "preferred_location_candidate_count"],
+      "required": [
+        "document_candidate_count",
+        "document_match_count",
+        "scanned_file_count",
+        "file_candidate_count",
+        "provider_artifact_counts",
+        "windows_provider_artifact_counts",
+        "artifact_type_counts",
+        "matched_keyword_counts",
+        "file_category_counts",
+        "artifacts",
+        "docs_extracted_count",
+        "files_extracted_count",
+        "preferred_location_candidate_count"
+      ],
       "properties": {
-        "document_candidate_count": { "type": "integer" },
-        "document_match_count": { "type": "integer" },
-        "scanned_file_count": { "type": "integer" },
-        "file_candidate_count": { "type": "integer" },
-        "provider_artifact_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
-        "windows_provider_artifact_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
-        "artifact_type_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
-        "matched_keyword_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
-        "file_category_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
+        "document_candidate_count": {
+          "type": "integer"
+        },
+        "document_match_count": {
+          "type": "integer"
+        },
+        "scanned_file_count": {
+          "type": "integer"
+        },
+        "file_candidate_count": {
+          "type": "integer"
+        },
+        "provider_artifact_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "windows_provider_artifact_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "artifact_type_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "matched_keyword_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "file_category_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
         "artifacts": {
           "type": "object",
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["artifact_count", "artifact_type_counts", "output"],
+            "required": [
+              "artifact_count",
+              "artifact_type_counts",
+              "output"
+            ],
             "properties": {
-              "artifact_count": { "type": "integer" },
-              "artifact_type_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
-              "output": { "type": "string" }
+              "artifact_count": {
+                "type": "integer"
+              },
+              "artifact_type_counts": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                }
+              },
+              "output": {
+                "type": "string"
+              }
             }
           }
         },
-        "docs_extracted_count": { "type": "integer" },
-        "files_extracted_count": { "type": "integer" },
-        "preferred_location_candidate_count": { "type": "integer" }
+        "docs_extracted_count": {
+          "type": "integer"
+        },
+        "files_extracted_count": {
+          "type": "integer"
+        },
+        "preferred_location_candidate_count": {
+          "type": "integer"
+        },
+        "matched_rule_count": {
+          "type": "integer"
+        },
+        "ioc_hit_count": {
+          "type": "integer"
+        }
       }
     },
     "highlights": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["document_hits", "recent_file_candidates", "large_file_candidates", "preferred_location_candidates"],
+      "required": [
+        "document_hits",
+        "recent_file_candidates",
+        "large_file_candidates",
+        "preferred_location_candidates"
+      ],
       "properties": {
         "document_hits": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "kind", "matched_keywords", "preview"],
+            "required": [
+              "path",
+              "kind",
+              "matched_keywords",
+              "preview"
+            ],
             "properties": {
-              "path": { "type": "string" },
-              "kind": { "type": "string" },
-              "matched_keywords": { "type": "array", "items": { "type": "string" } },
-              "preview": { "type": "string" }
+              "path": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "matched_keywords": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "preview": {
+                "type": "string"
+              }
             }
           }
         },
@@ -110,13 +308,41 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "categories", "extension", "size", "modified_at"],
+            "required": [
+              "path",
+              "categories",
+              "extension",
+              "size",
+              "modified_at"
+            ],
             "properties": {
-              "path": { "type": "string" },
-              "categories": { "type": "array", "items": { "type": "string" } },
-              "extension": { "type": ["string", "null"] },
-              "size": { "type": ["integer", "null"] },
-              "modified_at": { "type": ["string", "null"] }
+              "path": {
+                "type": "string"
+              },
+              "categories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "extension": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "size": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "modified_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
             }
           }
         },
@@ -125,12 +351,34 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "categories", "size", "modified_at"],
+            "required": [
+              "path",
+              "categories",
+              "size",
+              "modified_at"
+            ],
             "properties": {
-              "path": { "type": "string" },
-              "categories": { "type": "array", "items": { "type": "string" } },
-              "size": { "type": ["integer", "null"] },
-              "modified_at": { "type": ["string", "null"] }
+              "path": {
+                "type": "string"
+              },
+              "categories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "size": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "modified_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
             }
           }
         },
@@ -139,13 +387,87 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "categories", "size", "modified_at"],
+            "required": [
+              "path",
+              "categories",
+              "size",
+              "modified_at"
+            ],
             "properties": {
-              "path": { "type": "string" },
-              "categories": { "type": "array", "items": { "type": "string" } },
-              "size": { "type": ["integer", "null"] },
-              "modified_at": { "type": ["string", "null"] }
+              "path": {
+                "type": "string"
+              },
+              "categories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "size": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "modified_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
             }
+          }
+        }
+      }
+    },
+    "rule_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "format",
+        "rule_count"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "rule_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "matched_rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ioc_hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule_id",
+          "type",
+          "value"
+        ],
+        "properties": {
+          "rule_id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
           }
         }
       }

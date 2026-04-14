@@ -10,6 +10,7 @@ from .artifacts import SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
 from .docs import scan_document_candidates
 from .files import run_files_scan
 from .input_root import resolve_input_root
+from .rules import RuleSet, annotate_timeline_payload
 
 
 class TimelineError(ValueError):
@@ -35,6 +36,7 @@ def run_timeline(
     files_inputs: Sequence[Path] | None = None,
     docs_inputs: Sequence[Path] | None = None,
     artifacts_inputs: Sequence[Path] | None = None,
+    rule_set: RuleSet | None = None,
 ) -> Dict[str, object]:
     input_root = resolve_input_root(root or Path.cwd(), kind=input_kind)
     normalized_files = normalize_input_paths(files_inputs)
@@ -50,7 +52,7 @@ def run_timeline(
             payload = load_input_payload(input_path, expected_command="files")
             events.extend(extract_file_events(payload, input_path))
     else:
-        payload = run_files_scan(input_root)
+        payload = run_files_scan(input_root, rule_set=rule_set)
         events.extend(extract_file_events(payload, Path("generated:files")))
 
     if normalized_docs:
@@ -66,7 +68,7 @@ def run_timeline(
             events.extend(extract_artifact_events(payload, input_path))
     else:
         for kind in SUPPORTED_ARTIFACT_KINDS:
-            payload = run_artifact_collection(input_root, kind=kind)
+            payload = run_artifact_collection(input_root, kind=kind, rule_set=rule_set)
             events.extend(extract_artifact_events(payload, Path(f"generated:artifacts:{kind}")))
 
     events.sort(key=event_sort_key)
@@ -74,7 +76,7 @@ def run_timeline(
     source_counts = Counter(str(event["source"]) for event in events)
     timestamps = [str(event["timestamp"]) for event in events]
 
-    return {
+    payload = {
         "command": "timeline",
         "generated_at": dt.datetime.now().isoformat(),
         "root": str(input_root.root_path),
@@ -93,6 +95,9 @@ def run_timeline(
         },
         "events": events,
     }
+    if rule_set is not None:
+        annotate_timeline_payload(payload, rule_set)
+    return payload
 
 
 def normalize_input_paths(paths: Sequence[Path] | None) -> List[Path]:

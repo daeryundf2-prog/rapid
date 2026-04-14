@@ -2,32 +2,102 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["command", "generated_at", "root", "inputs", "summary", "events"],
+  "required": [
+    "command",
+    "generated_at",
+    "root",
+    "inputs",
+    "summary",
+    "events"
+  ],
   "properties": {
-    "command": { "const": "timeline" },
-    "generated_at": { "type": "string", "format": "date-time" },
-    "root": { "type": "string" },
+    "command": {
+      "const": "timeline"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "root": {
+      "type": "string"
+    },
     "inputs": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["files", "docs", "artifacts"],
+      "required": [
+        "files",
+        "docs",
+        "artifacts"
+      ],
       "properties": {
-        "files": { "type": "array", "items": { "type": "string" } },
-        "docs": { "type": "array", "items": { "type": "string" } },
-        "artifacts": { "type": "array", "items": { "type": "string" } }
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "docs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "summary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["input_file_count", "event_count", "source_counts", "event_type_counts", "earliest_event_at", "latest_event_at"],
+      "required": [
+        "input_file_count",
+        "event_count",
+        "source_counts",
+        "event_type_counts",
+        "earliest_event_at",
+        "latest_event_at"
+      ],
       "properties": {
-        "input_file_count": { "type": "integer" },
-        "event_count": { "type": "integer" },
-        "source_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
-        "event_type_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
-        "earliest_event_at": { "type": ["string", "null"] },
-        "latest_event_at": { "type": ["string", "null"] }
+        "input_file_count": {
+          "type": "integer"
+        },
+        "event_count": {
+          "type": "integer"
+        },
+        "source_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "event_type_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "earliest_event_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "latest_event_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "matched_rule_count": {
+          "type": "integer"
+        },
+        "ioc_hit_count": {
+          "type": "integer"
+        }
       }
     },
     "events": {
@@ -35,15 +105,126 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["timestamp", "source", "event_type", "path", "input_file", "summary", "details"],
+        "required": [
+          "timestamp",
+          "source",
+          "event_type",
+          "path",
+          "input_file",
+          "summary",
+          "details"
+        ],
         "properties": {
-          "timestamp": { "type": "string" },
-          "source": { "enum": ["files", "docs", "artifacts"] },
-          "event_type": { "type": "string" },
-          "path": { "type": "string" },
-          "input_file": { "type": "string" },
-          "summary": { "type": "string" },
-          "details": { "type": "object", "additionalProperties": true }
+          "timestamp": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "files",
+              "docs",
+              "artifacts"
+            ]
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "input_file": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "matched_rules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ioc_hits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "rule_id",
+                "type",
+                "value"
+              ],
+              "properties": {
+                "rule_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "rule_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "format",
+        "rule_count"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "rule_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "matched_rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ioc_hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule_id",
+          "type",
+          "value"
+        ],
+        "properties": {
+          "rule_id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          }
         }
       }
     }

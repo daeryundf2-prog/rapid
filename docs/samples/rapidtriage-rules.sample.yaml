@@ -1,0 +1,38 @@
+version: 1
+rules:
+  - id: downloads-executables
+    description: Executables launched from download or startup paths
+    ext:
+      - .exe
+      - .bat
+      - .ps1
+    path:
+      - downloads
+      - startup
+  - id: known-browser-domain
+    description: Known suspicious browser domain IOC
+    artifact:
+      - browser-history
+      - browser-history-downloads
+    domain:
+      - download.example
+      - contoso.example
+  - id: credential-doc-hash
+    description: Credential-bearing documents or known file hash IOC
+    ext:
+      - .txt
+      - .docx
+      - .pdf
+    keyword:
+      - credential
+      - password
+      - wire transfer
+    hash:
+      - 0000000000000000000000000000000000000000000000000000000000000000
+  - id: february-browser-activity
+    description: Browser artifacts observed after a specific case date
+    artifact:
+      - browser-history
+      - browser-history-downloads
+    date:
+      after: 2024-02-01T00:00:00+00:00
