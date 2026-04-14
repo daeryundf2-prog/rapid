@@ -806,17 +806,30 @@ def parse_yaml_mapping(lines: list[tuple[int, str]], index: int, indent: int) ->
 
 
 def looks_like_mapping_pair(value: str) -> bool:
-    if ":" not in value:
+    separator_index = find_mapping_separator(value)
+    if separator_index is None:
         return False
-    key, _ = split_mapping_pair(value)
+    key = value[:separator_index].strip()
     return bool(key)
 
 
 def split_mapping_pair(value: str) -> tuple[str, str]:
-    key, separator, remainder = value.partition(":")
-    if not separator:
+    separator_index = find_mapping_separator(value)
+    if separator_index is None:
         raise RuleConfigError(f"invalid YAML mapping entry: {value!r}")
+    key = value[:separator_index]
+    remainder = value[separator_index + 1 :]
     return key.strip(), remainder.strip()
+
+
+def find_mapping_separator(value: str) -> int | None:
+    for index, char in enumerate(value):
+        if char != ":":
+            continue
+        next_index = index + 1
+        if next_index >= len(value) or value[next_index].isspace():
+            return index
+    return None
 
 
 def parse_yaml_scalar(value: str) -> object:
