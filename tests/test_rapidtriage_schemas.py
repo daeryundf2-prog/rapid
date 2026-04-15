@@ -31,25 +31,32 @@ class RapidTriageSchemaValidationTests(unittest.TestCase):
             case_path = root / "case.json"
             extract_dir = root / "extract-out"
             extract_path = extract_dir / "rapidtriage-extract-manifest.json"
-            timeline_path = root / "timeline.json"
+            case_path = root / "case.json"
 
             self.assertEqual(main(["manifest", str(root), "--output", str(manifest_path)]), 0)
             self.assertEqual(main(["docs", str(root), "-k", "fraud", "-k", "deleted", "--output", str(docs_path)]), 0)
             self.assertEqual(main(["files", str(root), "--output", str(files_path)]), 0)
             self.assertEqual(main(["artifacts", str(root), "--kind", "browser", "--output", str(artifacts_path)]), 0)
             self.assertEqual(main(["extract", str(files_path), str(extract_dir)]), 0)
-            self.assertEqual(main(["timeline", str(root), "--output", str(timeline_path)]), 0)
             self.assertEqual(
                 main(
                     [
                         "case",
                         str(case_path),
+                        "--case-id",
+                        "schema-case",
+                        "--title",
+                        "Schema Validation Case",
                         "--source",
-                        str(timeline_path),
+                        str(files_path),
                         "--pointer",
-                        "/events/0",
+                        "/candidates/0",
+                        "--bookmark-id",
+                        "bookmark-1",
                         "--tag",
-                        "schema-check",
+                        "schema",
+                        "--note",
+                        "Schema validation fixture",
                     ]
                 ),
                 0,
