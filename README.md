@@ -196,6 +196,7 @@ rapidtriage extract --help
 rapidtriage artifacts --help
 rapidtriage run --help
 rapidtriage timeline --help
+rapidtriage case --help
 ```
 
 Current usage examples:
@@ -209,6 +210,7 @@ rapidtriage extract --help
 rapidtriage artifacts --help
 rapidtriage run --help
 rapidtriage timeline --help
+rapidtriage case --help
 ```
 
 Common command examples:
@@ -229,6 +231,8 @@ rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud
 rapidtriage run . --mode hacking --output-dir ./rapidtriage-run-hacking
 rapidtriage run . --mode recovery --output-dir ./rapidtriage-run-recovery
 rapidtriage timeline . --output ./rapidtriage-timeline.json --report ./rapidtriage-timeline-report.md
+rapidtriage case ./incident-case.json --source ./rapidtriage-timeline.json --pointer /events/0 --tag suspicious --note "Review this event"
+rapidtriage case ./incident-case.json --source ./rapidtriage-compare.json --pointer /results/0 --bookmark-id compare-001 --tag delta
 ```
 
 Input root abstraction:
@@ -296,6 +300,12 @@ Current `timeline` behavior:
 - accepts `files`, `docs`, and one or more `artifacts` JSON outputs, or auto-discovers the default component outputs under a root.
 - merges those sources into a chronological event list with `timestamp`, `source`, `path`, and `type`.
 - writes both timeline JSON and a markdown report, plus an audit sidecar for provenance/integrity tracking.
+
+Current `case` behavior:
+- saves and reloads case-level bookmarks from `files`, `docs`, `artifacts`, `timeline`, or `compare` JSON outputs.
+- selects rows by JSON pointer via `--pointer`, stores the original source file, command, timestamp, path, tags, and analyst note.
+- supports stable bookmark updates through `--bookmark-id` and prints the saved case JSON with `--show`.
+- validates against `rapidtriage/schemas/case.schema.json`.
 
 Smoke test:
 
