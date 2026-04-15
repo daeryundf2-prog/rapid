@@ -18,7 +18,7 @@ def load_schema(name: str) -> dict[str, object]:
 
 
 class RapidTriageSchemaValidationTests(unittest.TestCase):
-    def test_manifest_docs_files_extract_and_artifacts_outputs_validate(self) -> None:
+    def test_manifest_docs_files_extract_artifacts_and_case_outputs_validate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
             root.mkdir(parents=True, exist_ok=True)
@@ -44,12 +44,20 @@ class RapidTriageSchemaValidationTests(unittest.TestCase):
                     [
                         "case",
                         str(case_path),
+                        "--case-id",
+                        "schema-case",
+                        "--title",
+                        "Schema Validation Case",
                         "--source",
                         str(timeline_path),
                         "--pointer",
                         "/events/0",
+                        "--bookmark-id",
+                        "bookmark-1",
                         "--tag",
-                        "schema-check",
+                        "schema",
+                        "--note",
+                        "Schema validation fixture",
                     ]
                 ),
                 0,
