@@ -292,8 +292,9 @@ Current `run` behavior:
 - orchestrates `manifest`, `docs`, `files`, and both extract passes into a single incident-mode workflow.
 - implements `seizure`, `fraud`, `hacking`, and `recovery`.
 - writes dedicated artifact collector outputs under `artifacts/` when the mode profile uses them.
-- writes `rapidtriage-run-summary.json` and `rapidtriage-run-report.md` alongside the component outputs.
-- records per-step output paths, artifact counts, keyword hit counts, recent/large file highlights, and preferred-location candidates in the summary JSON.
+- writes `rapidtriage-run-summary.json`, `rapidtriage-run-report.md`, `rapidtriage-timeline.json`, and `rapidtriage-timeline-report.md` alongside the component outputs.
+- records per-step output paths, artifact counts, keyword hit counts, recent/large file highlights, preferred-location candidates, and timeline event counts in the summary JSON.
+- renders a submission-oriented markdown report with case overview, key hits, matched rules, IOC hits, related documents, artifact summary, timeline, extract results, and a compare-results placeholder.
 - accepts the same extract safety controls (`--dry-run`, `--read-only`, `--max-extract-size-bytes`, `--max-file-count`, `--overwrite`) and forwards them to both extract stages.
 
 Current `timeline` behavior:

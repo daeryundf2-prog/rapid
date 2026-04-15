@@ -36,7 +36,7 @@ Planned rule-engine / IOC lookup additions are tracked separately in `docs/rapid
 | `rapidtriage files ROOT` | `rapidtriage-files.json` | metadata-only candidate file scan |
 | `rapidtriage extract INPUT_JSON OUTPUT_DIR` | `OUTPUT_DIR/rapidtriage-extract-manifest.json` | copied originals plus hash/mtime manifest |
 | `rapidtriage artifacts ROOT --kind KIND` | `./rapidtriage-artifacts-KIND.json` | dedicated collector output for one artifact family |
-| `rapidtriage run ROOT --mode MODE` | `OUTPUT_DIR/rapidtriage-run-summary.json` | workflow summary JSON plus `rapidtriage-run-report.md` |
+| `rapidtriage run ROOT --mode MODE` | `OUTPUT_DIR/rapidtriage-run-summary.json` | workflow summary JSON plus `rapidtriage-run-report.md`, `rapidtriage-timeline.json`, and `rapidtriage-timeline-report.md` |
 
 ## `manifest` JSON
 
@@ -211,6 +211,8 @@ The collector interface is intentionally narrow so additional Windows-specific c
 - `files-extract/rapidtriage-extract-manifest.json`
 - `rapidtriage-run-summary.json`
 - `rapidtriage-run-report.md`
+- `rapidtriage-timeline.json`
+- `rapidtriage-timeline-report.md`
 
 Current run modes:
 
@@ -254,6 +256,7 @@ Current run modes:
 - file categories
 - docs/files extraction counts
 - preferred-location candidate counts
+- timeline event counts
 
 `highlights` currently contains:
 
@@ -261,6 +264,8 @@ Current run modes:
 - `recent_file_candidates`
 - `large_file_candidates`
 - `preferred_location_candidates`
+
+The generated `rapidtriage-run-report.md` is now a submission-oriented template with sections for case overview, key hits, `matched_rules`, `ioc_hits`, related documents, artifact summary, timeline, extract results, and optional compare findings.
 
 ## CLI help examples
 
