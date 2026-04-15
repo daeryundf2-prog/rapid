@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "command",
+    "generated_at",
+    "updated_at",
+    "case_id",
+    "title",
+    "summary",
+    "bookmarks"
+  ],
+  "properties": {
+    "command": {
+      "const": "case"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "case_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bookmark_count",
+        "tagged_bookmark_count",
+        "tag_counts",
+        "source_command_counts"
+      ],
+      "properties": {
+        "bookmark_count": {
+          "type": "integer"
+        },
+        "tagged_bookmark_count": {
+          "type": "integer"
+        },
+        "tag_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "source_command_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "bookmarks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bookmark_id",
+          "created_at",
+          "updated_at",
+          "source_command",
+          "source_file",
+          "source_pointer",
+          "summary",
+          "tags",
+          "note",
+          "item"
+        ],
+        "properties": {
+          "bookmark_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source_command": {
+            "type": "string"
+          },
+          "source_file": {
+            "type": "string"
+          },
+          "source_pointer": {
+            "type": "string"
+          },
+          "source_root": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_timestamp": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "note": {
+            "type": "string"
+          },
+          "item": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -28,20 +28,39 @@ class RapidTriageSchemaValidationTests(unittest.TestCase):
             docs_path = root / "docs.json"
             files_path = root / "files.json"
             artifacts_path = root / "artifacts-browser.json"
+            case_path = root / "case.json"
             extract_dir = root / "extract-out"
             extract_path = extract_dir / "rapidtriage-extract-manifest.json"
+            timeline_path = root / "timeline.json"
 
             self.assertEqual(main(["manifest", str(root), "--output", str(manifest_path)]), 0)
             self.assertEqual(main(["docs", str(root), "-k", "fraud", "-k", "deleted", "--output", str(docs_path)]), 0)
             self.assertEqual(main(["files", str(root), "--output", str(files_path)]), 0)
             self.assertEqual(main(["artifacts", str(root), "--kind", "browser", "--output", str(artifacts_path)]), 0)
             self.assertEqual(main(["extract", str(files_path), str(extract_dir)]), 0)
+            self.assertEqual(main(["timeline", str(root), "--output", str(timeline_path)]), 0)
+            self.assertEqual(
+                main(
+                    [
+                        "case",
+                        str(case_path),
+                        "--source",
+                        str(timeline_path),
+                        "--pointer",
+                        "/events/0",
+                        "--tag",
+                        "schema-check",
+                    ]
+                ),
+                0,
+            )
 
             validate(json.loads(manifest_path.read_text(encoding="utf-8")), load_schema("manifest.schema.json"))
             validate(json.loads(docs_path.read_text(encoding="utf-8")), load_schema("docs.schema.json"))
             validate(json.loads(files_path.read_text(encoding="utf-8")), load_schema("files.schema.json"))
             validate(json.loads(artifacts_path.read_text(encoding="utf-8")), load_schema("artifacts.schema.json"))
             validate(json.loads(extract_path.read_text(encoding="utf-8")), load_schema("extract.schema.json"))
+            validate(json.loads(case_path.read_text(encoding="utf-8")), load_schema("case.schema.json"))
 
     def test_run_summaries_validate_for_all_modes(self) -> None:
         schema = load_schema("run-summary.schema.json")

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .core.audit import audit_path_for, write_audit_record
 from .core.artifacts import ArtifactCollectionError, SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
+from .core.case import CaseBookmarkError, create_or_update_case_payload, load_case_payload, save_case_payload
 from .core.docs import build_manifest, run_docs_search, write_result
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
 from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
@@ -64,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage extract rapidtriage-files.json ./extract-out --dry-run --max-file-count 100
               rapidtriage artifacts . --kind browser --output rapidtriage-artifacts-browser.json
               rapidtriage timeline . --output rapidtriage-timeline.json --report rapidtriage-timeline-report.md
+              rapidtriage case ./incident-case.json --source rapidtriage-timeline.json --pointer /events/0 --tag suspicious
               rapidtriage manifest /Volumes/case-mount --input-kind mounted-image
               rapidtriage run . --mode fraud --output-dir ./rapidtriage-run --read-only
             """
@@ -223,6 +225,31 @@ def build_parser() -> argparse.ArgumentParser:
     timeline.add_argument("--report", help="Markdown report output path (default: OUTPUT stem + -report.md)")
     add_rules_argument(timeline)
 
+    case_parser = sub.add_parser(
+        "case",
+        help="Save or load case-level bookmarks from rapidtriage JSON outputs",
+        description="Save or load case-level bookmarks from rapidtriage JSON outputs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage case ./incident-case.json
+              rapidtriage case ./incident-case.json --source rapidtriage-timeline.json --pointer /events/0 --tag suspicious --note "Review this event"
+              rapidtriage case ./incident-case.json --source rapidtriage-files.json --pointer /candidates/1 --bookmark-id loader --tag executable
+              rapidtriage case ./incident-case.json --show
+            """
+        ),
+    )
+    case_parser.add_argument("case_json", help="Path to the case JSON to create/update/load")
+    case_parser.add_argument("--case-id", help="Stable case identifier (default: CASE_JSON stem when creating)")
+    case_parser.add_argument("--title", help="Human-readable case title")
+    case_parser.add_argument("--source", help="Path to a rapidtriage JSON output to bookmark from")
+    case_parser.add_argument("--pointer", help="JSON Pointer to the selected row inside --source (for example /events/0)")
+    case_parser.add_argument("--bookmark-id", help="Optional stable bookmark identifier for updates")
+    case_parser.add_argument("--tag", action="append", help="Bookmark tag (repeatable)")
+    case_parser.add_argument("--note", help="Bookmark note text")
+    case_parser.add_argument("--show", action="store_true", help="Load an existing case JSON and print it to stdout")
+
     run = sub.add_parser(
         "run",
         help="Run an incident-mode triage workflow and write summary/report outputs",
@@ -264,6 +291,51 @@ def main(argv=None) -> int:
             rule_set = load_rule_set(Path(args.rules).expanduser().resolve())
         except (FileNotFoundError, OSError, json.JSONDecodeError, RuleConfigError) as exc:
             parser.error(f"invalid rules file: {exc}")
+
+    if args.command == "case":
+        case_path = Path(args.case_json).expanduser().resolve()
+        if args.show:
+            try:
+                payload = load_case_payload(case_path)
+            except (FileNotFoundError, CaseBookmarkError) as exc:
+                parser.error(str(exc))
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0
+
+        source_path = Path(args.source).expanduser().resolve() if args.source else None
+        try:
+            payload = create_or_update_case_payload(
+                case_path,
+                case_id=args.case_id,
+                title=args.title,
+                source_path=source_path,
+                source_pointer=args.pointer,
+                bookmark_id=args.bookmark_id,
+                tags=args.tag or [],
+                note=args.note,
+            )
+        except (FileNotFoundError, CaseBookmarkError) as exc:
+            parser.error(str(exc))
+        save_case_payload(case_path, payload)
+        audit_output = audit_path_for(case_path)
+        write_audit_record(
+            audit_output,
+            command="case",
+            options={
+                "case_id": args.case_id,
+                "title": args.title,
+                "source": str(source_path) if source_path else None,
+                "pointer": args.pointer,
+                "bookmark_id": args.bookmark_id,
+                "tags": args.tag or [],
+            },
+            input_files=[("source-json", source_path)] if source_path else [],
+            output_files=[("case-json", case_path)],
+        )
+        print(f"Saved case JSON: {case_path}")
+        print(f"Saved audit JSON: {audit_output}")
+        print(f"Bookmarks: {payload['summary']['bookmark_count']}")
+        return 0
 
     if args.command == "timeline":
         root = Path(args.root).expanduser().resolve()
