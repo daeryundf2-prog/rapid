@@ -121,6 +121,7 @@ class RapidTriageRuleEngineTests(unittest.TestCase):
             artifacts_payload = json.loads(artifacts_output.read_text(encoding="utf-8"))
             timeline_payload = json.loads(timeline_output.read_text(encoding="utf-8"))
             summary_payload = json.loads((output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8"))
+            report_text = (output_dir / "rapidtriage-run-report.md").read_text(encoding="utf-8")
 
             self.assertPayloadHasRule(files_payload, "downloads-exe-sha256")
             self.assertPayloadHasIoc(files_payload, sha256_hex(payload_installer))
@@ -140,6 +141,10 @@ class RapidTriageRuleEngineTests(unittest.TestCase):
             self.assertPayloadHasRule(summary_payload, "credential-url-hit")
             self.assertPayloadHasIoc(summary_payload, "download.example")
             self.assertPayloadHasIoc(summary_payload, "malicious.example")
+            self.assertIn("matched rules", report_text.lower())
+            self.assertIn("ioc hits", report_text.lower())
+            self.assertIn("downloads-exe-sha256", report_text)
+            self.assertIn("malicious.example", report_text)
 
     def test_run_accepts_yaml_rules_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

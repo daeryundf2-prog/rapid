@@ -52,7 +52,9 @@
     "docs_extract_manifest": "/cases/case-001/rapidtriage-run-seizure/docs-extract/rapidtriage-extract-manifest.json",
     "files_extract_manifest": "/cases/case-001/rapidtriage-run-seizure/files-extract/rapidtriage-extract-manifest.json",
     "summary": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-run-summary.json",
-    "report": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-run-report.md"
+    "report": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-run-report.md",
+    "timeline": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-timeline.json",
+    "timeline_report": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-timeline-report.md"
   },
   "steps": [
     {
@@ -100,6 +102,13 @@
       "output": "/cases/case-001/rapidtriage-run-seizure/files-extract/rapidtriage-extract-manifest.json",
       "selected_count": 6,
       "extracted_count": 6
+    },
+    {
+      "name": "timeline",
+      "status": "completed",
+      "output": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-timeline.json",
+      "event_count": 3,
+      "report": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-timeline-report.md"
     }
   ],
   "summary": {
@@ -157,7 +166,8 @@
     },
     "docs_extracted_count": 2,
     "files_extracted_count": 6,
-    "preferred_location_candidate_count": 5
+    "preferred_location_candidate_count": 5,
+    "timeline_event_count": 3
   },
   "highlights": {
     "document_hits": [

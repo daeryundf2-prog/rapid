@@ -13,6 +13,7 @@ from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, run_extract
 from .files import run_files_scan
 from .input_root import InputRoot, derive_child_input_root, resolve_input_root
 from .rules import RuleSet, summarize_payload_annotations
+from .timeline import build_timeline_report, run_timeline
 
 SUPPORTED_RUN_MODES: tuple[str, ...] = ("seizure", "fraud", "hacking", "recovery")
 IMPLEMENTED_RUN_MODES = set(SUPPORTED_RUN_MODES)
@@ -115,6 +116,8 @@ def run_triage_mode(
     files_extract_dir = output_dir / "files-extract"
     docs_extract_manifest = docs_extract_dir / DEFAULT_EXTRACT_MANIFEST_NAME
     files_extract_manifest = files_extract_dir / DEFAULT_EXTRACT_MANIFEST_NAME
+    timeline_path = output_dir / "rapidtriage-timeline.json"
+    timeline_report_path = output_dir / "rapidtriage-timeline-report.md"
     summary_path = output_dir / "rapidtriage-run-summary.json"
     report_path = output_dir / "rapidtriage-run-report.md"
 
@@ -168,12 +171,25 @@ def run_triage_mode(
     write_result(docs_extract_payload, docs_extract_manifest)
     write_result(files_extract_payload, files_extract_manifest)
 
+    timeline_payload = run_timeline(
+        root=input_root.root_path,
+        input_kind=input_root.kind,
+        files_inputs=[files_path],
+        docs_inputs=[docs_path],
+        artifacts_inputs=list(artifact_outputs.values()),
+        rule_set=rule_set,
+    )
+    write_result(timeline_payload, timeline_path)
+    timeline_report_path.write_text(build_timeline_report(timeline_payload), encoding="utf-8")
+
     outputs = {
         "manifest": manifest_path,
         "docs": docs_path,
         "files": files_path,
         "docs_extract_manifest": docs_extract_manifest,
         "files_extract_manifest": files_extract_manifest,
+        "timeline": timeline_path,
+        "timeline_report": timeline_report_path,
         **{f"artifacts_{kind}": path for kind, path in artifact_outputs.items()},
         "summary": summary_path,
         "report": report_path,
@@ -188,6 +204,7 @@ def run_triage_mode(
         docs_extract_payload=docs_extract_payload,
         files_extract_payload=files_extract_payload,
         artifact_payloads=artifact_payloads,
+        timeline_payload=timeline_payload,
         outputs=outputs,
         safety={
             "dry_run": dry_run,
@@ -198,7 +215,18 @@ def run_triage_mode(
         },
         rule_set=rule_set,
     )
-    report_path.write_text(build_markdown_report(summary_payload), encoding="utf-8")
+    report_path.write_text(
+        build_markdown_report(
+            summary_payload,
+            docs_payload=docs_payload,
+            files_payload=files_payload,
+            docs_extract_payload=docs_extract_payload,
+            files_extract_payload=files_extract_payload,
+            artifact_payloads=artifact_payloads,
+            timeline_payload=timeline_payload,
+        ),
+        encoding="utf-8",
+    )
     write_result(summary_payload, summary_path)
     audit_output = output_dir / "rapidtriage-run-audit.json"
     write_audit_record(
@@ -223,6 +251,8 @@ def run_triage_mode(
             ("files", files_path),
             ("docs-extract-manifest", docs_extract_manifest),
             ("files-extract-manifest", files_extract_manifest),
+            ("timeline-json", timeline_path),
+            ("timeline-report", timeline_report_path),
             *[(f"artifacts-{kind}", path) for kind, path in artifact_outputs.items()],
             ("run-summary", summary_path),
             ("run-report", report_path),
@@ -251,6 +281,7 @@ def build_run_summary(
     docs_extract_payload: Mapping[str, object],
     files_extract_payload: Mapping[str, object],
     artifact_payloads: Mapping[str, Mapping[str, object]],
+    timeline_payload: Mapping[str, object],
     outputs: Mapping[str, Path],
     safety: Mapping[str, object],
     rule_set: RuleSet | None = None,
@@ -303,12 +334,13 @@ def build_run_summary(
         "steps": build_step_rows(
             manifest_payload=manifest_payload,
             docs_payload=docs_payload,
-            files_payload=files_payload,
-            docs_extract_payload=docs_extract_payload,
-            files_extract_payload=files_extract_payload,
-            artifact_payloads=artifact_payloads,
-            outputs=outputs,
-        ),
+        files_payload=files_payload,
+        docs_extract_payload=docs_extract_payload,
+        files_extract_payload=files_extract_payload,
+        artifact_payloads=artifact_payloads,
+        timeline_payload=timeline_payload,
+        outputs=outputs,
+    ),
         "summary": {
             "document_candidate_count": int(docs_payload.get("summary", {}).get("candidate_count", 0)),
             "document_match_count": int(docs_payload.get("summary", {}).get("match_count", 0)),
@@ -323,6 +355,7 @@ def build_run_summary(
             "docs_extracted_count": int(docs_extract_payload.get("summary", {}).get("extracted_count", 0)),
             "files_extracted_count": int(files_extract_payload.get("summary", {}).get("extracted_count", 0)),
             "preferred_location_candidate_count": len(preferred_candidates),
+            "timeline_event_count": int(timeline_payload.get("summary", {}).get("event_count", 0)),
         },
         "highlights": {
             "document_hits": summarize_document_hits(docs_payload.get("results", []), limit=5),
@@ -355,6 +388,7 @@ def build_step_rows(
     docs_extract_payload: Mapping[str, object],
     files_extract_payload: Mapping[str, object],
     artifact_payloads: Mapping[str, Mapping[str, object]],
+    timeline_payload: Mapping[str, object],
     outputs: Mapping[str, Path],
 ) -> List[Dict[str, object]]:
     rows: List[Dict[str, object]] = [
@@ -403,6 +437,13 @@ def build_step_rows(
                 "output": str(outputs["files_extract_manifest"]),
                 "selected_count": int(files_extract_payload.get("summary", {}).get("selected_count", 0)),
                 "extracted_count": int(files_extract_payload.get("summary", {}).get("extracted_count", 0)),
+            },
+            {
+                "name": "timeline",
+                "status": "completed",
+                "output": str(outputs["timeline"]),
+                "event_count": int(timeline_payload.get("summary", {}).get("event_count", 0)),
+                "report": str(outputs["timeline_report"]),
             },
         ]
     )
@@ -528,21 +569,43 @@ def collect_preferred_candidates(candidates: object, *, preferred_locations: Seq
     return selected
 
 
-def build_markdown_report(summary_payload: Mapping[str, object]) -> str:
+def build_markdown_report(
+    summary_payload: Mapping[str, object],
+    *,
+    docs_payload: Mapping[str, object] | None = None,
+    files_payload: Mapping[str, object] | None = None,
+    docs_extract_payload: Mapping[str, object] | None = None,
+    files_extract_payload: Mapping[str, object] | None = None,
+    artifact_payloads: Mapping[str, Mapping[str, object]] | None = None,
+    timeline_payload: Mapping[str, object] | None = None,
+) -> str:
     profile = summary_payload["profile"]
     outputs = summary_payload["outputs"]
     summary = summary_payload["summary"]
     steps = summary_payload["steps"]
     highlights = summary_payload["highlights"]
+    docs_payload = docs_payload or {}
+    files_payload = files_payload or {}
+    docs_extract_payload = docs_extract_payload or {}
+    files_extract_payload = files_extract_payload or {}
+    artifact_payloads = artifact_payloads or {}
+    timeline_payload = timeline_payload or {}
 
     lines = [
         "# rapidtriage run report",
+        "",
+        "> Submission-ready markdown template generated from rapidtriage run results.",
+        "",
+        "## 사건 개요 / Case overview",
         "",
         f"- Mode: `{summary_payload['mode']}`",
         f"- Root: `{summary_payload['root']}`",
         f"- Scan scope root: `{summary_payload['scan_scope_root']}`",
         f"- Generated at: `{summary_payload['generated_at']}`",
         f"- Output directory: `{summary_payload['output_dir']}`",
+        f"- Document matches: {summary['document_match_count']}",
+        f"- File candidates: {summary['file_candidate_count']}",
+        f"- Timeline events: {summary.get('timeline_event_count', 0)}",
         "",
         "## Mode profile",
         "",
@@ -562,9 +625,9 @@ def build_markdown_report(summary_payload: Mapping[str, object]) -> str:
 
     lines.extend(
         [
-            "",
-            "## Summary",
-            "",
+        "",
+        "## Summary",
+        "",
             f"- Document candidates: {summary['document_candidate_count']}",
             f"- Document matches: {summary['document_match_count']}",
             f"- Scanned files: {summary['scanned_file_count']}",
@@ -572,6 +635,7 @@ def build_markdown_report(summary_payload: Mapping[str, object]) -> str:
             f"- Docs extracted: {summary['docs_extracted_count']}",
             f"- Files extracted: {summary['files_extracted_count']}",
             f"- Preferred-location candidates: {summary['preferred_location_candidate_count']}",
+            f"- Timeline events: {summary.get('timeline_event_count', 0)}",
             "",
             "### Windows provider artifact counts",
             "",
@@ -611,15 +675,42 @@ def build_markdown_report(summary_payload: Mapping[str, object]) -> str:
     else:
         lines.append("- none")
 
-    lines.extend(["", "## Highlighted document hits", ""])
-    document_hits = highlights.get("document_hits", [])
-    if document_hits:
-        for item in document_hits:
+    lines.extend(["", "## 핵심 hit / Key hits", ""])
+    key_hits = build_key_hit_rows(
+        summary_payload,
+        docs_payload=docs_payload,
+        files_payload=files_payload,
+        artifact_payloads=artifact_payloads,
+        timeline_payload=timeline_payload,
+    )
+    if key_hits:
+        lines.extend([f"- {row}" for row in key_hits])
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "## Matched rules", ""])
+    matched_rules = summary_payload.get("matched_rules", [])
+    if isinstance(matched_rules, list) and matched_rules:
+        for rule_id in matched_rules:
+            lines.append(f"- `{rule_id}`")
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "## IOC hits", ""])
+    ioc_hits = summary_payload.get("ioc_hits", [])
+    if isinstance(ioc_hits, list) and ioc_hits:
+        for hit in ioc_hits[:10]:
+            if not isinstance(hit, dict):
+                continue
             lines.append(
-                f"- `{item['path']}` ({item['kind']}) keywords={', '.join(item['matched_keywords'])}: {item['preview']}"
+                f"- `{hit.get('type')}` `{hit.get('value')}`"
+                f" (rule=`{hit.get('rule_id')}`, count={hit.get('count', 1)})"
             )
     else:
         lines.append("- none")
+
+    lines.extend(["", "## 관련 문서 / Related documents", ""])
+    append_related_document_rows(lines, docs_payload.get("results", []))
 
     lines.extend(["", "## Recent file candidates", ""])
     recent_candidates = highlights.get("recent_file_candidates", [])
@@ -651,7 +742,193 @@ def build_markdown_report(summary_payload: Mapping[str, object]) -> str:
     else:
         lines.append("- none")
 
+    lines.extend(["", "## Artifact summary", ""])
+    append_artifact_summary_rows(lines, artifact_payloads)
+
+    lines.extend(["", "## Timeline", ""])
+    append_timeline_rows(lines, timeline_payload)
+
+    lines.extend(["", "## Extract results", ""])
+    append_extract_rows(
+        lines,
+        title="### Docs extract",
+        payload=docs_extract_payload,
+        source_label="docs",
+    )
+    append_extract_rows(
+        lines,
+        title="### Files extract",
+        payload=files_extract_payload,
+        source_label="files",
+    )
+
+    lines.extend(["", "## Compare results", ""])
+    compare_results = summary_payload.get("compare_results")
+    if isinstance(compare_results, list) and compare_results:
+        for item in compare_results[:10]:
+            if not isinstance(item, dict):
+                continue
+            lines.append(
+                f"- `{item.get('timestamp')}` `{item.get('status')}` `{item.get('path')}` — {item.get('summary')}"
+            )
+    else:
+        lines.append("- none provided (attach compare JSON findings here when available).")
+
     lines.extend(["", "## Output paths", ""])
     for name, path in outputs.items():
         lines.append(f"- `{name}`: `{path}`")
     return "\n".join(lines) + "\n"
+
+
+def build_key_hit_rows(
+    summary_payload: Mapping[str, object],
+    *,
+    docs_payload: Mapping[str, object],
+    files_payload: Mapping[str, object],
+    artifact_payloads: Mapping[str, Mapping[str, object]],
+    timeline_payload: Mapping[str, object],
+) -> List[str]:
+    rows: List[str] = []
+    matched_rules = summary_payload.get("matched_rules", [])
+    if isinstance(matched_rules, list) and matched_rules:
+        rows.append(f"Matched rules: {', '.join(str(item) for item in matched_rules[:5])}")
+
+    ioc_hits = summary_payload.get("ioc_hits", [])
+    if isinstance(ioc_hits, list):
+        for hit in ioc_hits[:3]:
+            if not isinstance(hit, dict):
+                continue
+            rows.append(
+                f"IOC `{hit.get('value')}` detected via `{hit.get('type')}`"
+                f" (rule `{hit.get('rule_id')}`)"
+            )
+
+    for item in docs_payload.get("results", [])[:3]:
+        if not isinstance(item, dict):
+            continue
+        keywords = ", ".join(str(keyword) for keyword in item.get("matched_keywords", []))
+        rows.append(f"Document hit `{item.get('path')}` keywords={keywords or 'none'}")
+
+    for item in files_payload.get("candidates", [])[:2]:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            f"File candidate `{item.get('path')}` categories={', '.join(str(value) for value in item.get('categories', []))}"
+        )
+
+    for kind, payload in artifact_payloads.items():
+        artifact_count = int(payload.get("summary", {}).get("artifact_count", 0))
+        if artifact_count:
+            rows.append(f"Artifact collector `{kind}` returned {artifact_count} row(s)")
+
+    for event in timeline_payload.get("events", [])[:2]:
+        if not isinstance(event, dict):
+            continue
+        rows.append(
+            f"Timeline `{event.get('timestamp')}` `{event.get('event_type')}` — {event.get('summary')}"
+        )
+
+    seen: set[str] = set()
+    deduped: List[str] = []
+    for row in rows:
+        if row in seen:
+            continue
+        seen.add(row)
+        deduped.append(row)
+    return deduped[:10]
+
+
+def append_related_document_rows(lines: List[str], results: object) -> None:
+    if not isinstance(results, list) or not results:
+        lines.append("- none")
+        return
+    for item in results[:10]:
+        if not isinstance(item, dict):
+            continue
+        keywords = ", ".join(str(keyword) for keyword in item.get("matched_keywords", [])) or "none"
+        lines.append(
+            f"- `{item.get('path')}` ({item.get('kind')}) keywords={keywords}: {item.get('preview')}"
+        )
+        matched_rules = item.get("matched_rules", [])
+        if isinstance(matched_rules, list) and matched_rules:
+            lines.append(f"  - matched_rules: {', '.join(str(rule_id) for rule_id in matched_rules)}")
+        ioc_hits = item.get("ioc_hits", [])
+        if isinstance(ioc_hits, list) and ioc_hits:
+            values = ", ".join(str(hit.get('value')) for hit in ioc_hits[:5] if isinstance(hit, dict))
+            lines.append(f"  - ioc_hits: {values}")
+
+
+def append_artifact_summary_rows(lines: List[str], artifact_payloads: Mapping[str, Mapping[str, object]]) -> None:
+    if not artifact_payloads:
+        lines.append("- none")
+        return
+    for kind, payload in artifact_payloads.items():
+        summary = payload.get("summary", {})
+        lines.append(
+            f"- `{kind}` count={summary.get('artifact_count', 0)}"
+            f" types={dict(summary.get('artifact_type_counts', {}))}"
+        )
+        artifacts = payload.get("artifacts", [])
+        if not isinstance(artifacts, list):
+            continue
+        for artifact in artifacts[:3]:
+            if not isinstance(artifact, dict):
+                continue
+            lines.append(
+                f"  - `{artifact.get('artifact_type')}` `{artifact.get('path')}` provider=`{artifact.get('provider')}`"
+            )
+
+
+def append_timeline_rows(lines: List[str], timeline_payload: Mapping[str, object]) -> None:
+    summary = timeline_payload.get("summary", {})
+    events = timeline_payload.get("events", [])
+    if not isinstance(events, list) or not events:
+        lines.append("- none")
+        return
+    lines.extend(
+        [
+            f"- Event count: {summary.get('event_count', 0)}",
+            f"- Earliest event: `{summary.get('earliest_event_at')}`",
+            f"- Latest event: `{summary.get('latest_event_at')}`",
+        ]
+    )
+    for event in events[:15]:
+        if not isinstance(event, dict):
+            continue
+        lines.append(
+            f"- `{event.get('timestamp')}` `{event.get('source')}` `{event.get('event_type')}`"
+            f" `{event.get('path')}` — {event.get('summary')}"
+        )
+        matched_rules = event.get("matched_rules", [])
+        if isinstance(matched_rules, list) and matched_rules:
+            lines.append(f"  - matched_rules: {', '.join(str(rule_id) for rule_id in matched_rules)}")
+        ioc_hits = event.get("ioc_hits", [])
+        if isinstance(ioc_hits, list) and ioc_hits:
+            values = ", ".join(str(hit.get('value')) for hit in ioc_hits[:5] if isinstance(hit, dict))
+            lines.append(f"  - ioc_hits: {values}")
+
+
+def append_extract_rows(
+    lines: List[str],
+    *,
+    title: str,
+    payload: Mapping[str, object],
+    source_label: str,
+) -> None:
+    lines.extend([title, ""])
+    summary = payload.get("summary", {})
+    lines.append(
+        f"- selected={summary.get('selected_count', 0)} extracted={summary.get('extracted_count', 0)}"
+        f" skipped={summary.get('skipped_count', 0)} source={source_label}"
+    )
+    entries = payload.get("entries", [])
+    if isinstance(entries, list) and entries:
+        for entry in entries[:10]:
+            if not isinstance(entry, dict):
+                continue
+            lines.append(
+                f"  - `{entry.get('original_path')}` -> `{entry.get('extracted_path')}`"
+                f" size={entry.get('size')} sha256={entry.get('sha256')}"
+            )
+    else:
+        lines.append("  - none")

@@ -175,7 +175,8 @@
         "artifacts",
         "docs_extracted_count",
         "files_extracted_count",
-        "preferred_location_candidate_count"
+        "preferred_location_candidate_count",
+        "timeline_event_count"
       ],
       "properties": {
         "document_candidate_count": {
@@ -253,6 +254,9 @@
           "type": "integer"
         },
         "preferred_location_candidate_count": {
+          "type": "integer"
+        },
+        "timeline_event_count": {
           "type": "integer"
         },
         "matched_rule_count": {

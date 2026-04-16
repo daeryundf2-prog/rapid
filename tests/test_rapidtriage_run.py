@@ -158,6 +158,8 @@ class RapidTriageRunTests(unittest.TestCase):
             files_path = output_dir / "rapidtriage-files.json"
             docs_extract_manifest_path = output_dir / "docs-extract" / "rapidtriage-extract-manifest.json"
             files_extract_manifest_path = output_dir / "files-extract" / "rapidtriage-extract-manifest.json"
+            timeline_path = output_dir / "rapidtriage-timeline.json"
+            timeline_report_path = output_dir / "rapidtriage-timeline-report.md"
             summary_path = output_dir / "rapidtriage-run-summary.json"
             report_path = output_dir / "rapidtriage-run-report.md"
             artifact_paths = {
@@ -171,6 +173,8 @@ class RapidTriageRunTests(unittest.TestCase):
                 files_path,
                 docs_extract_manifest_path,
                 files_extract_manifest_path,
+                timeline_path,
+                timeline_report_path,
                 summary_path,
                 report_path,
             ]
@@ -187,6 +191,7 @@ class RapidTriageRunTests(unittest.TestCase):
             docs_extract_payload = json.loads(docs_extract_manifest_path.read_text(encoding="utf-8"))
             files_extract_payload = json.loads(files_extract_manifest_path.read_text(encoding="utf-8"))
             summary_payload: dict[str, Any] = json.loads(summary_path.read_text(encoding="utf-8"))
+            timeline_payload: dict[str, Any] = json.loads(timeline_path.read_text(encoding="utf-8"))
 
             min_file_candidates = {"fraud": 4, "hacking": 3, "seizure": 4, "recovery": 3}[mode]
             min_doc_matches = {"fraud": 1, "hacking": 1, "seizure": 1, "recovery": 1}[mode]
@@ -217,8 +222,12 @@ class RapidTriageRunTests(unittest.TestCase):
                 Path(summary_payload["outputs"]["files_extract_manifest"]).resolve(),
                 files_extract_manifest_path.resolve(),
             )
+            self.assertEqual(Path(summary_payload["outputs"]["timeline"]).resolve(), timeline_path.resolve())
+            self.assertEqual(Path(summary_payload["outputs"]["timeline_report"]).resolve(), timeline_report_path.resolve())
             self.assertEqual(Path(summary_payload["outputs"]["summary"]).resolve(), summary_path.resolve())
             self.assertEqual(Path(summary_payload["outputs"]["report"]).resolve(), report_path.resolve())
+            self.assertGreaterEqual(summary_payload["summary"]["timeline_event_count"], 1)
+            self.assertGreaterEqual(timeline_payload["summary"]["event_count"], 1)
             self.assertIn("recent_file_candidates", summary_payload["highlights"])
             self.assertIn("large_file_candidates", summary_payload["highlights"])
 
@@ -233,9 +242,12 @@ class RapidTriageRunTests(unittest.TestCase):
 
             report_text = report_path.read_text(encoding="utf-8")
             self.assertIn(mode, report_text.lower())
-            self.assertIn("files-extract", report_text.lower())
-            self.assertIn("docs-extract", report_text.lower())
-            self.assertIn("largest file candidates", report_text.lower())
+            self.assertIn("case overview", report_text.lower())
+            self.assertIn("key hits", report_text.lower())
+            self.assertIn("matched rules", report_text.lower())
+            self.assertIn("artifact summary", report_text.lower())
+            self.assertIn("timeline", report_text.lower())
+            self.assertIn("extract results", report_text.lower())
 
 
 if __name__ == "__main__":
