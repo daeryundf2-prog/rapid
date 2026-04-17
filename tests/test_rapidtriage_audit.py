@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from rapidtriage.cli import main
+from rapidtriage.core.run import run_triage_mode
 from rapidtriage.core.audit import audit_path_for
 from tests.test_rapidtriage_run import build_run_fixture
 
@@ -76,6 +77,22 @@ class RapidTriageAuditTests(unittest.TestCase):
             self.assertIn("manifest", output_labels)
             self.assertTrue(any(label.startswith("docs-extract:") for label in output_labels))
             self.assertTrue(any(label.startswith("files-extract:") for label in output_labels))
+
+    def test_run_summary_json_matches_returned_payload_including_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+
+            payload = run_triage_mode(root, mode="fraud", output_dir=output_dir)
+
+            summary_path = output_dir / "rapidtriage-run-summary.json"
+            self.assertTrue(summary_path.is_file())
+
+            summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary_payload, payload)
+            self.assertEqual(summary_payload["audit"], str((output_dir / "rapidtriage-run-audit.json").resolve()))
 
 
 if __name__ == "__main__":
