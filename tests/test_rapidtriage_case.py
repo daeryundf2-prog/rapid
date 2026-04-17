@@ -300,7 +300,9 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                 "source": "artifacts",
                 "event_type": "browser-download",
                 "path": "/cases/case-001/Users/alice/Downloads/evidence.zip",
+                "input_file": "/cases/case-001/rapidtriage-artifacts-browser.json",
                 "summary": "Browser download: evidence.zip",
+                "details": {},
             }
 
             write_json(
@@ -309,6 +311,15 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                     "command": "timeline",
                     "generated_at": "2024-03-03T00:00:00+00:00",
                     "root": "/cases/case-001",
+                    "inputs": {"files": [], "docs": [], "artifacts": []},
+                    "summary": {
+                        "input_file_count": 0,
+                        "event_count": 1,
+                        "source_counts": {"artifacts": 1},
+                        "event_type_counts": {"browser-download": 1},
+                        "earliest_event_at": tracked_event["timestamp"],
+                        "latest_event_at": tracked_event["timestamp"],
+                    },
                     "events": [tracked_event],
                 },
             )
@@ -334,13 +345,24 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                     "command": "timeline",
                     "generated_at": "2024-03-03T00:05:00+00:00",
                     "root": "/cases/case-001",
+                    "inputs": {"files": [], "docs": [], "artifacts": []},
+                    "summary": {
+                        "input_file_count": 0,
+                        "event_count": 2,
+                        "source_counts": {"artifacts": 2},
+                        "event_type_counts": {"browser-download": 1, "prelude": 1},
+                        "earliest_event_at": "2024-03-01T08:40:00+00:00",
+                        "latest_event_at": tracked_event["timestamp"],
+                    },
                     "events": [
                         {
                             "timestamp": "2024-03-01T08:40:00+00:00",
                             "source": "artifacts",
                             "event_type": "prelude",
                             "path": "/cases/case-001/Users/alice/Desktop/prelude.txt",
+                            "input_file": "/cases/case-001/rapidtriage-artifacts-browser.json",
                             "summary": "Prelude event",
+                            "details": {},
                         },
                         tracked_event,
                     ],
@@ -382,12 +404,25 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                 artifacts_json,
                 {
                     "command": "artifacts",
+                    "kind": "browser",
                     "generated_at": "2026-04-11T12:04:00+00:00",
+                    "root": "/cases/case-001",
+                    "provider": {
+                        "name": "windows-browser-artifacts",
+                        "description": "Windows browser history/downloads collector",
+                        "target_platform": "windows",
+                        "supported": True
+                    },
+                    "summary": {
+                        "artifact_count": 1,
+                        "artifact_type_counts": {"browser-history-downloads": 1}
+                    },
                     "artifacts": [
                         {
                             "provider": "windows-browser-artifacts",
                             "artifact_type": "browser-history-downloads",
                             "path": "/cases/case-001/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                            "supported": True,
                             "details": {"history": [history_row]},
                         }
                     ],
@@ -415,12 +450,25 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                 artifacts_json,
                 {
                     "command": "artifacts",
+                    "kind": "browser",
                     "generated_at": "2026-04-11T12:09:00+00:00",
+                    "root": "/cases/case-001",
+                    "provider": {
+                        "name": "windows-browser-artifacts",
+                        "description": "Windows browser history/downloads collector",
+                        "target_platform": "windows",
+                        "supported": True
+                    },
+                    "summary": {
+                        "artifact_count": 1,
+                        "artifact_type_counts": {"browser-history-downloads": 1}
+                    },
                     "artifacts": [
                         {
                             "provider": "windows-browser-artifacts",
                             "artifact_type": "browser-history-downloads",
                             "path": "/cases/case-001/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                            "supported": True,
                             "details": {
                                 "history": [
                                     {

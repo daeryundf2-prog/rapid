@@ -12,7 +12,7 @@ RULE_SAMPLE_PATH = REPO_ROOT / "docs" / "samples" / "rapidtriage-rules.sample.ya
 class RapidTriageRuleEngineDocsTests(unittest.TestCase):
     def test_rule_engine_doc_exists_and_covers_requested_conditions(self) -> None:
         text = RULE_ENGINE_DOC.read_text(encoding="utf-8")
-        self.assertIn("rule engine and IOC lookup plan", text)
+        self.assertIn("rule engine and IOC lookup", text)
         self.assertIn("matched_rules", text)
         self.assertIn("ioc_hits", text)
         for token in ("ext", "path", "date", "artifact", "keyword", "hash", "domain", "url"):

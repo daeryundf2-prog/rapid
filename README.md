@@ -184,7 +184,7 @@ Current structure:
 - `rapidtriage/schemas/`: JSON Schema contracts for `manifest`, `docs`, `files`, `extract`, `artifacts`, and `run-summary`.
 - `docs/rapidtriage-output-schema.md`: human-readable contract summary and sample index.
 - `docs/samples/`: representative sample JSON outputs for every published command family.
-- `docs/rapidtriage-rule-engine.md`: planned additive contract for rule-engine / IOC lookup work.
+- `docs/rapidtriage-rule-engine.md`: current rule-engine / IOC lookup contract and sample layout.
 - `docs/samples/rapidtriage-rules.sample.yaml`: sample YAML rule file covering ext/path/date/artifact/keyword/hash/domain/url conditions.
 
 CLI help now includes copy/paste examples:
@@ -253,7 +253,29 @@ Schema and sample references:
 - `artifacts`: `rapidtriage/schemas/artifacts.schema.json` + `docs/samples/rapidtriage-artifacts.sample.json`
 - `run-summary`: `rapidtriage/schemas/run-summary.schema.json` + `docs/samples/rapidtriage-run-summary.sample.json`
 - `timeline`: `rapidtriage/schemas/timeline.schema.json`
-- `rule-engine plan`: `docs/rapidtriage-rule-engine.md` + `docs/samples/rapidtriage-rules.sample.yaml`
+- `rule-engine`: `docs/rapidtriage-rule-engine.md` + `docs/samples/rapidtriage-rules.sample.yaml`
+
+Implemented:
+
+- `docs` searches `txt`, `pdf`, and `docx` bodies for keywords and writes JSON output plus audit sidecars.
+- `files` performs metadata-only triage over names, paths, extensions, sizes, and mtimes, and categorizes candidates into `documents`, `archives`, `databases`, `executables`, and recovery-oriented `images`.
+- `extract` copies selected `files` or `docs` results into an output directory with overwrite guards, size/count limits, hashes, and manifest/audit output.
+- `artifacts` exposes dedicated collectors for `browser` and `recent-files` and writes standalone JSON output.
+- `run` orchestrates `manifest`, `docs`, `files`, `extract`, `artifacts`, and `timeline` for `seizure`, `fraud`, `hacking`, and `recovery`.
+- `timeline` merges `files`, `docs`, and `artifacts` JSON into chronological events and writes JSON plus markdown.
+- `case` stores bookmarks only from implemented `files`, `docs`, `artifacts`, and `timeline` outputs, validates source schemas, and persists stable `reference` + minimal `snapshot` records instead of copying full source rows.
+- `report` rendering is assembled from a normalized run-report context built from run summary, artifacts, timeline, and extract outputs.
+- `rules` / IOC lookup are implemented additively; matching metadata is appended without breaking existing output shapes.
+
+Experimental:
+
+- `compare` is not a current producer CLI. `case` rejects `compare` JSON sources, and `run`/report output only reserve a placeholder section for future compare findings.
+- `report` keeps an optional compare slot in markdown/context so a future compare producer can attach without reworking the template.
+
+Planned:
+
+- a dedicated `compare` producer/CLI with JSON schema and end-to-end case/report integration
+- any future case source beyond `files`, `docs`, `artifacts`, and `timeline`
 
 Current `docs` support:
 - `txt`
@@ -304,7 +326,8 @@ Current `timeline` behavior:
 
 Current `case` behavior:
 - saves and reloads case-level bookmarks from implemented `files`, `docs`, `artifacts`, and `timeline` JSON outputs.
-- requires command-specific row pointers via `--pointer` (`/candidates/<index>`, `/results/<index>`, `/artifacts/<index>`, `/events/<index>`) and stores the original source file, command, timestamp, path, tags, and analyst note.
+- requires command-specific row pointers via `--pointer` (`/candidates/<index>`, `/results/<index>`, `/artifacts/<index>`, `/events/<index>`).
+- stores bookmark `reference` metadata (`command`, source file, pointer, root, stable key) plus a minimal `snapshot` (`path`, `hash`, `timestamp`, `artifact_key`, `summary`) instead of duplicating the full source row.
 - reserves `compare` integration for a future producer/CLI instead of treating it as a current workflow contract.
 - supports stable bookmark updates through `--bookmark-id` and prints the saved case JSON with `--show`.
 - validates against `rapidtriage/schemas/case.schema.json`.

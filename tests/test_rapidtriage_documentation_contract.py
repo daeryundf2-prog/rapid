@@ -39,6 +39,15 @@ class RapidTriageDocumentationContractTests(unittest.TestCase):
         self.assertIn("rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud", readme)
         self.assertIn("rapidtriage artifacts . --kind browser", readme)
 
+    def test_readme_separates_implemented_experimental_and_planned_contracts(self) -> None:
+        readme = README_PATH.read_text(encoding="utf-8")
+        self.assertIn("Implemented:", readme)
+        self.assertIn("Experimental:", readme)
+        self.assertIn("Planned:", readme)
+        self.assertIn("stores bookmarks only from implemented `files`, `docs`, `artifacts`, and `timeline` outputs", readme)
+        self.assertIn("`compare` is not a current producer CLI", readme)
+        self.assertIn("a dedicated `compare` producer/CLI", readme)
+
     def test_manifest_sample_includes_windows_collectors(self) -> None:
         payload = self.load_sample("rapidtriage-manifest.sample.json")
         self.assertEqual(payload["root"], "/cases/case-001")

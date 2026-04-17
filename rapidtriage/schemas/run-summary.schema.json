@@ -41,6 +41,9 @@
     "output_dir": {
       "type": "string"
     },
+    "audit": {
+      "type": "string"
+    },
     "profile": {
       "type": "object",
       "additionalProperties": false,

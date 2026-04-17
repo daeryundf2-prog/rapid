@@ -1,6 +1,6 @@
-# rapidtriage rule engine and IOC lookup plan
+# rapidtriage rule engine and IOC lookup
 
-This document captures the planned contract for the `rapidtriage` rule-engine and IOC lookup addition requested for the current workstream. The implementation is intended to be **additive**: existing command outputs keep their current shape, while rule/IOC metadata is added through new fields.
+This document captures the current contract for `rapidtriage` rule-engine and IOC lookup support. The implementation is **additive**: existing command outputs keep their current shape, while rule/IOC metadata is added through new fields.
 
 The canonical sample rule file lives at `docs/samples/rapidtriage-rules.sample.yaml`.
 
