@@ -70,24 +70,6 @@ CASE_SOURCE_SCHEMAS = {
     "timeline": "timeline.schema.json",
 }
 
-CASE_SOURCE_ROWS = {
-    "files": "candidates",
-    "docs": "results",
-    "artifacts": "artifacts",
-    "timeline": "events",
-}
-
-EXPERIMENTAL_CASE_SOURCE_ROWS = {
-    "compare": "results",
-}
-
-CASE_SOURCE_SCHEMAS = {
-    "files": "files.schema.json",
-    "docs": "docs.schema.json",
-    "artifacts": "artifacts.schema.json",
-    "timeline": "timeline.schema.json",
-}
-
 
 def load_case_payload(path: Path) -> dict[str, object]:
     resolved = path.expanduser().resolve()
@@ -259,13 +241,6 @@ def upsert_bookmark(
             "bookmark_id": bookmark_id.strip() if bookmark_id else stable_key,
             "created_at": now,
             "updated_at": now,
-            "source_command": source_command or "unknown",
-            "source_file": str(source_path),
-            "source_pointer": source_pointer,
-            "source_root": str(source_payload.get("root")) if source_payload.get("root") else None,
-            "source_path": extracted_path,
-            "source_summary": summary,
-            "source_timestamp": find_first_string(item, TIMESTAMP_KEYS),
             "summary": summary,
             "tags": merged_tags,
             "note": note or "",
@@ -284,13 +259,6 @@ def upsert_bookmark(
     existing["bookmark_id"] = existing_bookmark_id
     existing["created_at"] = created_at
     existing["updated_at"] = now
-    existing["source_command"] = source_command or str(existing.get("source_command") or "unknown")
-    existing["source_file"] = str(source_path)
-    existing["source_pointer"] = source_pointer
-    existing["source_root"] = str(source_payload.get("root")) if source_payload.get("root") else existing.get("source_root")
-    existing["source_path"] = extracted_path
-    existing["source_summary"] = summary
-    existing["source_timestamp"] = find_first_string(item, TIMESTAMP_KEYS)
     existing["summary"] = summary
     existing["reference"] = reference
     existing["snapshot"] = snapshot
@@ -339,10 +307,8 @@ def resolve_case_source_row(
         raise CaseBookmarkError(f"unsupported bookmark source command {source_command!r}; expected one of: {supported}")
 
     tokens = split_json_pointer(source_pointer)
-    if len(tokens) != 2 or tokens[0] != collection_name:
-        raise CaseBookmarkError(
-            f"{source_command} bookmarks require a row pointer in the form '/{collection_name}/<index>'"
-        )
+    if len(tokens) < 2 or tokens[0] != collection_name:
+        raise CaseBookmarkError(f"{source_command} bookmarks require a row pointer rooted at '/{collection_name}/<index>'")
 
     collection = payload.get(collection_name)
     if not isinstance(collection, list):
@@ -360,7 +326,20 @@ def resolve_case_source_row(
 
     if not isinstance(item, dict):
         raise CaseBookmarkError("bookmark pointer must resolve to a JSON object row")
-    return item
+
+    if len(tokens) == 2:
+        return item
+
+    if source_command != "artifacts":
+        raise CaseBookmarkError(
+            f"{source_command} bookmarks require a row pointer in the form '/{collection_name}/<index>'"
+        )
+
+    nested_pointer = "/" + "/".join(tokens[2:])
+    nested_item = resolve_json_pointer(item, nested_pointer)
+    if not isinstance(nested_item, dict):
+        raise CaseBookmarkError("artifact bookmark pointer must resolve to a JSON object row")
+    return nested_item
 
 
 def split_json_pointer(pointer: str) -> list[str]:

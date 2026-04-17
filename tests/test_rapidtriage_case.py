@@ -181,15 +181,18 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
 
             second = payload["bookmarks"][1]
             self.assertEqual(second["bookmark_id"], "bm-file-1")
-            self.assertEqual(second["source_command"], "files")
-            self.assertEqual(Path(second["source_file"]).resolve(), files_json.resolve())
-            self.assertEqual(second["source_pointer"], "/candidates/0")
+            self.assertEqual(second["reference"]["command"], "files")
+            self.assertEqual(Path(second["reference"]["file"]).resolve(), files_json.resolve())
+            self.assertEqual(second["reference"]["pointer"], "/candidates/0")
+            self.assertTrue(second["reference"]["stable_key"].startswith("bookmark-"))
             self.assertEqual(second["tags"], ["files"])
             self.assertEqual(second["note"], "Review the underlying file.")
-            self.assertEqual(second["item"], file_candidate)
-            self.assertEqual(second["source_path"], file_candidate["path"])
-            self.assertEqual(second["source_summary"], file_candidate["name"])
-            self.assertEqual(second["source_timestamp"], file_candidate["modified_at"])
+            self.assertEqual(second["snapshot"]["path"], file_candidate["path"])
+            self.assertIsNone(second["snapshot"]["hash"])
+            self.assertIsNone(second["snapshot"]["artifact_key"])
+            self.assertEqual(second["snapshot"]["summary"], file_candidate["name"])
+            self.assertEqual(second["snapshot"]["timestamp"], file_candidate["modified_at"])
+            self.assertNotIn("item", second)
 
             exit_code, show_output = run_cli("case", str(case_json), "--show")
 
