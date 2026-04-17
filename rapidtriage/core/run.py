@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Mapping, Sequence, Union
 
-from .audit import audit_path_for, write_audit_record
+from .audit import write_audit_record
 from .artifacts import run_artifact_collection
 from .docs import build_manifest, run_docs_search, write_result
 from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, run_extract
@@ -215,6 +215,8 @@ def run_triage_mode(
         },
         rule_set=rule_set,
     )
+    audit_output = output_dir / "rapidtriage-run-audit.json"
+    summary_payload["audit"] = str(audit_output)
     report_path.write_text(
         build_markdown_report(
             summary_payload,
@@ -228,7 +230,6 @@ def run_triage_mode(
         encoding="utf-8",
     )
     write_result(summary_payload, summary_path)
-    audit_output = output_dir / "rapidtriage-run-audit.json"
     write_audit_record(
         audit_output,
         command="run",
@@ -266,7 +267,6 @@ def run_triage_mode(
             ],
         ],
     )
-    summary_payload["audit"] = str(audit_output)
     return summary_payload
 
 
