@@ -145,15 +145,19 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
 
             first = payload["bookmarks"][0]
             self.assertEqual(first["bookmark_id"], "bm-timeline-1")
-            self.assertEqual(first["source_command"], "timeline")
-            self.assertEqual(Path(first["source_file"]).resolve(), timeline_json.resolve())
-            self.assertEqual(first["source_pointer"], "/events/0")
+            self.assertEqual(first["reference"]["command"], "timeline")
+            self.assertEqual(Path(first["reference"]["file"]).resolve(), timeline_json.resolve())
+            self.assertEqual(first["reference"]["pointer"], "/events/0")
+            self.assertIsInstance(first["reference"]["stable_key"], str)
+            self.assertTrue(first["reference"]["stable_key"].startswith("bookmark-"))
             self.assertEqual(first["tags"], ["timeline", "download"])
             self.assertEqual(first["note"], "Review this artifact first.")
-            self.assertEqual(first["item"], timeline_event)
-            self.assertEqual(first["source_path"], timeline_event["path"])
-            self.assertEqual(first["source_summary"], timeline_event["summary"])
-            self.assertEqual(first["source_timestamp"], timeline_event["timestamp"])
+            self.assertEqual(first["snapshot"]["path"], timeline_event["path"])
+            self.assertIsNone(first["snapshot"]["hash"])
+            self.assertEqual(first["snapshot"]["artifact_key"], timeline_event["event_type"])
+            self.assertEqual(first["snapshot"]["summary"], timeline_event["summary"])
+            self.assertEqual(first["snapshot"]["timestamp"], timeline_event["timestamp"])
+            self.assertNotIn("item", first)
 
             exit_code, output = run_cli(
                 "case",
@@ -177,15 +181,18 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
 
             second = payload["bookmarks"][1]
             self.assertEqual(second["bookmark_id"], "bm-file-1")
-            self.assertEqual(second["source_command"], "files")
-            self.assertEqual(Path(second["source_file"]).resolve(), files_json.resolve())
-            self.assertEqual(second["source_pointer"], "/candidates/0")
+            self.assertEqual(second["reference"]["command"], "files")
+            self.assertEqual(Path(second["reference"]["file"]).resolve(), files_json.resolve())
+            self.assertEqual(second["reference"]["pointer"], "/candidates/0")
+            self.assertTrue(second["reference"]["stable_key"].startswith("bookmark-"))
             self.assertEqual(second["tags"], ["files"])
             self.assertEqual(second["note"], "Review the underlying file.")
-            self.assertEqual(second["item"], file_candidate)
-            self.assertEqual(second["source_path"], file_candidate["path"])
-            self.assertEqual(second["source_summary"], file_candidate["name"])
-            self.assertEqual(second["source_timestamp"], file_candidate["modified_at"])
+            self.assertEqual(second["snapshot"]["path"], file_candidate["path"])
+            self.assertIsNone(second["snapshot"]["hash"])
+            self.assertIsNone(second["snapshot"]["artifact_key"])
+            self.assertEqual(second["snapshot"]["summary"], file_candidate["name"])
+            self.assertEqual(second["snapshot"]["timestamp"], file_candidate["modified_at"])
+            self.assertNotIn("item", second)
 
             exit_code, show_output = run_cli("case", str(case_json), "--show")
 
@@ -281,6 +288,170 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
 
             self.assertEqual(exc.exception.code, 2)
             self.assertIn("files source JSON failed schema validation", stderr.getvalue())
+
+    def test_case_command_uses_stable_key_when_source_pointer_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            case_json = root / "case-bookmarks.json"
+            timeline_json = root / "timeline.json"
+
+            tracked_event = {
+                "timestamp": "2024-03-01T08:45:00+00:00",
+                "source": "artifacts",
+                "event_type": "browser-download",
+                "path": "/cases/case-001/Users/alice/Downloads/evidence.zip",
+                "summary": "Browser download: evidence.zip",
+            }
+
+            write_json(
+                timeline_json,
+                {
+                    "command": "timeline",
+                    "generated_at": "2024-03-03T00:00:00+00:00",
+                    "root": "/cases/case-001",
+                    "events": [tracked_event],
+                },
+            )
+
+            exit_code, output = run_cli(
+                "case",
+                str(case_json),
+                "--source",
+                str(timeline_json),
+                "--pointer",
+                "/events/0",
+            )
+
+            self.assertEqual(exit_code, 0, output)
+            payload = json.loads(case_json.read_text(encoding="utf-8"))
+            bookmark = payload["bookmarks"][0]
+            original_bookmark_id = bookmark["bookmark_id"]
+            self.assertEqual(original_bookmark_id, bookmark["reference"]["stable_key"])
+
+            write_json(
+                timeline_json,
+                {
+                    "command": "timeline",
+                    "generated_at": "2024-03-03T00:05:00+00:00",
+                    "root": "/cases/case-001",
+                    "events": [
+                        {
+                            "timestamp": "2024-03-01T08:40:00+00:00",
+                            "source": "artifacts",
+                            "event_type": "prelude",
+                            "path": "/cases/case-001/Users/alice/Desktop/prelude.txt",
+                            "summary": "Prelude event",
+                        },
+                        tracked_event,
+                    ],
+                },
+            )
+
+            exit_code, output = run_cli(
+                "case",
+                str(case_json),
+                "--source",
+                str(timeline_json),
+                "--pointer",
+                "/events/1",
+            )
+
+            self.assertEqual(exit_code, 0, output)
+            payload = json.loads(case_json.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["bookmarks"]), 1)
+            bookmark = payload["bookmarks"][0]
+            self.assertEqual(bookmark["bookmark_id"], original_bookmark_id)
+            self.assertEqual(bookmark["reference"]["pointer"], "/events/1")
+            self.assertEqual(bookmark["snapshot"]["path"], tracked_event["path"])
+            self.assertEqual(bookmark["snapshot"]["timestamp"], tracked_event["timestamp"])
+
+    def test_case_command_uses_artifact_key_for_rows_without_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            case_json = root / "case-bookmarks.json"
+            artifacts_json = root / "artifacts.json"
+
+            history_row = {
+                "url": "https://portal.example.local/incident/42",
+                "title": "Incident Portal",
+                "visit_count": 3,
+                "last_visited_at": "2026-04-10T09:30:00+00:00",
+            }
+
+            write_json(
+                artifacts_json,
+                {
+                    "command": "artifacts",
+                    "generated_at": "2026-04-11T12:04:00+00:00",
+                    "artifacts": [
+                        {
+                            "provider": "windows-browser-artifacts",
+                            "artifact_type": "browser-history-downloads",
+                            "path": "/cases/case-001/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                            "details": {"history": [history_row]},
+                        }
+                    ],
+                },
+            )
+
+            exit_code, output = run_cli(
+                "case",
+                str(case_json),
+                "--source",
+                str(artifacts_json),
+                "--pointer",
+                "/artifacts/0/details/history/0",
+            )
+
+            self.assertEqual(exit_code, 0, output)
+            payload = json.loads(case_json.read_text(encoding="utf-8"))
+            bookmark = payload["bookmarks"][0]
+            stable_key = bookmark["reference"]["stable_key"]
+            self.assertEqual(bookmark["snapshot"]["path"], None)
+            self.assertEqual(bookmark["snapshot"]["artifact_key"], history_row["url"])
+            self.assertEqual(bookmark["snapshot"]["timestamp"], history_row["last_visited_at"])
+
+            write_json(
+                artifacts_json,
+                {
+                    "command": "artifacts",
+                    "generated_at": "2026-04-11T12:09:00+00:00",
+                    "artifacts": [
+                        {
+                            "provider": "windows-browser-artifacts",
+                            "artifact_type": "browser-history-downloads",
+                            "path": "/cases/case-001/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                            "details": {
+                                "history": [
+                                    {
+                                        "url": "https://portal.example.local/incident/41",
+                                        "title": "Incident Portal 41",
+                                        "visit_count": 1,
+                                        "last_visited_at": "2026-04-10T09:20:00+00:00",
+                                    },
+                                    history_row,
+                                ]
+                            },
+                        }
+                    ],
+                },
+            )
+
+            exit_code, output = run_cli(
+                "case",
+                str(case_json),
+                "--source",
+                str(artifacts_json),
+                "--pointer",
+                "/artifacts/0/details/history/1",
+            )
+
+            self.assertEqual(exit_code, 0, output)
+            payload = json.loads(case_json.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["bookmarks"]), 1)
+            bookmark = payload["bookmarks"][0]
+            self.assertEqual(bookmark["bookmark_id"], stable_key)
+            self.assertEqual(bookmark["reference"]["pointer"], "/artifacts/0/details/history/1")
 
 
 if __name__ == "__main__":

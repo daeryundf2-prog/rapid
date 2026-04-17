@@ -68,13 +68,11 @@
           "bookmark_id",
           "created_at",
           "updated_at",
-          "source_command",
-          "source_file",
-          "source_pointer",
           "summary",
           "tags",
           "note",
-          "item"
+          "reference",
+          "snapshot"
         ],
         "properties": {
           "bookmark_id": {
@@ -88,39 +86,6 @@
             "type": "string",
             "format": "date-time"
           },
-          "source_command": {
-            "type": "string"
-          },
-          "source_file": {
-            "type": "string"
-          },
-          "source_pointer": {
-            "type": "string"
-          },
-          "source_root": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "source_path": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "source_summary": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "source_timestamp": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "summary": {
             "type": "string"
           },
@@ -133,9 +98,76 @@
           "note": {
             "type": "string"
           },
-          "item": {
+          "reference": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": false,
+            "required": [
+              "command",
+              "file",
+              "pointer",
+              "root",
+              "stable_key"
+            ],
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "pointer": {
+                "type": "string"
+              },
+              "root": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stable_key": {
+                "type": "string"
+              }
+            }
+          },
+          "snapshot": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "hash",
+              "timestamp",
+              "artifact_key",
+              "summary"
+            ],
+            "properties": {
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hash": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "timestamp": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "artifact_key": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "summary": {
+                "type": "string"
+              }
+            }
           }
         }
       }

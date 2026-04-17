@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -33,6 +34,26 @@ TIMESTAMP_KEYS = (
     "visited_at",
     "created_at",
     "accessed_at",
+)
+HASH_KEYS = (
+    "sha256",
+    "sha1",
+    "md5",
+    "hash",
+)
+ARTIFACT_KEYS = (
+    "artifact_key",
+    "artifact_id",
+    "artifact_type",
+    "event_type",
+    "url",
+    "source_url",
+    "target_path",
+    "tab_url",
+    "name",
+    "title",
+    "status",
+    "provider",
 )
 
 CASE_SOURCE_ROWS = {
@@ -180,56 +201,86 @@ def upsert_bookmark(
     if not isinstance(bookmarks, list):
         raise CaseBookmarkError("case payload bookmarks must be a list")
 
-    existing = find_existing_bookmark(bookmarks, bookmark_id=bookmark_id, source_path=source_path, source_pointer=source_pointer)
+    source_command = str(source_payload.get("command") or "unknown")
     now = now_iso()
     extracted_path = find_first_string(item, PATH_KEYS)
+    source_hash = find_first_string(item, HASH_KEYS)
+    source_timestamp = find_first_string(item, TIMESTAMP_KEYS)
+    artifact_key = find_artifact_key(item)
     summary = build_bookmark_summary(item, extracted_path, source_pointer)
+    stable_key = build_stable_bookmark_key(
+        source_command=source_command,
+        source_file=str(source_path),
+        source_path=extracted_path,
+        source_hash=source_hash,
+        source_timestamp=source_timestamp,
+        artifact_key=artifact_key,
+        summary=summary,
+    )
+    existing = find_existing_bookmark(
+        bookmarks,
+        bookmark_id=bookmark_id,
+        stable_key=stable_key,
+        source_path=source_path,
+        source_pointer=source_pointer,
+    )
     merged_tags = normalize_tags(tags)
+    reference = build_bookmark_reference(
+        source_command=source_command,
+        source_file=str(source_path),
+        source_pointer=source_pointer,
+        source_root=str(source_payload.get("root")) if source_payload.get("root") else None,
+        stable_key=stable_key,
+    )
+    snapshot = build_bookmark_snapshot(
+        source_path=extracted_path,
+        source_hash=source_hash,
+        source_timestamp=source_timestamp,
+        artifact_key=artifact_key,
+        summary=summary,
+    )
 
     if existing is None:
         record = {
-            "bookmark_id": bookmark_id.strip() if bookmark_id else next_bookmark_id(bookmarks),
+            "bookmark_id": bookmark_id.strip() if bookmark_id else stable_key,
             "created_at": now,
             "updated_at": now,
-            "source_command": source_command or "unknown",
-            "source_file": str(source_path),
-            "source_pointer": source_pointer,
-            "source_root": str(source_payload.get("root")) if source_payload.get("root") else None,
-            "source_path": extracted_path,
-            "source_summary": summary,
-            "source_timestamp": find_first_string(item, TIMESTAMP_KEYS),
             "summary": summary,
             "tags": merged_tags,
             "note": note or "",
-            "item": item,
+            "reference": reference,
+            "snapshot": snapshot,
         }
         bookmarks.append(record)
         return
 
+    existing_bookmark_id = bookmark_id.strip() if bookmark_id else str(existing.get("bookmark_id") or "").strip() or stable_key
+    prior_tags = normalize_tags(existing.get("tags", []))
+    created_at_value = existing.get("created_at")
+    created_at = str(created_at_value) if isinstance(created_at_value, str) and created_at_value else now
+    prior_note = str(existing.get("note") or "")
+    existing.clear()
+    existing["bookmark_id"] = existing_bookmark_id
+    existing["created_at"] = created_at
     existing["updated_at"] = now
-    existing["source_command"] = source_command or str(existing.get("source_command") or "unknown")
-    existing["source_file"] = str(source_path)
-    existing["source_pointer"] = source_pointer
-    existing["source_root"] = str(source_payload.get("root")) if source_payload.get("root") else existing.get("source_root")
-    existing["source_path"] = extracted_path
-    existing["source_summary"] = summary
-    existing["source_timestamp"] = find_first_string(item, TIMESTAMP_KEYS)
     existing["summary"] = summary
-    existing["item"] = item
+    existing["reference"] = reference
+    existing["snapshot"] = snapshot
     if merged_tags:
-        previous_tags = existing.get("tags")
-        prior = previous_tags if isinstance(previous_tags, list) else []
-        existing["tags"] = normalize_tags([*prior, *merged_tags])
+        existing["tags"] = normalize_tags([*prior_tags, *merged_tags])
     else:
-        existing["tags"] = normalize_tags(existing.get("tags", []))
+        existing["tags"] = prior_tags
     if note is not None:
         existing["note"] = note
+    else:
+        existing["note"] = prior_note
 
 
 def find_existing_bookmark(
     bookmarks: list[object],
     *,
     bookmark_id: str | None,
+    stable_key: str,
     source_path: Path,
     source_pointer: str,
 ) -> dict[str, object] | None:
@@ -239,6 +290,9 @@ def find_existing_bookmark(
         if not isinstance(item, dict):
             continue
         if normalized_bookmark_id and item.get("bookmark_id") == normalized_bookmark_id:
+            return item
+        reference = item.get("reference")
+        if isinstance(reference, dict) and reference.get("stable_key") == stable_key:
             return item
         if item.get("source_file") == normalized_source_path and item.get("source_pointer") == source_pointer:
             return item
@@ -321,7 +375,12 @@ def build_case_summary(bookmarks: object) -> dict[str, object]:
     source_command_counts: dict[str, int] = {}
     tagged_bookmark_count = 0
     for bookmark in rows:
-        source_command = str(bookmark.get("source_command") or "unknown")
+        reference = bookmark.get("reference")
+        source_command = (
+            str(reference.get("command") or "unknown")
+            if isinstance(reference, dict)
+            else str(bookmark.get("source_command") or "unknown")
+        )
         source_command_counts[source_command] = source_command_counts.get(source_command, 0) + 1
         raw_tags = bookmark.get("tags")
         tags = normalize_tags(raw_tags if isinstance(raw_tags, list) else [])
@@ -363,6 +422,40 @@ def next_bookmark_id(bookmarks: list[object]) -> str:
         index += 1
 
 
+def build_bookmark_reference(
+    *,
+    source_command: str,
+    source_file: str,
+    source_pointer: str,
+    source_root: str | None,
+    stable_key: str,
+) -> dict[str, str | None]:
+    return {
+        "command": source_command,
+        "file": source_file,
+        "pointer": source_pointer,
+        "root": source_root,
+        "stable_key": stable_key,
+    }
+
+
+def build_bookmark_snapshot(
+    *,
+    source_path: str | None,
+    source_hash: str | None,
+    source_timestamp: str | None,
+    artifact_key: str | None,
+    summary: str,
+) -> dict[str, str | None]:
+    return {
+        "path": source_path,
+        "hash": source_hash,
+        "timestamp": source_timestamp,
+        "artifact_key": artifact_key,
+        "summary": summary,
+    }
+
+
 def find_first_string(item: object, keys: tuple[str, ...]) -> str | None:
     if isinstance(item, dict):
         for key in keys:
@@ -376,6 +469,35 @@ def find_first_string(item: object, keys: tuple[str, ...]) -> str | None:
                 if isinstance(value, str) and value:
                     return value
     return None
+
+
+def find_artifact_key(item: object) -> str | None:
+    return find_first_string(item, ARTIFACT_KEYS)
+
+
+def build_stable_bookmark_key(
+    *,
+    source_command: str,
+    source_file: str,
+    source_path: str | None,
+    source_hash: str | None,
+    source_timestamp: str | None,
+    artifact_key: str | None,
+    summary: str,
+) -> str:
+    identity: dict[str, str | None] = {
+        "source_command": source_command,
+        "source_file": source_file,
+        "path": source_path,
+        "hash": source_hash,
+        "timestamp": source_timestamp,
+        "artifact_key": artifact_key,
+    }
+    if not any(identity[key] for key in ("path", "hash", "timestamp", "artifact_key")):
+        identity["summary"] = summary
+    serialized = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+    return f"bookmark-{digest}"
 
 
 def build_bookmark_summary(item: Mapping[str, object], source_path: str | None, source_pointer: str) -> str:
