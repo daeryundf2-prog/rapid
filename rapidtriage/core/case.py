@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .docs import write_result
+from .schema_validation import SchemaValidationError, load_schema, validate
 
 
 class CaseBookmarkError(ValueError):
@@ -43,6 +44,13 @@ CASE_SOURCE_ROWS = {
 
 EXPERIMENTAL_CASE_SOURCE_ROWS = {
     "compare": "results",
+}
+
+CASE_SOURCE_SCHEMAS = {
+    "files": "files.schema.json",
+    "docs": "docs.schema.json",
+    "artifacts": "artifacts.schema.json",
+    "timeline": "timeline.schema.json",
 }
 
 
@@ -147,6 +155,11 @@ def load_source_payload(path: Path) -> dict[str, object]:
     if command not in CASE_SOURCE_ROWS:
         supported = ", ".join(sorted(CASE_SOURCE_ROWS))
         raise CaseBookmarkError(f"unsupported bookmark source command {command!r}; expected one of: {supported}")
+    schema_name = CASE_SOURCE_SCHEMAS[command]
+    try:
+        validate(payload, load_schema(schema_name))
+    except SchemaValidationError as exc:
+        raise CaseBookmarkError(f"{command} source JSON failed schema validation: {exc}") from exc
     return payload
 
 

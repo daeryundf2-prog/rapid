@@ -24,6 +24,41 @@ def run_cli(*args: str) -> tuple[int, str]:
 
 
 class RapidTriageCaseCommandTests(unittest.TestCase):
+    def make_files_payload(self) -> dict[str, Any]:
+        return {
+            "command": "files",
+            "generated_at": "2024-03-03T00:00:00+00:00",
+            "root": "/cases/case-001",
+            "filters": {
+                "categories": [],
+                "name_contains": [],
+                "path_contains": [],
+                "extensions": [],
+                "modified_after": None,
+                "modified_before": None,
+                "limit": 0,
+            },
+            "summary": {
+                "scanned_file_count": 1,
+                "candidate_count": 1,
+                "category_counts": {"documents": 1},
+                "newest_modified_at": "2024-03-02T09:10:11+00:00",
+                "oldest_modified_at": "2024-03-02T09:10:11+00:00",
+            },
+            "candidates": [
+                {
+                    "modified_at": "2024-03-02T09:10:11+00:00",
+                    "path": "/cases/case-001/Users/alice/Documents/incident-notes.txt",
+                    "name": "incident-notes.txt",
+                    "extension": ".txt",
+                    "size": 128,
+                    "modified_epoch": 1709370611,
+                    "categories": ["documents"],
+                    "reasons": {"categories": ["documents"]},
+                }
+            ],
+        }
+
     def test_parser_exposes_case_subcommand_and_options(self) -> None:
         parser = build_parser()
         commands = parser._subparsers._group_actions[0].choices
@@ -50,19 +85,12 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                 "source": "artifacts",
                 "event_type": "browser-download",
                 "path": "/cases/case-001/Users/alice/Downloads/evidence.zip",
+                "input_file": "/cases/case-001/rapidtriage-artifacts-browser.json",
                 "summary": "Browser download: evidence.zip",
                 "details": {"provider": "chrome"},
             }
-            file_candidate = {
-                "modified_at": "2024-03-02T09:10:11+00:00",
-                "path": "/cases/case-001/Users/alice/Documents/incident-notes.txt",
-                "name": "incident-notes.txt",
-                "extension": ".txt",
-                "size": 128,
-                "modified_epoch": 1709370611,
-                "categories": ["documents"],
-                "reasons": ["category:documents"],
-            }
+            file_payload = self.make_files_payload()
+            file_candidate = file_payload["candidates"][0]
 
             write_json(
                 timeline_json,
@@ -70,21 +98,19 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                     "command": "timeline",
                     "generated_at": "2024-03-03T00:00:00+00:00",
                     "root": "/cases/case-001",
-                    "summary": {"event_count": 1},
+                    "inputs": {"files": [], "docs": [], "artifacts": []},
+                    "summary": {
+                        "input_file_count": 0,
+                        "event_count": 1,
+                        "source_counts": {"artifacts": 1},
+                        "event_type_counts": {"browser-download": 1},
+                        "earliest_event_at": "2024-03-01T08:45:00+00:00",
+                        "latest_event_at": "2024-03-01T08:45:00+00:00",
+                    },
                     "events": [timeline_event],
                 },
             )
-            write_json(
-                files_json,
-                {
-                    "command": "files",
-                    "generated_at": "2024-03-03T00:00:00+00:00",
-                    "root": "/cases/case-001",
-                    "filters": {},
-                    "summary": {"candidate_count": 1},
-                    "candidates": [file_candidate],
-                },
-            )
+            write_json(files_json, file_payload)
 
             exit_code, output = run_cli(
                 "case",
@@ -205,6 +231,56 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
 
             self.assertEqual(exc.exception.code, 2)
             self.assertIn("bookmark source command 'compare' is not implemented yet", stderr.getvalue())
+
+    def test_case_command_rejects_non_row_pointer_for_source_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            case_json = root / "case-bookmarks.json"
+            files_json = root / "files.json"
+
+            write_json(files_json, self.make_files_payload())
+
+            stderr = io.StringIO()
+            with redirect_stderr(stderr), self.assertRaises(SystemExit) as exc:
+                main(
+                    [
+                        "case",
+                        str(case_json),
+                        "--source",
+                        str(files_json),
+                        "--pointer",
+                        "/results/0",
+                    ]
+                )
+
+            self.assertEqual(exc.exception.code, 2)
+            self.assertIn("files bookmarks require a row pointer", stderr.getvalue())
+
+    def test_case_command_rejects_source_payloads_that_fail_schema_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            case_json = root / "case-bookmarks.json"
+            files_json = root / "files.json"
+
+            invalid_payload = self.make_files_payload()
+            invalid_payload["candidates"][0].pop("reasons")
+            write_json(files_json, invalid_payload)
+
+            stderr = io.StringIO()
+            with redirect_stderr(stderr), self.assertRaises(SystemExit) as exc:
+                main(
+                    [
+                        "case",
+                        str(case_json),
+                        "--source",
+                        str(files_json),
+                        "--pointer",
+                        "/candidates/0",
+                    ]
+                )
+
+            self.assertEqual(exc.exception.code, 2)
+            self.assertIn("files source JSON failed schema validation", stderr.getvalue())
 
 
 if __name__ == "__main__":
