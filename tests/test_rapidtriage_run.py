@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.core.reporting import build_run_report_context, render_run_markdown_report
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
 
@@ -192,6 +193,10 @@ class RapidTriageRunTests(unittest.TestCase):
             files_extract_payload = json.loads(files_extract_manifest_path.read_text(encoding="utf-8"))
             summary_payload: dict[str, Any] = json.loads(summary_path.read_text(encoding="utf-8"))
             timeline_payload: dict[str, Any] = json.loads(timeline_path.read_text(encoding="utf-8"))
+            artifact_payloads = {
+                path.stem.removeprefix("rapidtriage-artifacts-"): json.loads(path.read_text(encoding="utf-8"))
+                for path in artifact_paths.values()
+            }
 
             min_file_candidates = {"fraud": 4, "hacking": 3, "seizure": 4, "recovery": 3}[mode]
             min_doc_matches = {"fraud": 1, "hacking": 1, "seizure": 1, "recovery": 1}[mode]
@@ -241,6 +246,20 @@ class RapidTriageRunTests(unittest.TestCase):
                 self.assertTrue(artifact_path.is_file())
 
             report_text = report_path.read_text(encoding="utf-8")
+            report_context = build_run_report_context(
+                summary_payload,
+                docs_payload=docs_payload,
+                files_payload=files_payload,
+                docs_extract_payload=docs_extract_payload,
+                files_extract_payload=files_extract_payload,
+                artifact_payloads=artifact_payloads,
+                timeline_payload=timeline_payload,
+            )
+            self.assertIn("artifact_summary", report_context)
+            self.assertIn("timeline", report_context)
+            self.assertIn("extracts", report_context)
+            self.assertIn("compare_results", report_context)
+            self.assertEqual(render_run_markdown_report(report_context), report_text)
             self.assertIn(mode, report_text.lower())
             self.assertIn("case overview", report_text.lower())
             self.assertIn("key hits", report_text.lower())

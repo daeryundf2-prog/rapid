@@ -12,6 +12,7 @@ from .docs import build_manifest, run_docs_search, write_result
 from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, run_extract
 from .files import run_files_scan
 from .input_root import InputRoot, derive_child_input_root, resolve_input_root
+from .reporting import build_run_report_context, render_run_markdown_report
 from .rules import RuleSet, summarize_payload_annotations
 from .timeline import build_timeline_report, run_timeline
 
@@ -579,205 +580,16 @@ def build_markdown_report(
     artifact_payloads: Mapping[str, Mapping[str, object]] | None = None,
     timeline_payload: Mapping[str, object] | None = None,
 ) -> str:
-    profile = summary_payload["profile"]
-    outputs = summary_payload["outputs"]
-    summary = summary_payload["summary"]
-    steps = summary_payload["steps"]
-    highlights = summary_payload["highlights"]
-    docs_payload = docs_payload or {}
-    files_payload = files_payload or {}
-    docs_extract_payload = docs_extract_payload or {}
-    files_extract_payload = files_extract_payload or {}
-    artifact_payloads = artifact_payloads or {}
-    timeline_payload = timeline_payload or {}
-
-    lines = [
-        "# rapidtriage run report",
-        "",
-        "> Submission-ready markdown template generated from rapidtriage run results.",
-        "",
-        "## 사건 개요 / Case overview",
-        "",
-        f"- Mode: `{summary_payload['mode']}`",
-        f"- Root: `{summary_payload['root']}`",
-        f"- Scan scope root: `{summary_payload['scan_scope_root']}`",
-        f"- Generated at: `{summary_payload['generated_at']}`",
-        f"- Output directory: `{summary_payload['output_dir']}`",
-        f"- Document matches: {summary['document_match_count']}",
-        f"- File candidates: {summary['file_candidate_count']}",
-        f"- Timeline events: {summary.get('timeline_event_count', 0)}",
-        "",
-        "## Mode profile",
-        "",
-        f"- Description: {profile['description']}",
-        f"- Keywords: {', '.join(profile['keywords'])}",
-        f"- Docs extract kinds: {', '.join(profile['docs_extract_kinds'])}",
-        f"- File extract categories: {', '.join(profile['file_extract_categories'])}",
-        f"- File scan categories: {', '.join(profile['file_scan_categories'])}",
-        "",
-        "## Step outputs",
-        "",
-    ]
-    for step in steps:
-        detail_parts = [f"{key}={value}" for key, value in step.items() if key not in {"name", "status", "output"}]
-        detail_text = ", ".join(detail_parts) if detail_parts else "no metrics"
-        lines.append(f"- `{step['name']}` ({step['status']}): `{step['output']}` — {detail_text}")
-
-    lines.extend(
-        [
-        "",
-        "## Summary",
-        "",
-            f"- Document candidates: {summary['document_candidate_count']}",
-            f"- Document matches: {summary['document_match_count']}",
-            f"- Scanned files: {summary['scanned_file_count']}",
-            f"- File candidates: {summary['file_candidate_count']}",
-            f"- Docs extracted: {summary['docs_extracted_count']}",
-            f"- Files extracted: {summary['files_extracted_count']}",
-            f"- Preferred-location candidates: {summary['preferred_location_candidate_count']}",
-            f"- Timeline events: {summary.get('timeline_event_count', 0)}",
-            "",
-            "### Windows provider artifact counts",
-            "",
-        ]
-    )
-
-    windows_counts = summary.get("windows_provider_artifact_counts", {})
-    if windows_counts:
-        for name, count in windows_counts.items():
-            lines.append(f"- `{name}`: {count}")
-    else:
-        lines.append("- none")
-
-    lines.extend(["", "### Dedicated artifact outputs", ""])
-    artifacts_summary = summary.get("artifacts", {})
-    if artifacts_summary:
-        for kind, details in artifacts_summary.items():
-            lines.append(
-                f"- `{kind}`: count={details['artifact_count']} output=`{details['output']}`"
-            )
-    else:
-        lines.append("- none")
-
-    lines.extend(["", "### Matched keyword counts", ""])
-    keyword_counts = summary.get("matched_keyword_counts", {})
-    if keyword_counts:
-        for keyword, count in keyword_counts.items():
-            lines.append(f"- `{keyword}`: {count}")
-    else:
-        lines.append("- none")
-
-    lines.extend(["", "### File category counts", ""])
-    category_counts = summary.get("file_category_counts", {})
-    if category_counts:
-        for category, count in category_counts.items():
-            lines.append(f"- `{category}`: {count}")
-    else:
-        lines.append("- none")
-
-    lines.extend(["", "## 핵심 hit / Key hits", ""])
-    key_hits = build_key_hit_rows(
+    report_context = build_run_report_context(
         summary_payload,
         docs_payload=docs_payload,
         files_payload=files_payload,
+        docs_extract_payload=docs_extract_payload,
+        files_extract_payload=files_extract_payload,
         artifact_payloads=artifact_payloads,
         timeline_payload=timeline_payload,
     )
-    if key_hits:
-        lines.extend([f"- {row}" for row in key_hits])
-    else:
-        lines.append("- none")
-
-    lines.extend(["", "## Matched rules", ""])
-    matched_rules = summary_payload.get("matched_rules", [])
-    if isinstance(matched_rules, list) and matched_rules:
-        for rule_id in matched_rules:
-            lines.append(f"- `{rule_id}`")
-    else:
-        lines.append("- none")
-
-    lines.extend(["", "## IOC hits", ""])
-    ioc_hits = summary_payload.get("ioc_hits", [])
-    if isinstance(ioc_hits, list) and ioc_hits:
-        for hit in ioc_hits[:10]:
-            if not isinstance(hit, dict):
-                continue
-            lines.append(
-                f"- `{hit.get('type')}` `{hit.get('value')}`"
-                f" (rule=`{hit.get('rule_id')}`, count={hit.get('count', 1)})"
-            )
-    else:
-        lines.append("- none")
-
-    lines.extend(["", "## 관련 문서 / Related documents", ""])
-    append_related_document_rows(lines, docs_payload.get("results", []))
-
-    lines.extend(["", "## Recent file candidates", ""])
-    recent_candidates = highlights.get("recent_file_candidates", [])
-    if recent_candidates:
-        for item in recent_candidates:
-            lines.append(
-                f"- `{item['path']}` categories={', '.join(item['categories'])} size={item['size']} modified={item['modified_at']}"
-            )
-    else:
-        lines.append("- none")
-
-    lines.extend(["", "## Largest file candidates", ""])
-    large_candidates = highlights.get("large_file_candidates", [])
-    if large_candidates:
-        for item in large_candidates:
-            lines.append(
-                f"- `{item['path']}` categories={', '.join(item['categories'])} size={item['size']} modified={item['modified_at']}"
-            )
-    else:
-        lines.append("- none")
-
-    lines.extend(["", "## Preferred location candidates", ""])
-    preferred_candidates = highlights.get("preferred_location_candidates", [])
-    if preferred_candidates:
-        for item in preferred_candidates:
-            lines.append(
-                f"- `{item['path']}` categories={', '.join(item['categories'])} size={item['size']} modified={item['modified_at']}"
-            )
-    else:
-        lines.append("- none")
-
-    lines.extend(["", "## Artifact summary", ""])
-    append_artifact_summary_rows(lines, artifact_payloads)
-
-    lines.extend(["", "## Timeline", ""])
-    append_timeline_rows(lines, timeline_payload)
-
-    lines.extend(["", "## Extract results", ""])
-    append_extract_rows(
-        lines,
-        title="### Docs extract",
-        payload=docs_extract_payload,
-        source_label="docs",
-    )
-    append_extract_rows(
-        lines,
-        title="### Files extract",
-        payload=files_extract_payload,
-        source_label="files",
-    )
-
-    lines.extend(["", "## Compare results", ""])
-    compare_results = summary_payload.get("compare_results")
-    if isinstance(compare_results, list) and compare_results:
-        for item in compare_results[:10]:
-            if not isinstance(item, dict):
-                continue
-            lines.append(
-                f"- `{item.get('timestamp')}` `{item.get('status')}` `{item.get('path')}` — {item.get('summary')}"
-            )
-    else:
-        lines.append("- none provided (attach compare JSON findings here when available).")
-
-    lines.extend(["", "## Output paths", ""])
-    for name, path in outputs.items():
-        lines.append(f"- `{name}`: `{path}`")
-    return "\n".join(lines) + "\n"
+    return render_run_markdown_report(report_context)
 
 
 def build_key_hit_rows(
