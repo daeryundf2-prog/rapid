@@ -89,16 +89,8 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                 "summary": "Browser download: evidence.zip",
                 "details": {"provider": "chrome"},
             }
-            file_candidate = {
-                "modified_at": "2024-03-02T09:10:11+00:00",
-                "path": "/cases/case-001/Users/alice/Documents/incident-notes.txt",
-                "name": "incident-notes.txt",
-                "extension": ".txt",
-                "size": 128,
-                "modified_epoch": 1709370611,
-                "categories": ["documents"],
-                "reasons": ["category:documents"],
-            }
+            file_payload = self.make_files_payload()
+            file_candidate = file_payload["candidates"][0]
 
             write_json(
                 timeline_json,
@@ -118,17 +110,7 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                     "events": [timeline_event],
                 },
             )
-            write_json(
-                files_json,
-                {
-                    "command": "files",
-                    "generated_at": "2024-03-03T00:00:00+00:00",
-                    "root": "/cases/case-001",
-                    "filters": {},
-                    "summary": {"candidate_count": 1},
-                    "candidates": [file_candidate],
-                },
-            )
+            write_json(files_json, file_payload)
 
             exit_code, output = run_cli(
                 "case",
@@ -253,6 +235,56 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
 
             self.assertEqual(exc.exception.code, 2)
             self.assertIn("bookmark source command 'compare' is not implemented yet", stderr.getvalue())
+
+    def test_case_command_rejects_non_row_pointer_for_source_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            case_json = root / "case-bookmarks.json"
+            files_json = root / "files.json"
+
+            write_json(files_json, self.make_files_payload())
+
+            stderr = io.StringIO()
+            with redirect_stderr(stderr), self.assertRaises(SystemExit) as exc:
+                main(
+                    [
+                        "case",
+                        str(case_json),
+                        "--source",
+                        str(files_json),
+                        "--pointer",
+                        "/results/0",
+                    ]
+                )
+
+            self.assertEqual(exc.exception.code, 2)
+            self.assertIn("files bookmarks require a row pointer", stderr.getvalue())
+
+    def test_case_command_rejects_source_payloads_that_fail_schema_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            case_json = root / "case-bookmarks.json"
+            files_json = root / "files.json"
+
+            invalid_payload = self.make_files_payload()
+            invalid_payload["candidates"][0].pop("reasons")
+            write_json(files_json, invalid_payload)
+
+            stderr = io.StringIO()
+            with redirect_stderr(stderr), self.assertRaises(SystemExit) as exc:
+                main(
+                    [
+                        "case",
+                        str(case_json),
+                        "--source",
+                        str(files_json),
+                        "--pointer",
+                        "/candidates/0",
+                    ]
+                )
+
+            self.assertEqual(exc.exception.code, 2)
+            self.assertIn("files source JSON failed schema validation", stderr.getvalue())
 
 
 if __name__ == "__main__":
