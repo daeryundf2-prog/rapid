@@ -34,6 +34,17 @@ TIMESTAMP_KEYS = (
     "accessed_at",
 )
 
+CASE_SOURCE_ROWS = {
+    "files": "candidates",
+    "docs": "results",
+    "artifacts": "artifacts",
+    "timeline": "events",
+}
+
+EXPERIMENTAL_CASE_SOURCE_ROWS = {
+    "compare": "results",
+}
+
 
 def load_case_payload(path: Path) -> dict[str, object]:
     resolved = path.expanduser().resolve()
@@ -127,6 +138,15 @@ def load_source_payload(path: Path) -> dict[str, object]:
         raise CaseBookmarkError(f"bookmark source is not valid JSON: {resolved}") from exc
     if not isinstance(payload, dict):
         raise CaseBookmarkError(f"bookmark source must be a JSON object: {resolved}")
+    command = str(payload.get("command") or "").strip()
+    if command in EXPERIMENTAL_CASE_SOURCE_ROWS:
+        raise CaseBookmarkError(
+            "bookmark source command 'compare' is not implemented yet; "
+            "case currently supports files, docs, artifacts, and timeline outputs"
+        )
+    if command not in CASE_SOURCE_ROWS:
+        supported = ", ".join(sorted(CASE_SOURCE_ROWS))
+        raise CaseBookmarkError(f"unsupported bookmark source command {command!r}; expected one of: {supported}")
     return payload
 
 
@@ -140,9 +160,8 @@ def upsert_bookmark(
     tags: list[str],
     note: str | None,
 ) -> None:
-    item = resolve_json_pointer(source_payload, source_pointer)
-    if not isinstance(item, dict):
-        raise CaseBookmarkError("bookmark pointer must resolve to a JSON object row")
+    source_command = str(source_payload.get("command") or "").strip()
+    item = resolve_case_source_row(source_payload, source_command=source_command, source_pointer=source_pointer)
 
     bookmarks = payload.setdefault("bookmarks", [])
     if not isinstance(bookmarks, list):
@@ -159,7 +178,7 @@ def upsert_bookmark(
             "bookmark_id": bookmark_id.strip() if bookmark_id else next_bookmark_id(bookmarks),
             "created_at": now,
             "updated_at": now,
-            "source_command": str(source_payload.get("command") or "unknown"),
+            "source_command": source_command or "unknown",
             "source_file": str(source_path),
             "source_pointer": source_pointer,
             "source_root": str(source_payload.get("root")) if source_payload.get("root") else None,
@@ -175,7 +194,7 @@ def upsert_bookmark(
         return
 
     existing["updated_at"] = now
-    existing["source_command"] = str(source_payload.get("command") or existing.get("source_command") or "unknown")
+    existing["source_command"] = source_command or str(existing.get("source_command") or "unknown")
     existing["source_file"] = str(source_path)
     existing["source_pointer"] = source_pointer
     existing["source_root"] = str(source_payload.get("root")) if source_payload.get("root") else existing.get("source_root")
@@ -213,15 +232,57 @@ def find_existing_bookmark(
     return None
 
 
-def resolve_json_pointer(payload: Mapping[str, object], pointer: str) -> Any:
+def resolve_case_source_row(
+    payload: Mapping[str, object],
+    *,
+    source_command: str,
+    source_pointer: str,
+) -> dict[str, object]:
+    collection_name = CASE_SOURCE_ROWS.get(source_command)
+    if collection_name is None:
+        supported = ", ".join(sorted(CASE_SOURCE_ROWS))
+        raise CaseBookmarkError(f"unsupported bookmark source command {source_command!r}; expected one of: {supported}")
+
+    tokens = split_json_pointer(source_pointer)
+    if len(tokens) != 2 or tokens[0] != collection_name:
+        raise CaseBookmarkError(
+            f"{source_command} bookmarks require a row pointer in the form '/{collection_name}/<index>'"
+        )
+
+    collection = payload.get(collection_name)
+    if not isinstance(collection, list):
+        raise CaseBookmarkError(f"{source_command} source JSON must include a {collection_name} array")
+
+    try:
+        index = int(tokens[1])
+    except ValueError as exc:
+        raise CaseBookmarkError(f"bookmark pointer segment is not a list index: {tokens[1]!r}") from exc
+
+    try:
+        item = collection[index]
+    except IndexError as exc:
+        raise CaseBookmarkError(f"bookmark pointer index out of range: {index}") from exc
+
+    if not isinstance(item, dict):
+        raise CaseBookmarkError("bookmark pointer must resolve to a JSON object row")
+    return item
+
+
+def split_json_pointer(pointer: str) -> list[str]:
     if pointer == "":
-        return payload
+        return []
     if not pointer.startswith("/"):
         raise CaseBookmarkError("bookmark pointer must start with '/'")
+    return [raw_token.replace("~1", "/").replace("~0", "~") for raw_token in pointer.lstrip("/").split("/")]
+
+
+def resolve_json_pointer(payload: Mapping[str, object], pointer: str) -> Any:
+    tokens = split_json_pointer(pointer)
+    if not tokens:
+        return payload
 
     current: Any = payload
-    for raw_token in pointer.lstrip("/").split("/"):
-        token = raw_token.replace("~1", "/").replace("~0", "~")
+    for token in tokens:
         if isinstance(current, list):
             try:
                 index = int(token)

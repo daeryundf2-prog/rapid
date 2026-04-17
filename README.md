@@ -232,7 +232,7 @@ rapidtriage run . --mode hacking --output-dir ./rapidtriage-run-hacking
 rapidtriage run . --mode recovery --output-dir ./rapidtriage-run-recovery
 rapidtriage timeline . --output ./rapidtriage-timeline.json --report ./rapidtriage-timeline-report.md
 rapidtriage case ./incident-case.json --source ./rapidtriage-timeline.json --pointer /events/0 --tag suspicious --note "Review this event"
-rapidtriage case ./incident-case.json --source ./rapidtriage-compare.json --pointer /results/0 --bookmark-id compare-001 --tag delta
+rapidtriage case ./incident-case.json --source ./rapidtriage-files.json --pointer /candidates/0 --bookmark-id file-001 --tag executable
 ```
 
 Input root abstraction:
@@ -294,7 +294,7 @@ Current `run` behavior:
 - writes dedicated artifact collector outputs under `artifacts/` when the mode profile uses them.
 - writes `rapidtriage-run-summary.json`, `rapidtriage-run-report.md`, `rapidtriage-timeline.json`, and `rapidtriage-timeline-report.md` alongside the component outputs.
 - records per-step output paths, artifact counts, keyword hit counts, recent/large file highlights, preferred-location candidates, and timeline event counts in the summary JSON.
-- renders a submission-oriented markdown report with case overview, key hits, matched rules, IOC hits, related documents, artifact summary, timeline, extract results, and a compare-results placeholder.
+- renders a submission-oriented markdown report with case overview, key hits, matched rules, IOC hits, related documents, artifact summary, timeline, extract results, and a reserved placeholder for future compare findings.
 - accepts the same extract safety controls (`--dry-run`, `--read-only`, `--max-extract-size-bytes`, `--max-file-count`, `--overwrite`) and forwards them to both extract stages.
 
 Current `timeline` behavior:
@@ -303,8 +303,9 @@ Current `timeline` behavior:
 - writes both timeline JSON and a markdown report, plus an audit sidecar for provenance/integrity tracking.
 
 Current `case` behavior:
-- saves and reloads case-level bookmarks from `files`, `docs`, `artifacts`, `timeline`, or `compare` JSON outputs.
-- selects rows by JSON pointer via `--pointer`, stores the original source file, command, timestamp, path, tags, and analyst note.
+- saves and reloads case-level bookmarks from implemented `files`, `docs`, `artifacts`, and `timeline` JSON outputs.
+- requires command-specific row pointers via `--pointer` (`/candidates/<index>`, `/results/<index>`, `/artifacts/<index>`, `/events/<index>`) and stores the original source file, command, timestamp, path, tags, and analyst note.
+- reserves `compare` integration for a future producer/CLI instead of treating it as a current workflow contract.
 - supports stable bookmark updates through `--bookmark-id` and prints the saved case JSON with `--show`.
 - validates against `rapidtriage/schemas/case.schema.json`.
 

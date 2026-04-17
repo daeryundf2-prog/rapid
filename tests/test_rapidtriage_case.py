@@ -4,7 +4,7 @@ import io
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +43,7 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
             root = Path(tmp_dir)
             case_json = root / "case-bookmarks.json"
             timeline_json = root / "timeline.json"
-            compare_json = root / "compare.json"
+            files_json = root / "files.json"
 
             timeline_event = {
                 "timestamp": "2024-03-01T08:45:00+00:00",
@@ -53,11 +53,15 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                 "summary": "Browser download: evidence.zip",
                 "details": {"provider": "chrome"},
             }
-            compare_entry = {
-                "timestamp": "2024-03-02T09:10:11+00:00",
+            file_candidate = {
+                "modified_at": "2024-03-02T09:10:11+00:00",
                 "path": "/cases/case-001/Users/alice/Documents/incident-notes.txt",
-                "summary": "Only present in source A",
-                "status": "only-in-left",
+                "name": "incident-notes.txt",
+                "extension": ".txt",
+                "size": 128,
+                "modified_epoch": 1709370611,
+                "categories": ["documents"],
+                "reasons": ["category:documents"],
             }
 
             write_json(
@@ -71,11 +75,14 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                 },
             )
             write_json(
-                compare_json,
+                files_json,
                 {
-                    "command": "compare",
+                    "command": "files",
                     "generated_at": "2024-03-03T00:00:00+00:00",
-                    "results": [compare_entry],
+                    "root": "/cases/case-001",
+                    "filters": {},
+                    "summary": {"candidate_count": 1},
+                    "candidates": [file_candidate],
                 },
             )
 
@@ -126,15 +133,15 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                 "case",
                 str(case_json),
                 "--source",
-                str(compare_json),
+                str(files_json),
                 "--pointer",
-                "/results/0",
+                "/candidates/0",
                 "--bookmark-id",
-                "bm-compare-1",
+                "bm-file-1",
                 "--tag",
-                "compare",
+                "files",
                 "--note",
-                "Cross-check with timeline.",
+                "Review the underlying file.",
             )
 
             self.assertEqual(exit_code, 0, output)
@@ -143,23 +150,61 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
             self.assertEqual(len(payload["bookmarks"]), 2)
 
             second = payload["bookmarks"][1]
-            self.assertEqual(second["bookmark_id"], "bm-compare-1")
-            self.assertEqual(second["source_command"], "compare")
-            self.assertEqual(Path(second["source_file"]).resolve(), compare_json.resolve())
-            self.assertEqual(second["source_pointer"], "/results/0")
-            self.assertEqual(second["tags"], ["compare"])
-            self.assertEqual(second["note"], "Cross-check with timeline.")
-            self.assertEqual(second["item"], compare_entry)
-            self.assertEqual(second["source_path"], compare_entry["path"])
-            self.assertEqual(second["source_summary"], compare_entry["summary"])
-            self.assertEqual(second["source_timestamp"], compare_entry["timestamp"])
+            self.assertEqual(second["bookmark_id"], "bm-file-1")
+            self.assertEqual(second["source_command"], "files")
+            self.assertEqual(Path(second["source_file"]).resolve(), files_json.resolve())
+            self.assertEqual(second["source_pointer"], "/candidates/0")
+            self.assertEqual(second["tags"], ["files"])
+            self.assertEqual(second["note"], "Review the underlying file.")
+            self.assertEqual(second["item"], file_candidate)
+            self.assertEqual(second["source_path"], file_candidate["path"])
+            self.assertEqual(second["source_summary"], file_candidate["name"])
+            self.assertEqual(second["source_timestamp"], file_candidate["modified_at"])
 
             exit_code, show_output = run_cli("case", str(case_json), "--show")
 
             self.assertEqual(exit_code, 0, show_output)
             self.assertIn('"case_id": "case-001"', show_output)
             self.assertIn('"bookmark_id": "bm-timeline-1"', show_output)
-            self.assertIn('"bookmark_id": "bm-compare-1"', show_output)
+            self.assertIn('"bookmark_id": "bm-file-1"', show_output)
+
+    def test_case_command_rejects_compare_sources_until_compare_command_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            case_json = root / "case-bookmarks.json"
+            compare_json = root / "compare.json"
+
+            write_json(
+                compare_json,
+                {
+                    "command": "compare",
+                    "generated_at": "2024-03-03T00:00:00+00:00",
+                    "results": [
+                        {
+                            "timestamp": "2024-03-02T09:10:11+00:00",
+                            "path": "/cases/case-001/Users/alice/Documents/incident-notes.txt",
+                            "summary": "Only present in source A",
+                            "status": "only-in-left",
+                        }
+                    ],
+                },
+            )
+
+            stderr = io.StringIO()
+            with redirect_stderr(stderr), self.assertRaises(SystemExit) as exc:
+                main(
+                    [
+                        "case",
+                        str(case_json),
+                        "--source",
+                        str(compare_json),
+                        "--pointer",
+                        "/results/0",
+                    ]
+                )
+
+            self.assertEqual(exc.exception.code, 2)
+            self.assertIn("bookmark source command 'compare' is not implemented yet", stderr.getvalue())
 
 
 if __name__ == "__main__":
