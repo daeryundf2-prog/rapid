@@ -326,8 +326,7 @@ Current `timeline` behavior:
 
 Current `case` behavior:
 - saves and reloads case-level bookmarks from implemented `files`, `docs`, `artifacts`, and `timeline` JSON outputs.
-- requires command-specific row pointers via `--pointer` (`/candidates/<index>`, `/results/<index>`, `/artifacts/<index>`, `/events/<index>`).
-- stores bookmark `reference` metadata (`command`, source file, pointer, root, stable key) plus a minimal `snapshot` (`path`, `hash`, `timestamp`, `artifact_key`, `summary`) instead of duplicating the full source row.
+- requires command-specific row pointers via `--pointer` (`/candidates/<index>`, `/results/<index>`, `/artifacts/<index>`, `/events/<index>`) and stores the original source file, command, timestamp, path, tags, and analyst note.
 - reserves `compare` integration for a future producer/CLI instead of treating it as a current workflow contract.
 - supports stable bookmark updates through `--bookmark-id` and prints the saved case JSON with `--show`.
 - validates against `rapidtriage/schemas/case.schema.json`.
