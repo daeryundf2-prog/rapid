@@ -71,6 +71,8 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
         self.assertIn("--bookmark-id", case_help)
         self.assertIn("--tag", case_help)
         self.assertIn("--note", case_help)
+        self.assertIn("--review-status", case_help)
+        self.assertIn("--include-in-report", case_help)
         self.assertIn("--show", case_help)
 
     def test_case_command_creates_case_file_and_shows_saved_bookmarks(self) -> None:
@@ -131,6 +133,8 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                 "download",
                 "--note",
                 "Review this artifact first.",
+                "--review-status",
+                "needs-review",
             )
 
             self.assertEqual(exit_code, 0, output)
@@ -152,6 +156,11 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
             self.assertTrue(first["reference"]["stable_key"].startswith("bookmark-"))
             self.assertEqual(first["tags"], ["timeline", "download"])
             self.assertEqual(first["note"], "Review this artifact first.")
+            self.assertEqual(first["review"]["status"], "needs-review")
+            self.assertEqual(first["review"]["include_in_report"], False)
+            self.assertIsInstance(first["review"]["reviewed_at"], str)
+            self.assertEqual(first["review_history"][0]["action"], "created")
+            self.assertEqual(first["review_history"][0]["status"], "needs-review")
             self.assertEqual(first["snapshot"]["path"], timeline_event["path"])
             self.assertIsNone(first["snapshot"]["hash"])
             self.assertEqual(first["snapshot"]["artifact_key"], timeline_event["event_type"])
@@ -172,6 +181,9 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
                 "files",
                 "--note",
                 "Review the underlying file.",
+                "--review-status",
+                "relevant",
+                "--include-in-report",
             )
 
             self.assertEqual(exit_code, 0, output)
@@ -187,12 +199,47 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
             self.assertTrue(second["reference"]["stable_key"].startswith("bookmark-"))
             self.assertEqual(second["tags"], ["files"])
             self.assertEqual(second["note"], "Review the underlying file.")
+            self.assertEqual(second["review"]["status"], "relevant")
+            self.assertEqual(second["review"]["include_in_report"], True)
+            self.assertEqual(second["review_history"][0]["action"], "created")
+            self.assertEqual(second["review_history"][0]["include_in_report"], True)
             self.assertEqual(second["snapshot"]["path"], file_candidate["path"])
             self.assertIsNone(second["snapshot"]["hash"])
             self.assertIsNone(second["snapshot"]["artifact_key"])
             self.assertEqual(second["snapshot"]["summary"], file_candidate["name"])
             self.assertEqual(second["snapshot"]["timestamp"], file_candidate["modified_at"])
             self.assertNotIn("item", second)
+
+            exit_code, output = run_cli(
+                "case",
+                str(case_json),
+                "--source",
+                str(files_json),
+                "--pointer",
+                "/candidates/0",
+                "--bookmark-id",
+                "bm-file-1",
+                "--tag",
+                "escalated",
+                "--note",
+                "Escalated after second review.",
+                "--review-status",
+                "needs-review",
+            )
+
+            self.assertEqual(exit_code, 0, output)
+            payload = json.loads(case_json.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["bookmarks"]), 2)
+            updated_second = payload["bookmarks"][1]
+            self.assertEqual(updated_second["review"]["status"], "needs-review")
+            self.assertEqual(updated_second["review"]["include_in_report"], True)
+            self.assertEqual(updated_second["tags"], ["files", "escalated"])
+            self.assertEqual(updated_second["note"], "Escalated after second review.")
+            self.assertEqual(len(updated_second["review_history"]), 2)
+            self.assertEqual(updated_second["review_history"][1]["action"], "updated")
+            self.assertIn("review.status", updated_second["review_history"][1]["changed_fields"])
+            self.assertIn("tags", updated_second["review_history"][1]["changed_fields"])
+            self.assertEqual(payload["summary"]["review_revision_count"], 3)
 
             exit_code, show_output = run_cli("case", str(case_json), "--show")
 

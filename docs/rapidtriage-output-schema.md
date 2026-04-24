@@ -37,6 +37,7 @@ Planned rule-engine / IOC lookup additions are tracked separately in `docs/rapid
 | `rapidtriage extract INPUT_JSON OUTPUT_DIR` | `OUTPUT_DIR/rapidtriage-extract-manifest.json` | copied originals plus hash/mtime manifest |
 | `rapidtriage artifacts ROOT --kind KIND` | `./rapidtriage-artifacts-KIND.json` | dedicated collector output for one artifact family |
 | `rapidtriage run ROOT --mode MODE` | `OUTPUT_DIR/rapidtriage-run-summary.json` | workflow summary JSON plus `rapidtriage-run-report.md`, `rapidtriage-timeline.json`, and `rapidtriage-timeline-report.md` |
+| `rapidtriage search RUN_OUTPUT -k KEYWORD` | `rapidtriage-search.json` | unified keyword search over completed run outputs, including optional OCR |
 
 ## `manifest` JSON
 
@@ -84,18 +85,22 @@ Top-level keys:
 - `candidates`
 - `results`
 - optional `scan_scope_root` when produced inside `run`
+- optional `index` metadata when a processed-text index sidecar is written
 
-Current supported document kinds:
+Current supported document kinds include:
 
-- `txt`
-- `pdf`
-- `docx`
+- plain text/config/log/data: `txt`, `log`, `csv`, `tsv`, `md`, `json`, `jsonl`, `xml`, `yaml`, `yml`, `ini`, `cfg`, `conf`, `eml`
+- markup/rich text: `html`, `htm`, `rtf`
+- office/open document: `docx`, `xlsx`, `pptx`, `odt`, `ods`, `odp`
+- PDF: `pdf`
 
 `summary` contains:
 
 - `candidate_count`
 - `match_count`
 - `supported_extensions`
+
+When indexing is enabled, `rapidtriage` writes a sidecar such as `rapidtriage-docs-index.json` with command `docs-index`, strategy `processed-text-inverted-index`, per-document text hashes/lengths, and a lower-cased inverted token map. The sidecar intentionally stores no full extracted text.
 
 `results[]` contains:
 
@@ -133,10 +138,14 @@ Default file categories remain:
 - `archives`
 - `databases`
 - `executables`
-
-Additional category currently available for profile-specific workflows:
-
+- `emails`
+- `disk-images`
+- `mobile-images`
+- `memory-dumps`
+- `vehicle-images`
 - `images`
+
+The evidence-container categories are aligned with common Magnet AXIOM evidence source formats, including EnCase/FTK/AFF4/raw/VM/mobile image families, memory dumps, and iVe vehicle exports.
 
 Each candidate row contains:
 
@@ -178,6 +187,49 @@ Source-specific `entries[]` fields:
 - from `files`: `categories`
 - from `docs`: `kind`, `matched_keywords`
 
+## `submission-manifest` JSON
+
+The web API can generate `rapidtriage-submission-manifest.json` from reviewed case evidence. By default it hashes only bookmarks marked as report candidates.
+
+Top-level keys:
+
+- `command`
+- `generated_at`
+- `case_id`
+- `title`
+- `hash_algorithms`
+- `options`
+- `summary`
+- `items`
+- `skipped`
+
+Each `items[]` row preserves bookmark/review context plus an `evidence` object containing:
+
+- `path`
+- `name`
+- `size`
+- `modified_at`
+- `hashes.md5`
+- `hashes.sha1`
+- `hashes.sha256`
+
+Rows are skipped when the source path is unavailable, missing, outside the run evidence roots, or exceeds the configured item cap.
+
+## `case-report` Markdown
+
+The web API can generate `rapidtriage-case-report.md` from `rapidtriage-case.json` and `rapidtriage-submission-manifest.json`.
+
+The report draft includes:
+
+- case metadata such as title, case number, investigator, organization, and requester
+- analysis target/scope and run output directory
+- run step summary
+- reviewed item counts and report-candidate counts
+- per-evidence file path, size, modified time, MD5, SHA1, SHA256, tags, and analyst note
+- skipped hash rows and reasons
+- conclusion/opinion text
+- attachment list for case JSON, hash manifest, audit sidecars, and run report
+
 ## `artifacts` JSON
 
 The independent `artifacts` command exposes one collector per invocation.
@@ -206,6 +258,7 @@ The collector interface is intentionally narrow so additional Windows-specific c
 - `rapidtriage-manifest.json`
 - `rapidtriage-docs.json`
 - `rapidtriage-files.json`
+- `rapidtriage-e01.json` when the input is a direct `.E01` image
 - `artifacts/rapidtriage-artifacts-*.json`
 - `docs-extract/rapidtriage-extract-manifest.json`
 - `files-extract/rapidtriage-extract-manifest.json`
@@ -227,6 +280,7 @@ Current run modes:
 - `mode`
 - `generated_at`
 - `root`
+- `source`
 - `scan_scope_root`
 - `output_dir`
 - `profile`
@@ -245,6 +299,8 @@ Current run modes:
 - `file_scan_path_contains`
 - `preferred_locations`
 - `artifacts_kinds`
+
+`source` records the original input and the analysis root. For direct `.E01` input, `source.type` is `e01`, `source.source_path` points to the evidence image, and `source.analysis_root` points to the read-only extracted filesystem under the run output directory.
 
 `summary` contains aggregated counters for:
 

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>rapidtriage</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="run-panel" aria-label="Run triage">
+        <div class="brand-row">
+          <div>
+            <p class="eyebrow">local forensic triage</p>
+            <h1>rapidtriage</h1>
+          </div>
+          <span id="apiStatus" class="status-pill">checking</span>
+        </div>
+        <ol class="quick-start" aria-label="Recommended workflow">
+          <li><strong>1. Add evidence</strong><span>Folder, mounted image, or E01.</span></li>
+          <li><strong>2. Run triage</strong><span>Keep read-only unless extracting is intended.</span></li>
+          <li><strong>3. Search hits</strong><span>Use presets or your own keywords.</span></li>
+          <li><strong>4. Review</strong><span>Classify hits and build the case board.</span></li>
+        </ol>
+
+        <form id="runForm" class="run-form">
+          <label>
+            Evidence root or E01 image
+            <input id="rootInput" name="root" required placeholder="/cases/case-001 or /cases/case.E01" />
+          </label>
+
+          <div class="field-grid">
+            <label>
+              Mode
+              <select id="modeInput" name="mode">
+                <option value="fraud">Fraud</option>
+                <option value="seizure">Seizure</option>
+                <option value="hacking">Hacking</option>
+                <option value="recovery">Recovery</option>
+              </select>
+            </label>
+            <label>
+              Input kind
+              <select id="inputKindInput" name="inputKind">
+                <option value="">Auto</option>
+                <option value="folder">Folder</option>
+                <option value="mounted-image">Mounted image</option>
+                <option value="e01-derived">E01 image/derived</option>
+                <option value="live">Live root</option>
+              </select>
+            </label>
+          </div>
+
+          <label>
+            Output directory
+            <input id="outputInput" name="outputDir" placeholder="auto: ROOT/rapidtriage-run-MODE" />
+          </label>
+
+          <div class="toggle-row">
+            <label><input id="readOnlyInput" type="checkbox" checked /> Read-only</label>
+            <label><input id="dryRunInput" type="checkbox" /> Dry run</label>
+            <label><input id="overwriteInput" type="checkbox" /> Overwrite extracts</label>
+          </div>
+
+          <button id="runButton" type="submit">Start run</button>
+        </form>
+
+        <form id="importForm" class="import-form">
+          <div>
+            <p class="eyebrow">existing output</p>
+            <h2>Import run</h2>
+          </div>
+          <label>
+            Run output directory
+            <input id="importOutputInput" name="importOutputDir" placeholder="/cases/case-001/rapidtriage-run-fraud" />
+          </label>
+          <button id="importButton" type="submit">Import results</button>
+        </form>
+      </section>
+
+      <section class="results-panel" aria-label="Run results">
+        <div class="results-header">
+          <h2>Runs</h2>
+          <button id="refreshButton" type="button">Refresh</button>
+        </div>
+        <div id="runList" class="run-list"></div>
+        <div id="detailPanel" class="detail-panel">
+          <p class="empty-state">Run a case to see summary, outputs, and timeline details here.</p>
+        </div>
+      </section>
+    </main>
+    <script src="/assets/app.js"></script>
+  </body>
+</html>

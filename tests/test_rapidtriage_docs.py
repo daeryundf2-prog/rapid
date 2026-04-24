@@ -46,13 +46,45 @@ def write_minimal_pdf(path: Path, text: str) -> None:
     path.write_bytes(bytes(output))
 
 
+def write_minimal_xlsx(path: Path, text: str) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("xl/sharedStrings.xml", f"<sst><si><t>{text}</t></si></sst>")
+
+
+def write_minimal_pptx(path: Path, text: str) -> None:
+    xml = (
+        '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        f"<p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+    )
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("ppt/slides/slide1.xml", xml)
+
+
+def write_minimal_odt(path: Path, text: str) -> None:
+    xml = (
+        '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">'
+        f"<office:body><office:text><text:p>{text}</text:p></office:text></office:body></office:document-content>"
+    )
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("content.xml", xml)
+
+
 class RapidTriageDocsTests(unittest.TestCase):
-    def test_docs_command_scans_txt_pdf_docx_and_writes_json(self) -> None:
+    def test_docs_command_scans_supported_document_extensions_and_writes_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             (root / "note.txt").write_text("incident alpha secret", encoding="utf-8")
+            (root / "events.log").write_text("keyword in log", encoding="utf-8")
+            (root / "table.csv").write_text("name,value\nhit,keyword\n", encoding="utf-8")
+            (root / "page.html").write_text("<html><body>secret html</body></html>", encoding="utf-8")
+            (root / "brief.rtf").write_text(r"{\rtf1 keyword rtf}", encoding="utf-8")
             write_minimal_docx(root / "report.docx", "registry artifact keyword hit")
             write_minimal_pdf(root / "evidence.pdf", "shellbags keyword hit")
+            write_minimal_xlsx(root / "ledger.xlsx", "secret spreadsheet")
+            write_minimal_pptx(root / "deck.pptx", "keyword slide")
+            write_minimal_odt(root / "memo.odt", "secret open document")
             output = root / "results.json"
 
             exit_code = main(
@@ -70,10 +102,59 @@ class RapidTriageDocsTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             payload = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(payload["summary"]["candidate_count"], 3)
-            self.assertEqual(payload["summary"]["match_count"], 3)
+            self.assertEqual(payload["summary"]["candidate_count"], 10)
+            self.assertEqual(payload["summary"]["match_count"], 10)
             result_paths = {Path(item["path"]).name for item in payload["results"]}
-            self.assertEqual(result_paths, {"note.txt", "report.docx", "evidence.pdf"})
+            self.assertEqual(
+                result_paths,
+                {
+                    "brief.rtf",
+                    "deck.pptx",
+                    "events.log",
+                    "evidence.pdf",
+                    "ledger.xlsx",
+                    "memo.odt",
+                    "note.txt",
+                    "page.html",
+                    "report.docx",
+                    "table.csv",
+                },
+            )
+            self.assertIn(".xlsx", payload["summary"]["supported_extensions"])
+            self.assertIn(".odt", payload["summary"]["supported_extensions"])
+
+    def test_docs_command_can_write_processed_text_index_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "note.txt").write_text("Incident alpha alpha https://example.test/login", encoding="utf-8")
+            output = root / "results.json"
+            index_output = root / "docs-index.json"
+
+            exit_code = main(
+                [
+                    "docs",
+                    str(root),
+                    "-k",
+                    "alpha",
+                    "--output",
+                    str(output),
+                    "--index-output",
+                    str(index_output),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            index_payload = json.loads(index_output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["index"]["command"], "docs-index")
+            self.assertEqual(Path(payload["index"]["path"]), index_output.resolve())
+            self.assertEqual(index_payload["command"], "docs-index")
+            self.assertEqual(index_payload["strategy"], "processed-text-inverted-index")
+            self.assertFalse(index_payload["analyzer"]["stores_full_text"])
+            self.assertEqual(index_payload["summary"]["indexed_document_count"], 1)
+            self.assertGreaterEqual(index_payload["summary"]["term_count"], 3)
+            self.assertEqual(index_payload["terms"]["alpha"][0]["count"], 2)
+            self.assertIn("https://example.test/login", index_payload["terms"])
 
     def test_manifest_reports_windows_modules_as_separate_providers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

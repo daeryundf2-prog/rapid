@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import platform
 import re
 import zipfile
 import zlib
+from collections import Counter
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Union
 from xml.etree import ElementTree as ET
@@ -16,8 +18,53 @@ from .input_root import InputRoot, resolve_input_root
 from .models import DocumentCandidate, DocumentMatch
 from .rules import RuleSet, annotate_docs_payload
 
-SUPPORTED_DOC_EXTS = {".txt", ".pdf", ".docx"}
-TEXT_EXTS = {"txt"}
+SUPPORTED_DOC_EXTS = {
+    ".cfg",
+    ".conf",
+    ".csv",
+    ".docx",
+    ".eml",
+    ".htm",
+    ".html",
+    ".ini",
+    ".json",
+    ".jsonl",
+    ".log",
+    ".md",
+    ".odp",
+    ".ods",
+    ".odt",
+    ".pdf",
+    ".pptx",
+    ".rtf",
+    ".tsv",
+    ".txt",
+    ".xlsx",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
+TEXT_EXTS = {
+    "cfg",
+    "conf",
+    "csv",
+    "eml",
+    "ini",
+    "json",
+    "jsonl",
+    "log",
+    "md",
+    "tsv",
+    "txt",
+    "xml",
+    "yaml",
+    "yml",
+}
+HTML_EXTS = {"htm", "html"}
+OFFICE_OPEN_XML_EXTS = {"docx", "pptx", "xlsx"}
+OPEN_DOCUMENT_EXTS = {"odp", "ods", "odt"}
+DOCS_INDEX_TOKEN_PATTERN = re.compile(r"[\w@./:-]{2,}", flags=re.UNICODE)
+DOCS_INDEX_VERSION = 1
 
 
 def scan_document_candidates(root: Union[InputRoot, Path], limit: int = 0) -> List[DocumentCandidate]:
@@ -72,6 +119,7 @@ def run_docs_search(
     *,
     input_kind: str | None = None,
     rule_set: RuleSet | None = None,
+    index_output: Path | None = None,
 ) -> Dict[str, object]:
     input_root = resolve_input_root(root, kind=input_kind)
     normalized = [item.lower() for item in keywords]
@@ -79,7 +127,10 @@ def run_docs_search(
     matches: List[DocumentMatch] = []
     text_by_path: Dict[str, str] = {}
     for candidate in candidates:
-        text = extract_text(Path(candidate.path), candidate.kind)
+        try:
+            text = extract_text(Path(candidate.path), candidate.kind)
+        except (OSError, UnicodeError, zipfile.BadZipFile, ET.ParseError):
+            text = ""
         text_by_path[candidate.path] = text
         matched = [keyword for keyword in normalized if keyword in text.lower()]
         if not matched:
@@ -108,7 +159,74 @@ def run_docs_search(
     }
     if rule_set is not None:
         annotate_docs_payload(payload, rule_set, text_by_path=text_by_path)
+    if index_output is not None:
+        index_payload = build_docs_index(input_root, candidates, text_by_path)
+        write_result(index_payload, index_output)
+        payload["index"] = {
+            "command": "docs-index",
+            "path": str(index_output),
+            "strategy": index_payload["strategy"],
+            "version": index_payload["version"],
+            "document_count": index_payload["summary"]["indexed_document_count"],
+            "term_count": index_payload["summary"]["term_count"],
+        }
     return payload
+
+
+def build_docs_index(
+    root: Union[InputRoot, Path],
+    candidates: Sequence[DocumentCandidate],
+    text_by_path: Dict[str, str],
+) -> Dict[str, object]:
+    input_root = resolve_input_root(root)
+    documents = []
+    postings: Dict[str, List[Dict[str, int]]] = {}
+    total_occurrences = 0
+    for document_id, candidate in enumerate(candidates):
+        text = text_by_path.get(candidate.path, "")
+        token_counts = Counter(tokenize_index_terms(text))
+        total_occurrences += sum(token_counts.values())
+        documents.append(
+            {
+                "id": document_id,
+                "path": candidate.path,
+                "kind": candidate.kind,
+                "size": candidate.size,
+                "modified_at": candidate.modified_at,
+                "text_sha256": hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest(),
+                "text_length": len(text),
+                "token_count": sum(token_counts.values()),
+                "unique_token_count": len(token_counts),
+            }
+        )
+        for term, count in sorted(token_counts.items()):
+            postings.setdefault(term, []).append({"document_id": document_id, "count": count})
+
+    return {
+        "command": "docs-index",
+        "version": DOCS_INDEX_VERSION,
+        "root": str(input_root.root_path),
+        "generated_at": dt.datetime.now().isoformat(),
+        "strategy": "processed-text-inverted-index",
+        "analyzer": {
+            "case_fold": True,
+            "token_pattern": DOCS_INDEX_TOKEN_PATTERN.pattern,
+            "stores_full_text": False,
+            "stores_text_hashes": True,
+        },
+        "summary": {
+            "candidate_count": len(candidates),
+            "indexed_document_count": sum(1 for item in documents if int(item["text_length"]) > 0),
+            "term_count": len(postings),
+            "token_occurrence_count": total_occurrences,
+        },
+        "documents": documents,
+        "terms": postings,
+    }
+
+
+def tokenize_index_terms(text: str) -> List[str]:
+    return [match.group(0).lower()[:256] for match in DOCS_INDEX_TOKEN_PATTERN.finditer(text)]
 
 
 def write_result(payload: Dict[str, object], output: Path) -> None:
@@ -119,23 +237,50 @@ def write_result(payload: Dict[str, object], output: Path) -> None:
 def extract_text(path: Path, kind: str) -> str:
     if kind in TEXT_EXTS:
         return path.read_text(encoding="utf-8", errors="ignore")
-    if kind == "docx":
-        return _extract_docx_text(path)
+    if kind in HTML_EXTS:
+        return _strip_markup(path.read_text(encoding="utf-8", errors="ignore"))
+    if kind in OFFICE_OPEN_XML_EXTS:
+        return _extract_office_open_xml_text(path, kind)
+    if kind in OPEN_DOCUMENT_EXTS:
+        return _extract_open_document_text(path)
     if kind == "pdf":
         return _extract_pdf_text(path)
+    if kind == "rtf":
+        return _extract_rtf_text(path)
     return ""
 
 
-def _extract_docx_text(path: Path) -> str:
+def _extract_office_open_xml_text(path: Path, kind: str) -> str:
+    prefixes = {
+        "docx": ("word/document.xml",),
+        "pptx": ("ppt/slides/slide",),
+        "xlsx": ("xl/sharedStrings.xml", "xl/worksheets/sheet"),
+    }[kind]
     with zipfile.ZipFile(path) as archive:
-        with archive.open("word/document.xml") as handle:
-            xml_data = handle.read()
+        texts = []
+        for name in archive.namelist():
+            if not name.endswith(".xml") or not any(name.startswith(prefix) for prefix in prefixes):
+                continue
+            with archive.open(name) as handle:
+                texts.extend(_extract_xml_text(handle.read()))
+    return " ".join(texts)
+
+
+def _extract_open_document_text(path: Path) -> str:
+    with zipfile.ZipFile(path) as archive:
+        if "content.xml" not in archive.namelist():
+            return ""
+        with archive.open("content.xml") as handle:
+            return " ".join(_extract_xml_text(handle.read()))
+
+
+def _extract_xml_text(xml_data: bytes) -> List[str]:
     root = ET.fromstring(xml_data)
     texts = []
     for node in root.iter():
-        if node.tag.endswith("}t") and node.text:
-            texts.append(node.text)
-    return " ".join(texts)
+        if node.text and node.text.strip():
+            texts.append(node.text.strip())
+    return texts
 
 
 def _extract_pdf_text(path: Path) -> str:
@@ -169,6 +314,21 @@ def _extract_pdf_literal_strings(blob: bytes) -> List[str]:
         if cleaned:
             found.append(cleaned)
     return found
+
+
+def _extract_rtf_text(path: Path) -> str:
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    text = re.sub(r"\\'[0-9a-fA-F]{2}", " ", text)
+    text = re.sub(r"\\[a-zA-Z]+\d* ?", " ", text)
+    text = text.replace("{", " ").replace("}", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _strip_markup(text: str) -> str:
+    text = re.sub(r"<script\b.*?</script>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"<style\b.*?</style>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def build_preview(text: str, keyword: str, radius: int = 80) -> str:

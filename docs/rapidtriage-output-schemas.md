@@ -41,10 +41,12 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `manifest`
   - `candidates`
   - `results`
+  - optional `index` metadata when a processed-text index sidecar is written
 - `summary` currently records:
   - `candidate_count`
   - `match_count`
   - `supported_extensions`
+- Optional `docs-index` sidecars use a processed-text inverted index and do not store full extracted text.
 
 ### `files`
 
@@ -65,6 +67,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `modified_epoch`
   - `categories`
   - `reasons`
+- Default categories include documents, archives, databases, executables, emails, AXIOM-aligned disk/mobile images, memory dumps, vehicle exports, and image/OCR candidates.
 
 ### `extract`
 
@@ -92,6 +95,41 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - Source-specific entry keys:
   - from `files`: `categories`
   - from `docs`: `kind`, `matched_keywords`
+
+### `submission-manifest`
+
+- Schema: `rapidtriage/schemas/submission-manifest.schema.json`
+- Top-level keys:
+  - `command`
+  - `generated_at`
+  - `case_id`
+  - `title`
+  - `hash_algorithms`
+  - `options`
+  - `summary`
+  - `items`
+  - `skipped`
+- Each evidence row includes:
+  - `bookmark_id`
+  - `summary`
+  - `tags`
+  - `note`
+  - `review`
+  - `reference`
+  - `evidence.path`
+  - `evidence.size`
+  - `evidence.hashes.md5`
+  - `evidence.hashes.sha1`
+  - `evidence.hashes.sha256`
+
+### `case-report`
+
+- Output: `rapidtriage-case-report.md`
+- Built from:
+  - `rapidtriage-case.json`
+  - `rapidtriage-submission-manifest.json`
+  - run summary metadata
+- The Markdown draft includes case metadata, analysis scope, run steps, reviewed/report-candidate counts, evidence hashes, skipped hash rows, conclusion/opinion text, and attachment references.
 
 ## Windows artifact collector rows
 

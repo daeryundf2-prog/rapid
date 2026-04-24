@@ -7,13 +7,20 @@ from pathlib import Path
 
 from .core.audit import audit_path_for, write_audit_record
 from .core.artifacts import ArtifactCollectionError, SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
-from .core.case import CaseBookmarkError, create_or_update_case_payload, load_case_payload, save_case_payload
+from .core.case import (
+    REVIEW_STATUSES,
+    CaseBookmarkError,
+    create_or_update_case_payload,
+    load_case_payload,
+    save_case_payload,
+)
 from .core.docs import build_manifest, run_docs_search, write_result
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
 from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
 from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS, resolve_input_root
 from .core.rules import RuleConfigError, load_rule_set
 from .core.run import RunModeError, SUPPORTED_RUN_MODES, run_triage_mode
+from .core.search import SearchError, run_unified_search
 from .core.timeline import TimelineError, build_timeline_report, run_timeline
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
@@ -30,6 +37,7 @@ MANIFEST_EPILOG = """Examples:
 DOCS_EPILOG = """Examples:
   rapidtriage docs . -k incident -k registry
   rapidtriage docs /cases/image-mount -k password --limit 250 --output docs-hits.json
+  rapidtriage docs /cases/image-mount -k password --index-output docs-index.json
 """
 FILES_EPILOG = """Examples:
   rapidtriage files .
@@ -48,6 +56,12 @@ def add_rules_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--rules", help="Path to a rapidtriage JSON/YAML rule file for matched_rules and IOC lookup")
 
 
+def add_web_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--host", default="127.0.0.1", help="Host interface for the local web server")
+    parser.add_argument("--port", type=int, default=8765, help="Port for the local web server")
+    parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload for UI/API development")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rapidtriage",
@@ -58,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
             Examples:
               rapidtriage manifest . --output rapidtriage-manifest.json
               rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
+              rapidtriage docs . -k incident --index-output rapidtriage-docs-index.json
               rapidtriage files . --output rapidtriage-files.json
               rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
               rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
@@ -68,6 +83,9 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage case ./incident-case.json --source rapidtriage-timeline.json --pointer /events/0 --tag suspicious
               rapidtriage manifest /Volumes/case-mount --input-kind mounted-image
               rapidtriage run . --mode fraud --output-dir ./rapidtriage-run --read-only
+              rapidtriage run ./case.E01 --mode fraud --output-dir ./rapidtriage-run-e01
+              rapidtriage search ./rapidtriage-run-fraud -k invoice -k password
+              rapidtriage web --host 127.0.0.1 --port 8765
             """
         ),
     )
@@ -83,6 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
             Examples:
               rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
               rapidtriage docs /cases/image-mount -k password --limit 250 --output docs-hits.json
+              rapidtriage docs /cases/image-mount -k password --index-output docs-index.json
             """
         ),
     )
@@ -90,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     docs.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
     docs.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
     docs.add_argument("--output", default="rapidtriage-docs.json", help="JSON output path")
+    docs.add_argument("--index-output", help="Optional processed-text inverted index JSON sidecar")
     docs.add_argument("--limit", type=int, default=0, help="Stop after scanning N candidates (0 means all)")
     add_rules_argument(docs)
 
@@ -225,6 +245,25 @@ def build_parser() -> argparse.ArgumentParser:
     timeline.add_argument("--report", help="Markdown report output path (default: OUTPUT stem + -report.md)")
     add_rules_argument(timeline)
 
+    search = sub.add_parser(
+        "search",
+        help="Search a completed run across documents, files, artifacts, timeline, and OCR text",
+        description="Search a completed run across documents, files, artifacts, timeline, and OCR text",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage search ./rapidtriage-run-fraud -k invoice -k password
+              rapidtriage search ./rapidtriage-run-fraud/rapidtriage-run-summary.json -k malicious --no-ocr
+            """
+        ),
+    )
+    search.add_argument("run_output", help="Run output directory or rapidtriage-run-summary.json")
+    search.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
+    search.add_argument("--output", default="rapidtriage-search.json", help="JSON output path")
+    search.add_argument("--limit", type=int, default=500, help="Maximum number of combined matches")
+    search.add_argument("--no-ocr", action="store_true", help="Skip OCR over image candidates")
+
     case_parser = sub.add_parser(
         "case",
         help="Save or load case-level bookmarks from rapidtriage JSON outputs",
@@ -248,6 +287,8 @@ def build_parser() -> argparse.ArgumentParser:
     case_parser.add_argument("--bookmark-id", help="Optional stable bookmark identifier for updates")
     case_parser.add_argument("--tag", action="append", help="Bookmark tag (repeatable)")
     case_parser.add_argument("--note", help="Bookmark note text")
+    case_parser.add_argument("--review-status", choices=REVIEW_STATUSES, help="Analyst review decision for the bookmark")
+    case_parser.add_argument("--include-in-report", action="store_true", help="Mark the bookmark as a report candidate")
     case_parser.add_argument("--show", action="store_true", help="Load an existing case JSON and print it to stdout")
 
     run = sub.add_parser(
@@ -261,6 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage run . --mode fraud
               rapidtriage run /cases/image-mount --mode seizure --output-dir ./rapidtriage-run
               rapidtriage run /cases/image-mount --mode recovery --output-dir ./rapidtriage-run-recovery
+              rapidtriage run /cases/image.E01 --mode fraud --output-dir ./rapidtriage-run-e01
               rapidtriage run . --mode hacking --read-only --max-file-count 50
             """
         ),
@@ -279,7 +321,59 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-file-count", type=int, default=0, help="Cap copied files per extract stage (0 means unlimited)")
     run.add_argument("--overwrite", action="store_true", help="Allow extract stages to overwrite existing output files")
     add_rules_argument(run)
+
+    web = sub.add_parser(
+        "web",
+        help="Start the local rapidtriage web UI and API server",
+        description="Start the local rapidtriage web UI and API server",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage web
+              rapidtriage web --host 127.0.0.1 --port 8765
+            """
+        ),
+    )
+    add_web_arguments(web)
     return parser
+
+
+def build_web_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="rapidtriage-web",
+        description="Start the local rapidtriage web UI and API server",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage-web
+              rapidtriage-web --host 127.0.0.1 --port 8765
+            """
+        ),
+    )
+    add_web_arguments(parser)
+    return parser
+
+
+def run_web_server(host: str, port: int, reload: bool = False) -> int:
+    try:
+        import uvicorn
+    except ImportError as exc:
+        raise RuntimeError("rapidtriage web requires the 'web' extra: pip install 'dashcam-tools[web]'") from exc
+    print(f"Starting rapidtriage web UI at http://{host}:{port}")
+    uvicorn.run("rapidtriage.api.app:app", host=host, port=port, reload=reload)
+    return 0
+
+
+def web_main(argv=None) -> int:
+    parser = build_web_parser()
+    args = parser.parse_args(argv)
+    try:
+        return run_web_server(args.host, args.port, args.reload)
+    except RuntimeError as exc:
+        parser.error(str(exc))
+    return 2
 
 
 def main(argv=None) -> int:
@@ -313,6 +407,8 @@ def main(argv=None) -> int:
                 bookmark_id=args.bookmark_id,
                 tags=args.tag or [],
                 note=args.note,
+                review_status=args.review_status,
+                include_in_report=args.include_in_report if args.include_in_report else None,
             )
         except (FileNotFoundError, CaseBookmarkError) as exc:
             parser.error(str(exc))
@@ -328,6 +424,8 @@ def main(argv=None) -> int:
                 "pointer": args.pointer,
                 "bookmark_id": args.bookmark_id,
                 "tags": args.tag or [],
+                "review_status": args.review_status,
+                "include_in_report": args.include_in_report,
             },
             input_files=[("source-json", source_path)] if source_path else [],
             output_files=[("case-json", case_path)],
@@ -445,6 +543,39 @@ def main(argv=None) -> int:
         print(f"Selected: {payload['summary']['selected_count']}  Extracted: {payload['summary']['extracted_count']}")
         return 0
 
+    if args.command == "web":
+        try:
+            return run_web_server(args.host, args.port, args.reload)
+        except RuntimeError as exc:
+            parser.error(str(exc))
+
+    if args.command == "search":
+        run_output = Path(args.run_output).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        try:
+            payload = run_unified_search(run_output, args.keyword, include_ocr=not args.no_ocr, limit=args.limit)
+        except SearchError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        audit_output = audit_path_for(output)
+        input_summary = run_output / "rapidtriage-run-summary.json" if run_output.is_dir() else run_output
+        write_audit_record(
+            audit_output,
+            command="search",
+            options={
+                "keywords": args.keyword,
+                "output": str(output),
+                "limit": args.limit,
+                "ocr": not args.no_ocr,
+            },
+            input_files=[("run-summary", input_summary)],
+            output_files=[("search-json", output)],
+        )
+        print(f"Saved search JSON: {output}")
+        print(f"Saved audit JSON: {audit_output}")
+        print(f"Matches: {payload['summary']['match_count']}")
+        return 0
+
     root = Path(args.root).expanduser().resolve()
     input_root = resolve_input_root(root, kind=getattr(args, "input_kind", None))
     if args.command == "run":
@@ -505,7 +636,15 @@ def main(argv=None) -> int:
     output = Path(args.output).expanduser().resolve()
 
     if args.command == "docs":
-        payload = run_docs_search(root, args.keyword, limit=args.limit, input_kind=args.input_kind, rule_set=rule_set)
+        index_output = Path(args.index_output).expanduser().resolve() if args.index_output else None
+        payload = run_docs_search(
+            root,
+            args.keyword,
+            limit=args.limit,
+            input_kind=args.input_kind,
+            rule_set=rule_set,
+            index_output=index_output,
+        )
         write_result(payload, output)
         audit_output = audit_path_for(output)
         write_audit_record(
@@ -515,13 +654,16 @@ def main(argv=None) -> int:
                 "keywords": args.keyword,
                 "limit": args.limit,
                 "output": str(output),
+                "index_output": str(index_output) if index_output else None,
                 "input_kind": args.input_kind,
                 "rules": args.rules,
             },
             input_root=input_root,
-            output_files=[("docs-json", output)],
+            output_files=[("docs-json", output)] + ([("docs-index", index_output)] if index_output else []),
         )
         print(f"Saved docs search JSON: {output}")
+        if index_output is not None:
+            print(f"Saved docs index JSON: {index_output}")
         print(f"Saved audit JSON: {audit_output}")
         print(f"Candidates: {payload['summary']['candidate_count']}  Matches: {payload['summary']['match_count']}")
         return 0

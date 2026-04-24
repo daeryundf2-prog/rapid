@@ -18,7 +18,32 @@ from .files import (
 from .input_root import InputRoot, resolve_input_root
 
 SUPPORTED_EXTRACT_COMMANDS: Tuple[str, ...] = ("docs", "files")
-SUPPORTED_DOC_KINDS: Tuple[str, ...] = ("docx", "pdf", "txt")
+SUPPORTED_DOC_KINDS: Tuple[str, ...] = (
+    "cfg",
+    "conf",
+    "csv",
+    "docx",
+    "eml",
+    "htm",
+    "html",
+    "ini",
+    "json",
+    "jsonl",
+    "log",
+    "md",
+    "odp",
+    "ods",
+    "odt",
+    "pdf",
+    "pptx",
+    "rtf",
+    "tsv",
+    "txt",
+    "xlsx",
+    "xml",
+    "yaml",
+    "yml",
+)
 DEFAULT_EXTRACT_MANIFEST_NAME = "rapidtriage-extract-manifest.json"
 
 

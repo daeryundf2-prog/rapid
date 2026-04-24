@@ -7,7 +7,13 @@
       "documents",
       "archives",
       "databases",
-      "executables"
+      "executables",
+      "emails",
+      "disk-images",
+      "mobile-images",
+      "memory-dumps",
+      "vehicle-images",
+      "images"
     ],
     "name_contains": [],
     "path_contains": [],
@@ -23,7 +29,13 @@
       "documents": 1,
       "archives": 1,
       "databases": 1,
-      "executables": 1
+      "executables": 1,
+      "emails": 0,
+      "disk-images": 0,
+      "mobile-images": 0,
+      "memory-dumps": 0,
+      "vehicle-images": 0,
+      "images": 0
     },
     "newest_modified_at": "2024-02-03T13:05:09",
     "oldest_modified_at": "2024-02-03T13:05:06"

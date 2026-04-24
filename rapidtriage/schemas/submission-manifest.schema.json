@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "command",
+    "generated_at",
+    "case_id",
+    "title",
+    "hash_algorithms",
+    "options",
+    "summary",
+    "items",
+    "skipped"
+  ],
+  "properties": {
+    "command": { "const": "submission-manifest" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "case_id": { "type": "string" },
+    "title": { "type": "string" },
+    "hash_algorithms": {
+      "type": "array",
+      "items": { "enum": ["md5", "sha1", "sha256"] }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["include_all", "max_items"],
+      "properties": {
+        "include_all": { "type": "boolean" },
+        "max_items": { "type": "integer" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_bookmark_count", "hashed_item_count", "skipped_count", "total_size"],
+      "properties": {
+        "case_bookmark_count": { "type": "integer" },
+        "hashed_item_count": { "type": "integer" },
+        "skipped_count": { "type": "integer" },
+        "total_size": { "type": "integer" }
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["bookmark_id", "summary", "tags", "note", "review", "reference", "evidence"],
+        "properties": {
+          "bookmark_id": { "type": "string" },
+          "summary": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "note": { "type": "string" },
+          "review": { "type": "object", "additionalProperties": true },
+          "reference": { "type": "object", "additionalProperties": true },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "name", "size", "modified_at", "hashes"],
+            "properties": {
+              "path": { "type": "string" },
+              "name": { "type": "string" },
+              "size": { "type": "integer" },
+              "modified_at": { "type": "string", "format": "date-time" },
+              "hashes": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["md5", "sha1", "sha256"],
+                "properties": {
+                  "md5": { "type": "string" },
+                  "sha1": { "type": "string" },
+                  "sha256": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["bookmark_id", "summary", "path", "reason"],
+        "properties": {
+          "bookmark_id": { "type": "string" },
+          "summary": { "type": "string" },
+          "path": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

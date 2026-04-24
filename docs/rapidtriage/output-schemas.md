@@ -64,7 +64,7 @@ Current Windows collector detail shapes inside `providers[].artifacts[]`:
   - placeholder rows currently expose `details.note`
 - `generic-documents`
   - `artifact_type` is `document-pattern`
-  - `details.extension` is one of `.txt`, `.pdf`, `.docx`
+  - `details.extension` is one of the supported document-search suffixes.
 
 See: `docs/rapidtriage/samples/rapidtriage-manifest.sample.json`
 
@@ -79,17 +79,20 @@ Top-level object:
 | `generated_at` | string | Run timestamp. |
 | `summary.candidate_count` | integer | Number of supported document files discovered before keyword filtering. |
 | `summary.match_count` | integer | Number of result rows that matched at least one keyword. |
-| `summary.supported_extensions` | array of strings | Sorted list of supported suffixes: `.docx`, `.pdf`, `.txt`. |
+| `summary.supported_extensions` | array of strings | Sorted list of supported suffixes, including text/config/log/data files, HTML/RTF, PDF, Office OpenXML, and OpenDocument formats. |
+| `index` | object | Optional sidecar metadata when a processed-text inverted index is written. |
 | `manifest` | object | Full manifest object with the same schema as `rapidtriage manifest`. |
 | `candidates` | array of objects | All supported document candidates. |
 | `results` | array of objects | Keyword hits only. |
+
+When indexing is enabled, the sidecar command is `docs-index` and uses a `processed-text-inverted-index` strategy. It stores per-document text hashes/lengths and lower-cased token postings, but not full extracted text.
 
 Candidate row:
 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `path` | string | Candidate file path. |
-| `kind` | string | Extension without the leading dot (`txt`, `pdf`, `docx`). |
+| `kind` | string | Extension without the leading dot, such as `txt`, `pdf`, `docx`, `xlsx`, `pptx`, `odt`, `html`, or `log`. |
 | `size` | integer | File size in bytes. |
 | `modified_at` | string | Filesystem modified timestamp. |
 
@@ -129,6 +132,8 @@ Top-level object:
 | `modified_after` | string or `null` | Normalized ISO timestamp bound. |
 | `modified_before` | string or `null` | Normalized ISO timestamp bound. |
 | `limit` | integer | Result cap; `0` means unlimited. |
+
+Default file categories are `documents`, `archives`, `databases`, `executables`, `emails`, `disk-images`, `mobile-images`, `memory-dumps`, `vehicle-images`, and `images`. Evidence-container categories are aligned with common Magnet AXIOM evidence source formats, including EnCase/FTK/AFF4/raw/VM/mobile image families, memory dumps, and iVe vehicle exports.
 
 `summary` object:
 
@@ -219,3 +224,27 @@ See:
 
 - `docs/rapidtriage/samples/rapidtriage-extract-from-files.sample.json`
 - `docs/rapidtriage/samples/rapidtriage-extract-from-docs.sample.json`
+
+## `rapidtriage submission-manifest`
+
+The local web API writes `rapidtriage-submission-manifest.json` for reviewed evidence marked as report candidates.
+
+Top-level keys:
+
+- `command`
+- `generated_at`
+- `case_id`
+- `title`
+- `hash_algorithms`
+- `options`
+- `summary`
+- `items`
+- `skipped`
+
+Each `items[]` row includes bookmark context, review state, and an `evidence` object with `path`, `name`, `size`, `modified_at`, and `hashes` (`md5`, `sha1`, `sha256`). `skipped[]` records unavailable, missing, out-of-scope, or capped evidence rows.
+
+## `rapidtriage case-report`
+
+The local web API writes `rapidtriage-case-report.md` from case review data and the submission hash manifest.
+
+The Markdown draft includes case metadata, analyst/requester fields, analysis scope, run summary, reviewed/report-candidate counts, report-candidate evidence with MD5/SHA1/SHA256, skipped hash rows, conclusion/opinion text, and attachment references.

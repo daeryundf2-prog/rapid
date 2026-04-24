@@ -1,0 +1,1845 @@
+const apiStatus = document.querySelector("#apiStatus");
+const runForm = document.querySelector("#runForm");
+const runButton = document.querySelector("#runButton");
+const importForm = document.querySelector("#importForm");
+const importButton = document.querySelector("#importButton");
+const refreshButton = document.querySelector("#refreshButton");
+const runList = document.querySelector("#runList");
+const detailPanel = document.querySelector("#detailPanel");
+const RUN_FORM_STORAGE_KEY = "rapidtriage.runForm.v1";
+const SEARCH_STORAGE_PREFIX = "rapidtriage.search.";
+const COMPARE_STORAGE_PREFIX = "rapidtriage.compare.";
+const REVIEW_SELECTION_STORAGE_PREFIX = "rapidtriage.reviewSelection.";
+const SEARCH_PRESETS = [
+  { label: "Credentials", keywords: ["password", "secret", "token", "credential"] },
+  { label: "Web activity", keywords: ["download", "login", "history", "browser"] },
+  { label: "Money trail", keywords: ["invoice", "wire", "account", "transfer"] },
+  { label: "Intrusion", keywords: ["powershell", "rundll32", "remote", "persistence"] },
+];
+const PAGE_SIZE = 250;
+const COMPARE_LIMIT = 6;
+const VIEW_GROUPS = [
+  {
+    id: "triage",
+    label: "Triage",
+    summary: "Inventory first, one bounded table at a time.",
+    tabs: ["summary", "files", "docs", "artifacts", "timeline"],
+  },
+  {
+    id: "find",
+    label: "Find",
+    summary: "Search documents, logs, web artifacts, metadata, and OCR.",
+    tabs: ["search"],
+  },
+  {
+    id: "review",
+    label: "Review",
+    summary: "Classify hits, add notes, and separate evidence from noise.",
+    tabs: ["review"],
+  },
+  {
+    id: "deliver",
+    label: "Deliver",
+    summary: "Read generated reports and export submission material.",
+    tabs: ["report"],
+  },
+];
+const TAB_LABELS = {
+  summary: "Overview",
+  search: "Keyword search",
+  review: "Review board",
+  timeline: "Timeline",
+  artifacts: "Artifacts",
+  files: "Files",
+  docs: "Documents",
+  report: "Run report",
+};
+const SHORTCUTS = [
+  { keys: ["1", "2", "3", "4"], label: "Switch Triage / Find / Review / Deliver" },
+  { keys: ["Ctrl K", "Cmd K"], label: "Open entire case search" },
+  { keys: ["Ctrl F", "Cmd F"], label: "Search current file, or filter visible rows" },
+  { keys: ["[", "]"], label: "Previous / next page in heavy tables" },
+  { keys: ["?"], label: "Show or hide this shortcut guide" },
+];
+
+let selectedRunId = null;
+let selectedRun = null;
+let activeTab = "summary";
+let activeViewGroup = "triage";
+let pollTimer = null;
+const pageOffsets = { timeline: 0, artifacts: 0, files: 0, docs: 0 };
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(detail.detail || response.statusText);
+  }
+  const contentType = response.headers.get("content-type") || "";
+  return contentType.includes("application/json") ? response.json() : response.text();
+}
+
+async function checkHealth() {
+  try {
+    await api("/api/health");
+    setStatus(apiStatus, "online", "ok");
+  } catch (error) {
+    setStatus(apiStatus, "offline", "failed");
+  }
+}
+
+async function loadRuns() {
+  const payload = await api("/api/runs");
+  renderRunList(payload.runs || []);
+  if (selectedRunId) {
+    const match = (payload.runs || []).find((run) => run.run_id === selectedRunId);
+    if (match && match.status !== selectedRun?.status) {
+      await loadRunDetail(selectedRunId, activeTab);
+    }
+  }
+}
+
+function renderRunList(runs) {
+  runList.innerHTML = "";
+  if (!runs.length) {
+    runList.innerHTML = '<p class="empty-state">No runs yet.</p>';
+    return;
+  }
+  for (const run of runs) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `run-item ${run.run_id === selectedRunId ? "selected" : ""}`;
+    button.innerHTML = `
+      <span>
+        <strong>${escapeHtml(run.request.mode)} · ${escapeHtml(run.run_id)}</strong>
+        <span>${escapeHtml(run.origin || "web")} · ${escapeHtml(run.request.root || run.request.output_dir || "")}</span>
+      </span>
+      <span class="status-pill ${statusClass(run.status)}">${escapeHtml(run.status)}</span>
+    `;
+    button.addEventListener("click", () => loadRunDetail(run.run_id, activeTab));
+    runList.appendChild(button);
+  }
+}
+
+async function loadRunDetail(runId, tab = "summary") {
+  selectedRunId = runId;
+  activeTab = tab;
+  activeViewGroup = groupForTab(tab);
+  selectedRun = await api(`/api/runs/${runId}`);
+  if (selectedRun.status !== "completed" || !selectedRun.summary) {
+    detailPanel.innerHTML = renderPendingRun(selectedRun);
+    return;
+  }
+  detailPanel.innerHTML = renderDetailShell(selectedRun, activeTab);
+  bindTabButtons();
+  await renderActiveTab();
+}
+
+function renderPendingRun(run) {
+  return `
+    <div class="detail-topline">
+      <div>
+        <p class="eyebrow">${escapeHtml(run.request.mode)}</p>
+        <h3>${escapeHtml(run.run_id)}</h3>
+      </div>
+      <span class="status-pill ${statusClass(run.status)}">${escapeHtml(run.status)}</span>
+    </div>
+    <section class="guidance-card">
+      <p class="eyebrow">working</p>
+      <h3>${run.error ? "Run needs attention" : "Run is still processing"}</h3>
+      <p>${run.error ? escapeHtml(run.error) : "You can keep this page open. The list refreshes automatically and the run will open when it completes."}</p>
+    </section>
+  `;
+}
+
+function renderDetailShell(run, tab) {
+  activeViewGroup = groupForTab(tab);
+  const tabs = tabsForGroup(activeViewGroup);
+  const group = viewGroupById(activeViewGroup);
+  return `
+    <div class="detail-topline">
+      <div>
+        <p class="eyebrow">${escapeHtml(run.request.mode)}</p>
+        <h3>${escapeHtml(run.run_id)}</h3>
+      </div>
+      <div class="detail-actions">
+        <a class="link-button" href="/api/runs/${encodeURIComponent(run.run_id)}/outputs/report/file">Report</a>
+        <button id="removeRunButton" class="secondary-button danger" type="button">Remove</button>
+        <span class="status-pill ok">completed</span>
+      </div>
+    </div>
+    ${renderViewSwitcher(activeViewGroup)}
+    <p class="view-helper">${escapeHtml(group.summary)}</p>
+    ${renderShortcutHelp()}
+    ${renderCompareTray()}
+    <div class="tab-row">
+      ${tabs.map((item) => `<button class="tab-button ${item === tab ? "active" : ""}" data-tab="${item}" type="button">${escapeHtml(tabLabel(item))}</button>`).join("")}
+    </div>
+    <div class="filter-row">
+      <input id="tableFilter" placeholder="Filter visible rows" />
+      <button id="clearFilter" type="button">Clear</button>
+    </div>
+    <div id="tabBody" class="tab-body"></div>
+  `;
+}
+
+function bindTabButtons() {
+  for (const button of detailPanel.querySelectorAll(".view-button")) {
+    button.addEventListener("click", async () => {
+      const nextGroup = button.dataset.viewGroup;
+      const tabs = tabsForGroup(nextGroup);
+      if (!tabs.length) return;
+      activeViewGroup = nextGroup;
+      activeTab = tabs.includes(activeTab) ? activeTab : tabs[0];
+      detailPanel.innerHTML = renderDetailShell(selectedRun, activeTab);
+      bindTabButtons();
+      await renderActiveTab();
+    });
+  }
+  for (const button of detailPanel.querySelectorAll(".tab-button")) {
+    button.addEventListener("click", async () => {
+      activeTab = button.dataset.tab;
+      activeViewGroup = groupForTab(activeTab);
+      for (const item of detailPanel.querySelectorAll(".tab-button")) {
+        item.classList.toggle("active", item === button);
+      }
+      await renderActiveTab();
+    });
+  }
+  detailPanel.querySelector("#clearFilter")?.addEventListener("click", () => {
+    const input = detailPanel.querySelector("#tableFilter");
+    input.value = "";
+    applyFilter("");
+  });
+  detailPanel.querySelector("#tableFilter")?.addEventListener("input", (event) => {
+    applyFilter(event.target.value);
+  });
+  detailPanel.querySelector("#removeRunButton")?.addEventListener("click", removeSelectedRun);
+  bindCompareActions();
+}
+
+function renderViewSwitcher(activeGroup) {
+  return `
+    <nav class="view-switcher" aria-label="Case workflow views">
+      ${VIEW_GROUPS.map((group) => `
+        <button class="view-button ${group.id === activeGroup ? "active" : ""}" data-view-group="${escapeHtml(group.id)}" type="button">
+          <strong>${escapeHtml(group.label)}</strong>
+          <span>${escapeHtml(group.tabs.map(tabLabel).join(" / "))}</span>
+          <kbd>${escapeHtml(String(VIEW_GROUPS.findIndex((item) => item.id === group.id) + 1))}</kbd>
+        </button>
+      `).join("")}
+    </nav>
+  `;
+}
+
+function renderShortcutHelp() {
+  return `
+    <details id="shortcutHelp" class="shortcut-help">
+      <summary>Keyboard shortcuts ${kbd("?")}</summary>
+      <div class="shortcut-grid">
+        ${SHORTCUTS.map((item) => `
+          <div class="shortcut-row">
+            <span>${item.keys.map(kbd).join("")}</span>
+            <strong>${escapeHtml(item.label)}</strong>
+          </div>
+        `).join("")}
+      </div>
+    </details>
+  `;
+}
+
+async function renderActiveTab() {
+  const body = detailPanel.querySelector("#tabBody");
+  const filter = detailPanel.querySelector("#tableFilter");
+  if (filter) filter.value = "";
+  body.innerHTML = '<p class="empty-state">Loading...</p>';
+  try {
+    if (activeTab === "summary") body.innerHTML = renderSummary(selectedRun.summary);
+    if (activeTab === "search") body.innerHTML = renderSearch();
+    if (activeTab === "timeline") body.innerHTML = renderTimeline(await api(pagedUrl("timeline")));
+    if (activeTab === "artifacts") body.innerHTML = renderArtifacts(await api(pagedUrl("artifacts")));
+    if (activeTab === "files") body.innerHTML = renderFiles(await api(pagedUrl("files")));
+    if (activeTab === "docs") body.innerHTML = renderDocs(await api(pagedUrl("docs")));
+    if (activeTab === "report") body.innerHTML = renderReport(await api(`/api/runs/${selectedRunId}/report`));
+    if (activeTab === "review" || activeTab === "bookmarks") body.innerHTML = renderReviewBoard(await api(`/api/runs/${selectedRunId}/case`));
+  } catch (error) {
+    body.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  }
+  bindPanelActions();
+  bindBookmarkButtons();
+  bindSearchForm();
+}
+
+function renderSummary(payload) {
+  const summary = payload.summary || {};
+  const outputs = payload.outputs || {};
+  return `
+    ${renderWorkflowGuide(summary)}
+    ${renderWorkspaceCards(summary)}
+    <div class="metric-grid">
+      ${metric("Document matches", summary.document_match_count)}
+      ${metric("File candidates", summary.file_candidate_count)}
+      ${metric("Timeline events", summary.timeline_event_count)}
+      ${metric("Extracted files", (summary.docs_extracted_count || 0) + (summary.files_extracted_count || 0))}
+    </div>
+    <div class="split-grid">
+      <section>
+        <h3>Highlights</h3>
+        ${renderHighlightList(payload.highlights || {})}
+      </section>
+      <section>
+        <h3>Outputs</h3>
+        <ul class="output-list">
+          ${Object.entries(outputs).map(([name, path]) => `
+            <li>
+              <strong>${escapeHtml(name)}</strong>
+              <a href="/api/runs/${encodeURIComponent(selectedRunId)}/outputs/${encodeURIComponent(name)}/file">Download</a>
+              <br><span>${escapeHtml(path)}</span>
+            </li>
+          `).join("")}
+        </ul>
+      </section>
+    </div>
+  `;
+}
+
+function renderWorkspaceCards(summary) {
+  const cards = [
+    {
+      label: "1. Triage",
+      title: "Start with bounded inventory",
+      text: "Open only the files, document hits, artifacts, or timeline page you need. Each heavy table is loaded in small pages.",
+      metric: `${formatNumber((summary.file_candidate_count || 0) + (summary.document_match_count || 0))} indexed rows`,
+      tab: "files",
+    },
+    {
+      label: "2. Find",
+      title: "Search across evidence",
+      text: "Keyword search reaches documents, logs, browser/web artifacts, file metadata, timeline rows, and optional OCR.",
+      metric: `${formatNumber(summary.document_match_count || 0)} document hits`,
+      tab: "search",
+    },
+    {
+      label: "3. Review",
+      title: "Turn hits into decisions",
+      text: "Preview the source, tag the hit, mark relevance, and decide whether it belongs in the report set.",
+      metric: `${formatNumber(summary.report_item_count || 0)} report candidates`,
+      tab: "review",
+    },
+    {
+      label: "4. Deliver",
+      title: "Prepare handoff material",
+      text: "Read the run report, then jump to the review board for submission hashes and the case report draft.",
+      metric: "report + hashes",
+      tab: "report",
+    },
+  ];
+  return `
+    <section class="workspace-grid" aria-label="Workflow overview">
+      ${cards.map((card) => `
+        <article class="workspace-card" data-filter="${rowText(card)}">
+          <p class="eyebrow">${escapeHtml(card.label)}</p>
+          <h3>${escapeHtml(card.title)}</h3>
+          <p>${escapeHtml(card.text)}</p>
+          <div class="workspace-card-footer">
+            <span>${escapeHtml(card.metric)}</span>
+            <button class="secondary-button" type="button" data-open-tab="${escapeHtml(card.tab)}">Open</button>
+          </div>
+        </article>
+      `).join("")}
+    </section>
+  `;
+}
+
+function renderWorkflowGuide(summary) {
+  const hasSearchableData = (summary.document_match_count || 0) + (summary.file_candidate_count || 0) + (summary.timeline_event_count || 0) > 0;
+  return `
+    <section class="guidance-card">
+      <div>
+        <p class="eyebrow">recommended next steps</p>
+        <h3>Search, inspect, then review evidence</h3>
+      </div>
+      <div class="step-list">
+        <span class="step-item done">Run complete</span>
+        <span class="step-item ${hasSearchableData ? "done" : ""}">Searchable outputs ready</span>
+        <span class="step-item">Review and classify hits</span>
+        <span class="step-item">Use report candidates</span>
+      </div>
+      <div class="guidance-actions">
+        <button class="secondary-button" type="button" data-open-tab="search">Start keyword search</button>
+        <button class="secondary-button" type="button" data-open-tab="review">Open review board</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderHighlightList(highlights) {
+  const rows = [
+    ...(highlights.recent_file_candidates || []),
+    ...(highlights.large_file_candidates || []),
+    ...(highlights.preferred_location_candidates || []),
+  ].slice(0, 12);
+  if (!rows.length) return '<p class="empty-state">No highlight rows.</p>';
+  return `<div class="dense-list">${rows.map((item) => `<div class="dense-row"><strong>${escapeHtml(item.name || item.path || "item")}</strong><span>${escapeHtml(item.path || item.summary || "")}</span></div>`).join("")}</div>`;
+}
+
+function renderTimeline(payload) {
+  const rows = payload.events || [];
+  const offset = payload.pagination?.offset || 0;
+  if (!rows.length) return '<p class="empty-state">No timeline events.</p>';
+  return `
+    ${renderPaginationNotice(payload.pagination, "timeline")}
+    <table class="data-table">
+      <thead><tr><th>Time</th><th>Source</th><th>Type</th><th>Summary</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map((event, index) => `
+          <tr data-filter="${rowText(event)}">
+            <td>${escapeHtml(event.timestamp)}</td>
+            <td>${escapeHtml(event.source)}</td>
+            <td>${escapeHtml(event.event_type)}</td>
+            <td><strong>${escapeHtml(event.summary)}</strong><span>${escapeHtml(event.path || "")}</span></td>
+            <td>${bookmarkButton("timeline", `/events/${offset + index}`, event.summary)}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+    ${renderPaginationControls(payload.pagination, "timeline")}
+  `;
+}
+
+function renderArtifacts(payload) {
+  const groups = payload.artifacts || {};
+  const rows = [];
+  let pagination = null;
+  for (const [kind, artifactPayload] of Object.entries(groups)) {
+    const offset = artifactPayload.pagination?.offset || 0;
+    if (!pagination && artifactPayload.pagination) pagination = artifactPayload.pagination;
+    for (const [index, artifact] of (artifactPayload.artifacts || []).entries()) {
+      rows.push({ kind, index: offset + index, artifact });
+    }
+  }
+  if (!rows.length) return '<p class="empty-state">No artifact rows.</p>';
+  return `
+    ${renderPaginationNotice(pagination, "artifacts")}
+    <table class="data-table">
+      <thead><tr><th>Kind</th><th>Type</th><th>Provider</th><th>Path</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map(({ kind, index, artifact }) => `
+          <tr data-filter="${rowText({ kind, ...artifact })}">
+            <td>${escapeHtml(kind)}</td>
+            <td>${escapeHtml(artifact.artifact_type)}</td>
+            <td>${escapeHtml(artifact.provider)}</td>
+            <td><span>${escapeHtml(artifact.path)}</span></td>
+            <td>${bookmarkButton(`artifacts:${kind}`, `/artifacts/${index}`, artifact.artifact_type)}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+    ${renderPaginationControls(pagination, "artifacts")}
+  `;
+}
+
+function renderFiles(payload) {
+  const rows = payload.candidates || [];
+  const offset = payload.pagination?.offset || 0;
+  if (!rows.length) return '<p class="empty-state">No file candidates.</p>';
+  return `
+    ${renderPaginationNotice(payload.pagination, "files")}
+    <table class="data-table">
+      <thead><tr><th>Name</th><th>Categories</th><th>Size</th><th>Modified</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map((file, index) => `
+          <tr data-filter="${rowText(file)}">
+            <td><strong>${escapeHtml(file.name)}</strong><span>${escapeHtml(file.path)}</span></td>
+            <td>${escapeHtml((file.categories || []).join(", "))}</td>
+            <td>${formatBytes(file.size)}</td>
+            <td>${escapeHtml(file.modified_at)}</td>
+            <td>${bookmarkButton("files", `/candidates/${offset + index}`, file.name)}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+    ${renderPaginationControls(payload.pagination, "files")}
+  `;
+}
+
+function renderDocs(payload) {
+  const rows = payload.results || [];
+  const offset = payload.pagination?.offset || 0;
+  if (!rows.length) return '<p class="empty-state">No document matches.</p>';
+  return `
+    ${renderPaginationNotice(payload.pagination, "docs")}
+    <table class="data-table">
+      <thead><tr><th>Document</th><th>Kind</th><th>Keywords</th><th>Preview</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map((doc, index) => `
+          <tr data-filter="${rowText(doc)}">
+            <td><strong>${escapeHtml(fileName(doc.path))}</strong><span>${escapeHtml(doc.path)}</span></td>
+            <td>${escapeHtml(doc.kind)}</td>
+            <td>${escapeHtml((doc.matched_keywords || []).join(", "))}</td>
+            <td>${escapeHtml(doc.preview || "")}</td>
+            <td>${bookmarkButton("docs", `/results/${offset + index}`, fileName(doc.path))}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+    ${renderPaginationControls(payload.pagination, "docs")}
+  `;
+}
+
+function renderSearch(payload = null) {
+  const rows = payload?.matches || [];
+  const draft = payload ? { keywords: payload.keywords || [], ocr: payload.ocr?.enabled !== false } : getSearchDraft();
+  const draftText = (draft.keywords || []).join(", ");
+  return `
+    <form id="unifiedSearchForm" class="search-form">
+      <label>
+        Entire case search ${kbd("Ctrl K")}
+        <input id="unifiedSearchInput" value="${escapeHtml(draftText)}" placeholder="Search documents, web history, logs, OCR..." required />
+      </label>
+      <label class="check-label"><input id="unifiedSearchOcr" type="checkbox" ${draft.ocr === false ? "" : "checked"} /> Include OCR on image candidates</label>
+      <button id="unifiedSearchButton" type="submit">Search evidence</button>
+    </form>
+    <div class="preset-row" aria-label="Keyword presets">
+      ${SEARCH_PRESETS.map((preset) => `<button class="preset-chip" type="button" data-keywords="${escapeHtml(preset.keywords.join(", "))}">${escapeHtml(preset.label)}</button>`).join("")}
+    </div>
+    <p class="help-text">Tip: this searches the whole case. Open a result in the viewer to search only inside that file.</p>
+    <section id="evidenceViewer" class="viewer-panel">
+      <p class="empty-state">Select a search result to preview evidence here.</p>
+    </section>
+    ${payload ? renderSearchResults(payload, rows) : '<p class="empty-state">Enter one or more keywords. Separate multiple terms with commas.</p>'}
+  `;
+}
+
+function renderSearchResults(payload, rows) {
+  const summary = payload.summary || {};
+  if (!rows.length) {
+    const ocrErrors = payload.ocr?.errors || [];
+    return `
+      <div class="metric-grid search-metrics">
+        ${metric("Matches", summary.match_count)}
+        ${metric("OCR errors", summary.ocr_error_count)}
+      </div>
+      <p class="empty-state">No matches found.</p>
+      ${renderOcrErrors(ocrErrors)}
+    `;
+  }
+  return `
+    <div class="metric-grid search-metrics">
+      ${metric("Matches", summary.match_count)}
+      ${metric("Sources", Object.keys(summary.source_counts || {}).length)}
+      ${metric("OCR errors", summary.ocr_error_count)}
+      ${metric("Keywords", (payload.keywords || []).length)}
+    </div>
+    <table class="data-table">
+      <thead><tr><th>Source</th><th>Item</th><th>Keywords</th><th>Preview / Evidence</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map((match) => `
+          <tr data-filter="${rowText(match)}">
+            <td>${escapeHtml(match.source)}<span>${escapeHtml(match.kind || "")}</span></td>
+            <td><strong>${escapeHtml(match.title || fileName(match.path))}</strong><span>${escapeHtml(match.path || "")}</span></td>
+            <td>${escapeHtml((match.matched_keywords || []).join(", "))}</td>
+            <td>
+              ${escapeHtml(match.preview || "")}
+              ${renderSearchMetadata(match)}
+            </td>
+            <td class="action-stack">
+              ${reviewActionButtons(match)}
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+    ${renderOcrErrors(payload.ocr?.errors || [])}
+  `;
+}
+
+function renderOcrErrors(errors) {
+  if (!errors.length) return "";
+  return `
+    <details class="ocr-errors">
+      <summary>OCR skipped/failed for ${errors.length} item(s)</summary>
+      <div class="dense-list">
+        ${errors.slice(0, 20).map((item) => `<div class="dense-row"><strong>${escapeHtml(item.path || "OCR")}</strong><span>${escapeHtml(item.error)}</span></div>`).join("")}
+      </div>
+    </details>
+  `;
+}
+
+function renderSearchMetadata(match) {
+  if (!match.metadata) return "";
+  return `
+    <details class="match-details">
+      <summary>Inspect matched data</summary>
+      <pre>${escapeHtml(JSON.stringify(match.metadata, null, 2))}</pre>
+    </details>
+  `;
+}
+
+function bindSearchForm() {
+  const form = detailPanel.querySelector("#unifiedSearchForm");
+  if (!form) return;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const input = detailPanel.querySelector("#unifiedSearchInput");
+    const button = detailPanel.querySelector("#unifiedSearchButton");
+    const includeOcr = detailPanel.querySelector("#unifiedSearchOcr")?.checked ?? true;
+    const keywords = String(input.value || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!keywords.length) return;
+    setSearchDraft({ keywords, ocr: includeOcr });
+    button.disabled = true;
+    button.textContent = "Searching...";
+    try {
+      const params = new URLSearchParams();
+      for (const keyword of keywords) params.append("keyword", keyword);
+      params.set("ocr", includeOcr ? "true" : "false");
+      const payload = await api(`/api/runs/${selectedRunId}/search?${params.toString()}`);
+      detailPanel.querySelector("#tabBody").innerHTML = renderSearch(payload);
+      bindSearchForm();
+      bindBookmarkButtons();
+    } catch (error) {
+      detailPanel.querySelector("#tabBody").insertAdjacentHTML("beforeend", `<p class="empty-state">${escapeHtml(error.message)}</p>`);
+    } finally {
+      const nextButton = detailPanel.querySelector("#unifiedSearchButton");
+      if (nextButton) {
+        nextButton.disabled = false;
+        nextButton.textContent = "Search evidence";
+      }
+    }
+  });
+  for (const button of detailPanel.querySelectorAll("[data-view-source-path]")) {
+    button.addEventListener("click", async () => {
+      await loadEvidencePreview(button.dataset.viewSourcePath, parseReviewContext(button.dataset.reviewContext));
+    });
+  }
+  for (const button of detailPanel.querySelectorAll("[data-keywords]")) {
+    button.addEventListener("click", () => {
+      const input = detailPanel.querySelector("#unifiedSearchInput");
+      if (!input) return;
+      input.value = button.dataset.keywords || "";
+      form.requestSubmit();
+    });
+  }
+}
+
+async function loadEvidencePreview(path, reviewContext = null) {
+  const viewer = detailPanel.querySelector("#evidenceViewer");
+  if (!viewer || !path) return;
+  viewer.innerHTML = '<p class="empty-state">Loading preview...</p>';
+  try {
+    const payload = await api(`/api/runs/${selectedRunId}/source-preview?path=${encodeURIComponent(path)}`);
+    viewer.innerHTML = renderEvidenceViewer(payload, reviewContext);
+    bindViewerButtons();
+  } catch (error) {
+    viewer.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function renderEvidenceViewer(payload, reviewContext = null) {
+  const openLink = `<a class="mini-link" href="${escapeHtml(payload.download_url)}" target="_blank" rel="noreferrer">Open source</a>`;
+  const copyButton = `<button class="icon-action" type="button" data-copy-path="${escapeHtml(payload.path)}">Copy path</button>`;
+  const pinButton = `<button class="icon-action" type="button" data-compare-item="${escapeHtml(JSON.stringify(compareItemFromPreview(payload, reviewContext)))}">Pin compare</button>`;
+  let body = `<p class="empty-state">${escapeHtml(payload.message || "No preview available.")}</p>`;
+  if (payload.preview_type === "image") {
+    body = `<img class="viewer-image" src="${escapeHtml(payload.image_url)}" alt="${escapeHtml(payload.name)}" />`;
+  }
+  if (payload.preview_type === "text") {
+    body = `
+      <pre class="viewer-text">${escapeHtml(payload.text || "")}</pre>
+      ${payload.truncated ? '<p class="empty-state">Preview truncated for performance.</p>' : ""}
+    `;
+  }
+  return `
+    <div class="viewer-header">
+      <div>
+        <p class="eyebrow">evidence viewer</p>
+        <h3>${escapeHtml(payload.name)}</h3>
+      </div>
+      <div class="detail-actions">${openLink}${copyButton}${pinButton}</div>
+    </div>
+    <div class="viewer-meta">
+      <span>${escapeHtml(payload.mime_type)}</span>
+      <span>${formatBytes(payload.size)}</span>
+      <span>${escapeHtml(payload.path)}</span>
+    </div>
+    ${renderFileSearchBox(payload)}
+    ${renderReviewCapture(reviewContext, payload)}
+    ${body}
+  `;
+}
+
+function renderFileSearchBox(payload) {
+  return `
+    <form id="fileSearchForm" class="file-search-form" data-file-search-path="${escapeHtml(payload.path)}">
+      <label>
+        Search inside this file ${kbd("Ctrl F")}
+        <input name="keyword" placeholder="Find text only in ${escapeHtml(payload.name)}" />
+      </label>
+      <button type="submit">Search file</button>
+      <span id="fileSearchStatus" class="review-save-status"></span>
+    </form>
+    <section id="fileSearchResults" class="file-search-results"></section>
+  `;
+}
+
+function renderReviewCapture(reviewContext, payload) {
+  if (!reviewContext?.source || !reviewContext?.pointer) {
+    return '<p class="empty-state">This source can be previewed, but it is not tied to a saved result pointer for review.</p>';
+  }
+  const suggestedTags = Array.from(new Set([...(reviewContext.tags || []), payload.extension?.replace(".", "")].filter(Boolean))).join(", ");
+  return `
+    <form id="viewerReviewForm" class="review-capture" data-review-context="${escapeHtml(JSON.stringify(reviewContext))}">
+      <div>
+        <p class="eyebrow">review decision</p>
+        <h3>Check, classify, and organize this hit</h3>
+      </div>
+      <div class="review-grid">
+        <label>
+          Decision
+          <select name="status">
+            <option value="needs-review">Needs review</option>
+            <option value="relevant">Relevant</option>
+            <option value="not-relevant">Not relevant</option>
+            <option value="unreviewed">Unreviewed</option>
+          </select>
+        </label>
+        <label>
+          Tags
+          <input name="tags" value="${escapeHtml(suggestedTags)}" placeholder="credential, browser, suspicious-login" />
+        </label>
+      </div>
+      <label>
+        Analyst note
+        <textarea name="note" rows="3" placeholder="Why this matters, what to verify next, or why it is noise.">${escapeHtml(reviewContext.note || "")}</textarea>
+      </label>
+      <div class="review-actions">
+        <label class="check-label"><input name="include_in_report" type="checkbox" /> Include in report set</label>
+        <button type="submit">Save review decision</button>
+        <span id="viewerReviewStatus" class="review-save-status"></span>
+      </div>
+    </form>
+  `;
+}
+
+function bindViewerButtons() {
+  bindCopyButtons();
+  bindCompareActions();
+  const fileSearchForm = detailPanel.querySelector("#fileSearchForm");
+  if (fileSearchForm) fileSearchForm.addEventListener("submit", searchCurrentFile);
+  const reviewForm = detailPanel.querySelector("#viewerReviewForm");
+  if (reviewForm) {
+    reviewForm.addEventListener("submit", saveViewerReview);
+    reviewForm.querySelector("[name='status']")?.addEventListener("change", (event) => {
+      const includeInput = reviewForm.querySelector("[name='include_in_report']");
+      if (includeInput && event.target.value === "relevant") includeInput.checked = true;
+    });
+  }
+}
+
+async function searchCurrentFile(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = form.querySelector("#fileSearchStatus");
+  const output = detailPanel.querySelector("#fileSearchResults");
+  const input = form.elements.keyword;
+  const keywords = String(input?.value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!keywords.length || !form.dataset.fileSearchPath) return;
+  status.textContent = "Searching this file...";
+  output.innerHTML = "";
+  try {
+    const params = new URLSearchParams();
+    params.set("path", form.dataset.fileSearchPath);
+    for (const keyword of keywords) params.append("keyword", keyword);
+    const payload = await api(`/api/runs/${selectedRunId}/source-search?${params.toString()}`);
+    output.innerHTML = renderFileSearchResults(payload);
+  } catch (error) {
+    output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  } finally {
+    status.textContent = "";
+  }
+}
+
+function renderFileSearchResults(payload) {
+  const rows = payload.matches || [];
+  if (!payload.searchable) {
+    return `<p class="empty-state">${escapeHtml(payload.message || "This file is not searchable.")}</p>`;
+  }
+  if (!rows.length) {
+    return `
+      <div class="file-search-summary">
+        ${metric("File matches", 0)}
+        ${metric("Keywords", (payload.keywords || []).length)}
+      </div>
+      <p class="empty-state">No matches in this file.</p>
+    `;
+  }
+  return `
+    <div class="file-search-summary">
+      ${metric("File matches", payload.summary?.match_count)}
+      ${metric("Keywords", (payload.keywords || []).length)}
+    </div>
+    <div class="dense-list">
+      ${rows.map((match) => `
+        <article class="dense-row">
+          <strong>Line ${escapeHtml(match.line)} · ${escapeHtml(match.keyword)}</strong>
+          <span>${highlightSnippet(match.snippet || "", payload.keywords || [])}</span>
+        </article>
+      `).join("")}
+    </div>
+    ${payload.truncated ? '<p class="help-text">Results were capped for performance. Narrow the keyword if needed.</p>' : ""}
+  `;
+}
+
+async function saveViewerReview(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = form.querySelector("#viewerReviewStatus");
+  const context = parseReviewContext(form.dataset.reviewContext);
+  if (!context?.source || !context?.pointer) return;
+  const request = {
+    source: context.source,
+    pointer: context.pointer,
+    tag: activeTab === "search" ? "search-hit" : activeTab,
+    tags: parseTags(form.elements.tags?.value || ""),
+    note: form.elements.note?.value || context.note || "",
+    review_status: form.elements.status?.value || "needs-review",
+    include_in_report: Boolean(form.elements.include_in_report?.checked),
+  };
+  status.textContent = "Saving...";
+  try {
+    await api(`/api/runs/${selectedRunId}/bookmarks`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    status.innerHTML = 'Saved to review board <button class="mini-inline-button" type="button" data-open-tab="review">Open review</button>';
+    bindPanelActions();
+  } catch (error) {
+    status.textContent = `Failed: ${error.message}`;
+  }
+}
+
+async function saveCaseReport(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = form.querySelector("#caseReportStatus");
+  const request = {
+    title: form.elements.title?.value || null,
+    case_number: form.elements.case_number?.value || null,
+    investigator: form.elements.investigator?.value || null,
+    organization: form.elements.organization?.value || null,
+    requester: form.elements.requester?.value || null,
+    scope: form.elements.scope?.value || null,
+    conclusion: form.elements.conclusion?.value || null,
+    include_all: Boolean(form.elements.include_all?.checked),
+    max_items: Number(form.elements.max_items?.value || 500),
+  };
+  status.textContent = "Generating...";
+  try {
+    const payload = await api(`/api/runs/${selectedRunId}/case-report`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    const url = `/api/runs/${encodeURIComponent(selectedRunId)}/case-report/file`;
+    status.innerHTML = `Saved <a class="mini-link" href="${url}" target="_blank" rel="noreferrer">Download report</a>`;
+    if (payload.report_path) {
+      status.insertAdjacentHTML("beforeend", ` <span>${escapeHtml(payload.report_path)}</span>`);
+    }
+  } catch (error) {
+    status.textContent = `Failed: ${error.message}`;
+  }
+}
+
+function parseReviewContext(value) {
+  if (!value) return null;
+  try {
+    const payload = JSON.parse(value);
+    return payload && typeof payload === "object" ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseTags(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function renderReport(markdown) {
+  return `
+    <section class="guidance-card">
+      <div>
+        <p class="eyebrow">deliver</p>
+        <h3>Package the case without loading every row</h3>
+      </div>
+      <p>This view keeps the generated run report separate from evidence review. Use the review board to produce the submission hash manifest and case report draft from checked evidence.</p>
+      <div class="guidance-actions">
+        <button class="secondary-button" type="button" data-open-tab="review">Open review board</button>
+        <a class="link-button" href="/api/runs/${encodeURIComponent(selectedRunId)}/outputs/report/file">Download run report</a>
+      </div>
+    </section>
+    <pre class="report-view">${escapeHtml(markdown)}</pre>
+  `;
+}
+
+function renderReviewBoard(payload) {
+  if (!payload.exists || !payload.case) {
+    return `
+      <section class="guidance-card">
+        <p class="eyebrow">review board</p>
+        <h3>No reviewed evidence yet</h3>
+        <p>Use Search, open a result in the viewer, then save a review decision. Your decisions become the case board here.</p>
+        <div class="guidance-actions">
+          <button class="secondary-button" type="button" data-open-tab="search">Go to search</button>
+        </div>
+      </section>
+    `;
+  }
+  const bookmarks = payload.case.bookmarks || [];
+  if (!bookmarks.length) {
+    return `
+      <section class="guidance-card">
+        <p class="eyebrow">review board</p>
+        <h3>No reviewed evidence yet</h3>
+        <p>Classify search hits as relevant, needs review, or not relevant to build this board.</p>
+        <div class="guidance-actions">
+          <button class="secondary-button" type="button" data-open-tab="search">Go to search</button>
+        </div>
+      </section>
+    `;
+  }
+  const summary = payload.case.summary || {};
+  const groups = groupBookmarksByReviewStatus(bookmarks);
+  return `
+    <div class="case-path">${escapeHtml(payload.case_path)}</div>
+    <div class="metric-grid">
+      ${metric("Reviewed items", summary.bookmark_count)}
+      ${metric("Report candidates", summary.report_item_count)}
+      ${metric("Relevant", summary.review_status_counts?.relevant)}
+      ${metric("Needs review", summary.review_status_counts?.["needs-review"])}
+    </div>
+    ${renderSubmissionManifestPanel(summary)}
+    ${renderCaseReportPanel(summary, payload.case)}
+    ${renderReviewSelectionTray(bookmarks)}
+    <p class="empty-state">Use this board to separate report-ready evidence from noise. The saved structure lives in rapidtriage-case.json.</p>
+    ${["relevant", "needs-review", "not-relevant", "unreviewed"].map((status) => renderReviewGroup(status, groups[status] || [])).join("")}
+  `;
+}
+
+function renderReviewSelectionTray(bookmarks) {
+  const selectedIds = getReviewSelection();
+  const selectedBookmarks = bookmarks.filter((bookmark) => selectedIds.includes(String(bookmark.bookmark_id || "")));
+  return `
+    <section id="reviewSelectionTray" class="review-selection-tray ${selectedBookmarks.length ? "" : "empty"}">
+      <div class="review-group-header">
+        <div>
+          <p class="eyebrow">review selection</p>
+          <h3>현재 검토 묶음</h3>
+        </div>
+        <div class="detail-actions">
+          <span class="status-pill">${selectedBookmarks.length}</span>
+          <button class="secondary-button" type="button" data-clear-review-selection ${selectedBookmarks.length ? "" : "disabled"}>Clear selection</button>
+        </div>
+      </div>
+      ${selectedBookmarks.length ? `
+        <div class="dense-list">
+          ${selectedBookmarks.map((bookmark) => {
+            const review = bookmark.review || {};
+            const snapshot = bookmark.snapshot || {};
+            return `
+              <div class="dense-row">
+                <strong>${escapeHtml(bookmark.summary || bookmark.bookmark_id)}</strong>
+                <span>${escapeHtml(review.status || "unreviewed")} · ${review.include_in_report ? "report set" : "not in report"} · ${escapeHtml(snapshot.path || "")}</span>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      ` : '<p class="empty-state">리뷰 카드에서 Select를 누르면 현재 검토 중인 증거 묶음이 여기에 유지됩니다.</p>'}
+    </section>
+  `;
+}
+
+function renderSubmissionManifestPanel(summary) {
+  const reportCount = Number(summary.report_item_count || 0);
+  const disabled = reportCount ? "" : "disabled";
+  const fileUrl = `/api/runs/${encodeURIComponent(selectedRunId)}/submission-manifest/file`;
+  const jsonUrl = `/api/runs/${encodeURIComponent(selectedRunId)}/submission-manifest`;
+  return `
+    <section class="guidance-card">
+      <div>
+        <p class="eyebrow">submission hashes</p>
+        <h3>Prepare a court-friendly hash manifest</h3>
+      </div>
+      <p>Builds MD5, SHA1, and SHA256 for report-candidate evidence only, then saves rapidtriage-submission-manifest.json in the run output directory.</p>
+      <div class="guidance-actions">
+        <a class="link-button ${disabled}" href="${reportCount ? fileUrl : "#"}" target="_blank" rel="noreferrer">Download hash manifest</a>
+        <a class="link-button ${disabled}" href="${reportCount ? jsonUrl : "#"}" target="_blank" rel="noreferrer">Preview JSON</a>
+      </div>
+      ${reportCount ? "" : '<p class="help-text">Mark evidence as “Include in report set” before generating the submission manifest.</p>'}
+    </section>
+  `;
+}
+
+function renderCaseReportPanel(summary, casePayload) {
+  const reportCount = Number(summary.report_item_count || 0);
+  return `
+    <section class="guidance-card">
+      <div>
+        <p class="eyebrow">report drafting</p>
+        <h3>Write a submission-style investigation report</h3>
+      </div>
+      <p>Creates rapidtriage-case-report.md from case metadata, reviewed evidence, analyst notes, and the submission hash manifest.</p>
+      <form id="caseReportForm" class="report-form">
+        <div class="report-grid">
+          <label>
+            Report title
+            <input name="title" value="${escapeHtml(casePayload.title || "Digital forensic analysis report")}" />
+          </label>
+          <label>
+            Case number
+            <input name="case_number" value="${escapeHtml(casePayload.case_id || "")}" />
+          </label>
+          <label>
+            Investigator
+            <input name="investigator" placeholder="Analyst name" />
+          </label>
+          <label>
+            Organization
+            <input name="organization" placeholder="Agency / company" />
+          </label>
+          <label>
+            Requester
+            <input name="requester" placeholder="Requesting party" />
+          </label>
+          <label>
+            Max evidence items
+            <input name="max_items" type="number" min="1" max="5000" value="500" />
+          </label>
+        </div>
+        <label>
+          Scope
+          <textarea name="scope" rows="3">검토 대상으로 지정된 증거 파일과 rapidtriage 분석 산출물을 기준으로 작성함.</textarea>
+        </label>
+        <label>
+          Conclusion / opinion
+          <textarea name="conclusion" rows="3">검토 결과 및 증거 해시는 아래 항목과 같음.</textarea>
+        </label>
+        <div class="review-actions">
+          <label class="check-label"><input name="include_all" type="checkbox" /> Include every reviewed bookmark, not only report candidates</label>
+          <button type="submit" ${reportCount ? "" : "disabled"}>Generate report draft</button>
+          <span id="caseReportStatus" class="review-save-status"></span>
+        </div>
+      </form>
+      ${reportCount ? "" : '<p class="help-text">Mark evidence as “Include in report set” before generating a report draft.</p>'}
+    </section>
+  `;
+}
+
+function groupBookmarksByReviewStatus(bookmarks) {
+  return bookmarks.reduce((groups, bookmark) => {
+    const status = bookmark.review?.status || "unreviewed";
+    if (!groups[status]) groups[status] = [];
+    groups[status].push(bookmark);
+    return groups;
+  }, {});
+}
+
+function renderReviewGroup(status, bookmarks) {
+  const labelMap = {
+    relevant: "Relevant evidence",
+    "needs-review": "Needs review",
+    "not-relevant": "Not relevant / noise",
+    unreviewed: "Unreviewed bookmarks",
+  };
+  return `
+    <section class="review-group">
+      <div class="review-group-header">
+        <h3>${escapeHtml(labelMap[status] || status)}</h3>
+        <span class="status-pill">${bookmarks.length}</span>
+      </div>
+      ${bookmarks.length ? bookmarks.map(renderReviewCard).join("") : '<p class="empty-state">No items in this bucket.</p>'}
+    </section>
+  `;
+}
+
+function renderReviewCard(bookmark) {
+  const review = bookmark.review || {};
+  const snapshot = bookmark.snapshot || {};
+  const reference = bookmark.reference || {};
+  const reportBadge = review.include_in_report ? '<span class="review-badge report">report set</span>' : '<span class="review-badge">not in report</span>';
+  const compareButton = snapshot.path ? `<button class="icon-action" type="button" data-compare-item="${escapeHtml(JSON.stringify(compareItemFromBookmark(bookmark)))}">Pin compare</button>` : "";
+  const bookmarkId = String(bookmark.bookmark_id || "");
+  const selected = getReviewSelection().includes(bookmarkId);
+  return `
+    <article class="review-card ${selected ? "selected" : ""}" data-filter="${rowText(bookmark)}" data-review-card-id="${escapeHtml(bookmarkId)}">
+      <div class="review-card-top">
+        <strong>${escapeHtml(bookmark.summary || bookmark.bookmark_id)}</strong>
+        <div class="detail-actions">
+          ${reportBadge}
+          <button class="icon-action" type="button" data-toggle-review-selection="${escapeHtml(bookmarkId)}">${selected ? "Selected" : "Select"}</button>
+        </div>
+      </div>
+      <div class="viewer-meta">
+        <span>${escapeHtml(reference.command || "source")}</span>
+        <span>${escapeHtml(snapshot.timestamp || bookmark.updated_at || "")}</span>
+        <span>${escapeHtml(snapshot.path || "")}</span>
+      </div>
+      <p>${escapeHtml(bookmark.note || "No analyst note yet.")}</p>
+      <div class="tag-row">${(bookmark.tags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>
+      <code>${escapeHtml(reference.pointer || "")}</code>
+      ${renderReviewHistory(bookmark)}
+      ${compareButton ? `<div class="review-actions">${compareButton}</div>` : ""}
+    </article>
+  `;
+}
+
+function renderReviewHistory(bookmark) {
+  const history = Array.isArray(bookmark.review_history) ? bookmark.review_history : [];
+  if (!history.length) return "";
+  const latest = history[history.length - 1] || {};
+  return `
+    <details class="review-history">
+      <summary>Review history · ${history.length} revision(s), latest ${escapeHtml(latest.action || "updated")}</summary>
+      <div class="dense-list">
+        ${history.slice(-5).reverse().map((entry) => `
+          <div class="dense-row">
+            <strong>${escapeHtml(entry.action || "revision")} · ${escapeHtml(entry.status || "")} · ${escapeHtml(entry.at || "")}</strong>
+            <span>${escapeHtml((entry.changed_fields || []).join(", ") || "snapshot")}</span>
+          </div>
+        `).join("")}
+      </div>
+    </details>
+  `;
+}
+
+function bindBookmarkButtons() {
+  for (const button of detailPanel.querySelectorAll("[data-bookmark-source]")) {
+    button.addEventListener("click", async () => {
+      const tag = activeTab === "artifacts" ? "artifact" : activeTab;
+      button.disabled = true;
+      button.textContent = "Saving";
+      try {
+        await api(`/api/runs/${selectedRunId}/bookmarks`, {
+          method: "POST",
+          body: JSON.stringify({
+            source: button.dataset.bookmarkSource,
+            pointer: button.dataset.bookmarkPointer,
+            tag,
+            note: button.dataset.bookmarkNote || "",
+          }),
+        });
+        button.textContent = "Saved";
+      } catch (error) {
+        button.textContent = "Failed";
+        button.title = error.message;
+      }
+    });
+  }
+}
+
+function bookmarkButton(source, pointer, note) {
+  return `<button class="icon-action" type="button" title="Save bookmark" data-bookmark-source="${escapeHtml(source)}" data-bookmark-pointer="${escapeHtml(pointer)}" data-bookmark-note="${escapeHtml(note || "")}">Mark</button>`;
+}
+
+function bookmarkContextForMatch(match) {
+  const sourceMap = {
+    documents: "docs",
+    files: "files",
+    ocr: "files",
+    timeline: "timeline",
+    web: "artifacts:browser",
+    artifacts: `artifacts:${match.kind || ""}`,
+  };
+  const source = sourceMap[match.source];
+  if (!source || !match.pointer) return null;
+  return {
+    source,
+    pointer: match.pointer,
+    title: match.title || fileName(match.path) || "search hit",
+    note: match.preview || "",
+    path: match.path || "",
+    tags: [match.source, match.kind].filter(Boolean),
+  };
+}
+
+function reviewActionButtons(match) {
+  const context = bookmarkContextForMatch(match);
+  const items = [];
+  if (match.path) {
+    items.push(viewSourceButton(match, context));
+    items.push(sourceFileLink(match));
+    items.push(compareButton(compareItemFromMatch(match, context)));
+  }
+  if (context) {
+    items.push(bookmarkButton(context.source, context.pointer, context.note || context.title));
+  }
+  return items.join("");
+}
+
+function compareButton(item) {
+  if (!item?.path) return "";
+  return `<button class="icon-action" type="button" data-compare-item="${escapeHtml(JSON.stringify(item))}">Pin compare</button>`;
+}
+
+function compareItemFromMatch(match, context = null) {
+  return {
+    path: match.path || "",
+    title: match.title || fileName(match.path) || "search hit",
+    source: match.source || context?.source || activeTab,
+    kind: match.kind || "",
+    preview: match.preview || context?.note || "",
+    pointer: context?.pointer || match.pointer || "",
+  };
+}
+
+function compareItemFromPreview(payload, reviewContext = null) {
+  const previewText = payload.text
+    ? `${payload.text.slice(0, 1200)}${payload.truncated || payload.text.length > 1200 ? "\n..." : ""}`
+    : payload.preview_type === "image"
+      ? "Image evidence pinned. Use Preview to reopen the visual source."
+      : payload.message || "";
+  return {
+    path: payload.path || "",
+    title: payload.name || fileName(payload.path) || "evidence",
+    source: reviewContext?.source || activeTab,
+    kind: payload.mime_type || payload.preview_type || "",
+    preview: previewText,
+    pointer: reviewContext?.pointer || "",
+  };
+}
+
+function compareItemFromBookmark(bookmark) {
+  const snapshot = bookmark.snapshot || {};
+  const reference = bookmark.reference || {};
+  const review = bookmark.review || {};
+  return {
+    path: snapshot.path || "",
+    title: bookmark.summary || fileName(snapshot.path) || bookmark.bookmark_id || "reviewed evidence",
+    source: reference.command || "review",
+    kind: review.status || "",
+    preview: bookmark.note || "",
+    pointer: reference.pointer || "",
+  };
+}
+
+function viewSourceButton(match, context) {
+  if (!match.path) return "";
+  return `<button class="icon-action" type="button" data-view-source-path="${escapeHtml(match.path)}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}">View / review</button>`;
+}
+
+function sourceFileLink(match) {
+  if (!match.path) return "";
+  const url = `/api/runs/${encodeURIComponent(selectedRunId)}/source-file?path=${encodeURIComponent(match.path)}`;
+  return `<a class="mini-link" href="${url}" target="_blank" rel="noreferrer">Open source</a>`;
+}
+
+function applyFilter(value) {
+  const needle = value.trim().toLowerCase();
+  for (const row of detailPanel.querySelectorAll("[data-filter]")) {
+    row.hidden = needle && !row.dataset.filter.includes(needle);
+  }
+}
+
+function metric(label, value) {
+  return `<div class="metric"><b>${value ?? 0}</b><span>${escapeHtml(label)}</span></div>`;
+}
+
+function setStatus(element, text, className) {
+  element.textContent = text;
+  element.className = `status-pill ${className}`;
+}
+
+function statusClass(status) {
+  if (status === "completed") return "ok";
+  if (status === "failed") return "failed";
+  return "";
+}
+
+function titleCase(value) {
+  return value.slice(0, 1).toUpperCase() + value.slice(1);
+}
+
+function kbd(value) {
+  return `<kbd>${escapeHtml(value)}</kbd>`;
+}
+
+function tabLabel(value) {
+  return TAB_LABELS[value] || titleCase(value);
+}
+
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString();
+}
+
+function rowText(value) {
+  return escapeHtml(JSON.stringify(value || {}).toLowerCase());
+}
+
+function highlightSnippet(value, keywords) {
+  let html = escapeHtml(value);
+  for (const keyword of keywords) {
+    const needle = String(keyword || "").trim();
+    if (!needle) continue;
+    html = html.replace(new RegExp(`(${escapeRegExp(escapeHtml(needle))})`, "gi"), "<mark>$1</mark>");
+  }
+  return html;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function fileName(path) {
+  return String(path || "").split(/[\\/]/).filter(Boolean).pop() || String(path || "");
+}
+
+function formatBytes(value) {
+  const size = Number(value || 0);
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function compareStorageKey() {
+  return `${COMPARE_STORAGE_PREFIX}${selectedRunId || "default"}`;
+}
+
+function getCompareItems() {
+  if (!storageAvailable()) return [];
+  try {
+    const payload = JSON.parse(window.localStorage.getItem(compareStorageKey()) || "[]");
+    return Array.isArray(payload) ? payload.filter((item) => item?.path).slice(0, COMPARE_LIMIT) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setCompareItems(items) {
+  if (!storageAvailable()) return;
+  window.localStorage.setItem(compareStorageKey(), JSON.stringify(items.slice(0, COMPARE_LIMIT)));
+}
+
+function addCompareItem(item) {
+  if (!item?.path) return;
+  const nextItem = { ...item, added_at: new Date().toISOString() };
+  const existing = getCompareItems().filter((candidate) => candidate.path !== item.path);
+  setCompareItems([nextItem, ...existing].slice(0, COMPARE_LIMIT));
+  refreshCompareTray();
+}
+
+function removeCompareItem(path) {
+  setCompareItems(getCompareItems().filter((item) => item.path !== path));
+  refreshCompareTray();
+}
+
+function clearCompareItems() {
+  setCompareItems([]);
+  refreshCompareTray();
+}
+
+function renderCompareTray() {
+  const items = getCompareItems();
+  const primary = items.slice(0, 2);
+  return `
+    <section id="compareTray" class="compare-tray ${items.length ? "" : "empty"}" aria-label="Pinned evidence comparison">
+      <div class="compare-heading">
+        <div>
+          <p class="eyebrow">compare tray</p>
+          <h3>A/B 자료 비교</h3>
+        </div>
+        <div class="detail-actions">
+          <span class="status-pill">${items.length}/${COMPARE_LIMIT}</span>
+          <button class="secondary-button" type="button" data-clear-compare ${items.length ? "" : "disabled"}>Clear</button>
+        </div>
+      </div>
+      ${items.length ? renderCompareItems(primary, items.slice(2)) : '<p class="empty-state">검색 결과나 뷰어에서 “Pin compare”를 눌러두면 탭을 오가도 자료가 여기 남습니다.</p>'}
+    </section>
+  `;
+}
+
+function renderCompareItems(primaryItems, overflowItems) {
+  return `
+    <div class="compare-grid">
+      ${[0, 1].map((index) => renderCompareSlot(primaryItems[index], index)).join("")}
+    </div>
+    ${overflowItems.length ? `
+      <div class="compare-overflow">
+        ${overflowItems.map((item) => `
+          <button class="compare-chip" type="button" data-preview-compare-path="${escapeHtml(item.path)}" title="${escapeHtml(item.path)}">
+            ${escapeHtml(item.title || fileName(item.path))}
+          </button>
+        `).join("")}
+      </div>
+    ` : ""}
+  `;
+}
+
+function renderCompareSlot(item, index) {
+  const label = index === 0 ? "A" : "B";
+  if (!item) {
+    return `
+      <article class="compare-slot placeholder">
+        <strong>${label}</strong>
+        <p>비교할 자료를 하나 더 고정하세요.</p>
+      </article>
+    `;
+  }
+  return `
+    <article class="compare-slot">
+      <div class="compare-slot-top">
+        <strong>${label}</strong>
+        <button class="icon-action" type="button" data-remove-compare-path="${escapeHtml(item.path)}">Remove</button>
+      </div>
+      <h4>${escapeHtml(item.title || fileName(item.path))}</h4>
+      <div class="viewer-meta">
+        <span>${escapeHtml(item.source || "source")}</span>
+        <span>${escapeHtml(item.kind || "")}</span>
+      </div>
+      <p>${escapeHtml(item.preview || item.path)}</p>
+      <div class="review-actions">
+        <button class="secondary-button" type="button" data-preview-compare-path="${escapeHtml(item.path)}">Preview ${label}</button>
+        <button class="icon-action" type="button" data-copy-path="${escapeHtml(item.path)}">Copy path</button>
+      </div>
+    </article>
+  `;
+}
+
+function refreshCompareTray() {
+  const tray = detailPanel.querySelector("#compareTray");
+  if (!tray) return;
+  tray.outerHTML = renderCompareTray();
+  bindCompareActions();
+}
+
+function bindCompareActions() {
+  bindCopyButtons();
+  for (const button of detailPanel.querySelectorAll("[data-compare-item]")) {
+    if (button.dataset.compareBound) continue;
+    button.dataset.compareBound = "1";
+    button.addEventListener("click", () => {
+      const item = parseCompareItem(button.dataset.compareItem);
+      addCompareItem(item);
+      button.textContent = "Pinned";
+    });
+  }
+  const clearButton = detailPanel.querySelector("[data-clear-compare]");
+  if (clearButton && !clearButton.dataset.compareBound) {
+    clearButton.dataset.compareBound = "1";
+    clearButton.addEventListener("click", clearCompareItems);
+  }
+  for (const button of detailPanel.querySelectorAll("[data-remove-compare-path]")) {
+    if (button.dataset.compareBound) continue;
+    button.dataset.compareBound = "1";
+    button.addEventListener("click", () => removeCompareItem(button.dataset.removeComparePath));
+  }
+  for (const button of detailPanel.querySelectorAll("[data-preview-compare-path]")) {
+    if (button.dataset.compareBound) continue;
+    button.dataset.compareBound = "1";
+    button.addEventListener("click", async () => {
+      await previewCompareItem(button.dataset.previewComparePath);
+    });
+  }
+}
+
+function bindCopyButtons() {
+  for (const button of detailPanel.querySelectorAll("[data-copy-path]")) {
+    if (button.dataset.copyBound) continue;
+    button.dataset.copyBound = "1";
+    button.addEventListener("click", async () => {
+      await navigator.clipboard?.writeText(button.dataset.copyPath || "");
+      button.textContent = "Copied";
+    });
+  }
+}
+
+function parseCompareItem(value) {
+  if (!value) return null;
+  try {
+    const item = JSON.parse(value);
+    return item && typeof item === "object" ? item : null;
+  } catch {
+    return null;
+  }
+}
+
+async function previewCompareItem(path) {
+  if (!path) return;
+  if (!detailPanel.querySelector("#evidenceViewer")) {
+    await switchTab("search");
+  }
+  await loadEvidencePreview(path);
+}
+
+function bindPanelActions() {
+  for (const button of detailPanel.querySelectorAll("[data-open-tab]")) {
+    button.addEventListener("click", async () => {
+      await switchTab(button.dataset.openTab);
+    });
+  }
+  for (const button of detailPanel.querySelectorAll("[data-page-tab]")) {
+    button.addEventListener("click", async () => {
+      const tab = button.dataset.pageTab;
+      pageOffsets[tab] = Number(button.dataset.pageOffset || 0);
+      await switchTab(tab);
+    });
+  }
+  const reportForm = detailPanel.querySelector("#caseReportForm");
+  if (reportForm) reportForm.addEventListener("submit", saveCaseReport);
+  bindCompareActions();
+  bindReviewSelectionActions();
+}
+
+function reviewSelectionStorageKey() {
+  return `${REVIEW_SELECTION_STORAGE_PREFIX}${selectedRunId || "default"}`;
+}
+
+function getReviewSelection() {
+  if (!storageAvailable()) return [];
+  try {
+    const payload = JSON.parse(window.localStorage.getItem(reviewSelectionStorageKey()) || "[]");
+    return Array.isArray(payload) ? payload.map(String).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setReviewSelection(ids) {
+  if (!storageAvailable()) return;
+  window.localStorage.setItem(reviewSelectionStorageKey(), JSON.stringify(Array.from(new Set(ids.map(String).filter(Boolean)))));
+}
+
+function bindReviewSelectionActions() {
+  for (const button of detailPanel.querySelectorAll("[data-toggle-review-selection]")) {
+    if (button.dataset.selectionBound) continue;
+    button.dataset.selectionBound = "1";
+    button.addEventListener("click", () => {
+      const bookmarkId = button.dataset.toggleReviewSelection;
+      const current = getReviewSelection();
+      const next = current.includes(bookmarkId)
+        ? current.filter((item) => item !== bookmarkId)
+        : [...current, bookmarkId];
+      setReviewSelection(next);
+      refreshReviewSelectionUi();
+    });
+  }
+  const clearButton = detailPanel.querySelector("[data-clear-review-selection]");
+  if (clearButton && !clearButton.dataset.selectionBound) {
+    clearButton.dataset.selectionBound = "1";
+    clearButton.addEventListener("click", () => {
+      setReviewSelection([]);
+      refreshReviewSelectionUi();
+    });
+  }
+}
+
+function bindKeyboardShortcuts() {
+  document.addEventListener("keydown", async (event) => {
+    const commandShortcut = event.metaKey || event.ctrlKey;
+    if (isTypingTarget(event.target) && !commandShortcut) return;
+    if (event.key === "?") {
+      event.preventDefault();
+      toggleShortcutHelp();
+      return;
+    }
+    if (commandShortcut && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      await openCaseSearch();
+      return;
+    }
+    if (commandShortcut && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      focusContextSearch();
+      return;
+    }
+    if (!event.metaKey && !event.ctrlKey && !event.altKey && /^[1-4]$/.test(event.key)) {
+      event.preventDefault();
+      await switchViewGroupByIndex(Number(event.key) - 1);
+      return;
+    }
+    if (event.key === "[" || event.key === "]") {
+      const direction = event.key === "[" ? "previous" : "next";
+      if (await pageCurrentTable(direction)) event.preventDefault();
+    }
+  });
+}
+
+function isTypingTarget(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+}
+
+function toggleShortcutHelp() {
+  const help = detailPanel.querySelector("#shortcutHelp");
+  if (!help) return;
+  help.open = !help.open;
+}
+
+async function openCaseSearch() {
+  if (!selectedRunId) return;
+  await switchTab("search");
+  detailPanel.querySelector("#unifiedSearchInput")?.focus();
+}
+
+function focusContextSearch() {
+  const fileSearchInput = detailPanel.querySelector("#fileSearchForm [name='keyword']");
+  if (fileSearchInput) {
+    fileSearchInput.focus();
+    return;
+  }
+  detailPanel.querySelector("#tableFilter")?.focus();
+}
+
+async function switchViewGroupByIndex(index) {
+  if (!selectedRunId || !VIEW_GROUPS[index]) return;
+  const nextTab = VIEW_GROUPS[index].tabs[0];
+  await switchTab(nextTab);
+}
+
+async function pageCurrentTable(direction) {
+  if (!["timeline", "artifacts", "files", "docs"].includes(activeTab)) return false;
+  const selector = `[data-page-tab="${CSS.escape(activeTab)}"]`;
+  const buttons = Array.from(detailPanel.querySelectorAll(selector));
+  const button = buttons.find((item) => item.textContent.toLowerCase().includes(direction));
+  if (!button || button.disabled) return false;
+  button.click();
+  return true;
+}
+
+function refreshReviewSelectionUi() {
+  const selectedIds = getReviewSelection();
+  for (const card of detailPanel.querySelectorAll("[data-review-card-id]")) {
+    const selected = selectedIds.includes(card.dataset.reviewCardId);
+    card.classList.toggle("selected", selected);
+    const button = card.querySelector("[data-toggle-review-selection]");
+    if (button) button.textContent = selected ? "Selected" : "Select";
+  }
+  if (activeTab === "review") {
+    void renderActiveTab();
+  }
+}
+
+async function switchTab(tab) {
+  if (!tab) return;
+  activeTab = tab;
+  const nextGroup = groupForTab(tab);
+  const tabIsVisible = Array.from(detailPanel.querySelectorAll(".tab-button")).some((item) => item.dataset.tab === tab);
+  if (activeViewGroup !== nextGroup || !tabIsVisible) {
+    activeViewGroup = nextGroup;
+    detailPanel.innerHTML = renderDetailShell(selectedRun, activeTab);
+    bindTabButtons();
+    await renderActiveTab();
+    return;
+  }
+  for (const item of detailPanel.querySelectorAll(".tab-button")) {
+    item.classList.toggle("active", item.dataset.tab === tab);
+  }
+  await renderActiveTab();
+}
+
+function viewGroupById(groupId) {
+  return VIEW_GROUPS.find((group) => group.id === groupId) || VIEW_GROUPS[0];
+}
+
+function tabsForGroup(groupId) {
+  return viewGroupById(groupId).tabs;
+}
+
+function groupForTab(tab) {
+  return VIEW_GROUPS.find((group) => group.tabs.includes(tab))?.id || "triage";
+}
+
+function pagedUrl(tab) {
+  const offset = pageOffsets[tab] || 0;
+  return `/api/runs/${selectedRunId}/${tab}?offset=${offset}&limit=${PAGE_SIZE}`;
+}
+
+function renderPaginationNotice(pagination, tab) {
+  if (!pagination) return "";
+  const start = pagination.total ? pagination.offset + 1 : 0;
+  const end = pagination.offset + pagination.returned;
+  return `
+    <div class="pagination-bar">
+      <span>Showing ${start}-${end} of ${pagination.total} ${escapeHtml(tab)} row(s). Large outputs are loaded in ${pagination.limit}-row pages.</span>
+    </div>
+  `;
+}
+
+function renderPaginationControls(pagination, tab) {
+  if (!pagination) return "";
+  return `
+    <div class="pagination-bar pagination-actions">
+      <button class="secondary-button" type="button" data-page-tab="${escapeHtml(tab)}" data-page-offset="${pagination.previous_offset ?? 0}" ${pagination.previous_offset === null ? "disabled" : ""}>${kbd("[")} Previous page</button>
+      <button class="secondary-button" type="button" data-page-tab="${escapeHtml(tab)}" data-page-offset="${pagination.next_offset ?? pagination.offset}" ${pagination.next_offset === null ? "disabled" : ""}>Next ${pagination.limit} ${kbd("]")}</button>
+    </div>
+  `;
+}
+
+function storageAvailable() {
+  try {
+    window.localStorage.setItem("rapidtriage.storage-test", "1");
+    window.localStorage.removeItem("rapidtriage.storage-test");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hydrateRunForm() {
+  if (!storageAvailable()) return;
+  const saved = JSON.parse(window.localStorage.getItem(RUN_FORM_STORAGE_KEY) || "{}");
+  for (const [selector, key] of [
+    ["#rootInput", "root"],
+    ["#modeInput", "mode"],
+    ["#inputKindInput", "inputKind"],
+    ["#outputInput", "outputDir"],
+    ["#importOutputInput", "importOutputDir"],
+  ]) {
+    const element = document.querySelector(selector);
+    if (element && saved[key] !== undefined) element.value = saved[key];
+  }
+  for (const [selector, key] of [
+    ["#readOnlyInput", "readOnly"],
+    ["#dryRunInput", "dryRun"],
+    ["#overwriteInput", "overwrite"],
+  ]) {
+    const element = document.querySelector(selector);
+    if (element && saved[key] !== undefined) element.checked = Boolean(saved[key]);
+  }
+}
+
+function persistRunForm() {
+  if (!storageAvailable()) return;
+  const payload = {
+    root: document.querySelector("#rootInput")?.value || "",
+    mode: document.querySelector("#modeInput")?.value || "fraud",
+    inputKind: document.querySelector("#inputKindInput")?.value || "",
+    outputDir: document.querySelector("#outputInput")?.value || "",
+    importOutputDir: document.querySelector("#importOutputInput")?.value || "",
+    readOnly: document.querySelector("#readOnlyInput")?.checked ?? true,
+    dryRun: document.querySelector("#dryRunInput")?.checked ?? false,
+    overwrite: document.querySelector("#overwriteInput")?.checked ?? false,
+  };
+  window.localStorage.setItem(RUN_FORM_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function bindRunFormPersistence() {
+  for (const selector of ["#rootInput", "#modeInput", "#inputKindInput", "#outputInput", "#importOutputInput", "#readOnlyInput", "#dryRunInput", "#overwriteInput"]) {
+    document.querySelector(selector)?.addEventListener("input", persistRunForm);
+    document.querySelector(selector)?.addEventListener("change", persistRunForm);
+  }
+}
+
+function searchStorageKey() {
+  return `${SEARCH_STORAGE_PREFIX}${selectedRunId || "default"}`;
+}
+
+function getSearchDraft() {
+  if (!storageAvailable()) return { keywords: [], ocr: true };
+  try {
+    const payload = JSON.parse(window.localStorage.getItem(searchStorageKey()) || "{}");
+    return {
+      keywords: Array.isArray(payload.keywords) ? payload.keywords : [],
+      ocr: payload.ocr !== false,
+    };
+  } catch {
+    return { keywords: [], ocr: true };
+  }
+}
+
+function setSearchDraft(payload) {
+  if (!storageAvailable()) return;
+  window.localStorage.setItem(searchStorageKey(), JSON.stringify(payload));
+}
+
+runForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  runButton.disabled = true;
+  runButton.textContent = "Starting...";
+  const request = {
+    root: document.querySelector("#rootInput").value,
+    mode: document.querySelector("#modeInput").value,
+    output_dir: document.querySelector("#outputInput").value || null,
+    input_kind: document.querySelector("#inputKindInput").value || null,
+    read_only: document.querySelector("#readOnlyInput").checked,
+    dry_run: document.querySelector("#dryRunInput").checked,
+    overwrite: document.querySelector("#overwriteInput").checked,
+  };
+  try {
+    const run = await api("/api/runs", { method: "POST", body: JSON.stringify(request) });
+    selectedRunId = run.run_id;
+    activeTab = "summary";
+    await loadRuns();
+    await loadRunDetail(run.run_id, activeTab);
+  } catch (error) {
+    detailPanel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  } finally {
+    runButton.disabled = false;
+    runButton.textContent = "Start run";
+  }
+});
+
+refreshButton.addEventListener("click", loadRuns);
+
+importForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const outputDir = document.querySelector("#importOutputInput").value.trim();
+  if (!outputDir) return;
+  importButton.disabled = true;
+  importButton.textContent = "Importing...";
+  try {
+    const run = await api("/api/runs/import", {
+      method: "POST",
+      body: JSON.stringify({ output_dir: outputDir }),
+    });
+    selectedRunId = run.run_id;
+    activeTab = "summary";
+    await loadRuns();
+    await loadRunDetail(run.run_id, activeTab);
+  } catch (error) {
+    detailPanel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  } finally {
+    importButton.disabled = false;
+    importButton.textContent = "Import results";
+  }
+});
+
+async function removeSelectedRun() {
+  if (!selectedRunId) return;
+  const runId = selectedRunId;
+  try {
+    await api(`/api/runs/${runId}`, { method: "DELETE" });
+    selectedRunId = null;
+    selectedRun = null;
+    detailPanel.innerHTML = '<p class="empty-state">Run removed from the local catalog. Output files were not deleted.</p>';
+    await loadRuns();
+  } catch (error) {
+    detailPanel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+hydrateRunForm();
+bindRunFormPersistence();
+bindKeyboardShortcuts();
+checkHealth();
+loadRuns();
+pollTimer = setInterval(loadRuns, 4000);

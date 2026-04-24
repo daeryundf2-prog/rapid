@@ -35,6 +35,32 @@
     "root": {
       "type": "string"
     },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "source_path",
+        "analysis_root"
+      ],
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "source_path": {
+          "type": "string"
+        },
+        "analysis_root": {
+          "type": "string"
+        },
+        "stage_dir": {
+          "type": "string"
+        },
+        "partition_start_sector": {
+          "type": "integer"
+        }
+      }
+    },
     "scan_scope_root": {
       "type": "string"
     },

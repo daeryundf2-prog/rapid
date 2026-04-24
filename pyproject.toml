@@ -28,13 +28,21 @@ dependencies = [
 [project.optional-dependencies]
 # E01 extraction uses external tools (ewfmount, sleuthkit) not python deps
 full = []
+web = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+]
+test = [
+  "httpx>=0.27",
+]
 
 [project.scripts]
 dashcam-report = "dashcam_tools.report:main"
- dashcam-gui = "dashcam_tools.gui:main"
+dashcam-gui = "dashcam_tools.gui:main"
 dashcam-rename = "dashcam_tools.rename:cli"
 dashcam-ingest = "dashcam_tools.ingest:cli"
 rapidtriage = "rapidtriage.cli:main"
+rapidtriage-web = "rapidtriage.cli:web_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["dashcam_tools", "rapidtriage"]

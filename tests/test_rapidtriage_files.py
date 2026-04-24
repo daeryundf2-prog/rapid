@@ -27,6 +27,12 @@ class RapidTriageFilesTests(unittest.TestCase):
                 archive.writestr("evidence.txt", "archive payload")
             (root / "records.sqlite").write_text("SQLite format 3", encoding="utf-8")
             (root / "tool.exe").write_bytes(b"MZ\x90\x00")
+            (root / "mailbox.pst").write_bytes(b"email archive")
+            (root / "case.E01").write_bytes(b"EVF")
+            (root / "phone.ufdx").write_bytes(b"cellebrite mobile image")
+            (root / "memory.vmem").write_bytes(b"memory dump")
+            (root / "route.ivo").write_bytes(b"vehicle export")
+            (root / "split.7z001").write_bytes(b"segmented archive")
             (root / "photo.jpg").write_bytes(b"\xff\xd8\xff")
             output = root / "files.json"
 
@@ -36,19 +42,47 @@ class RapidTriageFilesTests(unittest.TestCase):
             payload = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(payload["command"], "files")
             self.assertEqual(Path(payload["root"]), root.resolve())
-            self.assertEqual(payload["summary"]["candidate_count"], 4)
+            self.assertEqual(payload["summary"]["candidate_count"], 11)
             category_counts = payload["summary"]["category_counts"]
             self.assertGreaterEqual(category_counts["documents"], 1)
             self.assertGreaterEqual(category_counts["archives"], 1)
             self.assertGreaterEqual(category_counts["databases"], 1)
             self.assertGreaterEqual(category_counts["executables"], 1)
+            self.assertGreaterEqual(category_counts["emails"], 1)
+            self.assertGreaterEqual(category_counts["disk-images"], 1)
+            self.assertGreaterEqual(category_counts["mobile-images"], 1)
+            self.assertGreaterEqual(category_counts["memory-dumps"], 1)
+            self.assertGreaterEqual(category_counts["vehicle-images"], 1)
+            self.assertGreaterEqual(category_counts["images"], 1)
 
             candidates = {Path(item["path"]).name: item for item in payload["candidates"]}
-            self.assertEqual(set(candidates), {"notes.txt", "bundle.zip", "records.sqlite", "tool.exe"})
+            self.assertEqual(
+                set(candidates),
+                {
+                    "notes.txt",
+                    "bundle.zip",
+                    "records.sqlite",
+                    "tool.exe",
+                    "mailbox.pst",
+                    "case.E01",
+                    "phone.ufdx",
+                    "memory.vmem",
+                    "route.ivo",
+                    "split.7z001",
+                    "photo.jpg",
+                },
+            )
             self.assertIn("documents", candidate_categories(candidates["notes.txt"]))
             self.assertIn("archives", candidate_categories(candidates["bundle.zip"]))
             self.assertIn("databases", candidate_categories(candidates["records.sqlite"]))
             self.assertIn("executables", candidate_categories(candidates["tool.exe"]))
+            self.assertIn("emails", candidate_categories(candidates["mailbox.pst"]))
+            self.assertIn("disk-images", candidate_categories(candidates["case.E01"]))
+            self.assertIn("mobile-images", candidate_categories(candidates["phone.ufdx"]))
+            self.assertIn("memory-dumps", candidate_categories(candidates["memory.vmem"]))
+            self.assertIn("vehicle-images", candidate_categories(candidates["route.ivo"]))
+            self.assertIn("archives", candidate_categories(candidates["split.7z001"]))
+            self.assertIn("images", candidate_categories(candidates["photo.jpg"]))
 
             for name, candidate in candidates.items():
                 self.assertEqual(candidate["name"], name)

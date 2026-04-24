@@ -46,6 +46,7 @@
   "outputs": {
     "manifest": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-manifest.json",
     "docs": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-docs.json",
+    "docs_index": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-docs-index.json",
     "files": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-files.json",
     "artifacts_browser": "/cases/case-001/rapidtriage-run-seizure/artifacts/rapidtriage-artifacts-browser.json",
     "artifacts_recent-files": "/cases/case-001/rapidtriage-run-seizure/artifacts/rapidtriage-artifacts-recent-files.json",
@@ -69,6 +70,14 @@
       "output": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-docs.json",
       "candidate_count": 3,
       "match_count": 2
+    },
+    {
+      "name": "docs-index",
+      "status": "completed",
+      "output": "/cases/case-001/rapidtriage-run-seizure/rapidtriage-docs-index.json",
+      "strategy": "processed-text-inverted-index",
+      "document_count": 3,
+      "term_count": 18
     },
     {
       "name": "files",

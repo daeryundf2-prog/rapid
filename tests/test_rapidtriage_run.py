@@ -142,6 +142,27 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(files_extract_payload["summary"]["extracted_count"], 0)
             self.assertGreaterEqual(files_extract_payload["summary"]["skipped_count"], 1)
 
+    def test_search_command_finds_keyword_across_completed_run_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            search_output = Path(tmp_dir) / "search.json"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)]), 0)
+            self.assertEqual(
+                main(["search", str(output_dir), "-k", "password", "--no-ocr", "--output", str(search_output)]),
+                0,
+            )
+
+            payload = json.loads(search_output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["command"], "search")
+            self.assertGreaterEqual(payload["summary"]["match_count"], 1)
+            sources = {match["source"] for match in payload["matches"]}
+            self.assertIn("documents", sources)
+            self.assertIn("password", payload["summary"]["keyword_counts"])
+
     def assert_run_mode_outputs(self, mode: str) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
@@ -156,6 +177,7 @@ class RapidTriageRunTests(unittest.TestCase):
 
             manifest_path = output_dir / "rapidtriage-manifest.json"
             docs_path = output_dir / "rapidtriage-docs.json"
+            docs_index_path = output_dir / "rapidtriage-docs-index.json"
             files_path = output_dir / "rapidtriage-files.json"
             docs_extract_manifest_path = output_dir / "docs-extract" / "rapidtriage-extract-manifest.json"
             files_extract_manifest_path = output_dir / "files-extract" / "rapidtriage-extract-manifest.json"
@@ -171,6 +193,7 @@ class RapidTriageRunTests(unittest.TestCase):
             expected_output_paths = [
                 manifest_path,
                 docs_path,
+                docs_index_path,
                 files_path,
                 docs_extract_manifest_path,
                 files_extract_manifest_path,
@@ -188,6 +211,7 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("windows-recent-files", provider_names)
 
             docs_payload = json.loads(docs_path.read_text(encoding="utf-8"))
+            docs_index_payload = json.loads(docs_index_path.read_text(encoding="utf-8"))
             files_payload = json.loads(files_path.read_text(encoding="utf-8"))
             docs_extract_payload = json.loads(docs_extract_manifest_path.read_text(encoding="utf-8"))
             files_extract_payload = json.loads(files_extract_manifest_path.read_text(encoding="utf-8"))
@@ -204,6 +228,11 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertGreaterEqual(files_payload["summary"]["candidate_count"], min_file_candidates)
             self.assertGreaterEqual(docs_payload["summary"]["candidate_count"], 1)
             self.assertGreaterEqual(docs_payload["summary"]["match_count"], min_doc_matches)
+            self.assertEqual(docs_payload["index"]["command"], "docs-index")
+            self.assertEqual(Path(docs_payload["index"]["path"]).resolve(), docs_index_path.resolve())
+            self.assertEqual(docs_index_payload["command"], "docs-index")
+            self.assertEqual(docs_index_payload["strategy"], "processed-text-inverted-index")
+            self.assertGreaterEqual(docs_index_payload["summary"]["indexed_document_count"], 1)
 
             self.assertGreaterEqual(docs_extract_payload["summary"]["selected_count"], 1)
             self.assertGreaterEqual(docs_extract_payload["summary"]["extracted_count"], 1)
@@ -218,6 +247,7 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(summary_payload["command"], "run")
             self.assertEqual(Path(summary_payload["outputs"]["manifest"]).resolve(), manifest_path.resolve())
             self.assertEqual(Path(summary_payload["outputs"]["docs"]).resolve(), docs_path.resolve())
+            self.assertEqual(Path(summary_payload["outputs"]["docs_index"]).resolve(), docs_index_path.resolve())
             self.assertEqual(Path(summary_payload["outputs"]["files"]).resolve(), files_path.resolve())
             self.assertEqual(
                 Path(summary_payload["outputs"]["docs_extract_manifest"]).resolve(),

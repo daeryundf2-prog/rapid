@@ -35,7 +35,10 @@
       "required": [
         "bookmark_count",
         "tagged_bookmark_count",
+        "report_item_count",
+        "review_revision_count",
         "tag_counts",
+        "review_status_counts",
         "source_command_counts"
       ],
       "properties": {
@@ -45,7 +48,19 @@
         "tagged_bookmark_count": {
           "type": "integer"
         },
+        "report_item_count": {
+          "type": "integer"
+        },
+        "review_revision_count": {
+          "type": "integer"
+        },
         "tag_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "review_status_counts": {
           "type": "object",
           "additionalProperties": {
             "type": "integer"
@@ -71,6 +86,7 @@
           "summary",
           "tags",
           "note",
+          "review",
           "reference",
           "snapshot"
         ],
@@ -97,6 +113,89 @@
           },
           "note": {
             "type": "string"
+          },
+          "review": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "include_in_report",
+              "reviewed_at"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "unreviewed",
+                  "relevant",
+                  "needs-review",
+                  "not-relevant"
+                ]
+              },
+              "include_in_report": {
+                "type": "boolean"
+              },
+              "reviewed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          },
+          "review_history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "action",
+                "at",
+                "status",
+                "include_in_report",
+                "tags",
+                "note",
+                "changed_fields"
+              ],
+              "properties": {
+                "action": {
+                  "enum": [
+                    "created",
+                    "updated"
+                  ]
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "status": {
+                  "enum": [
+                    "unreviewed",
+                    "relevant",
+                    "needs-review",
+                    "not-relevant"
+                  ]
+                },
+                "include_in_report": {
+                  "type": "boolean"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "note": {
+                  "type": "string"
+                },
+                "changed_fields": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           },
           "reference": {
             "type": "object",

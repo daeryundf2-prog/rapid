@@ -6,6 +6,8 @@ import sys
 import unittest
 from pathlib import Path
 
+from rapidtriage.core.docs import SUPPORTED_DOC_EXTS
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCS_DIR = REPO_ROOT / "docs"
 SAMPLES_DIR = DOCS_DIR / "samples"
@@ -64,7 +66,7 @@ class RapidTriageDocumentationContractTests(unittest.TestCase):
     def test_docs_sample_matches_expected_shape(self) -> None:
         payload = self.load_sample("rapidtriage-docs.sample.json")
         self.assertEqual(payload["command"], "docs")
-        self.assertEqual(sorted(payload["summary"]["supported_extensions"]), [".docx", ".pdf", ".txt"])
+        self.assertEqual(sorted(payload["summary"]["supported_extensions"]), sorted(SUPPORTED_DOC_EXTS))
         self.assertIn("manifest", payload)
         self.assertIn("candidates", payload)
         self.assertIn("results", payload)

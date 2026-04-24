@@ -51,6 +51,7 @@ ARTIFACT_KEYS = (
     "target_path",
     "tab_url",
 )
+REVIEW_STATUSES = ("unreviewed", "relevant", "needs-review", "not-relevant")
 
 CASE_SOURCE_ROWS = {
     "files": "candidates",
@@ -103,6 +104,8 @@ def create_or_update_case_payload(
     bookmark_id: str | None = None,
     tags: list[str] | None = None,
     note: str | None = None,
+    review_status: str | None = None,
+    include_in_report: bool | None = None,
 ) -> dict[str, object]:
     resolved_case_path = case_path.expanduser().resolve()
     payload = (
@@ -128,8 +131,10 @@ def create_or_update_case_payload(
             bookmark_id=bookmark_id,
             tags=tags or [],
             note=note,
+            review_status=review_status,
+            include_in_report=include_in_report,
         )
-    elif source_pointer or bookmark_id or tags or note:
+    elif source_pointer or bookmark_id or tags or note or review_status or include_in_report is not None:
         raise CaseBookmarkError("--source is required when using bookmark-specific options")
 
     payload["summary"] = build_case_summary(payload.get("bookmarks", []))
@@ -189,6 +194,8 @@ def upsert_bookmark(
     bookmark_id: str | None,
     tags: list[str],
     note: str | None,
+    review_status: str | None,
+    include_in_report: bool | None,
 ) -> None:
     source_command = str(source_payload.get("command") or "").strip()
     item = resolve_case_source_row(source_payload, source_command=source_command, source_pointer=source_pointer)
@@ -237,6 +244,7 @@ def upsert_bookmark(
     )
 
     if existing is None:
+        normalized_review_status = normalize_review_status(review_status)
         record = {
             "bookmark_id": bookmark_id.strip() if bookmark_id else stable_key,
             "created_at": now,
@@ -244,6 +252,22 @@ def upsert_bookmark(
             "summary": summary,
             "tags": merged_tags,
             "note": note or "",
+            "review": build_review_state(
+                status=normalized_review_status,
+                include_in_report=include_in_report if include_in_report is not None else False,
+                reviewed_at=now if normalized_review_status != "unreviewed" else None,
+            ),
+            "review_history": [
+                build_review_history_entry(
+                    action="created",
+                    at=now,
+                    status=normalized_review_status,
+                    include_in_report=include_in_report if include_in_report is not None else False,
+                    tags=merged_tags,
+                    note=note or "",
+                    changed_fields=["bookmark", "review", "tags", "note"],
+                )
+            ],
             "reference": reference,
             "snapshot": snapshot,
         }
@@ -255,6 +279,38 @@ def upsert_bookmark(
     created_at_value = existing.get("created_at")
     created_at = str(created_at_value) if isinstance(created_at_value, str) and created_at_value else now
     prior_note = str(existing.get("note") or "")
+    prior_history = existing.get("review_history")
+    review_history = [item for item in prior_history if isinstance(item, dict)] if isinstance(prior_history, list) else []
+    prior_review = existing.get("review")
+    prior_review_mapping = prior_review if isinstance(prior_review, Mapping) else {}
+    review = merge_review_state(
+        prior_review_mapping,
+        review_status=review_status,
+        include_in_report=include_in_report,
+        reviewed_at=now,
+    )
+    next_tags = normalize_tags([*prior_tags, *merged_tags]) if merged_tags else prior_tags
+    next_note = note if note is not None else prior_note
+    changed_fields = changed_review_fields(
+        prior_tags=prior_tags,
+        next_tags=next_tags,
+        prior_note=prior_note,
+        next_note=next_note,
+        prior_review=prior_review_mapping,
+        next_review=review,
+    )
+    if changed_fields:
+        review_history.append(
+            build_review_history_entry(
+                action="updated",
+                at=now,
+                status=str(review["status"]),
+                include_in_report=bool(review["include_in_report"]),
+                tags=next_tags,
+                note=next_note,
+                changed_fields=changed_fields,
+            )
+        )
     existing.clear()
     existing["bookmark_id"] = existing_bookmark_id
     existing["created_at"] = created_at
@@ -262,14 +318,10 @@ def upsert_bookmark(
     existing["summary"] = summary
     existing["reference"] = reference
     existing["snapshot"] = snapshot
-    if merged_tags:
-        existing["tags"] = normalize_tags([*prior_tags, *merged_tags])
-    else:
-        existing["tags"] = prior_tags
-    if note is not None:
-        existing["note"] = note
-    else:
-        existing["note"] = prior_note
+    existing["review"] = review
+    existing["review_history"] = review_history
+    existing["tags"] = next_tags
+    existing["note"] = next_note
 
 
 def find_existing_bookmark(
@@ -379,8 +431,11 @@ def resolve_json_pointer(payload: Mapping[str, object], pointer: str) -> Any:
 def build_case_summary(bookmarks: object) -> dict[str, object]:
     rows = [item for item in bookmarks if isinstance(item, dict)]
     tag_counts: dict[str, int] = {}
+    review_status_counts: dict[str, int] = {status: 0 for status in REVIEW_STATUSES}
     source_command_counts: dict[str, int] = {}
     tagged_bookmark_count = 0
+    report_item_count = 0
+    review_revision_count = 0
     for bookmark in rows:
         reference = bookmark.get("reference")
         source_command = (
@@ -395,12 +450,106 @@ def build_case_summary(bookmarks: object) -> dict[str, object]:
             tagged_bookmark_count += 1
         for tag in tags:
             tag_counts[tag] = tag_counts.get(tag, 0) + 1
+        review = bookmark.get("review")
+        review_status = "unreviewed"
+        if isinstance(review, Mapping):
+            review_status = normalize_review_status(review.get("status"))
+            if bool(review.get("include_in_report")):
+                report_item_count += 1
+        review_status_counts[review_status] = review_status_counts.get(review_status, 0) + 1
+        history = bookmark.get("review_history")
+        if isinstance(history, list):
+            review_revision_count += len([item for item in history if isinstance(item, Mapping)])
     return {
         "bookmark_count": len(rows),
         "tagged_bookmark_count": tagged_bookmark_count,
+        "report_item_count": report_item_count,
+        "review_revision_count": review_revision_count,
         "tag_counts": dict(sorted(tag_counts.items())),
+        "review_status_counts": dict(sorted(review_status_counts.items())),
         "source_command_counts": dict(sorted(source_command_counts.items())),
     }
+
+
+def normalize_review_status(value: object) -> str:
+    status = str(value or "unreviewed").strip().lower()
+    if status not in REVIEW_STATUSES:
+        raise CaseBookmarkError(
+            f"unsupported review status {status!r}; expected one of: {', '.join(REVIEW_STATUSES)}"
+        )
+    return status
+
+
+def build_review_state(*, status: str, include_in_report: bool, reviewed_at: str | None) -> dict[str, object]:
+    return {
+        "status": status,
+        "include_in_report": bool(include_in_report),
+        "reviewed_at": reviewed_at,
+    }
+
+
+def build_review_history_entry(
+    *,
+    action: str,
+    at: str,
+    status: str,
+    include_in_report: bool,
+    tags: list[str],
+    note: str,
+    changed_fields: list[str],
+) -> dict[str, object]:
+    return {
+        "action": action,
+        "at": at,
+        "status": status,
+        "include_in_report": bool(include_in_report),
+        "tags": list(tags),
+        "note": note,
+        "changed_fields": changed_fields,
+    }
+
+
+def changed_review_fields(
+    *,
+    prior_tags: list[str],
+    next_tags: list[str],
+    prior_note: str,
+    next_note: str,
+    prior_review: Mapping[str, object],
+    next_review: Mapping[str, object],
+) -> list[str]:
+    changed: list[str] = []
+    if normalize_review_status(prior_review.get("status")) != normalize_review_status(next_review.get("status")):
+        changed.append("review.status")
+    if bool(prior_review.get("include_in_report")) != bool(next_review.get("include_in_report")):
+        changed.append("review.include_in_report")
+    if prior_tags != next_tags:
+        changed.append("tags")
+    if prior_note != next_note:
+        changed.append("note")
+    return changed
+
+
+def merge_review_state(
+    prior: Mapping[str, object],
+    *,
+    review_status: str | None,
+    include_in_report: bool | None,
+    reviewed_at: str,
+) -> dict[str, object]:
+    prior_status = normalize_review_status(prior.get("status"))
+    next_status = normalize_review_status(review_status) if review_status is not None else prior_status
+    prior_reviewed_at = prior.get("reviewed_at")
+    next_reviewed_at = (
+        reviewed_at
+        if review_status is not None and next_status != "unreviewed"
+        else str(prior_reviewed_at) if isinstance(prior_reviewed_at, str) and prior_reviewed_at else None
+    )
+    return build_review_state(
+        status=next_status,
+        include_in_report=bool(prior.get("include_in_report")) if include_in_report is None else include_in_report,
+        reviewed_at=next_reviewed_at,
+    )
 
 
 def normalize_tags(tags: object) -> list[str]:

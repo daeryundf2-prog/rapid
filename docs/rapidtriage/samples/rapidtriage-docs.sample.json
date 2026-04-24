@@ -6,9 +6,30 @@
     "candidate_count": 3,
     "match_count": 2,
     "supported_extensions": [
+      ".cfg",
+      ".conf",
+      ".csv",
       ".docx",
+      ".eml",
+      ".htm",
+      ".html",
+      ".ini",
+      ".json",
+      ".jsonl",
+      ".log",
+      ".md",
+      ".odp",
+      ".ods",
+      ".odt",
       ".pdf",
-      ".txt"
+      ".pptx",
+      ".rtf",
+      ".tsv",
+      ".txt",
+      ".xlsx",
+      ".xml",
+      ".yaml",
+      ".yml"
     ]
   },
   "manifest": {

@@ -54,6 +54,38 @@
         }
       }
     },
+    "index": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "path",
+        "strategy",
+        "version",
+        "document_count",
+        "term_count"
+      ],
+      "properties": {
+        "command": {
+          "const": "docs-index"
+        },
+        "path": {
+          "type": "string"
+        },
+        "strategy": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "document_count": {
+          "type": "integer"
+        },
+        "term_count": {
+          "type": "integer"
+        }
+      }
+    },
     "manifest": {
       "type": "object",
       "additionalProperties": false,

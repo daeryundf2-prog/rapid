@@ -9,7 +9,8 @@ from typing import Dict, List, Mapping, Sequence, Union
 from .audit import write_audit_record
 from .artifacts import run_artifact_collection
 from .docs import build_manifest, run_docs_search, write_result
-from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, run_extract
+from .e01 import E01ExtractionError, E01ExtractionResult, extract_e01_to_directory, is_e01_path
+from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, SUPPORTED_DOC_KINDS, run_extract
 from .files import run_files_scan
 from .input_root import InputRoot, derive_child_input_root, resolve_input_root
 from .reporting import build_run_report_context, render_run_markdown_report
@@ -18,6 +19,7 @@ from .timeline import build_timeline_report, run_timeline
 
 SUPPORTED_RUN_MODES: tuple[str, ...] = ("seizure", "fraud", "hacking", "recovery")
 IMPLEMENTED_RUN_MODES = set(SUPPORTED_RUN_MODES)
+RUN_DOC_EXTRACT_KINDS = SUPPORTED_DOC_KINDS
 
 
 @dataclass(frozen=True)
@@ -39,9 +41,19 @@ RUN_PROFILES: Dict[str, RunProfile] = {
         mode="seizure",
         description="Seizure triage focused on user folders, recent modifications, and high-value documents, archives, and databases.",
         keywords=("seizure", "download", "desktop", "document", "archive", "database", "recent", "evidence"),
-        docs_extract_kinds=("txt", "pdf", "docx"),
-        file_extract_categories=("documents", "archives", "databases"),
-        file_scan_categories=("documents", "archives", "databases"),
+        docs_extract_kinds=RUN_DOC_EXTRACT_KINDS,
+        file_extract_categories=("documents", "archives", "databases", "emails", "disk-images", "mobile-images", "vehicle-images"),
+        file_scan_categories=(
+            "documents",
+            "archives",
+            "databases",
+            "emails",
+            "disk-images",
+            "mobile-images",
+            "memory-dumps",
+            "vehicle-images",
+            "images",
+        ),
         scan_root_parts=("Users",),
         preferred_locations=("downloads", "desktop", "documents"),
         artifacts_kinds=("browser", "recent-files"),
@@ -50,27 +62,36 @@ RUN_PROFILES: Dict[str, RunProfile] = {
         mode="fraud",
         description="Document-forward fraud triage focused on payment, account, and invoice evidence.",
         keywords=("fraud", "invoice", "payment", "transfer", "bank", "account", "receipt", "refund"),
-        docs_extract_kinds=("txt", "pdf", "docx"),
-        file_extract_categories=("documents", "archives", "databases"),
-        file_scan_categories=("documents", "archives", "databases"),
+        docs_extract_kinds=RUN_DOC_EXTRACT_KINDS,
+        file_extract_categories=("documents", "archives", "databases", "emails", "mobile-images"),
+        file_scan_categories=("documents", "archives", "databases", "emails", "mobile-images", "images"),
         artifacts_kinds=("browser", "recent-files"),
     ),
     "hacking": RunProfile(
         mode="hacking",
         description="Intrusion triage focused on suspicious binaries, credential theft, persistence, and attacker tooling.",
         keywords=("hacking", "malware", "credential", "powershell", "persistence", "ransomware", "shell", "exfil"),
-        docs_extract_kinds=("txt", "pdf", "docx"),
-        file_extract_categories=("executables", "archives", "databases"),
-        file_scan_categories=("executables", "archives", "databases"),
+        docs_extract_kinds=RUN_DOC_EXTRACT_KINDS,
+        file_extract_categories=("executables", "archives", "databases", "documents", "emails", "memory-dumps"),
+        file_scan_categories=("executables", "archives", "databases", "documents", "emails", "memory-dumps", "images"),
         artifacts_kinds=("browser", "recent-files"),
     ),
     "recovery": RunProfile(
         mode="recovery",
         description="Recovery triage focused on deleted, recycled, or restorable file candidates without doing carving.",
         keywords=("recovery", "deleted", "recycle", "trash", "restore", "backup", "recent"),
-        docs_extract_kinds=("txt", "pdf", "docx"),
-        file_extract_categories=("documents", "archives", "images"),
-        file_scan_categories=("documents", "archives", "images"),
+        docs_extract_kinds=RUN_DOC_EXTRACT_KINDS,
+        file_extract_categories=("documents", "archives", "images", "emails", "disk-images", "mobile-images", "vehicle-images"),
+        file_scan_categories=(
+            "documents",
+            "archives",
+            "images",
+            "emails",
+            "disk-images",
+            "mobile-images",
+            "memory-dumps",
+            "vehicle-images",
+        ),
         file_scan_path_contains=("recycle",),
         preferred_locations=("$recycle.bin", "recycle", "trash", "deleted"),
         artifacts_kinds=("recent-files",),
@@ -95,7 +116,6 @@ def run_triage_mode(
     overwrite: bool = False,
     rule_set: RuleSet | None = None,
 ) -> Dict[str, object]:
-    input_root = resolve_input_root(root, kind=input_kind)
     normalized_mode = mode.lower()
     if normalized_mode not in SUPPORTED_RUN_MODES:
         supported = ", ".join(SUPPORTED_RUN_MODES)
@@ -106,11 +126,14 @@ def run_triage_mode(
 
     profile = RUN_PROFILES[normalized_mode]
     output_dir = output_dir.expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    input_root, e01_result = prepare_run_input_root(root, input_kind=input_kind, output_dir=output_dir)
     scan_root = resolve_scan_root(input_root.root_path, profile)
     scan_input_root = derive_child_input_root(input_root, scan_root)
 
     manifest_path = output_dir / "rapidtriage-manifest.json"
     docs_path = output_dir / "rapidtriage-docs.json"
+    docs_index_path = output_dir / "rapidtriage-docs-index.json"
     files_path = output_dir / "rapidtriage-files.json"
     artifacts_dir = output_dir / "artifacts"
     docs_extract_dir = output_dir / "docs-extract"
@@ -121,9 +144,13 @@ def run_triage_mode(
     timeline_report_path = output_dir / "rapidtriage-timeline-report.md"
     summary_path = output_dir / "rapidtriage-run-summary.json"
     report_path = output_dir / "rapidtriage-run-report.md"
+    e01_metadata_path = output_dir / "rapidtriage-e01.json"
+
+    if e01_result is not None:
+        write_result(e01_result.to_dict(), e01_metadata_path)
 
     manifest_payload = build_manifest(input_root, profile.keywords)
-    docs_payload = run_docs_search(scan_input_root, profile.keywords, rule_set=rule_set)
+    docs_payload = run_docs_search(scan_input_root, profile.keywords, rule_set=rule_set, index_output=docs_index_path)
     docs_payload["manifest"] = manifest_payload
     docs_payload["scan_scope_root"] = str(scan_input_root.root_path)
 
@@ -135,7 +162,6 @@ def run_triage_mode(
     )
     files_payload["scan_scope_root"] = str(scan_input_root.root_path)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     write_result(manifest_payload, manifest_path)
     write_result(docs_payload, docs_path)
     write_result(files_payload, files_path)
@@ -186,6 +212,7 @@ def run_triage_mode(
     outputs = {
         "manifest": manifest_path,
         "docs": docs_path,
+        "docs_index": docs_index_path,
         "files": files_path,
         "docs_extract_manifest": docs_extract_manifest,
         "files_extract_manifest": files_extract_manifest,
@@ -195,6 +222,8 @@ def run_triage_mode(
         "summary": summary_path,
         "report": report_path,
     }
+    if e01_result is not None:
+        outputs = {"e01": e01_metadata_path, **outputs}
     summary_payload = build_run_summary(
         root=input_root.root_path,
         output_dir=output_dir,
@@ -215,6 +244,7 @@ def run_triage_mode(
             "overwrite": overwrite,
         },
         rule_set=rule_set,
+        source=build_run_source_record(input_root, e01_result=e01_result),
     )
     audit_output = output_dir / "rapidtriage-run-audit.json"
     summary_payload["audit"] = str(audit_output)
@@ -245,11 +275,16 @@ def run_triage_mode(
             "max_extract_size_bytes": max_extract_size_bytes,
             "max_file_count": max_file_count,
             "overwrite": overwrite,
+            "e01_source": str(e01_result.source_path) if e01_result else None,
+            "e01_extracted_root": str(e01_result.extract_dir) if e01_result else None,
         },
         input_root=input_root,
+        input_files=[("e01-source", e01_result.source_path)] if e01_result else [],
         output_files=[
+            *([("e01-metadata", e01_metadata_path)] if e01_result else []),
             ("manifest", manifest_path),
             ("docs", docs_path),
+            ("docs-index", docs_index_path),
             ("files", files_path),
             ("docs-extract-manifest", docs_extract_manifest),
             ("files-extract-manifest", files_extract_manifest),
@@ -271,6 +306,45 @@ def run_triage_mode(
     return summary_payload
 
 
+def prepare_run_input_root(
+    root: Union[InputRoot, Path],
+    *,
+    input_kind: str | None,
+    output_dir: Path,
+) -> tuple[InputRoot, E01ExtractionResult | None]:
+    if isinstance(root, InputRoot):
+        return resolve_input_root(root, kind=input_kind), None
+
+    root_path = Path(root).expanduser().resolve()
+    if is_e01_path(root_path):
+        try:
+            result = extract_e01_to_directory(root_path, output_dir / "_e01")
+        except E01ExtractionError as exc:
+            raise RunModeError(str(exc)) from exc
+        return InputRoot(source_path=str(root_path), root_path=result.extract_dir, kind="e01-derived"), result
+    return resolve_input_root(root_path, kind=input_kind), None
+
+
+def build_run_source_record(
+    input_root: InputRoot,
+    *,
+    e01_result: E01ExtractionResult | None,
+) -> dict[str, object]:
+    if e01_result is None:
+        return {
+            "type": input_root.kind,
+            "source_path": input_root.source_path,
+            "analysis_root": str(input_root.root_path),
+        }
+    return {
+        "type": "e01",
+        "source_path": str(e01_result.source_path),
+        "analysis_root": str(e01_result.extract_dir),
+        "stage_dir": str(e01_result.stage_dir),
+        "partition_start_sector": e01_result.partition_start_sector,
+    }
+
+
 def build_run_summary(
     *,
     root: Path,
@@ -286,6 +360,7 @@ def build_run_summary(
     outputs: Mapping[str, Path],
     safety: Mapping[str, object],
     rule_set: RuleSet | None = None,
+    source: Mapping[str, object] | None = None,
 ) -> Dict[str, object]:
     provider_counts = {
         str(provider["name"]): len(provider.get("artifacts", []))
@@ -318,6 +393,7 @@ def build_run_summary(
         "mode": profile.mode,
         "generated_at": dt.datetime.now().isoformat(),
         "root": str(root),
+        "source": dict(source or {}),
         "scan_scope_root": str(files_payload.get("scan_scope_root") or docs_payload.get("scan_scope_root") or root),
         "output_dir": str(output_dir),
         "profile": {
@@ -405,6 +481,14 @@ def build_step_rows(
             "output": str(outputs["docs"]),
             "candidate_count": int(docs_payload.get("summary", {}).get("candidate_count", 0)),
             "match_count": int(docs_payload.get("summary", {}).get("match_count", 0)),
+        },
+        {
+            "name": "docs-index",
+            "status": "completed",
+            "output": str(outputs["docs_index"]),
+            "strategy": str(docs_payload.get("index", {}).get("strategy", "")),
+            "document_count": int(docs_payload.get("index", {}).get("document_count", 0)),
+            "term_count": int(docs_payload.get("index", {}).get("term_count", 0)),
         },
         {
             "name": "files",
