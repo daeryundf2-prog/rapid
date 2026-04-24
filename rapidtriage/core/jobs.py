@@ -15,6 +15,7 @@ from .run import RunModeError, run_triage_mode
 
 
 RUN_STATUSES = ("queued", "running", "completed", "failed")
+JOB_STEP_NAMES = ("prepare", "triage", "persist", "finalize")
 
 
 def now_iso() -> str:
@@ -76,6 +77,11 @@ class RunJob:
     error: str | None = None
     summary: Dict[str, object] | None = None
     origin: str = "web"
+    steps: List[Dict[str, object]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.steps:
+            self.steps = default_job_steps()
 
     def to_dict(self, *, include_summary: bool = False) -> Dict[str, object]:
         payload: Dict[str, object] = {
@@ -88,6 +94,7 @@ class RunJob:
             "completed_at": self.completed_at,
             "error": self.error,
             "request": self.request.to_dict(),
+            "steps": self.steps,
         }
         if self.summary:
             outputs = self.summary.get("outputs", {})
@@ -118,6 +125,7 @@ class RunJob:
             completed_at=str(payload["completed_at"]) if payload.get("completed_at") else None,
             error=str(payload["error"]) if payload.get("error") else None,
             summary=dict(summary_payload) if isinstance(summary_payload, Mapping) else None,
+            steps=[dict(step) for step in payload.get("steps", [])] if isinstance(payload.get("steps"), list) else [],
         )
 
 
@@ -146,7 +154,10 @@ class RunJobStore:
         with self._lock:
             self._jobs[job.run_id] = job
             self._write_state_locked()
-        self._execute(job.run_id)
+        try:
+            self._execute(job.run_id)
+        except Exception:
+            pass
         return self.get(job.run_id)
 
     def list(self) -> List[RunJob]:
@@ -265,6 +276,8 @@ class RunJobStore:
             job.updated_at = job.started_at
             self._write_state_locked()
         try:
+            self._mark_step(run_id, "prepare", "completed", message="Run request accepted")
+            self._mark_step(run_id, "triage", "running", message="Executing triage workflow")
             summary = execute_run_request(job.request, run_id=run_id)
         except Exception as exc:
             with self._lock:
@@ -272,15 +285,27 @@ class RunJobStore:
                 job.error = str(exc)
                 job.completed_at = now_iso()
                 job.updated_at = job.completed_at
+                job.steps = update_step(job.steps, "triage", "failed", message=str(exc))
+                job.steps = update_step(job.steps, "finalize", "skipped", message="Run failed before finalize")
                 self._write_state_locked()
             raise
         with self._lock:
+            job.steps = update_step(job.steps, "triage", "completed", message="Triage workflow completed")
+            job.steps = update_step(job.steps, "persist", "completed", message="Run summary persisted")
+            job.steps = update_step(job.steps, "finalize", "completed", message="Run completed")
             job.status = "completed"
             job.summary = summary
             job.completed_at = now_iso()
             job.updated_at = job.completed_at
             self._write_state_locked()
         return summary
+
+    def _mark_step(self, run_id: str, name: str, status: str, *, message: str = "") -> None:
+        with self._lock:
+            job = self._jobs[run_id]
+            job.steps = update_step(job.steps, name, status, message=message)
+            job.updated_at = now_iso()
+            self._write_state_locked()
 
     def _load_state(self) -> None:
         if self._state_path is None or not self._state_path.is_file():
@@ -323,6 +348,52 @@ class RunJobStore:
 
     def list_locked(self) -> List[RunJob]:
         return sorted(self._jobs.values(), key=lambda item: item.created_at, reverse=True)
+
+
+def default_job_steps() -> List[Dict[str, object]]:
+    return [
+        {
+            "name": name,
+            "status": "pending",
+            "retry_count": 0,
+            "started_at": None,
+            "completed_at": None,
+            "message": "",
+        }
+        for name in JOB_STEP_NAMES
+    ]
+
+
+def update_step(steps: List[Dict[str, object]], name: str, status: str, *, message: str = "") -> List[Dict[str, object]]:
+    output = [dict(step) for step in (steps or default_job_steps())]
+    existing_names = {str(step.get("name")) for step in output}
+    for missing in JOB_STEP_NAMES:
+        if missing not in existing_names:
+            output.append(
+                {
+                    "name": missing,
+                    "status": "pending",
+                    "retry_count": 0,
+                    "started_at": None,
+                    "completed_at": None,
+                    "message": "",
+                }
+            )
+    timestamp = now_iso()
+    for step in output:
+        if step.get("name") != name:
+            continue
+        previous_status = str(step.get("status") or "pending")
+        if status == "running" and previous_status == "failed":
+            step["retry_count"] = int(step.get("retry_count") or 0) + 1
+        step["status"] = status
+        step["message"] = message
+        if status == "running" and not step.get("started_at"):
+            step["started_at"] = timestamp
+        if status in {"completed", "failed", "skipped", "canceled"}:
+            step["completed_at"] = timestamp
+        break
+    return output
 
 
 def execute_run_request(request: RunRequest, *, run_id: str | None = None) -> Dict[str, object]:

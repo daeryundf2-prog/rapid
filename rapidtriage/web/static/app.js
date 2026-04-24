@@ -70,8 +70,13 @@ let pollTimer = null;
 const pageOffsets = { timeline: 0, artifacts: 0, files: 0, docs: 0 };
 
 async function api(path, options = {}) {
+  const token = authToken();
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { "X-RapidTriage-Token": token } : {}),
+      ...(options.headers || {}),
+    },
     ...options,
   });
   if (!response.ok) {
@@ -80,6 +85,14 @@ async function api(path, options = {}) {
   }
   const contentType = response.headers.get("content-type") || "";
   return contentType.includes("application/json") ? response.json() : response.text();
+}
+
+function authToken() {
+  try {
+    return window.localStorage.getItem("rapidtriage.authToken") || "";
+  } catch {
+    return "";
+  }
 }
 
 async function checkHealth() {
@@ -285,6 +298,7 @@ function renderSummary(payload) {
       ${metric("Timeline events", summary.timeline_event_count)}
       ${metric("Extracted files", (summary.docs_extracted_count || 0) + (summary.files_extracted_count || 0))}
     </div>
+    ${renderCaseDbPanel(payload)}
     <div class="split-grid">
       <section>
         <h3>Highlights</h3>
@@ -303,6 +317,51 @@ function renderSummary(payload) {
         </ul>
       </section>
     </div>
+  `;
+}
+
+function renderCaseDbPanel(payload) {
+  const outputDir = payload.output_dir || "";
+  const defaultDb = outputDir ? `${outputDir.replace(/[\\/]$/, "")}/rapidtriage-case.db` : "rapidtriage-case.db";
+  const defaultCaseId = selectedRunId ? `run-${selectedRunId}` : "CASE-001";
+  return `
+    <section class="guidance-card case-db-panel">
+      <p class="eyebrow">Case DB alpha</p>
+      <h3>Import this run into SQLite search/review storage</h3>
+      <p>Use this to test the new DB-backed citation, FTS search, and verification marks while the original run JSON workflow remains intact.</p>
+      <form id="caseDbImportForm" class="search-form">
+        <label>Database path <input name="database" value="${escapeHtml(defaultDb)}" required /></label>
+        <label>Case ID <input name="case_id" value="${escapeHtml(defaultCaseId)}" required /></label>
+        <label>Case name <input name="name" value="${escapeHtml(payload.mode || "rapidtriage run")}" /></label>
+        <button id="caseDbImportButton" type="submit">Import run to Case DB</button>
+      </form>
+      <form id="caseDbSearchForm" class="search-form">
+        <label>DB keywords <input name="keywords" placeholder="password, powershell, download" required /></label>
+        <label>Source filter
+          <select name="source">
+            <option value="">All sources</option>
+            <option value="documents">Documents</option>
+            <option value="files">Files</option>
+            <option value="artifacts">Artifacts</option>
+            <option value="timeline">Timeline</option>
+          </select>
+        </label>
+        <label>Verification
+          <select name="verification_status">
+            <option value="">All statuses</option>
+            <option value="unverified">Unverified</option>
+            <option value="source_opened">Source opened</option>
+            <option value="cross_checked">Cross checked</option>
+            <option value="verified">Verified</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </label>
+        <button id="caseDbSearchButton" type="submit">Search Case DB</button>
+      </form>
+      <section id="caseDbResult" class="viewer-panel">
+        <p class="empty-state">Import this run, then search the Case DB here.</p>
+      </section>
+    </section>
   `;
 }
 
@@ -1504,8 +1563,157 @@ function bindPanelActions() {
   }
   const reportForm = detailPanel.querySelector("#caseReportForm");
   if (reportForm) reportForm.addEventListener("submit", saveCaseReport);
+  bindCaseDbPanel();
   bindCompareActions();
   bindReviewSelectionActions();
+}
+
+function bindCaseDbPanel() {
+  const importForm = detailPanel.querySelector("#caseDbImportForm");
+  const searchForm = detailPanel.querySelector("#caseDbSearchForm");
+  if (importForm) {
+    importForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const output = detailPanel.querySelector("#caseDbResult");
+      const button = detailPanel.querySelector("#caseDbImportButton");
+      const formData = new FormData(importForm);
+      const request = {
+        database: String(formData.get("database") || ""),
+        run_output: selectedRun?.summary?.output_dir || "",
+        case_id: String(formData.get("case_id") || ""),
+        name: String(formData.get("name") || ""),
+      };
+      button.disabled = true;
+      button.textContent = "Importing...";
+      try {
+        const payload = await api("/api/case-db/import-run", { method: "POST", body: JSON.stringify(request) });
+        output.innerHTML = renderCaseDbImportResult(payload);
+      } catch (error) {
+        output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+      } finally {
+        button.disabled = false;
+        button.textContent = "Import run to Case DB";
+      }
+    });
+  }
+  if (searchForm && importForm) {
+    searchForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const output = detailPanel.querySelector("#caseDbResult");
+      const button = detailPanel.querySelector("#caseDbSearchButton");
+      const importData = new FormData(importForm);
+      const searchData = new FormData(searchForm);
+      const keywords = String(searchData.get("keywords") || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const source = String(searchData.get("source") || "");
+      const verificationStatus = String(searchData.get("verification_status") || "");
+      const request = {
+        database: String(importData.get("database") || ""),
+        case_id: String(importData.get("case_id") || ""),
+        keywords,
+        sources: source ? [source] : null,
+        verification_status: verificationStatus || null,
+        limit: 100,
+      };
+      button.disabled = true;
+      button.textContent = "Searching...";
+      try {
+        const payload = await api("/api/case-db/search", { method: "POST", body: JSON.stringify(request) });
+        output.innerHTML = renderCaseDbSearchResult(payload);
+        bindCaseDbReviewButtons(request.database, request.case_id);
+      } catch (error) {
+        output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+      } finally {
+        button.disabled = false;
+        button.textContent = "Search Case DB";
+      }
+    });
+  }
+}
+
+function renderCaseDbImportResult(payload) {
+  const summary = payload.summary || {};
+  return `
+    <div class="metric-grid">
+      ${metric("Files", summary.file_record_count)}
+      ${metric("Indexed docs", summary.indexed_document_count)}
+      ${metric("Artifacts", summary.artifact_count)}
+      ${metric("Events", summary.event_count)}
+    </div>
+    <p class="help-text">Imported into case ${escapeHtml(payload.case_id)}. Audit citation: ${escapeHtml(payload.audit_citation_id || "")}</p>
+  `;
+}
+
+function renderCaseDbSearchResult(payload) {
+  const rows = payload.matches || [];
+  if (!rows.length) {
+    return `<p class="empty-state">No Case DB matches found.</p>`;
+  }
+  return `
+    <div class="metric-grid">
+      ${metric("DB matches", payload.summary?.match_count)}
+      ${metric("Sources", Object.keys(payload.summary?.source_counts || {}).length)}
+      ${metric("Keywords", (payload.keywords || []).length)}
+    </div>
+    <table class="data-table">
+      <thead><tr><th>Citation</th><th>Source</th><th>Item</th><th>Review</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map((match) => {
+          const review = match.review || {};
+          return `
+            <tr data-filter="${rowText(match)}">
+              <td><strong>${escapeHtml(match.citation_id || "")}</strong><span>${escapeHtml(match.target_type || "")}:${escapeHtml(match.target_id || "")}</span></td>
+              <td>${escapeHtml(match.source || "")}<span>${escapeHtml(match.kind || "")}</span></td>
+              <td><strong>${escapeHtml(match.title || "")}</strong><span>${escapeHtml(match.preview || match.path || "")}</span></td>
+              <td>${escapeHtml(review.status || "unreviewed")}<span>${escapeHtml(review.verification_status || "unverified")}</span></td>
+              <td class="action-stack">
+                <button class="icon-action" type="button" data-case-db-review="${escapeHtml(JSON.stringify({
+                  target_type: match.target_type,
+                  target_id: match.target_id,
+                  status: "relevant",
+                  verification_status: "source_opened",
+                  include_in_report: true,
+                  note: match.preview || match.title || "",
+                  tags: [match.source, match.kind].filter(Boolean),
+                }))}">Verify</button>
+                <button class="icon-action" type="button" data-case-db-review="${escapeHtml(JSON.stringify({
+                  target_type: match.target_type,
+                  target_id: match.target_id,
+                  status: "excluded",
+                  verification_status: "rejected",
+                  include_in_report: false,
+                  note: match.preview || match.title || "",
+                  tags: [match.source, "excluded"].filter(Boolean),
+                }))}">Reject</button>
+              </td>
+            </tr>
+          `;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function bindCaseDbReviewButtons(database, caseId) {
+  for (const button of detailPanel.querySelectorAll("[data-case-db-review]")) {
+    button.addEventListener("click", async () => {
+      const payload = JSON.parse(button.dataset.caseDbReview || "{}");
+      button.disabled = true;
+      button.textContent = "Saving";
+      try {
+        await api("/api/case-db/review", {
+          method: "POST",
+          body: JSON.stringify({ database, case_id: caseId, reviewer: "web-ui", ...payload }),
+        });
+        button.textContent = "Saved";
+      } catch (error) {
+        button.textContent = "Failed";
+        button.title = error.message;
+      }
+    });
+  }
 }
 
 function reviewSelectionStorageKey() {

@@ -7,6 +7,8 @@ from pathlib import Path
 
 from .core.audit import audit_path_for, write_audit_record
 from .core.artifacts import ArtifactCollectionError, SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
+from .core.benchmark import BenchmarkError, DEFAULT_BENCHMARK_FILE_COUNT, DEFAULT_BENCHMARK_KEYWORD, run_benchmark
+from .core.bundle import BundleError, build_submission_bundle
 from .core.case import (
     REVIEW_STATUSES,
     CaseBookmarkError,
@@ -14,14 +16,22 @@ from .core.case import (
     load_case_payload,
     save_case_payload,
 )
+from .core.case_catalog import CaseCatalog, CaseCatalogError, default_case_catalog_path
+from .core.case_db import CaseDatabaseError, open_case_database
 from .core.docs import build_manifest, run_docs_search, write_result
+from .core.doctor import format_doctor_text, run_doctor
+from .core.evidence import identify_evidence
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
 from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
 from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS, resolve_input_root
+from .core.normalize import NormalizationError, build_normalized_case
+from .core.plugins import PluginError, load_plugin_registry, validate_plugin_manifest, read_plugin_manifest
 from .core.rules import RuleConfigError, load_rule_set
 from .core.run import RunModeError, SUPPORTED_RUN_MODES, run_triage_mode
+from .core.sample_case import DEFAULT_SAMPLE_DIR, DEFAULT_SAMPLE_MODE, SampleCaseError, create_sample_case, run_sample_workflow
 from .core.search import SearchError, run_unified_search
 from .core.timeline import TimelineError, build_timeline_report, run_timeline
+from .core.timeline_export import TimelineExportError, build_unified_timeline_export
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 TOP_LEVEL_EPILOG = """Examples:
@@ -59,6 +69,8 @@ def add_rules_argument(parser: argparse.ArgumentParser) -> None:
 def add_web_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--host", default="127.0.0.1", help="Host interface for the local web server")
     parser.add_argument("--port", type=int, default=8765, help="Port for the local web server")
+    parser.add_argument("--auth-token", help="Require X-RapidTriage-Token for API calls")
+    parser.add_argument("--allow-remote-without-auth", action="store_true", help="Allow non-localhost binding without auth token")
     parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload for UI/API development")
 
 
@@ -85,6 +97,18 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage run . --mode fraud --output-dir ./rapidtriage-run --read-only
               rapidtriage run ./case.E01 --mode fraud --output-dir ./rapidtriage-run-e01
               rapidtriage search ./rapidtriage-run-fraud -k invoice -k password
+              rapidtriage sample --run --overwrite
+              rapidtriage case-db ./rapidtriage-case.db --create-case CASE-001 --name "Case 001"
+              rapidtriage case-search ./rapidtriage-case.db --case-id CASE-001 -k password
+              rapidtriage case-review ./rapidtriage-case.db --case-id CASE-001 --target-type indexed_document --target-id 1 --status relevant --verification-status source_opened
+              rapidtriage evidence ./case.E01
+              rapidtriage benchmark --output-dir ./rapidtriage-benchmark --file-count 1000
+              rapidtriage case-catalog --add-run ./rapidtriage-run --case-id CASE-001 --list
+              rapidtriage timeline-export ./rapidtriage-run --source artifacts --output timeline-export.json
+              rapidtriage normalize ./rapidtriage-run --output normalized-case.json
+              rapidtriage bundle ./rapidtriage-case.json --allowed-root /cases/mount --output-dir ./submission-bundle
+              rapidtriage plugins --list
+              rapidtriage doctor --json
               rapidtriage web --host 127.0.0.1 --port 8765
             """
         ),
@@ -264,6 +288,236 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--limit", type=int, default=500, help="Maximum number of combined matches")
     search.add_argument("--no-ocr", action="store_true", help="Skip OCR over image candidates")
 
+    doctor = sub.add_parser(
+        "doctor",
+        help="Check local runtime, optional tools, storage, and web UI assets",
+        description="Check local runtime, optional tools, storage, and web UI assets",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage doctor
+              rapidtriage doctor --json
+              rapidtriage doctor --host 127.0.0.1 --port 8765 --strict
+            """
+        ),
+    )
+    doctor.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    doctor.add_argument("--host", default="127.0.0.1", help="Host to check for web port availability")
+    doctor.add_argument("--port", type=int, default=8765, help="Port to check for web server availability")
+    doctor.add_argument("--app-data-dir", help="Override the app data directory to probe")
+    doctor.add_argument("--no-write-probe", action="store_true", help="Do not create a temporary write probe file")
+    doctor.add_argument("--strict", action="store_true", help="Return exit code 1 when any doctor check is error")
+
+    sample = sub.add_parser(
+        "sample",
+        help="Create a synthetic sample evidence folder and optionally run triage",
+        description="Create a synthetic sample evidence folder and optionally run triage",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage sample
+              rapidtriage sample --output-dir ./rapidtriage-sample --run
+              rapidtriage sample --run --mode fraud --overwrite --json
+            """
+        ),
+    )
+    sample.add_argument("--output-dir", default=DEFAULT_SAMPLE_DIR, help=f"Sample output directory (default: {DEFAULT_SAMPLE_DIR})")
+    sample.add_argument("--run", action="store_true", help="Run the sample evidence through rapidtriage after creating it")
+    sample.add_argument("--mode", choices=sorted(SUPPORTED_RUN_MODES), default=DEFAULT_SAMPLE_MODE, help=f"Run mode for --run (default: {DEFAULT_SAMPLE_MODE})")
+    sample.add_argument("--overwrite", action="store_true", help="Delete and recreate the sample output directory if it already has files")
+    sample.add_argument("--read-only", action="store_true", help="Use read-only extract mode when --run is enabled")
+    sample.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    case_db = sub.add_parser(
+        "case-db",
+        help="Initialize or inspect the experimental SQLite case database",
+        description="Initialize or inspect the experimental SQLite case database",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage case-db ./rapidtriage-case.db
+              rapidtriage case-db ./rapidtriage-case.db --create-case CASE-001 --name "Case 001"
+              rapidtriage case-db ./rapidtriage-case.db --import-run ./rapidtriage-sample/run-output --case-id CASE-001
+              rapidtriage case-db ./rapidtriage-case.db --list --json
+            """
+        ),
+    )
+    case_db.add_argument("database", help="Path to the SQLite case database")
+    case_db.add_argument("--create-case", metavar="CASE_ID", help="Create a case record after initializing the DB")
+    case_db.add_argument("--import-run", help="Import a completed run output directory or rapidtriage-run-summary.json")
+    case_db.add_argument("--case-id", help="Case ID for --import-run")
+    case_db.add_argument("--name", help="Case display name for --create-case")
+    case_db.add_argument("--description", default="", help="Case description for --create-case")
+    case_db.add_argument("--examiner", default="", help="Examiner name for --create-case")
+    case_db.add_argument("--organization", default="", help="Organization name for --create-case")
+    case_db.add_argument("--case-root", help="Evidence/case root path for --create-case")
+    case_db.add_argument("--list", action="store_true", help="List cases after initialization")
+    case_db.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    case_search = sub.add_parser(
+        "case-search",
+        help="Search an imported SQLite case database",
+        description="Search an imported SQLite case database",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage case-search ./rapidtriage-case.db --case-id CASE-001 -k password
+              rapidtriage case-search ./rapidtriage-case.db --case-id CASE-001 -k powershell -k download --limit 25 --json
+            """
+        ),
+    )
+    case_search.add_argument("database", help="Path to the SQLite case database")
+    case_search.add_argument("--case-id", required=True, help="Case ID to search")
+    case_search.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
+    case_search.add_argument("--limit", type=int, default=100, help="Maximum number of combined matches")
+    case_search.add_argument("--source", action="append", help="Limit to a result source such as documents, files, artifacts, or timeline")
+    case_search.add_argument("--verification-status", help="Limit by review verification status")
+    case_search.add_argument("--output", help="Optional JSON output path")
+    case_search.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    case_review = sub.add_parser(
+        "case-review",
+        help="Mark review and verification state for a Case DB search result",
+        description="Mark review and verification state for a Case DB search result",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage case-review ./rapidtriage-case.db --case-id CASE-001 --target-type indexed_document --target-id 1 --status relevant
+              rapidtriage case-review ./rapidtriage-case.db --case-id CASE-001 --target-type artifact --target-id 3 --verification-status source_opened --include-in-report
+            """
+        ),
+    )
+    case_review.add_argument("database", help="Path to the SQLite case database")
+    case_review.add_argument("--case-id", required=True, help="Case ID to update")
+    case_review.add_argument("--target-type", required=True, help="Target type from case-search result")
+    case_review.add_argument("--target-id", required=True, help="Target id from case-search result")
+    case_review.add_argument("--status", default="unreviewed", help="Review status such as relevant, notable, excluded, or follow_up")
+    case_review.add_argument("--verification-status", default="unverified", help="Verification status such as source_opened, cross_checked, verified, or rejected")
+    case_review.add_argument("--tag", action="append", help="Review tag (repeatable)")
+    case_review.add_argument("--note", default="", help="Review note")
+    case_review.add_argument("--reviewer", default="", help="Reviewer name")
+    case_review.add_argument("--include-in-report", action="store_true", help="Mark target as report candidate")
+    case_review.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    evidence = sub.add_parser(
+        "evidence",
+        help="Identify the evidence adapter that would handle a source path",
+        description="Identify the evidence adapter that would handle a source path",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage evidence ./mounted-folder
+              rapidtriage evidence ./case.E01 --json
+            """
+        ),
+    )
+    evidence.add_argument("source", help="Evidence source path to identify")
+    evidence.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    benchmark = sub.add_parser(
+        "benchmark",
+        help="Run a synthetic or existing-root performance benchmark",
+        description="Run a synthetic or existing-root performance benchmark",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage benchmark --output-dir ./rapidtriage-benchmark
+              rapidtriage benchmark --root /cases/mounted --output-dir ./bench-mounted --keyword password
+            """
+        ),
+    )
+    benchmark.add_argument("--root", help="Optional existing evidence root. If omitted, a synthetic case is generated.")
+    benchmark.add_argument("--output-dir", required=True, help="Directory for benchmark outputs")
+    benchmark.add_argument("--file-count", type=int, default=DEFAULT_BENCHMARK_FILE_COUNT, help="Synthetic file count")
+    benchmark.add_argument("--keyword", default=DEFAULT_BENCHMARK_KEYWORD, help="Keyword to seed/search")
+    benchmark.add_argument("--mode", choices=sorted(SUPPORTED_RUN_MODES), default="fraud", help="Run mode")
+    benchmark.add_argument("--search-iterations", type=int, default=3, help="Repeated search samples for p50/p95")
+    benchmark.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty benchmark output directory")
+    benchmark.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    case_catalog = sub.add_parser(
+        "case-catalog",
+        help="Manage the local case catalog for user-facing case lists",
+        description="Manage the local case catalog for user-facing case lists",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage case-catalog --list
+              rapidtriage case-catalog --add-run ./rapidtriage-run --case-id CASE-001 --name "Case 001" --list
+              rapidtriage case-catalog --export CASE-001 --archive ./CASE-001.zip
+            """
+        ),
+    )
+    case_catalog.add_argument("--catalog", default=str(default_case_catalog_path()), help="Catalog JSON path")
+    case_catalog.add_argument("--add-run", help="Add a completed run output directory or summary JSON to a case")
+    case_catalog.add_argument("--case-id", help="Case ID for --add-run or --export")
+    case_catalog.add_argument("--name", help="Case display name")
+    case_catalog.add_argument("--description", default="", help="Case description")
+    case_catalog.add_argument("--examiner", default="", help="Examiner name")
+    case_catalog.add_argument("--organization", default="", help="Organization name")
+    case_catalog.add_argument("--list", action="store_true", help="List catalog cases")
+    case_catalog.add_argument("--export", metavar="CASE_ID", help="Export a catalog case entry to a zip archive")
+    case_catalog.add_argument("--archive", help="Archive path for --export or --import")
+    case_catalog.add_argument("--import", dest="import_archive", help="Import a case catalog archive")
+    case_catalog.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    timeline_export = sub.add_parser(
+        "timeline-export",
+        help="Export an AXIOM-style normalized timeline from a completed run",
+        description="Export an AXIOM-style normalized timeline from a completed run",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    timeline_export.add_argument("run_output", help="Completed run output directory or summary JSON")
+    timeline_export.add_argument("--start", help="Keep events at or after this ISO timestamp")
+    timeline_export.add_argument("--end", help="Keep events at or before this ISO timestamp")
+    timeline_export.add_argument("--source", help="Filter by event source")
+    timeline_export.add_argument("--event-type", help="Filter by event type")
+    timeline_export.add_argument("--reviewed-status", help="Filter by review status")
+    timeline_export.add_argument("--limit", type=int, default=0, help="Maximum events to include")
+    timeline_export.add_argument("--output", default="rapidtriage-timeline-export.json", help="JSON output path")
+    timeline_export.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    normalize = sub.add_parser(
+        "normalize",
+        help="Normalize completed run outputs into stable forensic model collections",
+        description="Normalize completed run outputs into stable forensic model collections",
+    )
+    normalize.add_argument("run_output", help="Completed run output directory or summary JSON")
+    normalize.add_argument("--case-id", help="Case ID to write into the normalized model")
+    normalize.add_argument("--output", default="rapidtriage-normalized-case.json", help="JSON output path")
+    normalize.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    bundle = sub.add_parser(
+        "bundle",
+        help="Build a submission bundle with report, selected evidence list, hashes, and audit",
+        description="Build a submission bundle with report, selected evidence list, hashes, and audit",
+    )
+    bundle.add_argument("case_json", help="rapidtriage case JSON")
+    bundle.add_argument("--allowed-root", action="append", required=True, help="Allowed evidence root for hashing/copy checks")
+    bundle.add_argument("--output-dir", required=True, help="Bundle output directory")
+    bundle.add_argument("--include-all", action="store_true", help="Hash all bookmarks instead of only report candidates")
+    bundle.add_argument("--max-items", type=int, default=500, help="Maximum evidence rows to include")
+    bundle.add_argument("--title", help="Report title")
+    bundle.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    plugins = sub.add_parser(
+        "plugins",
+        help="List or validate RapidTriage plugin manifests",
+        description="List or validate RapidTriage plugin manifests",
+    )
+    plugins.add_argument("--plugin-dir", action="append", help="Directory containing plugin.json files")
+    plugins.add_argument("--validate", help="Validate one plugin.json manifest")
+    plugins.add_argument("--list", action="store_true", help="List built-in and discovered plugins")
+    plugins.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
     case_parser = sub.add_parser(
         "case",
         help="Save or load case-level bookmarks from rapidtriage JSON outputs",
@@ -356,12 +610,21 @@ def build_web_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run_web_server(host: str, port: int, reload: bool = False) -> int:
+def run_web_server(host: str, port: int, reload: bool = False, auth_token: str | None = None, allow_remote_without_auth: bool = False) -> int:
     try:
         import uvicorn
     except ImportError as exc:
         raise RuntimeError("rapidtriage web requires the 'web' extra: pip install 'dashcam-tools[web]'") from exc
+    if host not in {"127.0.0.1", "localhost", "::1"} and not auth_token and not allow_remote_without_auth:
+        raise RuntimeError(
+            "Refusing to bind RapidTriage to a non-localhost interface without --auth-token. "
+            "Use --auth-token or --allow-remote-without-auth if you understand the risk."
+        )
     print(f"Starting rapidtriage web UI at http://{host}:{port}")
+    if auth_token:
+        import os
+
+        os.environ["RAPIDTRIAGE_AUTH_TOKEN"] = auth_token
     uvicorn.run("rapidtriage.api.app:app", host=host, port=port, reload=reload)
     return 0
 
@@ -370,7 +633,7 @@ def web_main(argv=None) -> int:
     parser = build_web_parser()
     args = parser.parse_args(argv)
     try:
-        return run_web_server(args.host, args.port, args.reload)
+        return run_web_server(args.host, args.port, args.reload, args.auth_token, args.allow_remote_without_auth)
     except RuntimeError as exc:
         parser.error(str(exc))
     return 2
@@ -545,9 +808,317 @@ def main(argv=None) -> int:
 
     if args.command == "web":
         try:
-            return run_web_server(args.host, args.port, args.reload)
+            return run_web_server(args.host, args.port, args.reload, args.auth_token, args.allow_remote_without_auth)
         except RuntimeError as exc:
             parser.error(str(exc))
+
+    if args.command == "doctor":
+        payload = run_doctor(
+            host=args.host,
+            port=args.port,
+            app_data_dir=Path(args.app_data_dir).expanduser().resolve() if args.app_data_dir else None,
+            write_probe=not args.no_write_probe,
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(format_doctor_text(payload))
+        return 1 if args.strict and payload["status"] == "error" else 0
+
+    if args.command == "sample":
+        output_dir = Path(args.output_dir).expanduser().resolve()
+        try:
+            payload = (
+                run_sample_workflow(output_dir, mode=args.mode, overwrite=args.overwrite, read_only=args.read_only)
+                if args.run
+                else create_sample_case(output_dir, overwrite=args.overwrite)
+            )
+        except (SampleCaseError, RunModeError, OSError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Created sample evidence: {payload['evidence_root']}")
+            print(f"Saved expected output guide: {payload['expected']}")
+            if payload.get("run"):
+                run_payload = payload["run"]
+                print(f"Saved sample run summary JSON: {run_payload['summary']}")
+                print(f"Saved sample run report: {run_payload['report']}")
+        return 0
+
+    if args.command == "case-db":
+        database_path = Path(args.database).expanduser().resolve()
+        try:
+            database = open_case_database(database_path)
+            init_payload = database.initialize()
+            created_case = None
+            imported_run = None
+            if args.create_case:
+                created_case = database.create_case(
+                    case_id=args.create_case,
+                    name=args.name,
+                    description=args.description,
+                    examiner=args.examiner,
+                    organization=args.organization,
+                    case_root=Path(args.case_root).expanduser().resolve() if args.case_root else None,
+                )
+                database.add_audit_event(
+                    case_id=created_case.case_id,
+                    action="case.created",
+                    target_type="case",
+                    target_id=created_case.case_id,
+                    params_json=json.dumps({"command": "case-db"}, ensure_ascii=False),
+                )
+            if args.import_run:
+                import_case_id = args.case_id or args.create_case
+                if not import_case_id:
+                    parser.error("--case-id or --create-case is required with --import-run")
+                imported_run = database.import_run_output(
+                    Path(args.import_run).expanduser().resolve(),
+                    case_id=import_case_id,
+                    case_name=args.name,
+                )
+            cases = database.list_cases() if args.list or created_case is not None else []
+        except CaseDatabaseError as exc:
+            parser.error(str(exc))
+        payload = {
+            "command": "case-db",
+            "database": str(database_path),
+            "schema_version": init_payload["schema_version"],
+            "tables": init_payload["tables"],
+            "created_case": created_case.to_dict() if created_case else None,
+            "imported_run": imported_run,
+            "cases": [case.to_dict() for case in cases],
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Initialized case DB: {database_path}")
+            print(f"Schema version: {payload['schema_version']}")
+            if created_case:
+                print(f"Created case: {created_case.case_id}")
+            if imported_run:
+                print(f"Imported run into case: {imported_run['case_id']}")
+                print(f"Import counts: {imported_run['summary']}")
+            if cases:
+                print(f"Cases: {len(cases)}")
+                for case in cases:
+                    print(f"- {case.case_id}: {case.name}")
+        return 0
+
+    if args.command == "case-search":
+        database_path = Path(args.database).expanduser().resolve()
+        try:
+            database = open_case_database(database_path)
+            payload = database.search_case(
+                case_id=args.case_id,
+                keywords=args.keyword,
+                limit=args.limit,
+                sources=args.source,
+                verification_status=args.verification_status,
+            )
+        except CaseDatabaseError as exc:
+            parser.error(str(exc))
+        if args.output:
+            write_result(payload, Path(args.output).expanduser().resolve())
+        if args.json or args.output:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Case search matches: {payload['summary']['match_count']}")
+            for match in payload["matches"]:
+                print(
+                    f"- {match['citation_id']} [{match['source']}] "
+                    f"{match.get('title') or match.get('path')}: {match.get('preview') or ''}"
+                )
+        return 0
+
+    if args.command == "case-review":
+        try:
+            database = open_case_database(Path(args.database).expanduser().resolve())
+            payload = database.mark_review(
+                case_id=args.case_id,
+                target_type=args.target_type,
+                target_id=args.target_id,
+                status=args.status,
+                verification_status=args.verification_status,
+                tags=args.tag or [],
+                note=args.note,
+                reviewer=args.reviewer,
+                include_in_report=args.include_in_report,
+            )
+        except CaseDatabaseError as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved review mark: {payload['citation_id']}")
+            print(f"Target: {payload['target_type']}:{payload['target_id']}")
+            print(f"Status: {payload['status']} / {payload['verification_status']}")
+        return 0
+
+    if args.command == "evidence":
+        payload = identify_evidence(Path(args.source)).to_dict()
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Adapter: {payload['adapter']}")
+            print(f"Format: {payload['detected_format']}")
+            print(f"Supported now: {payload['supported']}")
+            print(f"Message: {payload['message']}")
+            if payload["missing_tools"]:
+                print(f"Missing tools: {', '.join(payload['missing_tools'])}")
+        return 0
+
+    if args.command == "benchmark":
+        try:
+            payload = run_benchmark(
+                root=Path(args.root).expanduser().resolve() if args.root else None,
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+                file_count=args.file_count,
+                keyword=args.keyword,
+                mode=args.mode,
+                search_iterations=args.search_iterations,
+                overwrite=args.overwrite,
+            )
+        except (BenchmarkError, SearchError, RunModeError, OSError, ValueError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            metrics = payload["metrics"]
+            print(f"Saved benchmark JSON: {payload['outputs']['json']}")
+            print(f"Saved benchmark report: {payload['outputs']['markdown']}")
+            print(
+                "Ingest: "
+                f"{metrics['ingest_seconds']}s  Search p50: {metrics['search_p50_seconds']}s  "
+                f"Search p95: {metrics['search_p95_seconds']}s"
+            )
+        return 0
+
+    if args.command == "case-catalog":
+        catalog = CaseCatalog(Path(args.catalog).expanduser().resolve())
+        added_case = None
+        exported = None
+        imported = None
+        try:
+            if args.add_run:
+                if not args.case_id:
+                    parser.error("--case-id is required with --add-run")
+                added_case = catalog.add_run(
+                    run_output=Path(args.add_run).expanduser().resolve(),
+                    case_id=args.case_id,
+                    name=args.name,
+                    description=args.description,
+                    examiner=args.examiner,
+                    organization=args.organization,
+                )
+            if args.export:
+                archive = Path(args.archive).expanduser().resolve() if args.archive else Path(f"{args.export}.zip").resolve()
+                exported = catalog.export_case(case_id=args.export, output_zip=archive)
+            if args.import_archive:
+                imported = catalog.import_archive(Path(args.import_archive).expanduser().resolve())
+            cases = catalog.list_cases() if args.list or not any([added_case, exported, imported]) else []
+        except CaseCatalogError as exc:
+            parser.error(str(exc))
+        payload = {
+            "command": "case-catalog",
+            "catalog": str(catalog.path),
+            "added_case": added_case,
+            "exported": exported,
+            "imported": imported,
+            "cases": cases,
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            if added_case:
+                print(f"Added case: {added_case['case_id']}")
+            if exported:
+                print(f"Exported case archive: {exported['archive']}")
+            if imported:
+                print(f"Imported case: {imported['case_id']}")
+            if cases:
+                print(f"Cases: {len(cases)}")
+                for case in cases:
+                    print(f"- {case.get('case_id')}: {case.get('name')} ({len(case.get('runs', []))} runs)")
+        return 0
+
+    if args.command == "timeline-export":
+        try:
+            payload = build_unified_timeline_export(
+                Path(args.run_output).expanduser().resolve(),
+                start=args.start,
+                end=args.end,
+                source=args.source,
+                event_type=args.event_type,
+                reviewed_status=args.reviewed_status,
+                limit=args.limit,
+            )
+        except (TimelineExportError, OSError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        output = Path(args.output).expanduser().resolve()
+        write_result(payload, output)
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved timeline export JSON: {output}")
+            print(f"Events: {payload['summary']['event_count']}")
+        return 0
+
+    if args.command == "normalize":
+        try:
+            payload = build_normalized_case(Path(args.run_output).expanduser().resolve(), case_id=args.case_id)
+        except (NormalizationError, OSError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        output = Path(args.output).expanduser().resolve()
+        write_result(payload, output)
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved normalized case JSON: {output}")
+            print(f"Models: {payload['summary']}")
+        return 0
+
+    if args.command == "bundle":
+        try:
+            payload = build_submission_bundle(
+                case_json=Path(args.case_json).expanduser().resolve(),
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+                allowed_roots=[Path(path).expanduser().resolve() for path in args.allowed_root],
+                include_all=args.include_all,
+                max_items=args.max_items,
+                title=args.title,
+            )
+        except (BundleError, CaseBookmarkError, OSError, ValueError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved bundle manifest: {payload['outputs']['manifest']}")
+            print(f"Saved bundle archive: {payload['outputs']['archive']}")
+            print(f"Archive SHA256: {payload['archive_hashes']['sha256']}")
+        return 0
+
+    if args.command == "plugins":
+        try:
+            if args.validate:
+                plugin = validate_plugin_manifest(
+                    read_plugin_manifest(Path(args.validate).expanduser().resolve()),
+                    manifest_path=Path(args.validate).expanduser().resolve(),
+                )
+                payload = {"command": "plugins", "validated": plugin, "plugins": [plugin], "errors": []}
+            else:
+                payload = load_plugin_registry([Path(path) for path in (args.plugin_dir or [])])
+        except PluginError as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            for plugin in payload.get("plugins", []):
+                print(f"- {plugin['id']} [{plugin['kind']}] {plugin['version']} enabled={plugin['enabled']}")
+            for error in payload.get("errors", []):
+                print(f"! {error['path']}: {error['error']}")
+        return 0
 
     if args.command == "search":
         run_output = Path(args.run_output).expanduser().resolve()

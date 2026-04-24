@@ -23,6 +23,14 @@ python -m pip install -U pip build
 python -m pip install -e ".[web,test]"
 ```
 
+Windows one-command launcher:
+
+```powershell
+.\scripts\windows\start-rapidtriage.ps1
+```
+
+See [docs/rapidtriage-windows-quickstart.md](docs/rapidtriage-windows-quickstart.md) for the Windows launcher, diagnostics, and E01 fallback guidance.
+
 System dependencies:
 
 - Required for dashcam OCR/video workflows: `ffprobe` from ffmpeg and the `tesseract` binary.
@@ -35,6 +43,12 @@ Run the local web UI:
 
 ```bash
 rapidtriage web --host 127.0.0.1 --port 8765
+```
+
+Check the local runtime before starting:
+
+```bash
+rapidtriage doctor
 ```
 
 Or use the dedicated entrypoint:
@@ -53,6 +67,57 @@ Run the CLI workflow directly:
 
 ```bash
 rapidtriage run . --mode fraud --output-dir ./rapidtriage-run-fraud --read-only
+```
+
+Create and run a synthetic sample case:
+
+```bash
+rapidtriage sample --run --overwrite
+```
+
+See [docs/rapidtriage-sample-case.md](docs/rapidtriage-sample-case.md) for expected sample outputs and smoke-search examples.
+
+Initialize the experimental SQLite case database:
+
+```bash
+rapidtriage case-db ./rapidtriage-case.db --create-case CASE-001 --name "Case 001" --list
+```
+
+Import a completed run and search the SQLite case DB:
+
+```bash
+rapidtriage case-db ./rapidtriage-case.db --import-run ./rapidtriage-sample/run-output --case-id CASE-001
+rapidtriage case-search ./rapidtriage-case.db --case-id CASE-001 -k password --source documents
+rapidtriage case-review ./rapidtriage-case.db --case-id CASE-001 --target-type indexed_document --target-id 1 --status relevant --verification-status source_opened --include-in-report
+rapidtriage case-search ./rapidtriage-case.db --case-id CASE-001 -k password --verification-status source_opened
+```
+
+Check which evidence adapter will handle a source path:
+
+```bash
+rapidtriage evidence ./case.E01 --json
+rapidtriage evidence ./mounted-folder
+```
+
+Track performance with a synthetic benchmark:
+
+```bash
+rapidtriage benchmark --output-dir ./rapidtriage-benchmark --file-count 1000
+```
+
+Register a completed run in the local case catalog:
+
+```bash
+rapidtriage case-catalog --add-run ./rapidtriage-sample/run-output --case-id CASE-001 --name "Sample Case" --list
+```
+
+Export normalized timeline/model data and a submission bundle:
+
+```bash
+rapidtriage timeline-export ./rapidtriage-sample/run-output --output timeline-export.json
+rapidtriage normalize ./rapidtriage-sample/run-output --output normalized-case.json
+rapidtriage bundle ./rapidtriage-case.json --allowed-root ./rapidtriage-sample/evidence --output-dir ./submission-bundle
+rapidtriage plugins --list
 ```
 
 Run directly from an E01 image when `libewf` and Sleuth Kit tools are installed:
@@ -126,6 +191,7 @@ The local UI is a browser-based dashboard served by FastAPI. It supports:
 - Persisting the local run catalog across server restarts.
 - Importing an existing run output directory that contains `rapidtriage-run-summary.json`.
 - Viewing run status, summaries, files, docs, artifacts, timeline events, and generated markdown reports.
+- Displaying step-level run status for recovery/retry diagnostics.
 - Splitting the case workspace into `Triage`, `Find`, `Review`, and `Deliver` views so large cases are handled by task instead of one overloaded screen.
 - Pinning search results, viewer previews, and reviewed evidence into a persistent A/B compare tray for quick back-and-forth inspection.
 - Loading large files/docs/artifacts/timeline outputs in bounded pages instead of rendering entire result sets at once.
@@ -143,6 +209,8 @@ The local UI is a browser-based dashboard served by FastAPI. It supports:
 - Removing a run from the local web catalog without deleting evidence output files.
 
 API endpoints are served under `/api`, including health, run creation/listing/detail, run import, catalog removal, named outputs, paginated files/docs/artifacts/timeline views, downloadable output files, source previews, report text, case loading, submission hash manifest generation, case report drafting, and review/bookmark creation.
+
+The web server defaults to `127.0.0.1`. If you bind it to a non-localhost interface, use `--auth-token` unless you intentionally pass `--allow-remote-without-auth`.
 
 By default, the web run catalog is stored in the user state directory:
 
@@ -180,6 +248,16 @@ Implemented:
 - `submission-manifest` hashes report-candidate case evidence with MD5, SHA1, and SHA256, preserves review/bookmark context, skips unavailable or out-of-scope paths, and writes an audit sidecar.
 - `case-report` writes a Korean/English-friendly Markdown report draft with case metadata, analysis scope, reviewed evidence, hashes, skipped hash rows, conclusion text, and audit sidecar.
 - `web` starts a local FastAPI server with a browser UI for launching runs, importing existing outputs, searching evidence, previewing source files, reviewing hits, organizing case findings, downloading generated files, and reading reports.
+- `case-db` initializes the experimental SQLite case database v1 with tables for cases, evidence sources, files, hashes, artifacts, events, indexed documents/FTS, reviews, audit events, report items, jobs, and stable citation ID sequences.
+- `case-search` searches imported SQLite case databases across FTS-indexed documents, file records, artifacts, and timeline events while preserving citation IDs; it supports source and verification-status filters.
+- `case-review` stores DB-backed review/verification marks, tags, notes, reviewer names, and report-candidate flags for individual search targets.
+- `evidence` identifies folder, E01/Ex01, raw image, ISO, and virtual-disk source adapters and reports whether required external tooling is available.
+- `benchmark` writes JSON and Markdown benchmark results with ingest/search latency, peak memory, output size, and result counts.
+- `case-catalog` stores user-facing case metadata, associated run outputs, and portable catalog archives.
+- `timeline-export` writes an AXIOM-style normalized timeline with stable event IDs and filters for date, source, event type, and review status.
+- `normalize` converts completed run outputs into stable model collections for files, artifacts, events, and indexed documents.
+- `bundle` creates a submission folder and zip with report, selected evidence list, hash manifest, audit JSON, and bundle integrity hashes.
+- `plugins` lists built-in plugin contracts and validates external `plugin.json` manifests for parsers, evidence adapters, viewers, and report exporters.
 - `report` rendering is assembled from a normalized run-report context built from run summary, artifacts, timeline, and extract outputs.
 - `rules` and IOC lookup are implemented additively; matching metadata is appended without breaking existing output shapes.
 

@@ -280,6 +280,86 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(delete_response.status_code, 204)
             self.assertEqual(restored_client.get(f"/api/runs/{run_id}").status_code, 404)
 
+    def test_case_db_api_imports_searches_and_marks_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            db_path = Path(tmp_dir) / "case.db"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+            client = TestClient(create_app(RunJobStore()))
+
+            run_response = client.post(
+                "/api/runs",
+                json={
+                    "root": str(root),
+                    "mode": "fraud",
+                    "output_dir": str(output_dir),
+                    "read_only": True,
+                    "wait": True,
+                },
+            )
+            self.assertEqual(run_response.status_code, 202, run_response.text)
+
+            import_response = client.post(
+                "/api/case-db/import-run",
+                json={
+                    "database": str(db_path),
+                    "run_output": str(output_dir),
+                    "case_id": "CASE-API-DB",
+                    "name": "API Case DB",
+                },
+            )
+            self.assertEqual(import_response.status_code, 200, import_response.text)
+            self.assertGreaterEqual(import_response.json()["summary"]["indexed_document_count"], 1)
+
+            search_response = client.post(
+                "/api/case-db/search",
+                json={
+                    "database": str(db_path),
+                    "case_id": "CASE-API-DB",
+                    "keywords": ["password"],
+                    "sources": ["documents"],
+                },
+            )
+            self.assertEqual(search_response.status_code, 200, search_response.text)
+            search_payload = search_response.json()
+            self.assertGreaterEqual(search_payload["summary"]["match_count"], 1)
+            target = search_payload["matches"][0]
+
+            review_response = client.post(
+                "/api/case-db/review",
+                json={
+                    "database": str(db_path),
+                    "case_id": "CASE-API-DB",
+                    "target_type": target["target_type"],
+                    "target_id": target["target_id"],
+                    "status": "relevant",
+                    "verification_status": "source_opened",
+                    "tags": ["credential"],
+                    "note": "Opened in viewer.",
+                    "reviewer": "api-test",
+                    "include_in_report": True,
+                },
+            )
+            self.assertEqual(review_response.status_code, 200, review_response.text)
+            self.assertEqual(review_response.json()["verification_status"], "source_opened")
+
+            filtered_response = client.post(
+                "/api/case-db/search",
+                json={
+                    "database": str(db_path),
+                    "case_id": "CASE-API-DB",
+                    "keywords": ["password"],
+                    "sources": ["documents"],
+                    "verification_status": "source_opened",
+                },
+            )
+            self.assertEqual(filtered_response.status_code, 200, filtered_response.text)
+            filtered_payload = filtered_response.json()
+            self.assertGreaterEqual(filtered_payload["summary"]["match_count"], 1)
+            self.assertEqual(filtered_payload["matches"][0]["review"]["status"], "relevant")
+
     def test_imported_summary_cannot_expose_files_outside_output_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

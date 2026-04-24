@@ -2,20 +2,24 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..core.audit import audit_path_for, write_audit_record
 from ..core.case import CaseBookmarkError, create_or_update_case_payload, load_case_payload, save_case_payload
+from ..core.case_catalog import CaseCatalog, CaseCatalogError, default_case_catalog_path
 from ..core.case_report import build_case_report_markdown
+from ..core.case_db import CaseDatabaseError, open_case_database
 from ..core.docs import SUPPORTED_DOC_EXTS, extract_text
+from ..core.doctor import run_doctor
 from ..core.jobs import RunJobStore, RunRequest, default_job_store, is_relative_to, run_output_dir
 from ..core.search import SearchError, run_unified_search
 from ..core.submission import build_submission_manifest
@@ -64,14 +68,130 @@ class CaseReportCreateRequest(BaseModel):
     max_items: int = Field(500, ge=1, le=5000)
 
 
-def create_app(job_store: RunJobStore | None = None) -> FastAPI:
+class CaseDbImportRunRequest(BaseModel):
+    database: str = Field(..., min_length=1)
+    run_output: str = Field(..., min_length=1)
+    case_id: str = Field(..., min_length=1)
+    name: Optional[str] = None
+
+
+class CaseDbSearchRequest(BaseModel):
+    database: str = Field(..., min_length=1)
+    case_id: str = Field(..., min_length=1)
+    keywords: list[str] = Field(..., min_length=1)
+    limit: int = Field(100, ge=1, le=1000)
+    sources: Optional[list[str]] = None
+    verification_status: Optional[str] = None
+
+
+class CaseDbReviewRequest(BaseModel):
+    database: str = Field(..., min_length=1)
+    case_id: str = Field(..., min_length=1)
+    target_type: str = Field(..., min_length=1)
+    target_id: str = Field(..., min_length=1)
+    status: str = "unreviewed"
+    verification_status: str = "unverified"
+    tags: Optional[list[str]] = None
+    note: str = ""
+    reviewer: str = ""
+    include_in_report: bool = False
+
+
+class CaseCatalogAddRunRequest(BaseModel):
+    catalog: Optional[str] = None
+    run_output: str = Field(..., min_length=1)
+    case_id: str = Field(..., min_length=1)
+    name: Optional[str] = None
+    description: str = ""
+    examiner: str = ""
+    organization: str = ""
+
+
+def create_app(job_store: RunJobStore | None = None, auth_token: str | None = None) -> FastAPI:
     store = job_store or default_job_store
     api = FastAPI(title="rapidtriage local API", version="0.2.0")
     static_dir = Path(__file__).resolve().parent.parent / "web" / "static"
+    expected_token = auth_token or os.environ.get("RAPIDTRIAGE_AUTH_TOKEN") or ""
+
+    @api.middleware("http")
+    async def require_auth_token(request: Request, call_next):
+        if expected_token and request.url.path.startswith("/api"):
+            supplied = request.headers.get("X-RapidTriage-Token") or request.query_params.get("token")
+            if supplied != expected_token:
+                return JSONResponse(status_code=401, content={"detail": "missing or invalid RapidTriage auth token"})
+        return await call_next(request)
 
     @api.get("/api/health")
     def health() -> Dict[str, str]:
         return {"status": "ok"}
+
+    @api.get("/api/doctor")
+    def doctor() -> Dict[str, object]:
+        return run_doctor(include_port_check=False)
+
+    @api.post("/api/case-db/import-run")
+    def import_run_to_case_db(request: CaseDbImportRunRequest) -> Dict[str, object]:
+        try:
+            database = open_case_database(Path(request.database))
+            return database.import_run_output(Path(request.run_output), case_id=request.case_id, case_name=request.name)
+        except (CaseDatabaseError, SearchError, OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @api.post("/api/case-db/search")
+    def search_case_db(request: CaseDbSearchRequest) -> Dict[str, object]:
+        try:
+            database = open_case_database(Path(request.database))
+            return database.search_case(
+                case_id=request.case_id,
+                keywords=request.keywords,
+                limit=request.limit,
+                sources=request.sources,
+                verification_status=request.verification_status,
+            )
+        except CaseDatabaseError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @api.post("/api/case-db/review")
+    def mark_case_db_review(request: CaseDbReviewRequest) -> Dict[str, object]:
+        try:
+            database = open_case_database(Path(request.database))
+            return database.mark_review(
+                case_id=request.case_id,
+                target_type=request.target_type,
+                target_id=request.target_id,
+                status=request.status,
+                verification_status=request.verification_status,
+                tags=request.tags or [],
+                note=request.note,
+                reviewer=request.reviewer,
+                include_in_report=request.include_in_report,
+            )
+        except CaseDatabaseError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @api.get("/api/case-catalog")
+    def list_case_catalog(catalog: Optional[str] = Query(None)) -> Dict[str, object]:
+        try:
+            case_catalog = CaseCatalog(Path(catalog).expanduser().resolve() if catalog else default_case_catalog_path())
+            return {"catalog": str(case_catalog.path), "cases": case_catalog.list_cases()}
+        except CaseCatalogError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @api.post("/api/case-catalog/add-run")
+    def add_case_catalog_run(request: CaseCatalogAddRunRequest) -> Dict[str, object]:
+        try:
+            case_catalog = CaseCatalog(Path(request.catalog).expanduser().resolve() if request.catalog else default_case_catalog_path())
+            case = case_catalog.add_run(
+                run_output=Path(request.run_output),
+                case_id=request.case_id,
+                name=request.name,
+                description=request.description,
+                examiner=request.examiner,
+                organization=request.organization,
+            )
+            return {"catalog": str(case_catalog.path), "case": case}
+        except CaseCatalogError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/runs", status_code=202)
     def create_run(request: RunCreateRequest) -> Dict[str, Any]:
