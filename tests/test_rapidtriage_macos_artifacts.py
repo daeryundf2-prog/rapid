@@ -26,6 +26,7 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             self.assertIn("macos-user-profile", artifact_types)
             self.assertIn("macos-browser-history-downloads", artifact_types)
             self.assertIn("macos-quarantine-event", artifact_types)
+            self.assertIn("macos-tcc-permission", artifact_types)
             self.assertIn("macos-launch-agent", artifact_types)
 
             browser = next(item for item in payload["artifacts"] if item["artifact_type"] == "macos-browser-history-downloads")
@@ -39,6 +40,13 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             launch_agent = next(item for item in payload["artifacts"] if item["artifact_type"] == "macos-launch-agent")
             self.assertEqual(launch_agent["details"]["label"], "com.example.persist")
             self.assertEqual(launch_agent["details"]["program_arguments"][0], "/usr/bin/osascript")
+
+            tcc = next(item for item in payload["artifacts"] if item["artifact_type"] == "macos-tcc-permission")
+            self.assertEqual(tcc["details"]["service"], "kTCCServiceSystemPolicyAllFiles")
+            self.assertEqual(tcc["details"]["client"], "/Users/alice/Library/Application Support/persist/helper")
+            self.assertTrue(tcc["details"]["allowed"])
+            self.assertIn("high-value-privacy-permission", tcc["details"]["risk_flags"])
+            self.assertIn("user-writable-client-path", tcc["details"]["risk_flags"])
 
     def test_macos_system_collector_is_wired_into_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -69,11 +77,13 @@ def build_macos_fixture(root: Path) -> None:
     safari_dir = user_root / "Library" / "Safari"
     preferences_dir = user_root / "Library" / "Preferences"
     launch_agents_dir = user_root / "Library" / "LaunchAgents"
-    for directory in (safari_dir, preferences_dir, launch_agents_dir):
+    tcc_dir = user_root / "Library" / "Application Support" / "com.apple.TCC"
+    for directory in (safari_dir, preferences_dir, launch_agents_dir, tcc_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
     create_safari_history(safari_dir / "History.db")
     create_quarantine_db(preferences_dir / "com.apple.LaunchServices.QuarantineEventsV2")
+    create_tcc_db(tcc_dir / "TCC.db")
     (launch_agents_dir / "com.example.persist.plist").write_bytes(
         plistlib.dumps(
             {
@@ -99,6 +109,56 @@ def create_safari_history(path: Path) -> None:
         connection.execute(
             "INSERT INTO history_visits (history_item, visit_time) VALUES (?, ?)",
             (1, 735000000.0),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def create_tcc_db(path: Path) -> None:
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE access (
+                service TEXT,
+                client TEXT,
+                client_type INTEGER,
+                auth_value INTEGER,
+                auth_reason INTEGER,
+                auth_version INTEGER,
+                indirect_object_identifier TEXT,
+                flags INTEGER,
+                last_modified INTEGER
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO access (
+                service,
+                client,
+                client_type,
+                auth_value,
+                auth_reason,
+                auth_version,
+                indirect_object_identifier,
+                flags,
+                last_modified
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "kTCCServiceSystemPolicyAllFiles",
+                "/Users/alice/Library/Application Support/persist/helper",
+                1,
+                2,
+                4,
+                1,
+                "UNUSED",
+                0,
+                1_700_000_000,
+            ),
         )
         connection.commit()
     finally:

@@ -55,7 +55,7 @@
     },
     {
       "name": "macos-system-artifacts",
-      "description": "macOS user, browser, quarantine, and LaunchAgent triage artifacts",
+      "description": "macOS user, browser, quarantine, TCC privacy permission, and LaunchAgent triage artifacts",
       "target_platform": "macos",
       "supported": true,
       "artifacts": []

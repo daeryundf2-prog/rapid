@@ -17,7 +17,7 @@ from .windows.browser import (
 )
 from .windows.common import open_sqlite_snapshot
 
-PARSER_VERSION = "macos-system-v1"
+PARSER_VERSION = "macos-system-v2"
 MACOS_EPOCH = dt.datetime(2001, 1, 1, tzinfo=dt.timezone.utc)
 SKIP_USERS = {"shared", "guest", "daemon", "nobody"}
 CHROMIUM_BROWSER_ROOTS = (
@@ -32,12 +32,31 @@ LAUNCH_AGENT_DIRS = (
     ("Library", "LaunchAgents"),
     ("Library", "LaunchDaemons"),
 )
+USER_TCC_DB = ("Library", "Application Support", "com.apple.TCC", "TCC.db")
+SYSTEM_TCC_DB = ("Library", "Application Support", "com.apple.TCC", "TCC.db")
+HIGH_VALUE_TCC_SERVICES = {
+    "kTCCServiceAccessibility",
+    "kTCCServiceAddressBook",
+    "kTCCServiceAppleEvents",
+    "kTCCServiceCamera",
+    "kTCCServiceListenEvent",
+    "kTCCServiceMicrophone",
+    "kTCCServicePhotos",
+    "kTCCServicePostEvent",
+    "kTCCServiceScreenCapture",
+    "kTCCServiceSystemPolicyAllFiles",
+    "kTCCServiceSystemPolicyDesktopFolder",
+    "kTCCServiceSystemPolicyDocumentsFolder",
+    "kTCCServiceSystemPolicyDownloadsFolder",
+    "kTCCServiceSystemPolicyNetworkVolumes",
+    "kTCCServiceSystemPolicyRemovableVolumes",
+}
 
 
 class MacOsSystemArtifactsProvider:
     name = "macos-system-artifacts"
     collector_kind = "macos-system"
-    description = "macOS user, browser, quarantine, and LaunchAgent triage artifacts"
+    description = "macOS user, browser, quarantine, TCC privacy permission, and LaunchAgent triage artifacts"
     target_platform = "macos"
 
     def supported(self) -> bool:
@@ -50,7 +69,9 @@ class MacOsSystemArtifactsProvider:
             yield user_profile_record(user_root)
             yield from collect_macos_browsers(user_root)
             yield from collect_quarantine_events(user_root)
+            yield from collect_tcc_permissions(user_root.joinpath(*USER_TCC_DB), owner=user_root.name, scope="user")
             yield from collect_launch_agents(user_root)
+        yield from collect_tcc_permissions(root.joinpath(*SYSTEM_TCC_DB), owner="system", scope="system")
         yield from collect_system_launch_agents(root)
 
 
@@ -244,6 +265,144 @@ def extract_quarantine_rows(path: Path) -> list[dict[str, object]]:
             return rows
     except (sqlite3.DatabaseError, OSError):
         return []
+
+
+def collect_tcc_permissions(path: Path, *, owner: str, scope: str) -> Iterable[ArtifactRecord]:
+    if not path.is_file():
+        return
+    source_hashes = file_hashes(path)
+    for index, row in enumerate(extract_tcc_rows(path)):
+        flags = tcc_risk_flags(row)
+        yield ArtifactRecord(
+            provider=MacOsSystemArtifactsProvider.name,
+            artifact_type="macos-tcc-permission",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "macos-tcc-db",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "parsed",
+                "reportability": "triage",
+                "source_path": str(path.resolve()),
+                "source_hashes": source_hashes,
+                "source_index": index,
+                "owner": owner,
+                "scope": scope,
+                **row,
+                "risk_flags": flags,
+                "risk_score": tcc_risk_score(flags),
+            },
+        )
+
+
+def extract_tcc_rows(path: Path) -> list[dict[str, object]]:
+    try:
+        with open_sqlite_snapshot(path) as connection:
+            if not sqlite_table_exists(connection, "access"):
+                return []
+            columns = table_columns(connection, "access")
+            selected_columns = [
+                column
+                for column in (
+                    "service",
+                    "client",
+                    "client_type",
+                    "auth_value",
+                    "auth_reason",
+                    "auth_version",
+                    "allowed",
+                    "prompt_count",
+                    "indirect_object_identifier",
+                    "flags",
+                    "last_modified",
+                )
+                if column in columns
+            ]
+            if not selected_columns:
+                return []
+            rows = []
+            query = f"SELECT {', '.join(selected_columns)} FROM access ORDER BY service ASC, client ASC"
+            for row in connection.execute(query):
+                normalized = {column: normalize_sqlite_value(row[column]) for column in selected_columns}
+                auth_value = normalized.get("auth_value")
+                allowed = normalized.get("allowed")
+                rows.append(
+                    {
+                        "service": str(normalized.get("service") or ""),
+                        "client": str(normalized.get("client") or ""),
+                        "client_type": normalized.get("client_type", ""),
+                        "auth_value": auth_value,
+                        "allowed": allowed_from_tcc(auth_value=auth_value, allowed=allowed),
+                        "auth_reason": normalized.get("auth_reason", ""),
+                        "auth_version": normalized.get("auth_version", ""),
+                        "prompt_count": normalized.get("prompt_count", ""),
+                        "indirect_object_identifier": str(normalized.get("indirect_object_identifier") or ""),
+                        "flags": normalized.get("flags", ""),
+                        "last_modified_at": isoformat_from_unix_seconds(normalized.get("last_modified")),
+                    }
+                )
+            return rows
+    except (sqlite3.DatabaseError, OSError):
+        return []
+
+
+def table_columns(connection: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table})")}
+
+
+def normalize_sqlite_value(value: object) -> object:
+    if isinstance(value, bytes):
+        return value.hex()
+    return value
+
+
+def allowed_from_tcc(*, auth_value: object, allowed: object) -> bool | str:
+    if auth_value not in (None, ""):
+        try:
+            return int(auth_value) == 2
+        except (TypeError, ValueError):
+            return ""
+    if allowed not in (None, ""):
+        try:
+            return bool(int(allowed))
+        except (TypeError, ValueError):
+            return ""
+    return ""
+
+
+def isoformat_from_unix_seconds(value: object) -> str:
+    if value in (None, "", 0):
+        return ""
+    try:
+        return dt.datetime.fromtimestamp(float(value), tz=dt.timezone.utc).isoformat()
+    except (OSError, OverflowError, TypeError, ValueError):
+        return ""
+
+
+def tcc_risk_flags(row: dict[str, object]) -> list[str]:
+    flags: list[str] = []
+    service = str(row.get("service") or "")
+    client = str(row.get("client") or "")
+    if service in HIGH_VALUE_TCC_SERVICES:
+        flags.append("high-value-privacy-permission")
+    if row.get("allowed") is True:
+        flags.append("permission-allowed")
+    lowered_client = client.lower()
+    if lowered_client.startswith("/users/") or "/users/" in lowered_client:
+        flags.append("user-writable-client-path")
+    if "osascript" in lowered_client or "python" in lowered_client or "sh" == Path(lowered_client).name:
+        flags.append("scriptable-client")
+    return flags
+
+
+def tcc_risk_score(flags: list[str]) -> int:
+    weights = {
+        "high-value-privacy-permission": 25,
+        "permission-allowed": 20,
+        "user-writable-client-path": 20,
+        "scriptable-client": 15,
+    }
+    return min(sum(weights.get(flag, 5) for flag in flags), 100)
 
 
 def collect_launch_agents(user_root: Path) -> Iterable[ArtifactRecord]:

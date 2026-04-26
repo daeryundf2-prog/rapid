@@ -176,6 +176,7 @@ On mounted or exported macOS evidence, `macos-system` collects a baseline set of
 - User profile inventory under `Users/*`.
 - Safari, Chromium, Edge, Brave, and Firefox history/download rows where local profile databases are present.
 - LaunchServices quarantine events, useful for downloaded-file provenance.
+- TCC privacy permission rows for camera, microphone, screen capture, accessibility, full-disk access, and protected folders, including risk flags for allowed high-value permissions and user-writable clients.
 - User and system LaunchAgent/LaunchDaemon plist inventory, including label, program arguments, and `RunAtLoad`.
 
 Use:
