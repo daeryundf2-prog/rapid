@@ -176,6 +176,60 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("documents", sources)
             self.assertIn("password", payload["summary"]["keyword_counts"])
 
+    def test_hacking_run_surfaces_windows_forensic_artifacts_in_search_and_timeline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            search_output = Path(tmp_dir) / "search.json"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+
+            self.assertEqual(main(["run", str(root), "--mode", "hacking", "--output-dir", str(output_dir)]), 0)
+
+            summary_payload: dict[str, Any] = json.loads(
+                (output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8")
+            )
+            for kind in (
+                "eventlog",
+                "windows-os-account",
+                "windows-execution",
+                "windows-filesystem",
+            ):
+                self.assertIn(kind, summary_payload["summary"]["artifacts"])
+                self.assertIn(f"artifacts_{kind}", summary_payload["outputs"])
+                self.assertTrue(Path(summary_payload["outputs"][f"artifacts_{kind}"]).is_file())
+
+            self.assertGreaterEqual(
+                summary_payload["summary"]["artifacts"]["eventlog"]["artifact_count"],
+                1,
+            )
+            self.assertGreaterEqual(
+                summary_payload["summary"]["artifacts"]["windows-execution"]["artifact_count"],
+                1,
+            )
+            self.assertGreaterEqual(
+                summary_payload["summary"]["artifacts"]["windows-filesystem"]["artifact_count"],
+                1,
+            )
+
+            timeline_payload: dict[str, Any] = json.loads(
+                (output_dir / "rapidtriage-timeline.json").read_text(encoding="utf-8")
+            )
+            timeline_text = json.dumps(timeline_payload, ensure_ascii=False)
+            self.assertIn("eventlog-event", timeline_text)
+            self.assertIn("powershell-history-command", timeline_text)
+            self.assertIn("mft-record", timeline_text)
+
+            self.assertEqual(
+                main(["search", str(output_dir), "-k", "powershell", "--no-ocr", "--output", str(search_output)]),
+                0,
+            )
+            search_payload = json.loads(search_output.read_text(encoding="utf-8"))
+            sources = {match["source"] for match in search_payload["matches"]}
+            self.assertIn("artifacts", sources)
+            self.assertIn("timeline", sources)
+            self.assertIn("powershell", search_payload["summary"]["keyword_counts"])
+
     def assert_run_mode_outputs(self, mode: str) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
@@ -281,10 +335,17 @@ class RapidTriageRunTests(unittest.TestCase):
 
             if mode == "recovery":
                 self.assertIn("recent-files", summary_payload["summary"]["artifacts"])
+                self.assertIn("windows-os-account", summary_payload["summary"]["artifacts"])
+                self.assertIn("eventlog", summary_payload["summary"]["artifacts"])
+                self.assertIn("windows-filesystem", summary_payload["summary"]["artifacts"])
                 self.assertIn("images", files_payload["summary"]["category_counts"])
             else:
                 self.assertIn("browser", summary_payload["summary"]["artifacts"])
                 self.assertIn("recent-files", summary_payload["summary"]["artifacts"])
+                self.assertIn("windows-os-account", summary_payload["summary"]["artifacts"])
+                self.assertIn("eventlog", summary_payload["summary"]["artifacts"])
+                self.assertIn("windows-execution", summary_payload["summary"]["artifacts"])
+                self.assertIn("windows-filesystem", summary_payload["summary"]["artifacts"])
             for artifact_path in artifact_paths.values():
                 self.assertTrue(artifact_path.is_file())
 

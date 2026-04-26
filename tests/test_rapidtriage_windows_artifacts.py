@@ -56,6 +56,95 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 self.assertIn("supported", artifact)
                 self.assertIsInstance(artifact["details"], dict)
 
+    def test_eventlog_collector_normalizes_exports_detections_and_evtx_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            fixture = build_windows_artifact_fixture(root)
+            output = root / "eventlog.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifacts = payload["artifacts"]
+            event_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-event"]
+            detection_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-detection"]
+            inventory_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-file"]
+
+            self.assertGreaterEqual(len(event_rows), 2)
+            logon = [item for item in event_rows if item["details"]["event_id"] == "4624"][0]
+            self.assertEqual(logon["details"]["user_name"], "alice")
+            self.assertEqual(logon["details"]["target_user_name"], "alice")
+            self.assertEqual(logon["details"]["subject_user_name"], "SYSTEM")
+            self.assertEqual(logon["details"]["logon_type"], "10")
+            self.assertEqual(logon["details"]["source_ip"], "10.0.0.5")
+            powershell = [item for item in event_rows if item["details"]["event_id"] == "4104"][0]
+            self.assertEqual(powershell["details"]["event_category"], "powershell-script-block")
+            self.assertEqual(powershell["details"]["command_line"], "powershell -enc SQBFAFgA")
+            self.assertEqual(powershell["details"]["script_block_text"], "powershell -enc SQBFAFgA")
+            self.assertIn("high-value-event-id:4104", powershell["details"]["risk_flags"])
+            self.assertIn("suspicious-term:powershell -enc", powershell["details"]["risk_flags"])
+            self.assertEqual(detection_rows[0]["details"]["rule"]["title"], "Suspicious Encoded PowerShell")
+            self.assertEqual(detection_rows[0]["details"]["coverage_status"], "detected-by-rule")
+            self.assertEqual(inventory_rows[0]["details"]["coverage_status"], "detected")
+            self.assertEqual(inventory_rows[0]["details"]["source_path"], str(fixture.evtx_file.resolve()))
+
+    def test_windows_os_account_collector_summarizes_profiles_and_reg_exports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            fixture = build_windows_artifact_fixture(root)
+            output = root / "os-account.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-os-account", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifacts = payload["artifacts"]
+            profiles = [item for item in artifacts if item["artifact_type"] == "windows-user-profile"]
+            summaries = [item for item in artifacts if item["artifact_type"] == "windows-os-account-summary"]
+
+            self.assertTrue(profiles)
+            self.assertEqual(profiles[0]["details"]["user_name"], "alice")
+            self.assertEqual(profiles[0]["details"]["source_path"], str(fixture.user_profile.resolve()))
+            self.assertTrue(profiles[0]["details"]["ntuser_dat_present"])
+            self.assertTrue(summaries)
+            self.assertIn("WIN-FIXTURE", summaries[0]["details"]["computer_names"])
+            self.assertIn("Korea Standard Time", summaries[0]["details"]["time_zones"])
+
+    def test_windows_execution_collector_maps_registry_and_powershell_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            fixture = build_windows_artifact_fixture(root)
+            output = root / "execution.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-execution", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifacts = payload["artifacts"]
+            artifact_types = {item["artifact_type"] for item in artifacts}
+
+            self.assertIn("bam-entry", artifact_types)
+            self.assertIn("userassist-entry", artifact_types)
+            self.assertIn("shimcache-entry", artifact_types)
+            self.assertIn("powershell-history-command", artifact_types)
+            ps_rows = [item for item in artifacts if item["artifact_type"] == "powershell-history-command"]
+            self.assertTrue(any("suspicious-command:powershell -enc" in row["details"]["risk_flags"] for row in ps_rows))
+            self.assertTrue(any("vssadmin delete shadows" in row["details"]["command_line"] for row in ps_rows))
+            self.assertEqual(ps_rows[0]["details"]["source_path"], str(fixture.powershell_history.resolve()))
+
+    def test_windows_filesystem_collector_imports_mft_and_usn_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            fixture = build_windows_artifact_fixture(root)
+            output = root / "filesystem.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-filesystem", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifacts = payload["artifacts"]
+            mft = [item for item in artifacts if item["artifact_type"] == "mft-record"]
+            usn = [item for item in artifacts if item["artifact_type"] == "usn-record"]
+
+            self.assertEqual(mft[0]["details"]["record_number"], "42")
+            self.assertTrue(mft[0]["details"]["deleted_hint"])
+            self.assertEqual(mft[0]["details"]["source_path"], str(fixture.mft_csv.resolve()))
+            self.assertEqual(usn[0]["details"]["reason"], "FILE_DELETE")
+            self.assertEqual(usn[0]["details"]["source_path"], str(fixture.usn_jsonl.resolve()))
+
 
 if __name__ == "__main__":
     unittest.main()

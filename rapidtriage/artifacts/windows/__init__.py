@@ -1,5 +1,8 @@
 from .browser import WindowsBrowserArtifactsProvider
 from .eventlog import WindowsEventLogProvider
+from .execution import WindowsExecutionProvider
+from .filesystem import WindowsFilesystemProvider
+from .os_account import WindowsOsAccountProvider
 from .prefetch import WindowsPrefetchProvider
 from .recent_files import WindowsRecentFilesProvider
 from .registry import WindowsRegistryProvider
@@ -15,6 +18,9 @@ __all__ = [
     "system",
     "WindowsBrowserArtifactsProvider",
     "WindowsEventLogProvider",
+    "WindowsExecutionProvider",
+    "WindowsFilesystemProvider",
+    "WindowsOsAccountProvider",
     "WindowsPrefetchProvider",
     "WindowsRecentFilesProvider",
     "WindowsRegistryProvider",

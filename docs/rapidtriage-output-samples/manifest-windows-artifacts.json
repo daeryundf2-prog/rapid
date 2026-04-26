@@ -54,6 +54,13 @@
       "artifacts": []
     },
     {
+      "name": "macos-system-artifacts",
+      "description": "macOS user, browser, quarantine, and LaunchAgent triage artifacts",
+      "target_platform": "macos",
+      "supported": true,
+      "artifacts": []
+    },
+    {
       "name": "media-image-artifacts",
       "description": "Image inventory with dimensions, hashes, perceptual hash, OCR queue hints, and similarity buckets",
       "target_platform": "any",
@@ -215,8 +222,51 @@
       ]
     },
     {
+      "name": "windows-os-account",
+      "description": "Windows OS and account summary artifacts",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "windows-os-account",
+          "artifact_type": "windows-user-profile",
+          "path": "<ROOT>/Users/alice",
+          "supported": true,
+          "details": {
+            "parser": "windows-user-profile-inventory",
+            "parser_version": "windows-os-account-v1",
+            "coverage_status": "parsed",
+            "reportability": "triage",
+            "source_path": "<ROOT>/Users/alice",
+            "user_name": "alice",
+            "profile_path": "<ROOT>/Users/alice",
+            "profile_modified_at": "2024-03-05T06:06:06+00:00",
+            "ntuser_dat_present": false,
+            "usrclass_dat_present": false,
+            "ntuser_dat_hashes": {},
+            "usrclass_dat_hashes": {},
+            "account_type_hint": "user-profile"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-execution",
+      "description": "Windows execution artifacts from registry exports and PowerShell history",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": []
+    },
+    {
+      "name": "windows-filesystem",
+      "description": "Windows MFT and USN Journal CSV/JSON/JSONL imports",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": []
+    },
+    {
       "name": "windows-eventlog",
-      "description": "Windows Event Log XML/JSON export artifacts",
+      "description": "Windows Event Log EVTX inventory and XML/JSON/JSONL/CSV event imports",
       "target_platform": "windows",
       "supported": true,
       "artifacts": [
@@ -227,17 +277,52 @@
           "supported": true,
           "details": {
             "parser": "windows-eventlog-xml",
-            "parser_version": "eventlog-export-v1",
+            "parser_version": "eventlog-normalized-v2",
+            "coverage_status": "mapped",
+            "reportability": "reportable",
             "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
             "source_format": "xml",
             "source_index": 0,
+            "source_hashes": {
+              "sha256": "3280198506b93b1d8c90fed52b92c8740c1b0ebb493bbe0d86d40941bad6f906"
+            },
             "provider_name": "Microsoft-Windows-Security-Auditing",
             "event_id": "4624",
+            "event_category": "logon-success",
+            "event_description": "Authentication success",
             "record_id": "1001",
             "channel": "Security",
             "level": "0",
             "computer": "WIN-CASE01",
-            "event_created_at": "2024-04-01T12:34:56.0000000Z",
+            "user_sid": "",
+            "user_name": "alice",
+            "subject_user_name": "",
+            "target_user_name": "alice",
+            "target_domain_name": "",
+            "logon_type": "10",
+            "source_ip": "10.0.0.5",
+            "source_port": "",
+            "service_name": "",
+            "process_id": "",
+            "thread_id": "",
+            "process_name": "",
+            "new_process_name": "",
+            "parent_process_name": "",
+            "command_line": "",
+            "script_block_text": "",
+            "task": "",
+            "opcode": "",
+            "keywords": "",
+            "event_created_at": "2024-04-01T12:34:56.000000+00:00",
+            "timestamp": "2024-04-01T12:34:56.000000+00:00",
+            "rule": {
+              "title": "",
+              "id": "",
+              "level": "",
+              "mitre_tags": []
+            },
+            "risk_flags": [],
+            "risk_score": 0,
             "data": {
               "TargetUserName": "alice",
               "IpAddress": "10.0.0.5",

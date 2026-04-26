@@ -28,7 +28,7 @@ rapidtriage case-db ./case.db --import-run ./case-run --case-id CASE-001
 rapidtriage case-search ./case.db --case-id CASE-001 -k password --source documents
 ```
 
-Search reaches indexed document text, file metadata, artifact summaries, and timeline events. Use source filters to narrow heavy cases.
+Search reaches indexed document text, file metadata, artifact summaries, and timeline events. Artifact results keep reviewable source paths and high-value metadata such as event IDs, usernames, source IPs, command lines, PowerShell script blocks, MFT paths, and USN reasons. Use source filters to narrow heavy cases.
 
 For repeated review, save useful Case DB searches and filter by review state:
 
@@ -47,7 +47,46 @@ After a run, the Summary tab and generated Markdown report include a processing 
 
 ## Windows System Artifacts
 
-On mounted or exported Windows evidence, RapidTriage now collects high-value system artifacts in addition to browser/recent-file data:
+On mounted or exported Windows evidence, RapidTriage now collects high-value system artifacts in addition to browser/recent-file data.
+
+Event log workflow:
+
+- Native `.evtx` files are inventoried with source hashes and parser guidance.
+- XML/JSON/JSONL/CSV exports from EVTX-oriented tools such as EvtxECmd, Hayabusa, Chainsaw, and Velociraptor are normalized into event rows.
+- Important Event IDs such as logons, failed logons, privileged logons, process creation, scheduled task creation, service installation, log clearing, and PowerShell script blocks are categorized with risk flags.
+
+Use:
+
+```bash
+rapidtriage artifacts ./mounted-case --kind eventlog --output eventlog.json
+rapidtriage artifacts ./evtx-tool-output --kind eventlog --output eventlog-import.json
+```
+
+OS/account workflow:
+
+- User profile directories are inventoried.
+- `.reg` exports can provide computer name, timezone, ProfileList SID, and admin-group hints.
+
+Use:
+
+```bash
+rapidtriage artifacts ./mounted-case --kind windows-os-account --output os-account.json
+```
+
+Execution and filesystem workflow:
+
+- `windows-execution` imports Amcache/ShimCache/UserAssist/BAM-style `.reg` exports and PowerShell console history.
+- `windows-filesystem` imports MFT/USN CSV, JSON, JSONL, or NDJSON exports from trusted external tools.
+- These rows are labeled as triage/reportability hints so weak artifacts such as ShimCache are not overclaimed as proof of execution.
+
+Use:
+
+```bash
+rapidtriage artifacts ./mounted-case-or-export --kind windows-execution --output execution.json
+rapidtriage artifacts ./mft-usn-export --kind windows-filesystem --output filesystem.json
+```
+
+Other Windows system artifacts:
 
 - Task Scheduler XML tasks, including command, arguments, author, user SID, and trigger type.
 - Windows Defender `MPLog*.log` support logs, with threat/remediation/exclusion-looking lines highlighted.
@@ -60,6 +99,28 @@ Use:
 ```bash
 rapidtriage artifacts ./mounted-case --kind windows-system --output windows-system.json
 rapidtriage run ./mounted-case --mode hacking --output-dir ./case-run --read-only
+```
+
+When you use `rapidtriage run`, the Windows collectors are wired into the case workflow automatically:
+
+- `seizure`, `fraud`, and `hacking` run browser, recent-file, OS/account, event log, execution, filesystem, Windows system, and macOS system collectors.
+- `recovery` runs recent-file, OS/account, event log, filesystem, and macOS system collectors so deleted-file and restore clues still enter the timeline without doing carving.
+- Search and Case DB import can then find hits across documents, logs, event exports, PowerShell history, MFT/USN imports, and timeline rows from the same run output.
+
+## macOS System Artifacts
+
+On mounted or exported macOS evidence, `macos-system` collects a baseline set of reviewable artifacts:
+
+- User profile inventory under `Users/*`.
+- Safari, Chromium, Edge, Brave, and Firefox history/download rows where local profile databases are present.
+- LaunchServices quarantine events, useful for downloaded-file provenance.
+- User and system LaunchAgent/LaunchDaemon plist inventory, including label, program arguments, and `RunAtLoad`.
+
+Use:
+
+```bash
+rapidtriage artifacts ./mounted-mac --kind macos-system --output macos-system.json
+rapidtriage run ./mounted-mac --mode hacking --output-dir ./case-run --read-only
 ```
 
 ## Android APK Triage

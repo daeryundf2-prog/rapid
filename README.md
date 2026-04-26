@@ -261,8 +261,8 @@ Implemented:
 - `docs` searches text/config/log/data files, HTML/RTF, PDF, Office OpenXML (`docx`, `xlsx`, `pptx`), and OpenDocument (`odt`, `ods`, `odp`) bodies for keywords; it can also write an AXIOM-inspired processed-text inverted index sidecar for faster post-processing keyword pivots.
 - `files` performs metadata-only triage over names, paths, extensions, sizes, and mtimes, including document, archive, database, executable/script, email archive, AXIOM-aligned disk/VM/mobile image, memory dump, and vehicle export candidates.
 - `extract` copies selected `files` or `docs` results into an output directory with overwrite guards, size/count limits, hashes, and manifest/audit output.
-- `artifacts` exposes dedicated collectors for `browser` and `recent-files`.
-- `run` orchestrates `manifest`, `docs`, `files`, `extract`, `artifacts`, and `timeline` for `seizure`, `fraud`, `hacking`, and `recovery`.
+- `artifacts` exposes dedicated collectors for `browser`, `recent-files`, `eventlog`, `windows-os-account`, `windows-execution`, `windows-filesystem`, `windows-system`, `macos-system`, `android-apk`, `media-image`, `memory-volatility`, and `cloud-export`.
+- `run` orchestrates `manifest`, `docs`, `files`, `extract`, `artifacts`, and `timeline` for `seizure`, `fraud`, `hacking`, and `recovery`; Windows-focused modes automatically include account, event log, execution, filesystem, recent-file, browser, and system-artifact collectors where relevant.
 - Direct `.E01` input is supported for `run` when `ewfmount`, `mmls`, and `tsk_recover` are available; `rapidtriage-e01.json` records the extracted filesystem root and selected partition offset.
 - `search` searches a completed run across document/log text, file metadata, browser/web artifacts, timeline rows, and optional OCR over image candidates.
 - `timeline` merges `files`, `docs`, and `artifacts` JSON into chronological events and writes JSON plus markdown.
@@ -271,7 +271,7 @@ Implemented:
 - `case-report` writes a Korean/English-friendly Markdown report draft with case metadata, analysis scope, reviewed evidence, hashes, skipped hash rows, conclusion text, and audit sidecar.
 - `web` starts a local FastAPI server with a browser UI for launching runs, importing existing outputs, searching evidence, previewing source files, reviewing hits, organizing case findings, downloading generated files, and reading reports.
 - `case-db` initializes the experimental SQLite case database v1 with tables for cases, evidence sources, files, hashes, artifacts, events, indexed documents/FTS, reviews, audit events, report items, jobs, and stable citation ID sequences.
-- `case-search` searches imported SQLite case databases across FTS-indexed documents, file records, artifacts, and timeline events while preserving citation IDs; it supports source and verification-status filters.
+- `case-search` searches imported SQLite case databases across FTS-indexed documents, file records, artifacts, and timeline events while preserving citation IDs; artifact hits expose reviewable source paths plus key Windows metadata for event logs, PowerShell history, MFT, and USN rows.
 - `case-review` stores DB-backed review/verification marks, tags, notes, reviewer names, and report-candidate flags for individual search targets.
 - `evidence` identifies folder, E01/Ex01, raw image, ISO, and virtual-disk source adapters and reports whether required external tooling is available.
 - `benchmark` writes JSON and Markdown benchmark results with ingest/search latency, peak memory, output size, and result counts.

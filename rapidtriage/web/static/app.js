@@ -37,6 +37,12 @@ const PROCESSING_PROFILES = {
     badges: ["extracts matches", "no cap", "slow/heavy"],
   },
 };
+const RUN_MODE_COLLECTORS = {
+  seizure: ["browser", "recent files", "OS/account", "event logs", "execution", "MFT/USN", "Windows system", "macOS"],
+  fraud: ["browser", "recent files", "OS/account", "event logs", "execution", "MFT/USN", "Windows system", "macOS"],
+  hacking: ["browser", "recent files", "OS/account", "event logs", "execution", "MFT/USN", "Windows system", "macOS"],
+  recovery: ["recent files", "OS/account", "event logs", "MFT/USN", "macOS"],
+};
 const PAGE_SIZE = 250;
 const COMPARE_LIMIT = 6;
 const VIEW_GROUPS = [
@@ -608,21 +614,79 @@ function renderArtifacts(payload) {
   return `
     ${renderPaginationNotice(pagination, "artifacts")}
     <table class="data-table">
-      <thead><tr><th>Kind</th><th>Type</th><th>Provider</th><th>Path</th><th></th></tr></thead>
+      <thead><tr><th>Kind</th><th>Type</th><th>Provider</th><th>Evidence</th><th></th></tr></thead>
       <tbody>
         ${rows.map(({ kind, index, artifact }) => `
           <tr data-filter="${rowText({ kind, ...artifact })}">
             <td>${escapeHtml(kind)}</td>
             <td>${escapeHtml(artifact.artifact_type)}</td>
             <td>${escapeHtml(artifact.provider)}</td>
-            <td><span>${escapeHtml(artifact.path)}</span></td>
-            <td>${bookmarkButton(`artifacts:${kind}`, `/artifacts/${index}`, artifact.artifact_type)}</td>
+            <td>
+              <strong>${escapeHtml(artifactPreviewText(artifact))}</strong>
+              <span>${escapeHtml(artifact.path || "")}</span>
+              ${renderArtifactDetails(artifact)}
+            </td>
+            <td class="action-stack">${artifactActionButtons(kind, index, artifact)}</td>
           </tr>
         `).join("")}
       </tbody>
     </table>
     ${renderPaginationControls(pagination, "artifacts")}
   `;
+}
+
+function artifactPreviewText(artifact) {
+  const details = artifact.details || {};
+  if (details.event_id) {
+    return [
+      `Event ${details.event_id}`,
+      details.event_category,
+      details.user_name || details.target_user_name ? `user=${details.user_name || details.target_user_name}` : "",
+      details.source_ip ? `ip=${details.source_ip}` : "",
+      details.command_line || details.script_block_text ? `cmd=${details.command_line || details.script_block_text}` : "",
+    ].filter(Boolean).join(" · ");
+  }
+  for (const key of ["command_line", "script_block_text", "file_path", "executable_path", "source_url", "target_path", "entry_name", "service_name", "process_name"]) {
+    if (details[key]) return String(details[key]);
+  }
+  return artifact.artifact_type || "artifact";
+}
+
+function renderArtifactDetails(artifact) {
+  if (!artifact.details) return "";
+  return `
+    <details class="match-details">
+      <summary>Inspect artifact details</summary>
+      <pre>${escapeHtml(JSON.stringify(artifact.details, null, 2))}</pre>
+    </details>
+  `;
+}
+
+function artifactActionButtons(kind, index, artifact) {
+  const context = {
+    source: `artifacts:${kind}`,
+    pointer: `/artifacts/${index}`,
+    title: artifact.artifact_type || "artifact",
+    note: artifactPreviewText(artifact),
+    path: artifact.path || "",
+    tags: ["artifact", kind, artifact.artifact_type].filter(Boolean),
+  };
+  const match = {
+    source: "artifacts",
+    kind,
+    path: artifact.path || "",
+    title: artifact.artifact_type || kind,
+    preview: context.note,
+    pointer: context.pointer,
+  };
+  const items = [];
+  if (match.path) {
+    items.push(viewSourceButton(match, context));
+    items.push(sourceFileLink(match));
+    items.push(compareButton(compareItemFromMatch(match, context)));
+  }
+  items.push(bookmarkButton(context.source, context.pointer, context.note || context.title));
+  return items.join("");
 }
 
 function renderFiles(payload) {
@@ -2364,6 +2428,7 @@ function refreshRunPlanPreview() {
   const maxExtractBytes = extractLimitBytes();
   const maxFiles = Number(document.querySelector("#maxFileCountInput")?.value || 0);
   const mode = document.querySelector("#modeInput")?.value || "fraud";
+  const collectors = RUN_MODE_COLLECTORS[mode] || RUN_MODE_COLLECTORS.fraud;
   const badges = [
     ...profile.badges,
     readOnly ? "read-only" : "extract allowed",
@@ -2373,6 +2438,7 @@ function refreshRunPlanPreview() {
     <p class="eyebrow">run plan preview</p>
     <h3>${escapeHtml(profile.title)} · ${escapeHtml(titleCase(mode))}</h3>
     <p>${escapeHtml(profile.summary)}</p>
+    <p>Collectors: ${collectors.map((collector) => `<code>${escapeHtml(collector)}</code>`).join(" ")}</p>
     <div class="processing-caps">
       ${badges.map((badge) => `<span>${escapeHtml(badge)}</span>`).join("")}
       <span>Max extract: ${maxExtractBytes ? formatBytes(maxExtractBytes) : "uncapped/none"}</span>

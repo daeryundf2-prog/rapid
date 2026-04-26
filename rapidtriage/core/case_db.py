@@ -746,6 +746,7 @@ class CaseDatabase:
                     if not isinstance(row, Mapping):
                         continue
                     artifact_type = str(row.get("artifact_type") or name.removeprefix("artifacts_"))
+                    details = artifact_details(row)
                     summary = artifact_summary(row)
                     connection.execute(
                         """
@@ -760,9 +761,9 @@ class CaseDatabase:
                             case_id,
                             evidence_source_id,
                             artifact_type,
-                            str(row.get("provider") or name),
-                            "",
-                            artifact_type,
+                            str(details.get("parser") or row.get("provider") or name),
+                            str(details.get("parser_version") or ""),
+                            artifact_title(row),
                             summary,
                             json.dumps(dict(row), ensure_ascii=False, sort_keys=True),
                             None,
@@ -970,14 +971,120 @@ def optional_str(value: Any) -> str | None:
     return str(value) if value not in (None, "") else None
 
 
-def artifact_summary(row: Mapping[str, object]) -> str:
+def artifact_details(row: Mapping[str, object]) -> Mapping[str, object]:
     details = row.get("details")
-    details_payload = details if isinstance(details, Mapping) else {}
-    for key in ("url", "source_url", "target_path", "entry_name", "summary"):
+    return details if isinstance(details, Mapping) else {}
+
+
+def artifact_summary(row: Mapping[str, object]) -> str:
+    details_payload = artifact_details(row)
+    event_id = details_payload.get("event_id")
+    if event_id:
+        parts = [
+            f"event_id={event_id}",
+            str(details_payload.get("event_category") or ""),
+            field_label("user", details_payload.get("user_name") or details_payload.get("target_user_name")),
+            field_label("ip", details_payload.get("source_ip")),
+            field_label("cmd", details_payload.get("command_line") or details_payload.get("script_block_text")),
+        ]
+        summary = " ".join(part for part in parts if part)
+        if summary:
+            return summary
+
+    for key in (
+        "command_line",
+        "script_block_text",
+        "file_path",
+        "executable_path",
+        "url",
+        "source_url",
+        "target_path",
+        "entry_name",
+        "service_name",
+        "process_name",
+        "summary",
+    ):
         value = details_payload.get(key) or row.get(key)
         if value:
             return str(value)
     return str(row.get("path") or row.get("artifact_type") or "artifact")
+
+
+def artifact_title(row: Mapping[str, object]) -> str:
+    artifact_type = str(row.get("artifact_type") or "artifact")
+    details = artifact_details(row)
+    event_id = details.get("event_id")
+    if event_id:
+        category = details.get("event_category") or "event"
+        return f"{artifact_type} {event_id} {category}"
+    for key in ("command_line", "file_path", "executable_path", "entry_name", "source_path"):
+        value = details.get(key)
+        if value:
+            return f"{artifact_type}: {compact_text(str(value), 80)}"
+    return artifact_type
+
+
+def artifact_source_path(row: Mapping[str, object]) -> str:
+    details = artifact_details(row)
+    for value in (row.get("path"), details.get("source_path"), details.get("target_path"), details.get("file_path")):
+        if value:
+            return str(value)
+    return ""
+
+
+def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
+    details = artifact_details(row)
+    keys = (
+        "parser",
+        "parser_version",
+        "coverage_status",
+        "reportability",
+        "event_id",
+        "event_category",
+        "event_description",
+        "channel",
+        "computer",
+        "user_name",
+        "subject_user_name",
+        "target_user_name",
+        "target_domain_name",
+        "logon_type",
+        "source_ip",
+        "source_port",
+        "service_name",
+        "process_name",
+        "new_process_name",
+        "parent_process_name",
+        "command_line",
+        "script_block_text",
+        "file_path",
+        "executable_path",
+        "reason",
+        "timestamp",
+        "risk_score",
+        "risk_flags",
+        "evidence_strength",
+    )
+    return {key: details[key] for key in keys if details.get(key) not in (None, "", [])}
+
+
+def parse_json_object(value: object) -> dict[str, object]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    try:
+        payload = json.loads(str(value or "{}"))
+    except json.JSONDecodeError:
+        return {}
+    return dict(payload) if isinstance(payload, Mapping) else {}
+
+
+def field_label(name: str, value: object) -> str:
+    return f"{name}={value}" if value not in (None, "") else ""
+
+
+def compact_text(value: str, limit: int) -> str:
+    text = " ".join(value.split())
+    return text if len(text) <= limit else f"{text[: limit - 1]}..."
 
 
 def search_indexed_documents(
@@ -1115,6 +1222,8 @@ def search_artifacts(
         hits = matched_keywords(haystack, keywords)
         if not hits:
             continue
+        artifact_row = parse_json_object(row["data_json"])
+        metadata = artifact_search_metadata(artifact_row)
         matches.append(
             {
                 "source": "artifacts",
@@ -1123,8 +1232,10 @@ def search_artifacts(
                 "target_id": str(row["id"]),
                 "title": str(row["title"] or row["artifact_type"]),
                 "kind": str(row["artifact_type"]),
+                "path": artifact_source_path(artifact_row),
                 "matched_keywords": hits,
                 "preview": str(row["summary"] or row["artifact_type"]),
+                "metadata": metadata,
             }
         )
         if limit and len(matches) >= limit:

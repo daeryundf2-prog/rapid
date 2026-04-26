@@ -10,15 +10,17 @@
 | Case DB FTS | Implemented baseline | Documents, file metadata, artifacts, timeline, review status filters. |
 | OCR | Partial | Depends on local Tesseract and image quality. |
 | Image/media triage | Partial | Image dimensions, file hashes, perceptual average hash, similarity bucket, and OCR queue hints are implemented for common image files. |
-| Windows OS/account summary | Planned | Hostname, timezone, last boot, user/admin status, account lifecycle. |
-| Windows Event Logs | Partial | XML/JSON exports parse into normalized event rows; binary EVTX is inventoried with export guidance. |
+| Windows OS/account summary | Implemented baseline | User profile inventory plus `.reg` export hints for computer name, timezone, ProfileList SIDs, and admin-group hints. Last boot and full account lifecycle remain planned. |
+| Windows Event Logs | Partial+ | XML/JSON/JSONL/CSV exports from EVTX-oriented tools parse into normalized event/detection rows with hashes, categories, risk flags, and reportability status; binary EVTX is inventoried with external-parser guidance. |
 | Registry hives | Partial | `.reg` exports parse into key/value rows including Run keys and USB hints. |
-| MFT | Planned | File record/timeline source with deleted/recovered status where validated. |
+| MFT | Import baseline | MFT CSV/JSON/JSONL exports are normalized with record number, path, timestamps, and deleted hints; native `$MFT` parsing remains planned. |
 | Zone.Identifier ADS | Partial | Exported `:Zone.Identifier`/`.Zone.Identifier` sidecar files parse ZoneId, referrer URL, and host URL. |
 | Defender/Firewall/WER/Task Scheduler | Partial | Fixture-backed inventory for Defender MPLog, Windows Firewall W3C logs, WER reports, and Task Scheduler XML. |
-| Prefetch | Partial | `.pf` inventory with executable hints; full binary run-count parsing remains planned. |
+| Prefetch | Partial | `.pf` inventory with executable hints; full binary run-count parsing remains planned. Execution-related registry export and PowerShell history imports are available through `windows-execution`. |
 | Jump Lists/LNK | Partial | Recent/Jumplist file inventory implemented; full binary destination parsing remains planned. |
-| Volume Shadow Copy compare | Planned | Current-vs-snapshot deleted file delta and VSC deletion-command detection. |
+| USN Journal | Import baseline | USN CSV/JSON/JSONL exports are normalized with FRN/parent/reason/timestamp fields; native `$J` parsing remains planned. |
+| macOS user/browser/quarantine | Implemented baseline | User home inventory, Safari/Chromium/Firefox history imports, LaunchServices quarantine events, and LaunchAgent plist inventory are available through `macos-system`. |
+| Volume Shadow Copy compare | Planned | Current-vs-snapshot deleted file delta is planned; VSC deletion command hints can be surfaced from EVTX/PowerShell history imports. |
 | Linux XFS | Planned | Filesystem adapter/extraction requirement for Linux server images. |
 | Forensic containers AD1/L01/Lx01/AFF/AFF4 | Detection | UI/API adapter detection exists; direct parsing requires vendor/tool export first. |
 | Raw/split images DD/RAW/IMG/001 | Detection | UI/API adapter detection exists; mount or recover externally, then scan the folder. |

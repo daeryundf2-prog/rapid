@@ -13,8 +13,9 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 ## Parser Coverage
 
 - Browser, recent-file, EventLog export, Registry export, ShellBags export, Prefetch inventory, Task Scheduler XML, Defender MPLog, Firewall W3C log, WER report, and Zone.Identifier sidecar artifacts are implemented first.
-- Binary EVTX, binary Prefetch run-count parsing, full Jump List/LNK destination parsing, SRUM, full mobile extraction imports, and live cloud acquisition are roadmap items.
-- MFT, VSC comparison, AI prompt extraction, and deeper LotL command correlation are roadmap items.
+- macOS user profile, browser history, quarantine event, and LaunchAgent plist triage is implemented as a baseline; full unified logs, Spotlight, FSEvents, TCC, and APFS snapshot parsing remain planned.
+- Native binary EVTX decoding, binary Prefetch run-count parsing, full Jump List/LNK destination parsing, SRUM, full mobile extraction imports, and live cloud acquisition are roadmap items. EVTX-oriented XML/JSON/JSONL/CSV exports from tools such as EvtxECmd, Hayabusa, Chainsaw, or Velociraptor can be imported and normalized.
+- Native MFT/USN parsing, VSC comparison, AI prompt extraction, and deeper LotL command correlation are roadmap items. MFT/USN CSV/JSON/JSONL exports can be imported and normalized.
 - APK inventory/risk triage works on exported `.apk` files; Volatility/Volatility3 JSON/JSONL memory output import is supported.
 - Google Takeout-style location/activity JSON and Apple/general account JSON imports are supported; direct provider API collection is not implemented.
 - Direct memory dump parsing, password cracking, live USB collection, and remote-agent collection are deferred until the security and validation model matures.

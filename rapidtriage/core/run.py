@@ -56,7 +56,16 @@ RUN_PROFILES: Dict[str, RunProfile] = {
         ),
         scan_root_parts=("Users",),
         preferred_locations=("downloads", "desktop", "documents"),
-        artifacts_kinds=("browser", "recent-files", "windows-system"),
+        artifacts_kinds=(
+            "browser",
+            "recent-files",
+            "windows-os-account",
+            "eventlog",
+            "windows-execution",
+            "windows-filesystem",
+            "windows-system",
+            "macos-system",
+        ),
     ),
     "fraud": RunProfile(
         mode="fraud",
@@ -65,7 +74,16 @@ RUN_PROFILES: Dict[str, RunProfile] = {
         docs_extract_kinds=RUN_DOC_EXTRACT_KINDS,
         file_extract_categories=("documents", "archives", "databases", "emails", "mobile-images"),
         file_scan_categories=("documents", "archives", "databases", "emails", "mobile-images", "images"),
-        artifacts_kinds=("browser", "recent-files", "windows-system"),
+        artifacts_kinds=(
+            "browser",
+            "recent-files",
+            "windows-os-account",
+            "eventlog",
+            "windows-execution",
+            "windows-filesystem",
+            "windows-system",
+            "macos-system",
+        ),
     ),
     "hacking": RunProfile(
         mode="hacking",
@@ -74,7 +92,16 @@ RUN_PROFILES: Dict[str, RunProfile] = {
         docs_extract_kinds=RUN_DOC_EXTRACT_KINDS,
         file_extract_categories=("executables", "archives", "databases", "documents", "emails", "memory-dumps"),
         file_scan_categories=("executables", "archives", "databases", "documents", "emails", "memory-dumps", "images"),
-        artifacts_kinds=("browser", "recent-files", "windows-system"),
+        artifacts_kinds=(
+            "browser",
+            "recent-files",
+            "windows-os-account",
+            "eventlog",
+            "windows-execution",
+            "windows-filesystem",
+            "windows-system",
+            "macos-system",
+        ),
     ),
     "recovery": RunProfile(
         mode="recovery",
@@ -94,7 +121,7 @@ RUN_PROFILES: Dict[str, RunProfile] = {
         ),
         file_scan_path_contains=("recycle",),
         preferred_locations=("$recycle.bin", "recycle", "trash", "deleted"),
-        artifacts_kinds=("recent-files",),
+        artifacts_kinds=("recent-files", "windows-os-account", "eventlog", "windows-filesystem", "macos-system"),
     ),
 }
 

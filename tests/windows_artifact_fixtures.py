@@ -38,6 +38,14 @@ class WindowsArtifactFixture:
     edge_visit: ChromiumVisit
     download: ChromiumDownload
     recent_shortcut: RecentShortcut
+    eventlog_xml: Path
+    hayabusa_jsonl: Path
+    evtx_file: Path
+    user_profile: Path
+    execution_reg: Path
+    powershell_history: Path
+    mft_csv: Path
+    usn_jsonl: Path
 
 
 def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
@@ -65,6 +73,15 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     chrome_history = root / "Users" / "alice" / "AppData" / "Local" / "Google" / "Chrome" / "User Data" / "Default" / "History"
     edge_history = root / "Users" / "alice" / "AppData" / "Local" / "Microsoft" / "Edge" / "User Data" / "Default" / "History"
     recent_dir = root / "Users" / "alice" / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Recent"
+    logs_dir = root / "Windows" / "System32" / "winevt" / "Logs"
+    eventlog_xml = logs_dir / "Security.xml"
+    hayabusa_jsonl = root / "analysis" / "hayabusa-results.jsonl"
+    evtx_file = logs_dir / "System.evtx"
+    user_profile = root / "Users" / "alice"
+    execution_reg = root / "Windows" / "System32" / "config" / "execution.reg"
+    powershell_history = root / "Users" / "alice" / "AppData" / "Roaming" / "Microsoft" / "Windows" / "PowerShell" / "PSReadLine" / "ConsoleHost_history.txt"
+    mft_csv = root / "analysis" / "mft.csv"
+    usn_jsonl = root / "analysis" / "usn.jsonl"
 
     _write_chromium_history(
         chrome_history,
@@ -77,6 +94,10 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         downloads=[download],
     )
     _write_recent_shortcuts(recent_dir, [recent_shortcut])
+    _write_eventlog_fixtures(eventlog_xml, hayabusa_jsonl, evtx_file)
+    _write_user_profile_fixtures(user_profile, root / "Windows" / "System32" / "config" / "SYSTEM.reg")
+    _write_execution_fixtures(execution_reg, powershell_history)
+    _write_filesystem_fixtures(mft_csv, usn_jsonl)
 
     return WindowsArtifactFixture(
         root=root,
@@ -84,6 +105,14 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         edge_visit=edge_visit,
         download=download,
         recent_shortcut=recent_shortcut,
+        eventlog_xml=eventlog_xml,
+        hayabusa_jsonl=hayabusa_jsonl,
+        evtx_file=evtx_file,
+        user_profile=user_profile,
+        execution_reg=execution_reg,
+        powershell_history=powershell_history,
+        mft_csv=mft_csv,
+        usn_jsonl=usn_jsonl,
     )
 
 
@@ -182,6 +211,117 @@ def _write_recent_shortcuts(path: Path, shortcuts: list[RecentShortcut]) -> None
         shortcut_path.write_bytes(b"LNK")
         ts = shortcut.modified_at.timestamp()
         os.utime(shortcut_path, (ts, ts))
+
+
+def _write_eventlog_fixtures(xml_path: Path, hayabusa_path: Path, evtx_path: Path) -> None:
+    xml_path.parent.mkdir(parents=True, exist_ok=True)
+    xml_path.write_text(
+        """<Events>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing"/>
+      <EventID>4624</EventID>
+      <Level>0</Level>
+      <Task>12544</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8020000000000000</Keywords>
+      <TimeCreated SystemTime="2024-04-01T01:02:03.0000000Z"/>
+      <EventRecordID>101</EventRecordID>
+      <Channel>Security</Channel>
+      <Computer>WIN-FIXTURE</Computer>
+      <Security UserID="S-1-5-18"/>
+      <Execution ProcessID="612" ThreadID="616"/>
+    </System>
+    <EventData>
+      <Data Name="SubjectUserName">SYSTEM</Data>
+      <Data Name="TargetUserName">alice</Data>
+      <Data Name="LogonType">10</Data>
+      <Data Name="IpAddress">10.0.0.5</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-PowerShell"/>
+      <EventID>4104</EventID>
+      <Level>3</Level>
+      <TimeCreated SystemTime="2024-04-01T02:03:04.0000000Z"/>
+      <EventRecordID>202</EventRecordID>
+      <Channel>Microsoft-Windows-PowerShell/Operational</Channel>
+      <Computer>WIN-FIXTURE</Computer>
+    </System>
+    <EventData>
+      <Data Name="ScriptBlockText">powershell -enc SQBFAFgA</Data>
+    </EventData>
+  </Event>
+</Events>
+""",
+        encoding="utf-8",
+    )
+    hayabusa_path.parent.mkdir(parents=True, exist_ok=True)
+    hayabusa_path.write_text(
+        '{"Timestamp":"2024-04-01T02:03:04Z","Computer":"WIN-FIXTURE","Channel":"Microsoft-Windows-PowerShell/Operational","EventID":4104,"Level":"high","RecordID":202,"RuleTitle":"Suspicious Encoded PowerShell","RuleID":"RT-PS-001","MitreTags":"attack.t1059.001","CommandLine":"powershell -enc SQBFAFgA"}\n',
+        encoding="utf-8",
+    )
+    evtx_path.write_bytes(b"ElfFile fixture evtx placeholder")
+
+
+def _write_user_profile_fixtures(profile_path: Path, reg_path: Path) -> None:
+    profile_path.mkdir(parents=True, exist_ok=True)
+    (profile_path / "NTUSER.DAT").write_bytes(b"fixture ntuser")
+    usrclass = profile_path / "AppData" / "Local" / "Microsoft" / "Windows" / "UsrClass.dat"
+    usrclass.parent.mkdir(parents=True, exist_ok=True)
+    usrclass.write_bytes(b"fixture usrclass")
+    reg_path.parent.mkdir(parents=True, exist_ok=True)
+    reg_path.write_text(
+        """Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\ComputerName\\ComputerName]
+"ComputerName"="WIN-FIXTURE"
+
+[HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\TimeZoneInformation]
+"TimeZoneKeyName"="Korea Standard Time"
+
+[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\S-1-5-21-1000]
+"ProfileImagePath"="C:\\Users\\alice"
+""",
+        encoding="utf-16",
+    )
+
+
+def _write_execution_fixtures(reg_path: Path, powershell_history: Path) -> None:
+    reg_path.parent.mkdir(parents=True, exist_ok=True)
+    reg_path.write_text(
+        """Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\bam\\State\\UserSettings\\S-1-5-21-1000]
+"\\Device\\HarddiskVolume3\\Users\\alice\\AppData\\Roaming\\evil.exe"=hex(b):00,00,00,00,00,00,00,00
+
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\UserAssist\\{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}\\Count]
+"P:\\Hfref\\nyvpr\\NccQngn\\Ebnzvat\\rivy.rkr"=hex:01,00,00,00
+
+[HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\AppCompatCache]
+"C:\\Users\\alice\\AppData\\Roaming\\legacy.exe"="LastModified=2024-04-01T03:04:05Z"
+""",
+        encoding="utf-16",
+    )
+    powershell_history.parent.mkdir(parents=True, exist_ok=True)
+    powershell_history.write_text(
+        "Get-Process\npowershell -enc SQBFAFgA\nvssadmin delete shadows /all /quiet\n",
+        encoding="utf-8",
+    )
+
+
+def _write_filesystem_fixtures(mft_csv: Path, usn_jsonl: Path) -> None:
+    mft_csv.parent.mkdir(parents=True, exist_ok=True)
+    mft_csv.write_text(
+        "EntryNumber,FullPath,Deleted,Created0x10\n"
+        "42,C:\\\\Users\\\\alice\\\\Desktop\\\\deleted.txt,True,2024-04-01T04:05:06Z\n",
+        encoding="utf-8",
+    )
+    usn_jsonl.write_text(
+        '{"FRN":"42","ParentFRN":"5","Name":"deleted.txt","Reason":"FILE_DELETE","Timestamp":"2024-04-01T04:06:07Z"}\n',
+        encoding="utf-8",
+    )
 
 
 def _to_chrome_time(value: datetime) -> int:

@@ -197,8 +197,21 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `recent-shortcut`
   - `jumplist-automatic`
   - `jumplist-custom`
+- `windows-os-account`
+  - `windows-user-profile`
+  - `windows-os-account-summary`
+- `windows-execution`
+  - `amcache-entry`
+  - `shimcache-entry`
+  - `userassist-entry`
+  - `bam-entry`
+  - `powershell-history-command`
+- `windows-filesystem`
+  - `mft-record`
+  - `usn-record`
 - `windows-eventlog`
   - `eventlog-event`
+  - `eventlog-detection`
   - `eventlog-file`
 - `windows-registry`
   - `registry-key`
@@ -214,9 +227,16 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `firewall-log`
   - `wer-report`
   - `zone-identifier`
+- `macos-system`
+  - `macos-user-profile`
+  - `macos-browser-history-downloads`
+  - `macos-quarantine-event`
+  - `macos-launch-agent`
 
 Current browser rows carry `user`, `browser`, `profile`, `history_count`, `download_count`, `history`, and `downloads` under `details`.
 
 Current recent/jumplist rows carry `user`, `entry_name`, `entry_hint`, `size`, and `modified_at` under `details`.
 
-Current Windows parser rows include source validation fields where available: `parser`, `parser_version`, `source_path`, `source_format`, and a bounded `raw_preview`. EventLog XML/JSON exports emit normalized `event_id`, `provider_name`, `channel`, `computer`, `event_created_at`, and `data`. Registry `.reg` exports emit `key`, `hive_hint`, `value_count`, and `values`. Prefetch inventory rows emit `executable_hint`, `entry_name`, `size`, and `modified_at`. Windows system rows emit Task Scheduler commands/arguments, Defender interesting entries, Firewall blocked/sample entries, WER app/module/bucket fields, and Zone.Identifier host/referrer URLs.
+Current Windows parser rows include source validation fields where available: `parser`, `parser_version`, `coverage_status`, `reportability`, `source_path`, `source_format`, `source_hashes`, and a bounded `raw_preview`. EventLog XML/JSON/JSONL/CSV imports emit normalized `event_id`, `event_category`, `provider_name`, `channel`, `computer`, `event_created_at`, `data`, `rule`, `risk_flags`, and `risk_score`; common EventData fields such as `target_user_name`, `subject_user_name`, `logon_type`, `source_ip`, `service_name`, `process_name`, `command_line`, and `script_block_text` are promoted for filtering and reporting. Binary `.evtx` rows are inventoried as `eventlog-file` with recommended external parsers. OS/account rows emit profile inventory, NTUSER/UsrClass presence and hashes, computer names, time zones, ProfileList SIDs, and admin-group hints where exported registry data is available. Execution rows emit Amcache/ShimCache/UserAssist/BAM registry-export hints and PowerShell history commands with evidence-strength labels and risk flags. Filesystem rows emit MFT/USN import fields such as record number, parent reference, path, timestamp, deletion hint, and USN reason. Registry `.reg` exports emit `key`, `hive_hint`, `value_count`, and `values`. Prefetch inventory rows emit `executable_hint`, `entry_name`, `size`, and `modified_at`. Windows system rows emit Task Scheduler commands/arguments, Defender interesting entries, Firewall blocked/sample entries, WER app/module/bucket fields, and Zone.Identifier host/referrer URLs.
+
+Current macOS parser rows include user profile inventory, Safari/Chromium/Firefox history/download rows, LaunchServices quarantine events, and LaunchAgent plist fields such as `label`, `program`, `program_arguments`, and `run_at_load`.

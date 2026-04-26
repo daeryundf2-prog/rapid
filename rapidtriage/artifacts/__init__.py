@@ -5,10 +5,14 @@ from typing import Dict, List
 from .android import AndroidApkProvider
 from .cloud import CloudExportProvider
 from .generic import GenericDocumentArtifactProvider
+from .macos import MacOsSystemArtifactsProvider
 from .media import MediaImageProvider
 from .memory import MemoryVolatilityProvider
 from .windows.browser import WindowsBrowserArtifactsProvider
 from .windows.eventlog import WindowsEventLogProvider
+from .windows.execution import WindowsExecutionProvider
+from .windows.filesystem import WindowsFilesystemProvider
+from .windows.os_account import WindowsOsAccountProvider
 from .windows.prefetch import WindowsPrefetchProvider
 from .windows.recent_files import WindowsRecentFilesProvider
 from .windows.registry import WindowsRegistryProvider
@@ -21,10 +25,14 @@ def all_providers() -> List[object]:
         GenericDocumentArtifactProvider(),
         AndroidApkProvider(),
         CloudExportProvider(),
+        MacOsSystemArtifactsProvider(),
         MediaImageProvider(),
         MemoryVolatilityProvider(),
         WindowsBrowserArtifactsProvider(),
         WindowsRecentFilesProvider(),
+        WindowsOsAccountProvider(),
+        WindowsExecutionProvider(),
+        WindowsFilesystemProvider(),
         WindowsEventLogProvider(),
         WindowsRegistryProvider(),
         WindowsShellbagsProvider(),

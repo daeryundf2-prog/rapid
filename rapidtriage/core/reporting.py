@@ -25,6 +25,7 @@ def build_run_report_context(
     files_extract_payload = files_extract_payload or {}
     artifact_payloads = artifact_payloads or {}
     timeline_payload = timeline_payload or {}
+    ordered_artifact_payloads = order_artifact_payloads(artifact_payloads, summary_payload)
 
     windows_counts = summary.get("windows_provider_artifact_counts", {})
     artifact_outputs = summary.get("artifacts", {})
@@ -102,7 +103,7 @@ def build_run_report_context(
             summary_payload,
             docs_payload=docs_payload,
             files_payload=files_payload,
-            artifact_payloads=artifact_payloads,
+            artifact_payloads=ordered_artifact_payloads,
             timeline_payload=timeline_payload,
         ),
         "matched_rules": [str(item) for item in summary_payload.get("matched_rules", [])],
@@ -120,7 +121,7 @@ def build_run_report_context(
         "recent_file_candidates": list(highlights.get("recent_file_candidates", [])),
         "large_file_candidates": list(highlights.get("large_file_candidates", [])),
         "preferred_location_candidates": list(highlights.get("preferred_location_candidates", [])),
-        "artifact_summary": build_artifact_summary_rows(artifact_payloads),
+        "artifact_summary": build_artifact_summary_rows(ordered_artifact_payloads),
         "timeline": build_timeline_rows(timeline_payload),
         "extracts": [
             build_extract_context("### Docs extract", docs_extract_payload),
@@ -129,6 +130,24 @@ def build_run_report_context(
         "compare_results": build_compare_rows(summary_payload.get("compare_results")),
         "outputs": [{"name": name, "path": path} for name, path in outputs.items()],
     }
+
+
+def order_artifact_payloads(
+    artifact_payloads: Mapping[str, Mapping[str, object]],
+    summary_payload: Mapping[str, object],
+) -> Dict[str, Mapping[str, object]]:
+    profile = summary_payload.get("profile", {})
+    preferred: list[str] = []
+    if isinstance(profile, Mapping):
+        preferred = [str(kind) for kind in profile.get("artifacts_kinds", [])]
+    ordered: Dict[str, Mapping[str, object]] = {}
+    for kind in preferred:
+        if kind in artifact_payloads:
+            ordered[kind] = artifact_payloads[kind]
+    for kind in sorted(str(kind) for kind in artifact_payloads):
+        if kind not in ordered:
+            ordered[kind] = artifact_payloads[kind]
+    return ordered
 
 
 def render_run_markdown_report(report_context: Mapping[str, object]) -> str:

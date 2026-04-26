@@ -87,9 +87,15 @@ Current Windows artifact collector rows surfaced through `manifest` include:
 
 - `windows-browser-artifacts`
 - `windows-recent-files`
+- `windows-os-account`
+- `windows-execution`
+- `windows-filesystem`
 - `windows-eventlog`
 - `windows-registry`
 - `windows-shellbags`
+- `windows-prefetch`
+- `windows-system`
+- `macos-system-artifacts`
 
 ## `docs` JSON
 
@@ -287,10 +293,10 @@ The collector interface is intentionally narrow so additional Windows-specific c
 
 Current run modes:
 
-- `seizure`
-- `fraud`
-- `hacking`
-- `recovery`
+- `seizure`: browser, recent files, Windows OS/account, event log, execution, filesystem, system-artifact, and macOS system collectors.
+- `fraud`: browser, recent files, Windows OS/account, event log, execution, filesystem, system-artifact, and macOS system collectors.
+- `hacking`: browser, recent files, Windows OS/account, event log, execution, filesystem, system-artifact, and macOS system collectors.
+- `recovery`: recent files, Windows OS/account, event log, filesystem, and macOS system collectors.
 
 `rapidtriage-run-summary.json` top-level keys:
 

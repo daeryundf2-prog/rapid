@@ -91,6 +91,13 @@
         "artifacts": []
       },
       {
+        "name": "macos-system-artifacts",
+        "description": "macOS user, browser, quarantine, and LaunchAgent triage artifacts",
+        "target_platform": "macos",
+        "supported": true,
+        "artifacts": []
+      },
+      {
         "name": "media-image-artifacts",
         "description": "Image inventory with dimensions, hashes, perceptual hash, OCR queue hints, and similarity buckets",
         "target_platform": "any",
@@ -119,8 +126,29 @@
         "artifacts": []
       },
       {
+        "name": "windows-os-account",
+        "description": "Windows OS and account summary artifacts",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-execution",
+        "description": "Windows execution artifacts from registry exports and PowerShell history",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-filesystem",
+        "description": "Windows MFT and USN Journal CSV/JSON/JSONL imports",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
         "name": "windows-eventlog",
-        "description": "Windows Event Log XML/JSON export artifacts",
+        "description": "Windows Event Log EVTX inventory and XML/JSON/JSONL/CSV event imports",
         "target_platform": "windows",
         "supported": true,
         "artifacts": []

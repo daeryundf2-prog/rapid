@@ -91,6 +91,7 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
         datetime(2024, 3, 5, 6, 9, 10, tzinfo=timezone.utc),
     )
     stable_artifact_times = {
+        root / "Users" / "alice": datetime(2024, 3, 5, 6, 6, 6, tzinfo=timezone.utc),
         root / "Windows" / "System32" / "winevt" / "Logs" / "Security.xml": datetime(2024, 3, 5, 6, 10, 11, tzinfo=timezone.utc),
         root / "Windows" / "System32" / "config" / "software.reg": datetime(2024, 3, 5, 6, 11, 12, tzinfo=timezone.utc),
         root / "Users" / "alice" / "NTUSER-shellbags.reg": datetime(2024, 3, 5, 6, 12, 13, tzinfo=timezone.utc),

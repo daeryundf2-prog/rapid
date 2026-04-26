@@ -18,6 +18,7 @@ from rapidtriage.core.case_db import (
     table_columns,
 )
 from rapidtriage.core.sample_case import run_sample_workflow
+from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
 
 REQUIRED_TABLES = {
@@ -273,6 +274,47 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("artifacts", sources)
             self.assertIn("timeline", sources)
             self.assertTrue(all(str(match["citation_id"]).startswith("CASE-SEARCH-001-") for match in payload["matches"]))
+
+    def test_case_search_exposes_windows_artifact_paths_and_metadata_for_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evidence_root = root / "windows-case"
+            output_dir = root / "run-out"
+            evidence_root.mkdir()
+            build_windows_artifact_fixture(evidence_root)
+
+            self.assertEqual(
+                main(["run", str(evidence_root), "--mode", "hacking", "--output-dir", str(output_dir), "--read-only"]),
+                0,
+            )
+            database = open_case_database(root / "case.db")
+            database.import_run_output(output_dir, case_id="CASE-WINDOWS-ARTIFACTS")
+
+            payload = database.search_case(
+                case_id="CASE-WINDOWS-ARTIFACTS",
+                keywords=["powershell", "10.0.0.5", "deleted.txt"],
+                sources=["artifacts"],
+                limit=50,
+            )
+
+            self.assertEqual(payload["command"], "case-search")
+            self.assertGreaterEqual(payload["summary"]["match_count"], 3)
+            self.assertTrue(all(match["source"] == "artifacts" for match in payload["matches"]))
+            self.assertTrue(all(match.get("path") for match in payload["matches"]))
+
+            eventlog_matches = [
+                match
+                for match in payload["matches"]
+                if match["kind"] in {"eventlog-event", "eventlog-detection"}
+            ]
+            self.assertTrue(eventlog_matches)
+            self.assertTrue(any(match["metadata"].get("event_id") == "4104" for match in eventlog_matches))
+            self.assertTrue(any(match["metadata"].get("source_ip") == "10.0.0.5" for match in eventlog_matches))
+            self.assertTrue(any("powershell -enc" in str(match["metadata"].get("command_line", "")).lower() for match in eventlog_matches))
+
+            filesystem_matches = [match for match in payload["matches"] if match["kind"] in {"mft-record", "usn-record"}]
+            self.assertTrue(filesystem_matches)
+            self.assertTrue(any("deleted.txt" in str(match["metadata"].get("file_path", "")) for match in filesystem_matches))
 
     def test_cli_case_search_outputs_json_and_can_write_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
