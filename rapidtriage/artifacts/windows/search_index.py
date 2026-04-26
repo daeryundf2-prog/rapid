@@ -8,8 +8,9 @@ from pathlib import Path, PureWindowsPath
 from typing import Iterable, Mapping, Sequence
 
 from ...core.models import ArtifactRecord
+from .ese import build_ese_string_pivots, probe_ese_database
 
-PARSER_VERSION = "windows-search-index-import-v1"
+PARSER_VERSION = "windows-search-index-import-v2"
 SEARCH_EDB_PATH = ("ProgramData", "Microsoft", "Search", "Data", "Applications", "Windows", "Windows.edb")
 SUPPORTED_EXPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 EXPORT_HINTS = ("windows.edb", "windows-search", "searchindex", "search-index", "edbexport", "winsearch")
@@ -58,6 +59,9 @@ class WindowsSearchIndexProvider:
 
 def build_edb_inventory_record(path: Path) -> ArtifactRecord:
     stat_result = path.stat()
+    ese_header = probe_ese_database(path)
+    pivots = build_ese_string_pivots(path)
+    coverage_status = "ese-header-string-scan" if ese_header.get("header_readable") else "detected"
     return ArtifactRecord(
         provider=WindowsSearchIndexProvider.name,
         artifact_type="windows-search-edb-file",
@@ -66,15 +70,19 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
         details={
             "parser": "windows-search-edb-inventory",
             "parser_version": PARSER_VERSION,
-            "coverage_status": "detected",
+            "coverage_status": coverage_status,
             "reportability": "inventory-only",
             "source_path": str(path.resolve()),
-            "source_format": "edb",
+            "source_format": "ese-edb",
             "source_hashes": file_hashes(path),
             "size": stat_result.st_size,
             "modified_at": stat_result.st_mtime,
+            "ese_header": ese_header,
+            "parser_confidence": 0.65 if ese_header.get("signature_valid") else 0.35,
+            "evidence_strength": "search-index-database-presence",
+            **pivots,
             "recommended_parsers": ["WinSearchDBAnalyzer", "ESEDatabaseView", "libesedb/esedbexport"],
-            "note": "Windows.edb is inventoried directly; export CSV/JSON rows with a trusted ESE/Search parser for normalized searchable entries.",
+            "note": "Windows.edb is inventoried directly with bounded ESE header/string pivots; export CSV/JSON rows with a trusted ESE/Search parser for full table decoding.",
         },
     )
 
@@ -149,6 +157,22 @@ def build_search_index_summary(root: Path, records: Sequence[ArtifactRecord]) ->
             extension_counts[extension] += 1
         source_path = str(details.get("source_path") or record.path)
         source_files.add(source_path)
+    edb_inventory = []
+    edb_string_hit_count = 0
+    for record in edb_files:
+        details = record.details
+        source_path = str(details.get("source_path") or record.path)
+        source_files.add(source_path)
+        hit_count = int(details.get("extracted_string_count") or 0)
+        edb_string_hit_count += hit_count
+        edb_inventory.append(
+            {
+                "source_path": source_path,
+                "signature_valid": bool(dict(details.get("ese_header") or {}).get("signature_valid")),
+                "extracted_string_count": hit_count,
+                "risk_flags": list(details.get("risk_flags") or [])[:10],
+            }
+        )
     return ArtifactRecord(
         provider=WindowsSearchIndexProvider.name,
         artifact_type="windows-search-index-summary",
@@ -164,6 +188,8 @@ def build_search_index_summary(root: Path, records: Sequence[ArtifactRecord]) ->
             "inventory_count": len(edb_files),
             "source_files": sorted(source_files),
             "extension_counts": [{"value": value, "count": count} for value, count in extension_counts.most_common(25)],
+            "edb_string_hit_count": edb_string_hit_count,
+            "edb_inventory": edb_inventory,
         },
     )
 

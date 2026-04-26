@@ -11,9 +11,10 @@ from typing import Iterable, Mapping
 
 from ...core.models import ArtifactRecord
 from .common import iter_windows_user_homes
+from .ese import build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
 
-PARSER_VERSION = "windows-execution-v2"
+PARSER_VERSION = "windows-execution-v3"
 REGISTRY_EXPORT_EXT = ".reg"
 SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 POWERSHELL_HISTORY = ("AppData", "Roaming", "Microsoft", "Windows", "PowerShell", "PSReadLine", "ConsoleHost_history.txt")
@@ -53,6 +54,7 @@ class WindowsExecutionProvider:
             *collect_execution_reg_exports(root),
             *collect_powershell_history(root),
             *collect_srum_imports(root),
+            *collect_srum_dat_inventory(root),
         ]
         yield from records
         summary = build_execution_summary(root, records)
@@ -190,6 +192,51 @@ def collect_srum_imports(root: Path) -> Iterable[ArtifactRecord]:
         for index, row in enumerate(rows):
             if isinstance(row, Mapping):
                 yield build_srum_record(path, row, index)
+
+
+def collect_srum_dat_inventory(root: Path) -> Iterable[ArtifactRecord]:
+    seen: set[Path] = set()
+    canonical_path = root / "Windows" / "System32" / "sru" / "SRUDB.dat"
+    if canonical_path.is_file():
+        yield build_srum_database_inventory_record(canonical_path)
+        seen.add(canonical_path.resolve())
+    for path in sorted(root.rglob("SRUDB.dat"), key=lambda item: str(item).lower()):
+        if not path.is_file():
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        yield build_srum_database_inventory_record(path)
+        seen.add(resolved)
+
+
+def build_srum_database_inventory_record(path: Path) -> ArtifactRecord:
+    stat_result = path.stat()
+    ese_header = probe_ese_database(path)
+    pivots = build_ese_string_pivots(path)
+    return ArtifactRecord(
+        provider=WindowsExecutionProvider.name,
+        artifact_type="srum-database-file",
+        path=str(path.resolve()),
+        supported=False,
+        details={
+            "parser": "windows-srum-ese-inventory",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "ese-header-string-scan" if ese_header.get("header_readable") else "detected",
+            "reportability": "inventory-only",
+            "source_path": str(path.resolve()),
+            "source_format": "ese-srum",
+            "source_hashes": file_hashes(path),
+            "size": stat_result.st_size,
+            "modified_at": stat_result.st_mtime,
+            "ese_header": ese_header,
+            "parser_confidence": 0.65 if ese_header.get("signature_valid") else 0.35,
+            "evidence_strength": "application-resource-usage-database-presence",
+            **pivots,
+            "recommended_parsers": ["SrumECmd", "ESEDatabaseView", "libesedb/esedbexport"],
+            "note": "SRUDB.dat is inventoried directly with bounded ESE header/string pivots; use a dedicated SRUM parser for full table decoding and timeline-grade rows.",
+        },
+    )
 
 
 def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> ArtifactRecord:

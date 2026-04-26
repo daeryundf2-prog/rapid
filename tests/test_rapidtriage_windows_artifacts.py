@@ -258,15 +258,20 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("shimcache-entry", artifact_types)
             self.assertIn("powershell-history-command", artifact_types)
             self.assertIn("srum-network-usage", artifact_types)
+            self.assertIn("srum-database-file", artifact_types)
             self.assertIn("windows-execution-summary", artifact_types)
             ps_rows = [item for item in artifacts if item["artifact_type"] == "powershell-history-command"]
             srum_rows = [item for item in artifacts if item["artifact_type"] == "srum-network-usage"]
+            srum_database_rows = [item for item in artifacts if item["artifact_type"] == "srum-database-file"]
             self.assertTrue(any("suspicious-command:powershell -enc" in row["details"]["risk_flags"] for row in ps_rows))
             self.assertTrue(any("vssadmin delete shadows" in row["details"]["command_line"] for row in ps_rows))
             self.assertEqual(ps_rows[0]["details"]["source_path"], str(fixture.powershell_history.resolve()))
             self.assertEqual(srum_rows[0]["details"]["app_id"], "powershell.exe")
             self.assertEqual(srum_rows[0]["details"]["bytes_received"], 2048)
             self.assertEqual(srum_rows[0]["details"]["source_path"], str(fixture.srum_csv.resolve()))
+            self.assertEqual(srum_database_rows[0]["details"]["source_path"], str(fixture.srum_db.resolve()))
+            self.assertTrue(srum_database_rows[0]["details"]["ese_header"]["signature_valid"])
+            self.assertTrue(any("powershell.exe" in value.lower() for value in srum_database_rows[0]["details"]["path_candidates"]))
             summary = next(item for item in artifacts if item["artifact_type"] == "windows-execution-summary")
             groups = {item["display_name"]: item for item in summary["details"]["groups"]}
             self.assertIn("evil.exe", groups)
@@ -357,8 +362,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("encoded powershell", entries[0]["details"]["content_snippet"])
             self.assertEqual(entries[0]["details"]["source_path"], str(fixture.windows_search_csv.resolve()))
             self.assertEqual(edb_files[0]["details"]["source_path"], str(fixture.windows_edb.resolve()))
+            self.assertTrue(edb_files[0]["details"]["ese_header"]["signature_valid"])
+            self.assertIn("ese-string:powershell", edb_files[0]["details"]["risk_flags"])
+            self.assertTrue(any("Incident Notes.docx" in value for value in edb_files[0]["details"]["path_candidates"]))
             self.assertEqual(summary["details"]["entry_count"], 1)
             self.assertEqual(summary["details"]["inventory_count"], 1)
+            self.assertGreater(summary["details"]["edb_string_hit_count"], 0)
             self.assertIn({"value": ".docx", "count": 1}, summary["details"]["extension_counts"])
 
     def test_windows_remote_access_collector_maps_rdp_config_cache_and_destinations(self) -> None:

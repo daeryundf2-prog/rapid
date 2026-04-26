@@ -127,13 +127,22 @@ WINDOWS_TARGETS: tuple[CollectTarget, ...] = (
         "Export with a trusted parser for normalized execution rows.",
     ),
     CollectTarget(
+        "EvidenceOfExecution",
+        "SRUM database",
+        "Windows/System32/sru/SRUDB.dat",
+        "file",
+        "windows-execution",
+        "inventory-or-export",
+        "Preserve SRUDB.dat for ESE header/hash/string pivots; export with SrumECmd or libesedb/esedbexport for full application resource and network usage rows.",
+    ),
+    CollectTarget(
         "SearchIndex",
         "Windows Search EDB",
         "ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
         "file",
         "windows-search-index",
         "inventory-or-export",
-        "Preserve Windows.edb for search-index evidence; export CSV/JSON with WinSearchDBAnalyzer, ESEDatabaseView, or libesedb/esedbexport for normalized keyword-search rows.",
+        "Preserve Windows.edb for ESE header/hash/string pivots; export CSV/JSON with WinSearchDBAnalyzer, ESEDatabaseView, or libesedb/esedbexport for normalized keyword-search rows.",
     ),
     CollectTarget(
         "SearchIndex",

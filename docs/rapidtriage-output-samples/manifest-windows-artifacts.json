@@ -1122,22 +1122,43 @@
           "supported": false,
           "details": {
             "parser": "windows-search-edb-inventory",
-            "parser_version": "windows-search-index-import-v1",
-            "coverage_status": "detected",
+            "parser_version": "windows-search-index-import-v2",
+            "coverage_status": "ese-header-string-scan",
             "reportability": "inventory-only",
             "source_path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
-            "source_format": "edb",
+            "source_format": "ese-edb",
             "source_hashes": {
               "sha256": "a9a209f53f1525135d35eb951d743f7931df271e7e0c9c2f39d3dead3adb6eee"
             },
             "size": 25,
             "modified_at": 1709618830.0,
+            "ese_header": {
+              "header_readable": true,
+              "signature_valid": false,
+              "signature_hex": "6c652077",
+              "header_sha256": "a9a209f53f1525135d35eb951d743f7931df271e7e0c9c2f39d3dead3adb6eee",
+              "format_version": 1868852841,
+              "file_type": 1931506551,
+              "page_size": 0
+            },
+            "parser_confidence": 0.35,
+            "evidence_strength": "search-index-database-presence",
+            "string_scan_bytes": 25,
+            "extracted_string_count": 1,
+            "extracted_strings": [
+              "sample windows search edb"
+            ],
+            "path_candidates": [],
+            "url_candidates": [],
+            "suspicious_strings": [],
+            "risk_flags": [],
+            "risk_score": 0,
             "recommended_parsers": [
               "WinSearchDBAnalyzer",
               "ESEDatabaseView",
               "libesedb/esedbexport"
             ],
-            "note": "Windows.edb is inventoried directly; export CSV/JSON rows with a trusted ESE/Search parser for normalized searchable entries."
+            "note": "Windows.edb is inventoried directly with bounded ESE header/string pivots; export CSV/JSON rows with a trusted ESE/Search parser for full table decoding."
           }
         },
         {
@@ -1147,7 +1168,7 @@
           "supported": true,
           "details": {
             "parser": "windows-search-index-import",
-            "parser_version": "windows-search-index-import-v1",
+            "parser_version": "windows-search-index-import-v2",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/analysis/windows-search-index.csv",
@@ -1188,19 +1209,29 @@
           "supported": true,
           "details": {
             "parser": "windows-search-index-summary",
-            "parser_version": "windows-search-index-import-v1",
+            "parser_version": "windows-search-index-import-v2",
             "coverage_status": "summarized",
             "reportability": "triage",
             "source_path": "<ROOT>",
             "entry_count": 1,
             "inventory_count": 1,
             "source_files": [
+              "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
               "<ROOT>/analysis/windows-search-index.csv"
             ],
             "extension_counts": [
               {
                 "value": ".docx",
                 "count": 1
+              }
+            ],
+            "edb_string_hit_count": 1,
+            "edb_inventory": [
+              {
+                "source_path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "signature_valid": false,
+                "extracted_string_count": 1,
+                "risk_flags": []
               }
             ]
           }

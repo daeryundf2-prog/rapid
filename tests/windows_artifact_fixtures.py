@@ -49,6 +49,7 @@ class WindowsArtifactFixture:
     powershell_history: Path
     prefetch_file: Path
     srum_csv: Path
+    srum_db: Path
     mft_csv: Path
     usn_jsonl: Path
     windows_search_csv: Path
@@ -112,6 +113,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     powershell_history = root / "Users" / "alice" / "AppData" / "Roaming" / "Microsoft" / "Windows" / "PowerShell" / "PSReadLine" / "ConsoleHost_history.txt"
     prefetch_file = root / "Windows" / "Prefetch" / "POWERSHELL.EXE-12345678.pf"
     srum_csv = root / "analysis" / "srum.csv"
+    srum_db = root / "Windows" / "System32" / "sru" / "SRUDB.dat"
     mft_csv = root / "analysis" / "mft.csv"
     usn_jsonl = root / "analysis" / "usn.jsonl"
     windows_search_csv = root / "analysis" / "windows-search-index.csv"
@@ -138,6 +140,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     _write_execution_fixtures(execution_reg, powershell_history)
     _write_prefetch_fixture(prefetch_file)
     _write_srum_fixture(srum_csv)
+    _write_srum_database_fixture(srum_db)
     _write_filesystem_fixtures(mft_csv, usn_jsonl)
     _write_windows_search_fixture(windows_search_csv, windows_edb)
     _write_remote_access_fixtures(default_rdp, rdp_cache_file, rdp_reg)
@@ -159,6 +162,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         powershell_history=powershell_history,
         prefetch_file=prefetch_file,
         srum_csv=srum_csv,
+        srum_db=srum_db,
         mft_csv=mft_csv,
         usn_jsonl=usn_jsonl,
         windows_search_csv=windows_search_csv,
@@ -483,6 +487,19 @@ def _write_srum_fixture(path: Path) -> None:
     )
 
 
+def _write_srum_database_fixture(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(
+        _minimal_ese_database(
+            [
+                r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                "NetworkUsage",
+                "bytes received from https://download.example/tools/installer.exe",
+            ]
+        )
+    )
+
+
 def _write_filesystem_fixtures(mft_csv: Path, usn_jsonl: Path) -> None:
     mft_csv.parent.mkdir(parents=True, exist_ok=True)
     mft_csv.write_text(
@@ -504,7 +521,25 @@ def _write_windows_search_fixture(csv_path: Path, edb_path: Path) -> None:
         encoding="utf-8",
     )
     edb_path.parent.mkdir(parents=True, exist_ok=True)
-    edb_path.write_bytes(b"fixture windows search edb")
+    edb_path.write_bytes(
+        _minimal_ese_database(
+            [
+                r"C:\Users\alice\Documents\Incident Notes.docx",
+                "encoded powershell investigation notes",
+                "https://example.com/browser-history",
+            ]
+        )
+    )
+
+
+def _minimal_ese_database(strings: list[str]) -> bytes:
+    header = bytearray(8192)
+    header[4:8] = bytes.fromhex("efcdab89")
+    header[8:12] = (0x620).to_bytes(4, "little")
+    header[12:16] = (1).to_bytes(4, "little")
+    header[0xEC:0xF0] = (8192).to_bytes(4, "little")
+    payload = b"\x00\x00".join(value.encode("utf-16le") for value in strings)
+    return bytes(header) + payload
 
 
 def _write_remote_access_fixtures(default_rdp: Path, cache_file: Path, reg_path: Path) -> None:
