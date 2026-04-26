@@ -62,6 +62,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `notes`
 - Each comparison includes `snapshot_root`, `snapshot_label`, a per-snapshot `summary`, and change `records`.
 - Change records include `status` (`deleted`, `added`, or `modified`), `relative_path`, and `snapshot`/`current` file payloads with path, size, mtime, and optional SHA256.
+- `case-db --import-vsc-compare` stores each change record as `vsc-deleted-file`, `vsc-added-file`, or `vsc-modified-file` artifact rows so they can be searched, reviewed, tagged, and included in reports.
 
 ### `docs`
 

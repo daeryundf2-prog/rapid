@@ -50,6 +50,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
         self.assertIn("case-db", commands)
         self.assertIn("--create-case", commands["case-db"].format_help())
         self.assertIn("--import-run", commands["case-db"].format_help())
+        self.assertIn("--import-vsc-compare", commands["case-db"].format_help())
         self.assertIn("case-search", commands)
         self.assertIn("--case-id", commands["case-search"].format_help())
         self.assertIn("--source", commands["case-search"].format_help())
@@ -253,6 +254,48 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(payload["imported_run"]["case_id"], "CASE-CLI-IMPORT")
             self.assertGreaterEqual(payload["imported_run"]["summary"]["file_record_count"], 1)
             self.assertGreaterEqual(payload["imported_run"]["summary"]["indexed_document_count"], 1)
+
+    def test_cli_case_db_imports_vsc_compare_as_searchable_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            current = root / "current"
+            snapshot = root / "snapshot"
+            current.mkdir()
+            snapshot.mkdir()
+            (snapshot / "deleted-secret.txt").write_text("snapshot only", encoding="utf-8")
+            (current / "added.txt").write_text("current only", encoding="utf-8")
+            vsc_output = root / "vsc.json"
+            db_path = root / "case.db"
+
+            self.assertEqual(main(["vsc-compare", str(current), str(snapshot), "--output", str(vsc_output)]), 0)
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                self.assertEqual(
+                    main(
+                        [
+                            "case-db",
+                            str(db_path),
+                            "--import-vsc-compare",
+                            str(vsc_output),
+                            "--case-id",
+                            "CASE-VSC",
+                            "--json",
+                        ]
+                    ),
+                    0,
+                )
+            import_payload = json.loads(stdout.getvalue())
+            self.assertEqual(import_payload["imported_vsc_compare"]["summary"]["artifact_count"], 2)
+
+            database = open_case_database(db_path)
+            payload = database.search_case(case_id="CASE-VSC", keywords=["deleted-secret"], sources=["artifacts"])
+
+            self.assertEqual(payload["summary"]["match_count"], 1)
+            match = payload["matches"][0]
+            self.assertEqual(match["kind"], "vsc-deleted-file")
+            self.assertEqual(match["metadata"]["status"], "deleted")
+            self.assertEqual(match["metadata"]["relative_path"], "deleted-secret.txt")
+            self.assertEqual(match["metadata"]["snapshot_label"], "snapshot")
 
     def test_search_case_finds_documents_files_artifacts_and_timeline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

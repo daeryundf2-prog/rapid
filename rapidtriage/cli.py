@@ -434,6 +434,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage case-db ./rapidtriage-case.db
               rapidtriage case-db ./rapidtriage-case.db --create-case CASE-001 --name "Case 001"
               rapidtriage case-db ./rapidtriage-case.db --import-run ./rapidtriage-sample/run-output --case-id CASE-001
+              rapidtriage case-db ./rapidtriage-case.db --import-vsc-compare ./vsc-delta.json --case-id CASE-001
               rapidtriage case-db ./rapidtriage-case.db --list --json
             """
         ),
@@ -441,7 +442,8 @@ def build_parser() -> argparse.ArgumentParser:
     case_db.add_argument("database", help="Path to the SQLite case database")
     case_db.add_argument("--create-case", metavar="CASE_ID", help="Create a case record after initializing the DB")
     case_db.add_argument("--import-run", help="Import a completed run output directory or rapidtriage-run-summary.json")
-    case_db.add_argument("--case-id", help="Case ID for --import-run")
+    case_db.add_argument("--import-vsc-compare", help="Import a rapidtriage vsc-compare JSON as reviewable case artifacts")
+    case_db.add_argument("--case-id", help="Case ID for --import-run or --import-vsc-compare")
     case_db.add_argument("--name", help="Case display name for --create-case")
     case_db.add_argument("--description", default="", help="Case description for --create-case")
     case_db.add_argument("--examiner", default="", help="Examiner name for --create-case")
@@ -965,6 +967,7 @@ def main(argv=None) -> int:
             init_payload = database.initialize()
             created_case = None
             imported_run = None
+            imported_vsc_compare = None
             if args.create_case:
                 created_case = database.create_case(
                     case_id=args.create_case,
@@ -990,6 +993,15 @@ def main(argv=None) -> int:
                     case_id=import_case_id,
                     case_name=args.name,
                 )
+            if args.import_vsc_compare:
+                import_case_id = args.case_id or args.create_case
+                if not import_case_id:
+                    parser.error("--case-id or --create-case is required with --import-vsc-compare")
+                imported_vsc_compare = database.import_vsc_compare(
+                    Path(args.import_vsc_compare).expanduser().resolve(),
+                    case_id=import_case_id,
+                    case_name=args.name,
+                )
             cases = database.list_cases() if args.list or created_case is not None else []
         except CaseDatabaseError as exc:
             parser.error(str(exc))
@@ -1000,6 +1012,7 @@ def main(argv=None) -> int:
             "tables": init_payload["tables"],
             "created_case": created_case.to_dict() if created_case else None,
             "imported_run": imported_run,
+            "imported_vsc_compare": imported_vsc_compare,
             "cases": [case.to_dict() for case in cases],
         }
         if args.json:
@@ -1012,6 +1025,9 @@ def main(argv=None) -> int:
             if imported_run:
                 print(f"Imported run into case: {imported_run['case_id']}")
                 print(f"Import counts: {imported_run['summary']}")
+            if imported_vsc_compare:
+                print(f"Imported VSC compare into case: {imported_vsc_compare['case_id']}")
+                print(f"VSC import counts: {imported_vsc_compare['summary']}")
             if cases:
                 print(f"Cases: {len(cases)}")
                 for case in cases:

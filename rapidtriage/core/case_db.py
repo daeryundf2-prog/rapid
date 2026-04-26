@@ -260,6 +260,53 @@ class CaseDatabase:
             "summary": counts,
         }
 
+    def import_vsc_compare(
+        self,
+        vsc_compare_json: Mapping[str, object] | Path,
+        *,
+        case_id: str,
+        case_name: Optional[str] = None,
+    ) -> dict[str, object]:
+        payload = read_json_path(vsc_compare_json) if isinstance(vsc_compare_json, Path) else dict(vsc_compare_json)
+        if str(payload.get("tool") or "") != "rapidtriage-vsc-compare":
+            raise CaseDatabaseError("VSC compare JSON must come from rapidtriage vsc-compare")
+        normalized_case_id = normalize_identifier(case_id, fallback="case")
+        current_root = Path(str(payload.get("current_root") or "")).expanduser()
+        case_root = current_root.resolve() if str(current_root) else None
+
+        with self.connect() as connection:
+            apply_schema(connection)
+            case_row = connection.execute("SELECT case_id FROM case_record WHERE case_id = ?", (normalized_case_id,)).fetchone()
+        if case_row is None:
+            self.create_case(case_id=normalized_case_id, name=case_name, case_root=case_root)
+
+        source_payload = {
+            "source": {
+                "source_path": str(vsc_compare_json) if isinstance(vsc_compare_json, Path) else str(payload.get("current_root") or ""),
+                "analysis_root": str(payload.get("current_root") or ""),
+                "type": "vsc-compare",
+            },
+            "mode": "vsc-compare",
+            "root": str(payload.get("current_root") or ""),
+        }
+        evidence_source_id = self._insert_evidence_source(normalized_case_id, source_payload)
+        artifact_count = self._import_vsc_artifacts(normalized_case_id, evidence_source_id, payload)
+        audit_id = self.add_audit_event(
+            case_id=normalized_case_id,
+            action="vsc-compare.imported",
+            target_type="vsc-compare",
+            target_id=str(vsc_compare_json) if isinstance(vsc_compare_json, Path) else "",
+            params_json=json.dumps({"artifact_count": artifact_count}, ensure_ascii=False, sort_keys=True),
+        )
+        return {
+            "case_id": normalized_case_id,
+            "audit_citation_id": audit_id,
+            "summary": {
+                "evidence_source_count": 1,
+                "artifact_count": artifact_count,
+            },
+        }
+
     def search_case(
         self,
         *,
@@ -811,6 +858,50 @@ class CaseDatabase:
                 count += 1
         return count
 
+    def _import_vsc_artifacts(self, case_id: str, evidence_source_id: int, payload: Mapping[str, object]) -> int:
+        comparisons = payload.get("comparisons")
+        if not isinstance(comparisons, list):
+            return 0
+        count = 0
+        with self.connect() as connection:
+            for comparison in comparisons:
+                if not isinstance(comparison, Mapping):
+                    continue
+                snapshot_label = str(comparison.get("snapshot_label") or "")
+                snapshot_root = str(comparison.get("snapshot_root") or "")
+                records = comparison.get("records")
+                if not isinstance(records, list):
+                    continue
+                for index, record in enumerate(records):
+                    if not isinstance(record, Mapping):
+                        continue
+                    artifact = vsc_artifact_row(record, snapshot_label=snapshot_label, snapshot_root=snapshot_root, index=index)
+                    details = artifact_details(artifact)
+                    connection.execute(
+                        """
+                        INSERT INTO artifact (
+                            citation_id, case_id, evidence_source_id, artifact_type, parser_name,
+                            parser_version, title, summary, data_json, confidence, created_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            next_citation_id_for_connection(connection, case_id, "artifact"),
+                            case_id,
+                            evidence_source_id,
+                            str(artifact.get("artifact_type") or "vsc-change"),
+                            str(details.get("parser") or "rapidtriage-vsc-compare"),
+                            str(details.get("parser_version") or "1"),
+                            artifact_title(artifact),
+                            artifact_summary(artifact),
+                            json.dumps(artifact, ensure_ascii=False, sort_keys=True),
+                            None,
+                            now_iso(),
+                        ),
+                    )
+                    count += 1
+        return count
+
 
 def next_citation_id_for_connection(connection: sqlite3.Connection, case_id: str, kind: str) -> str:
     normalized_kind = kind.strip().lower()
@@ -992,6 +1083,9 @@ def artifact_summary(row: Mapping[str, object]) -> str:
             return summary
 
     for key in (
+        "relative_path",
+        "current_path",
+        "snapshot_path",
         "command_line",
         "script_block_text",
         "file_path",
@@ -1026,6 +1120,9 @@ def artifact_title(row: Mapping[str, object]) -> str:
         category = details.get("event_category") or "event"
         return f"{artifact_type} {event_id} {category}"
     for key in (
+        "relative_path",
+        "current_path",
+        "snapshot_path",
         "command_line",
         "file_path",
         "executable_path",
@@ -1047,7 +1144,14 @@ def artifact_title(row: Mapping[str, object]) -> str:
 
 def artifact_source_path(row: Mapping[str, object]) -> str:
     details = artifact_details(row)
-    for value in (row.get("path"), details.get("source_path"), details.get("target_path"), details.get("file_path")):
+    for value in (
+        row.get("path"),
+        details.get("source_path"),
+        details.get("current_path"),
+        details.get("snapshot_path"),
+        details.get("target_path"),
+        details.get("file_path"),
+    ):
         if value:
             return str(value)
     return ""
@@ -1060,6 +1164,15 @@ def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "parser_version",
         "coverage_status",
         "reportability",
+        "status",
+        "relative_path",
+        "snapshot_label",
+        "snapshot_path",
+        "current_path",
+        "snapshot_modified_at",
+        "current_modified_at",
+        "snapshot_sha256",
+        "current_sha256",
         "event_id",
         "event_category",
         "event_description",
@@ -1121,6 +1234,51 @@ def artifact_nested_preview(details: Mapping[str, object]) -> str:
                 if value:
                     return str(value)
     return ""
+
+
+def vsc_artifact_row(
+    record: Mapping[str, object],
+    *,
+    snapshot_label: str,
+    snapshot_root: str,
+    index: int,
+) -> dict[str, object]:
+    status = str(record.get("status") or "change")
+    relative_path = str(record.get("relative_path") or "")
+    snapshot = record.get("snapshot") if isinstance(record.get("snapshot"), Mapping) else {}
+    current = record.get("current") if isinstance(record.get("current"), Mapping) else {}
+    snapshot_path = str(snapshot.get("path") or "") if isinstance(snapshot, Mapping) else ""
+    current_path = str(current.get("path") or "") if isinstance(current, Mapping) else ""
+    review_path = current_path or snapshot_path or relative_path
+    details = {
+        "parser": "rapidtriage-vsc-compare-import",
+        "parser_version": "1",
+        "coverage_status": "mapped",
+        "reportability": "triage",
+        "source_format": "vsc-compare-json",
+        "source_index": index,
+        "status": status,
+        "relative_path": relative_path,
+        "snapshot_label": snapshot_label,
+        "snapshot_root": snapshot_root,
+        "snapshot_path": snapshot_path,
+        "current_path": current_path,
+        "snapshot_size": snapshot.get("size") if isinstance(snapshot, Mapping) else None,
+        "current_size": current.get("size") if isinstance(current, Mapping) else None,
+        "snapshot_modified_at": snapshot.get("modified_at") if isinstance(snapshot, Mapping) else "",
+        "current_modified_at": current.get("modified_at") if isinstance(current, Mapping) else "",
+        "snapshot_sha256": snapshot.get("sha256") if isinstance(snapshot, Mapping) else "",
+        "current_sha256": current.get("sha256") if isinstance(current, Mapping) else "",
+        "evidence_strength": "snapshot-file-delta",
+        "raw": dict(record),
+    }
+    return {
+        "provider": "rapidtriage-vsc-compare",
+        "artifact_type": f"vsc-{status}-file",
+        "path": review_path,
+        "supported": True,
+        "details": details,
+    }
 
 
 def parse_json_object(value: object) -> dict[str, object]:
