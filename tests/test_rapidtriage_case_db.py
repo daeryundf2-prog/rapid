@@ -54,6 +54,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
         self.assertIn("case-search", commands)
         self.assertIn("--case-id", commands["case-search"].format_help())
         self.assertIn("--source", commands["case-search"].format_help())
+        self.assertIn("--metadata", commands["case-search"].format_help())
         self.assertIn("--review-status", commands["case-search"].format_help())
         self.assertIn("--verification-status", commands["case-search"].format_help())
         self.assertIn("--save-as", commands["case-search"].format_help())
@@ -288,7 +289,12 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(import_payload["imported_vsc_compare"]["summary"]["artifact_count"], 2)
 
             database = open_case_database(db_path)
-            payload = database.search_case(case_id="CASE-VSC", keywords=["deleted-secret"], sources=["artifacts"])
+            payload = database.search_case(
+                case_id="CASE-VSC",
+                keywords=["deleted-secret"],
+                sources=["artifacts"],
+                metadata_filters=["status=deleted"],
+            )
 
             self.assertEqual(payload["summary"]["match_count"], 1)
             match = payload["matches"][0]
@@ -296,6 +302,13 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(match["metadata"]["status"], "deleted")
             self.assertEqual(match["metadata"]["relative_path"], "deleted-secret.txt")
             self.assertEqual(match["metadata"]["snapshot_label"], "snapshot")
+            filtered_out = database.search_case(
+                case_id="CASE-VSC",
+                keywords=["deleted-secret"],
+                sources=["artifacts"],
+                metadata_filters=["status=added"],
+            )
+            self.assertEqual(filtered_out["summary"]["match_count"], 0)
 
     def test_search_case_finds_documents_files_artifacts_and_timeline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

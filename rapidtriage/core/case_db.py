@@ -314,6 +314,7 @@ class CaseDatabase:
         keywords: Iterable[str],
         limit: int = 100,
         sources: Iterable[str] | None = None,
+        metadata_filters: Iterable[str] | None = None,
         review_status: str | None = None,
         verification_status: str | None = None,
     ) -> dict[str, object]:
@@ -322,6 +323,7 @@ class CaseDatabase:
             raise CaseDatabaseError("at least one keyword is required")
         normalized_case_id = normalize_identifier(case_id, fallback="case")
         source_filter = {source.strip() for source in (sources or []) if source.strip()}
+        metadata_filter = parse_metadata_filters(metadata_filters or [])
         with self.connect() as connection:
             apply_schema(connection)
             if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (normalized_case_id,)).fetchone() is None:
@@ -334,6 +336,8 @@ class CaseDatabase:
             matches = attach_review_marks(connection, normalized_case_id, matches)
             if source_filter:
                 matches = [match for match in matches if str(match.get("source") or "") in source_filter]
+            if metadata_filter:
+                matches = [match for match in matches if metadata_matches(match.get("metadata"), metadata_filter)]
             if review_status:
                 matches = [
                     match
@@ -365,6 +369,7 @@ class CaseDatabase:
             "options": {
                 "limit": limit,
                 "sources": sorted(source_filter),
+                "metadata": dict(metadata_filter),
                 "review_status": review_status,
                 "verification_status": verification_status,
             },
@@ -383,6 +388,7 @@ class CaseDatabase:
         name: str,
         keywords: Iterable[str],
         sources: Iterable[str] | None = None,
+        metadata_filters: Iterable[str] | None = None,
         review_status: str | None = None,
         verification_status: str | None = None,
         limit: int = 100,
@@ -399,6 +405,7 @@ class CaseDatabase:
         filters = {
             "keywords": normalized_keywords,
             "sources": [source.strip() for source in (sources or []) if source.strip()],
+            "metadata": dict(parse_metadata_filters(metadata_filters or [])),
             "review_status": review_status,
             "verification_status": verification_status,
             "limit": limit,
@@ -1060,6 +1067,36 @@ def optional_int(value: Any) -> int | None:
 
 def optional_str(value: Any) -> str | None:
     return str(value) if value not in (None, "") else None
+
+
+def parse_metadata_filters(filters: Iterable[str]) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for item in filters:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        if "=" not in text:
+            raise CaseDatabaseError(f"metadata filter must be KEY=VALUE: {text}")
+        key, value = text.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise CaseDatabaseError(f"metadata filter key is empty: {text}")
+        parsed[key] = value.strip()
+    return parsed
+
+
+def metadata_matches(metadata: object, filters: Mapping[str, str]) -> bool:
+    if not isinstance(metadata, Mapping):
+        return False
+    for key, expected in filters.items():
+        value = metadata.get(key)
+        if isinstance(value, list):
+            haystack = " ".join(str(item) for item in value)
+        else:
+            haystack = str(value or "")
+        if expected.lower() not in haystack.lower():
+            return False
+    return True
 
 
 def artifact_details(row: Mapping[str, object]) -> Mapping[str, object]:

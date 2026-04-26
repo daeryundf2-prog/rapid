@@ -470,6 +470,7 @@ def build_parser() -> argparse.ArgumentParser:
     case_search.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
     case_search.add_argument("--limit", type=int, default=100, help="Maximum number of combined matches")
     case_search.add_argument("--source", action="append", help="Limit to a result source such as documents, files, artifacts, or timeline")
+    case_search.add_argument("--metadata", action="append", help="Limit artifact/timeline results by metadata KEY=VALUE, repeatable")
     case_search.add_argument("--review-status", help="Limit by analyst review status")
     case_search.add_argument("--verification-status", help="Limit by review verification status")
     case_search.add_argument("--save-as", help="Save this keyword/filter set for reuse")
@@ -1043,6 +1044,7 @@ def main(argv=None) -> int:
                 keywords=args.keyword,
                 limit=args.limit,
                 sources=args.source,
+                metadata_filters=args.metadata,
                 review_status=args.review_status,
                 verification_status=args.verification_status,
             )
@@ -1053,6 +1055,7 @@ def main(argv=None) -> int:
                     keywords=args.keyword,
                     limit=args.limit,
                     sources=args.source,
+                    metadata_filters=args.metadata,
                     review_status=args.review_status,
                     verification_status=args.verification_status,
                     created_by="cli",

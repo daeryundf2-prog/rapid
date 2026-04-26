@@ -145,6 +145,7 @@ Volume Shadow Copy comparison:
 rapidtriage vsc-compare ./current-volume ./vss/snapshot-1 --output vsc-delta.json
 rapidtriage vsc-compare ./current-volume ./vss/snapshot-1 ./vss/snapshot-2 --hash --max-records 5000
 rapidtriage case-db ./case.db --import-vsc-compare ./vsc-delta.json --case-id CASE-001
+rapidtriage case-search ./case.db --case-id CASE-001 -k deleted --source artifacts --metadata status=deleted
 ```
 
 When you use `rapidtriage run`, the Windows collectors are wired into the case workflow automatically:
