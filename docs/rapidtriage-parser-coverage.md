@@ -4,19 +4,19 @@
 | --- | --- | --- |
 | File metadata | Implemented | Names, paths, extensions, sizes, modified time, categories. |
 | Document text | Implemented | Text/log/config/data, PDF, Office OpenXML, OpenDocument where dependencies support extraction. |
-| Browser history/downloads | Partial | Dedicated browser artifact collector exists for supported local fixtures/profiles. |
-| Recent files | Partial | Dedicated recent-files collector exists. |
+| Browser history/downloads | Implemented baseline | Chrome, Edge, Brave, Firefox local profiles; history/download fixture coverage. |
+| Recent files | Implemented baseline | Recent shortcuts and Jump List file inventory from user profiles. |
 | Timeline merge | Implemented baseline | Files, docs, artifacts, and normalized timeline export. |
 | Case DB FTS | Implemented baseline | Documents, file metadata, artifacts, timeline, review status filters. |
 | OCR | Partial | Depends on local Tesseract and image quality. |
 | Windows OS/account summary | Planned | Hostname, timezone, last boot, user/admin status, account lifecycle. |
-| Windows Event Logs | Planned | EVTX parser contract should emit normalized Event records. |
-| Registry hives | Planned | USB history/ShellBags/UserAssist style parser coverage pending. |
+| Windows Event Logs | Partial | XML/JSON exports parse into normalized event rows; binary EVTX is inventoried with export guidance. |
+| Registry hives | Partial | `.reg` exports parse into key/value rows including Run keys and USB hints. |
 | MFT | Planned | File record/timeline source with deleted/recovered status where validated. |
 | Zone.Identifier ADS | Planned | Download provenance and source URL/referrer tracking. |
 | Defender/Firewall/WER/Task Scheduler | Planned | High-value Windows operating-system artifacts. |
-| Prefetch | Planned | Execution artifacts pending. |
-| Jump Lists/LNK | Planned | Link and destination parsing pending. |
+| Prefetch | Partial | `.pf` inventory with executable hints; full binary run-count parsing remains planned. |
+| Jump Lists/LNK | Partial | Recent/Jumplist file inventory implemented; full binary destination parsing remains planned. |
 | Volume Shadow Copy compare | Planned | Current-vs-snapshot deleted file delta and VSC deletion-command detection. |
 | Linux XFS | Planned | Filesystem adapter/extraction requirement for Linux server images. |
 | Forensic containers AD1/L01/Lx01/AFF/AFF4 | Detection | UI/API adapter detection exists; direct parsing requires vendor/tool export first. |

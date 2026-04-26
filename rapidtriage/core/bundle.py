@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import html
 import json
 import shutil
 import zipfile
@@ -39,6 +40,7 @@ def build_submission_bundle(
     manifest_path = output_dir / "rapidtriage-submission-manifest.json"
     selected_path = output_dir / "rapidtriage-selected-evidence.json"
     report_path = output_dir / "rapidtriage-case-report.md"
+    reviewer_path = output_dir / "rapidtriage-reviewer.html"
     audit_path = output_dir / "rapidtriage-bundle-audit.json"
     zip_path = output_dir.with_suffix(".zip")
 
@@ -52,6 +54,7 @@ def build_submission_bundle(
         metadata={"title": title or case_payload.get("title") or "RapidTriage submission bundle"},
     )
     report_path.write_text(report_markdown, encoding="utf-8")
+    reviewer_path.write_text(render_reviewer_html(manifest, selected, report_markdown), encoding="utf-8")
     audit = {
         "command": "bundle",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -61,11 +64,12 @@ def build_submission_bundle(
             "manifest": str(manifest_path),
             "selected_evidence": str(selected_path),
             "report": str(report_path),
+            "reviewer": str(reviewer_path),
         },
     }
     write_result(audit, audit_path)
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in (manifest_path, selected_path, report_path, audit_path):
+        for path in (manifest_path, selected_path, report_path, reviewer_path, audit_path):
             archive.write(path, path.name)
     integrity = compute_hashes(zip_path)
     bundle_manifest = {
@@ -87,12 +91,71 @@ def build_submission_bundle(
             "manifest": str(manifest_path),
             "selected_evidence": str(selected_path),
             "report": str(report_path),
+            "reviewer": str(reviewer_path),
             "audit": str(audit_path),
             "archive": str(zip_path),
         },
     }
     write_result(bundle_manifest, output_dir / "rapidtriage-bundle-manifest.json")
     return bundle_manifest
+
+
+def render_reviewer_html(
+    manifest: Mapping[str, object],
+    selected: Mapping[str, object],
+    report_markdown: str,
+) -> str:
+    items = selected.get("items") if isinstance(selected.get("items"), list) else []
+    manifest_summary = manifest.get("summary") if isinstance(manifest.get("summary"), Mapping) else {}
+    rows = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        hashes = item.get("hashes") if isinstance(item.get("hashes"), Mapping) else {}
+        review = item.get("review") if isinstance(item.get("review"), Mapping) else {}
+        rows.append(
+            "<tr>"
+            f"<td>{escape(item.get('bookmark_id', ''))}</td>"
+            f"<td>{escape(item.get('summary', ''))}<br><small>{escape(item.get('path', ''))}</small></td>"
+            f"<td>{escape(review.get('status', ''))}</td>"
+            f"<td><code>{escape(hashes.get('sha256', ''))}</code></td>"
+            "</tr>"
+        )
+    return "\n".join(
+        [
+            "<!doctype html>",
+            '<html lang="en">',
+            "<head>",
+            '<meta charset="utf-8" />',
+            '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+            "<title>RapidTriage Reviewer Bundle</title>",
+            "<style>",
+            "body{font-family:Georgia,serif;margin:32px;background:#f7f2ea;color:#1f2528}",
+            "main{max-width:1100px;margin:auto;background:white;border:1px solid #ddd0bf;border-radius:12px;padding:24px}",
+            "table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border-bottom:1px solid #eee;padding:10px;text-align:left;vertical-align:top}",
+            "code,pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f8f5ef;padding:2px 4px;border-radius:4px}",
+            ".metric{display:inline-block;margin:4px 10px 4px 0;padding:8px 10px;border:1px solid #ddd0bf;border-radius:999px;font-weight:bold}",
+            "</style>",
+            "</head>",
+            "<body><main>",
+            "<h1>RapidTriage Reviewer Bundle</h1>",
+            "<p>This portable review package contains selected artifact metadata, analyst review state, hashes, and report text. It does not include the original evidence image.</p>",
+            f"<span class=\"metric\">Case: {escape(manifest.get('case_id', ''))}</span>",
+            f"<span class=\"metric\">Hashed items: {escape(manifest_summary.get('hashed_item_count', 0))}</span>",
+            f"<span class=\"metric\">Skipped: {escape(manifest_summary.get('skipped_count', 0))}</span>",
+            "<h2>Selected Evidence</h2>",
+            "<table><thead><tr><th>Bookmark</th><th>Evidence</th><th>Review</th><th>SHA256</th></tr></thead><tbody>",
+            "\n".join(rows) if rows else '<tr><td colspan="4">No selected evidence.</td></tr>',
+            "</tbody></table>",
+            "<h2>Report Draft</h2>",
+            f"<pre>{escape(report_markdown)}</pre>",
+            "</main></body></html>",
+        ]
+    )
+
+
+def escape(value: object) -> str:
+    return html.escape(str(value or ""), quote=True)
 
 
 def build_selected_evidence_list(manifest: Mapping[str, object]) -> dict[str, object]:

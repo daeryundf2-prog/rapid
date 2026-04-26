@@ -45,6 +45,27 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(shortcut["details"]["entry_name"], "Case Notes.lnk")
             self.assertEqual(shortcut["details"]["user"], "alice")
 
+            event_provider = providers["windows-eventlog"]
+            self.assertEqual(event_provider["artifacts"][0]["artifact_type"], "eventlog-event")
+            self.assertEqual(event_provider["artifacts"][0]["details"]["event_id"], "4624")
+            self.assertEqual(event_provider["artifacts"][0]["details"]["data"]["TargetUserName"], "alice")
+            self.assertEqual(event_provider["artifacts"][0]["details"]["source_format"], "xml")
+
+            registry_provider = providers["windows-registry"]
+            registry_types = {artifact["artifact_type"] for artifact in registry_provider["artifacts"]}
+            self.assertIn("registry-run-key", registry_types)
+            self.assertIn("registry-usb", registry_types)
+            run_key = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-run-key")
+            self.assertIn("SecurityUpdater", run_key["details"]["values"])
+
+            shellbags_provider = providers["windows-shellbags"]
+            self.assertEqual(shellbags_provider["artifacts"][0]["artifact_type"], "shellbag-key")
+            self.assertIn("BagMRU", shellbags_provider["artifacts"][0]["details"]["key"])
+
+            prefetch_provider = providers["windows-prefetch"]
+            self.assertEqual(prefetch_provider["artifacts"][0]["artifact_type"], "prefetch-file")
+            self.assertEqual(prefetch_provider["artifacts"][0]["details"]["executable_hint"], "POWERSHELL.EXE")
+
 
 if __name__ == "__main__":
     unittest.main()

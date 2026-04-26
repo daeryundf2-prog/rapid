@@ -1,25 +1,34 @@
 from __future__ import annotations
 
-import platform
 from pathlib import Path
 from typing import Iterable
 
 from ...core.models import ArtifactRecord
+from .registry import collect_reg_export
 
 
 class WindowsShellbagsProvider:
     name = "windows-shellbags"
-    description = "Windows Shellbags artifacts behind a separate implementation module"
+    description = "Windows Shellbags from Registry .reg exports"
     target_platform = "windows"
 
     def supported(self) -> bool:
-        return platform.system() == "Windows"
+        return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        yield ArtifactRecord(
-            provider=self.name,
-            artifact_type="shellbags",
-            path=str(root / "artifacts" / "windows" / "shellbags"),
-            supported=self.supported(),
-            details={"note": "Windows-specific provider placeholder"},
-        )
+        for path in sorted(root.rglob("*.reg"), key=lambda item: str(item).lower()):
+            if not path.is_file():
+                continue
+            for record in collect_reg_export(path):
+                key = str(record.details.get("key") or "").lower()
+                if "shell\\bagmru" not in key and "shellnoroam\\bagmru" not in key:
+                    continue
+                details = dict(record.details)
+                details["parser"] = "windows-shellbags-reg-export"
+                yield ArtifactRecord(
+                    provider=self.name,
+                    artifact_type="shellbag-key",
+                    path=record.path,
+                    supported=True,
+                    details=details,
+                )

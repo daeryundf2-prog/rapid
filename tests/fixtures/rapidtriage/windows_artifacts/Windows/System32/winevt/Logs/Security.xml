@@ -1,0 +1,18 @@
+<Events xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <Event>
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" />
+      <EventID>4624</EventID>
+      <Level>0</Level>
+      <Channel>Security</Channel>
+      <Computer>WIN-CASE01</Computer>
+      <EventRecordID>1001</EventRecordID>
+      <TimeCreated SystemTime="2024-04-01T12:34:56.0000000Z" />
+    </System>
+    <EventData>
+      <Data Name="TargetUserName">alice</Data>
+      <Data Name="IpAddress">10.0.0.5</Data>
+      <Data Name="LogonType">10</Data>
+    </EventData>
+  </Event>
+</Events>

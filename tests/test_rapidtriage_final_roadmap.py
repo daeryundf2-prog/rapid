@@ -110,8 +110,11 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertTrue((bundle_dir / "rapidtriage-submission-manifest.json").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-selected-evidence.json").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-case-report.md").is_file())
+            self.assertTrue((bundle_dir / "rapidtriage-reviewer.html").is_file())
+            self.assertIn("Reviewer Bundle", (bundle_dir / "rapidtriage-reviewer.html").read_text(encoding="utf-8"))
             self.assertTrue(Path(payload["archive"]).is_file())
             self.assertIn("sha256", payload["archive_hashes"])
+            self.assertIn("reviewer", payload["outputs"])
 
     def test_plugins_command_lists_builtins_and_validates_external_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

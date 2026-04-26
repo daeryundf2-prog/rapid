@@ -4,11 +4,11 @@ This plan is scored from a real analyst/user perspective, not from a feature-cou
 
 ## Current Score
 
-Estimated current score: 75/100.
+Estimated current score: 80/100.
 
 Why:
 
-- The tool now has a usable local web UI, sample case, doctor check, evidence preflight, processing plan preview, whole-case search, source viewer, review board, compare tray with text diff, hashes, report templates, SQLite Case DB saved searches/batch review, Windows quickstart, and packaging tests.
+- The tool now has a usable local web UI, sample case, doctor check, evidence preflight, processing plan preview, whole-case search, source viewer, review board, compare tray with text diff, hashes, report templates, SQLite Case DB saved searches/batch review, fixture-backed Windows artifact parsers, portable reviewer bundle, Windows quickstart, and packaging tests.
 - It is useful for folder-based triage and light forensic review.
 - It is not yet comparable to AXIOM/WISDOM for direct evidence ingestion, deep Windows artifact coverage, validated parsers, large-case indexing, portable reviewer workflows, or commercial trust.
 
@@ -84,18 +84,18 @@ Goal: improve actual forensic value, especially Windows evidence.
 
 Tasks:
 
-- Add high-value Windows parser tests and normalized outputs for Event Logs, Registry hives, Prefetch, LNK, Jump Lists, ShellBags, USB history, SRUM/EDB where feasible.
-- Add browser unified view across Chrome, Edge, Firefox, downloads, history, and typed URLs.
-- Add source validation views: parser source path, offset if available, raw record preview, extraction method, parser version.
-- Add portable reviewer bundle: static HTML/JSON package with selected artifacts, previews, notes, hashes, and no original image.
-- Add report noise controls: hide technical metadata by default, put full metadata in appendix.
-- Add validation fixtures with expected artifact counts and known false-negative limitations.
+- Add high-value Windows parser tests and normalized outputs for Event Logs, Registry hives, Prefetch, LNK, Jump Lists, ShellBags, USB history, SRUM/EDB where feasible. Status: XML/JSON EventLog, `.reg` Registry/USB/Shellbags, Prefetch inventory, Recent/LNK/JumpList inventory, and browser fixture coverage implemented; SRUM/EDB remains later.
+- Add browser unified view across Chrome, Edge, Firefox, downloads, history, and typed URLs. Status: Chrome/Edge/Brave/Firefox profile collection exists for history/download rows.
+- Add source validation views: parser source path, offset if available, raw record preview, extraction method, parser version. Status: Windows parser rows now include `source_path`, `source_format`, parser name/version, and raw previews where applicable.
+- Add portable reviewer bundle: static HTML/JSON package with selected artifacts, previews, notes, hashes, and no original image. Status: bundle now emits `rapidtriage-reviewer.html` plus JSON/report/hash manifest and archive hashes.
+- Add report noise controls: hide technical metadata by default, put full metadata in appendix. Status: report templates include legal, executive, technical appendix, and hash-only modes.
+- Add validation fixtures with expected artifact counts and known false-negative limitations. Status: deterministic Windows artifact fixture covers browser, recent/jumplist, EventLog XML, Registry `.reg`, Shellbags `.reg`, and Prefetch inventory.
 
 Acceptance criteria:
 
-- At least 10 high-value parser fixtures pass deterministic tests.
-- Portable review package supports tagging/comment review without exposing original evidence image.
-- Report is readable by a non-technical reviewer while preserving technical appendices.
+- At least 10 high-value parser fixtures pass deterministic tests. Status: current Windows fixture asserts representative rows across browser, recent/jumplist, EventLog, Registry, Shellbags, and Prefetch; deeper binary parser corpus remains a later hardening item.
+- Portable review package supports tagging/comment review without exposing original evidence image. Status: reviewer bundle contains metadata, review state, hashes, and report text without original image data.
+- Report is readable by a non-technical reviewer while preserving technical appendices. Status: template selector and technical appendix mode implemented.
 
 ## Plan To Reach 85
 

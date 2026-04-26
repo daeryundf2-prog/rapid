@@ -88,6 +88,16 @@ rapidtriage benchmark --output-dir ./benchmark-small --file-count 1000 --json
 
 The command writes JSON and Markdown with ingest time, search p50/p95, peak memory, output size, and result counts.
 
+## Portable Reviewer Bundle
+
+Use a bundle when a reviewer should see selected evidence metadata, review state, hashes, and the report draft without receiving the original evidence image:
+
+```bash
+rapidtriage bundle ./rapidtriage-case.json --allowed-root ./mounted-case --output-dir ./review-bundle --json
+```
+
+The bundle includes `rapidtriage-reviewer.html`, selected evidence JSON, a hash manifest, a report draft, an audit file, and an archive SHA256.
+
 ## Security Notes
 
 RapidTriage web defaults to `127.0.0.1`. If you bind to `0.0.0.0`, pass an auth token:

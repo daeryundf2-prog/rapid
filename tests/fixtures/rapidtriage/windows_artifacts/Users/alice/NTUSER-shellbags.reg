@@ -1,0 +1,5 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\BagMRU\0]
+"NodeSlot"=dword:00000001
+"0"=hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00

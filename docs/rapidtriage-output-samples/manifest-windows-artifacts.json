@@ -188,51 +188,153 @@
     },
     {
       "name": "windows-eventlog",
-      "description": "Windows Event Log artifacts exposed via a dedicated provider boundary",
+      "description": "Windows Event Log XML/JSON export artifacts",
       "target_platform": "windows",
-      "supported": false,
+      "supported": true,
       "artifacts": [
         {
           "provider": "windows-eventlog",
-          "artifact_type": "eventlog",
-          "path": "<ROOT>/artifacts/windows/eventlog",
-          "supported": false,
+          "artifact_type": "eventlog-event",
+          "path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+          "supported": true,
           "details": {
-            "note": "Windows-specific provider placeholder"
+            "parser": "windows-eventlog-xml",
+            "parser_version": "eventlog-export-v1",
+            "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+            "source_format": "xml",
+            "source_index": 0,
+            "provider_name": "Microsoft-Windows-Security-Auditing",
+            "event_id": "4624",
+            "record_id": "1001",
+            "channel": "Security",
+            "level": "0",
+            "computer": "WIN-CASE01",
+            "event_created_at": "2024-04-01T12:34:56.0000000Z",
+            "data": {
+              "TargetUserName": "alice",
+              "IpAddress": "10.0.0.5",
+              "LogonType": "10"
+            },
+            "raw_preview": "<ns0:Event xmlns:ns0=\"http://schemas.microsoft.com/win/2004/08/events/event\">\n    <ns0:System>\n      <ns0:Provider Name=\"Microsoft-Windows-Security-Auditing\" />\n      <ns0:EventID>4624</ns0:EventID>\n      <ns0:Level>0</ns0:Level>\n      <ns0:Channel>Security</ns0:Channel>\n      <ns0:Computer>WIN-CASE01</ns0:Computer>\n      <ns0:EventRecordID>1001</ns0:EventRecordID>\n      <ns0:TimeCreated SystemTime=\"2024-04-01T12:34:56.0000000Z\" />\n    </ns0:System>\n    <ns0:EventData>\n      <ns0:Data Name=\"TargetUserName\">alice</ns0:Data>\n      <ns0:Data Name=\"IpAddress\">10.0.0.5</ns0:Data>\n      <ns0:Data Name=\"LogonType\">10</ns0:Data>\n    </ns0:EventData>\n  </ns0:Event>\n"
           }
         }
       ]
     },
     {
       "name": "windows-registry",
-      "description": "Windows Registry artifacts behind a separate implementation module",
+      "description": "Windows Registry .reg export artifacts",
       "target_platform": "windows",
-      "supported": false,
+      "supported": true,
       "artifacts": [
         {
           "provider": "windows-registry",
-          "artifact_type": "registry",
-          "path": "<ROOT>/artifacts/windows/registry",
-          "supported": false,
+          "artifact_type": "registry-key",
+          "path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+          "supported": true,
           "details": {
-            "note": "Windows-specific provider placeholder"
+            "parser": "windows-registry-reg-export",
+            "parser_version": "reg-export-v1",
+            "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+            "source_format": "reg",
+            "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+            "hive_hint": "HKEY_CURRENT_USER",
+            "value_count": 2,
+            "values": {
+              "0": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
+              "NodeSlot": "dword:00000001"
+            },
+            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]"
+          }
+        },
+        {
+          "provider": "windows-registry",
+          "artifact_type": "registry-run-key",
+          "path": "<ROOT>/Windows/System32/config/software.reg",
+          "supported": true,
+          "details": {
+            "parser": "windows-registry-reg-export",
+            "parser_version": "reg-export-v1",
+            "source_path": "<ROOT>/Windows/System32/config/software.reg",
+            "source_format": "reg",
+            "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            "hive_hint": "HKEY_LOCAL_MACHINE",
+            "value_count": 1,
+            "values": {
+              "SecurityUpdater": "\"C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe\""
+            },
+            "raw_preview": "[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run]"
+          }
+        },
+        {
+          "provider": "windows-registry",
+          "artifact_type": "registry-usb",
+          "path": "<ROOT>/Windows/System32/config/software.reg",
+          "supported": true,
+          "details": {
+            "parser": "windows-registry-reg-export",
+            "parser_version": "reg-export-v1",
+            "source_path": "<ROOT>/Windows/System32/config/software.reg",
+            "source_format": "reg",
+            "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890",
+            "hive_hint": "HKEY_LOCAL_MACHINE",
+            "value_count": 1,
+            "values": {
+              "FriendlyName": "\"Test USB Device\""
+            },
+            "raw_preview": "[HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890]"
           }
         }
       ]
     },
     {
       "name": "windows-shellbags",
-      "description": "Windows Shellbags artifacts behind a separate implementation module",
+      "description": "Windows Shellbags from Registry .reg exports",
       "target_platform": "windows",
-      "supported": false,
+      "supported": true,
       "artifacts": [
         {
           "provider": "windows-shellbags",
-          "artifact_type": "shellbags",
-          "path": "<ROOT>/artifacts/windows/shellbags",
-          "supported": false,
+          "artifact_type": "shellbag-key",
+          "path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+          "supported": true,
           "details": {
-            "note": "Windows-specific provider placeholder"
+            "parser": "windows-shellbags-reg-export",
+            "parser_version": "reg-export-v1",
+            "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+            "source_format": "reg",
+            "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+            "hive_hint": "HKEY_CURRENT_USER",
+            "value_count": 2,
+            "values": {
+              "0": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
+              "NodeSlot": "dword:00000001"
+            },
+            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-prefetch",
+      "description": "Windows Prefetch execution artifact inventory",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "windows-prefetch",
+          "artifact_type": "prefetch-file",
+          "path": "<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
+          "supported": true,
+          "details": {
+            "parser": "windows-prefetch-inventory",
+            "parser_version": "prefetch-inventory-v1",
+            "source_path": "<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
+            "source_format": "pf",
+            "executable_hint": "POWERSHELL.EXE",
+            "entry_name": "POWERSHELL.EXE-12345678.pf",
+            "size": 17,
+            "modified_at": "2026-04-26T01:33:08.625073+00:00",
+            "note": "Prefetch binary inventory; full run-count parsing requires a dedicated PF parser."
           }
         }
       ]

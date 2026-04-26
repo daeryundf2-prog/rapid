@@ -92,54 +92,31 @@
       },
       {
         "name": "windows-eventlog",
-        "description": "Windows Event Log artifacts exposed via a dedicated provider boundary",
+        "description": "Windows Event Log XML/JSON export artifacts",
         "target_platform": "windows",
-        "supported": false,
-        "artifacts": [
-          {
-            "provider": "windows-eventlog",
-            "artifact_type": "eventlog",
-            "path": "<ROOT>/artifacts/windows/eventlog",
-            "supported": false,
-            "details": {
-              "note": "Windows-specific provider placeholder"
-            }
-          }
-        ]
+        "supported": true,
+        "artifacts": []
       },
       {
         "name": "windows-registry",
-        "description": "Windows Registry artifacts behind a separate implementation module",
+        "description": "Windows Registry .reg export artifacts",
         "target_platform": "windows",
-        "supported": false,
-        "artifacts": [
-          {
-            "provider": "windows-registry",
-            "artifact_type": "registry",
-            "path": "<ROOT>/artifacts/windows/registry",
-            "supported": false,
-            "details": {
-              "note": "Windows-specific provider placeholder"
-            }
-          }
-        ]
+        "supported": true,
+        "artifacts": []
       },
       {
         "name": "windows-shellbags",
-        "description": "Windows Shellbags artifacts behind a separate implementation module",
+        "description": "Windows Shellbags from Registry .reg exports",
         "target_platform": "windows",
-        "supported": false,
-        "artifacts": [
-          {
-            "provider": "windows-shellbags",
-            "artifact_type": "shellbags",
-            "path": "<ROOT>/artifacts/windows/shellbags",
-            "supported": false,
-            "details": {
-              "note": "Windows-specific provider placeholder"
-            }
-          }
-        ]
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "windows-prefetch",
+        "description": "Windows Prefetch execution artifact inventory",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
       }
     ]
   },

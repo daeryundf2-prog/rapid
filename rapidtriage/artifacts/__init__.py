@@ -5,6 +5,7 @@ from typing import Dict, List
 from .generic import GenericDocumentArtifactProvider
 from .windows.browser import WindowsBrowserArtifactsProvider
 from .windows.eventlog import WindowsEventLogProvider
+from .windows.prefetch import WindowsPrefetchProvider
 from .windows.recent_files import WindowsRecentFilesProvider
 from .windows.registry import WindowsRegistryProvider
 from .windows.shellbags import WindowsShellbagsProvider
@@ -18,6 +19,7 @@ def all_providers() -> List[object]:
         WindowsEventLogProvider(),
         WindowsRegistryProvider(),
         WindowsShellbagsProvider(),
+        WindowsPrefetchProvider(),
     ]
 
 
