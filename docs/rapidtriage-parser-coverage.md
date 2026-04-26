@@ -13,8 +13,8 @@
 | Windows Event Logs | Partial | XML/JSON exports parse into normalized event rows; binary EVTX is inventoried with export guidance. |
 | Registry hives | Partial | `.reg` exports parse into key/value rows including Run keys and USB hints. |
 | MFT | Planned | File record/timeline source with deleted/recovered status where validated. |
-| Zone.Identifier ADS | Planned | Download provenance and source URL/referrer tracking. |
-| Defender/Firewall/WER/Task Scheduler | Planned | High-value Windows operating-system artifacts. |
+| Zone.Identifier ADS | Partial | Exported `:Zone.Identifier`/`.Zone.Identifier` sidecar files parse ZoneId, referrer URL, and host URL. |
+| Defender/Firewall/WER/Task Scheduler | Partial | Fixture-backed inventory for Defender MPLog, Windows Firewall W3C logs, WER reports, and Task Scheduler XML. |
 | Prefetch | Partial | `.pf` inventory with executable hints; full binary run-count parsing remains planned. |
 | Jump Lists/LNK | Partial | Recent/Jumplist file inventory implemented; full binary destination parsing remains planned. |
 | Volume Shadow Copy compare | Planned | Current-vs-snapshot deleted file delta and VSC deletion-command detection. |

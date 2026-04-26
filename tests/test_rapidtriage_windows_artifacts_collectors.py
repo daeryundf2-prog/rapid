@@ -66,6 +66,25 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(prefetch_provider["artifacts"][0]["artifact_type"], "prefetch-file")
             self.assertEqual(prefetch_provider["artifacts"][0]["details"]["executable_hint"], "POWERSHELL.EXE")
 
+            system_provider = providers["windows-system-artifacts"]
+            system_types = {artifact["artifact_type"] for artifact in system_provider["artifacts"]}
+            self.assertEqual(
+                system_types,
+                {"task-scheduler-task", "defender-support-log", "firewall-log", "wer-report", "zone-identifier"},
+            )
+            task = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "task-scheduler-task")
+            self.assertEqual(task["details"]["command"], "powershell.exe")
+            self.assertIn("Bypass", task["details"]["arguments"])
+            defender = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "defender-support-log")
+            self.assertEqual(defender["details"]["interesting_entry_count"], 3)
+            firewall = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "firewall-log")
+            self.assertEqual(firewall["details"]["blocked_count"], 1)
+            wer = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "wer-report")
+            self.assertEqual(wer["details"]["application"], "powershell.exe")
+            zone = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "zone-identifier")
+            self.assertEqual(zone["details"]["zone_id"], "3")
+            self.assertEqual(zone["details"]["host_url"], "https://download.example.com/report.zip")
+
 
 if __name__ == "__main__":
     unittest.main()

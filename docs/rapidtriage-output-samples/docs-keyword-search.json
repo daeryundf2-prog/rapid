@@ -117,6 +117,13 @@
         "target_platform": "windows",
         "supported": true,
         "artifacts": []
+      },
+      {
+        "name": "windows-system-artifacts",
+        "description": "Windows Task Scheduler, Defender, Firewall, WER, and Zone.Identifier artifacts",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
       }
     ]
   },

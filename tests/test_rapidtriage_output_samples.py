@@ -90,6 +90,39 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
         / "9b9cdc69c1c24e2b.customDestinations-ms",
         datetime(2024, 3, 5, 6, 9, 10, tzinfo=timezone.utc),
     )
+    stable_artifact_times = {
+        root / "Windows" / "System32" / "winevt" / "Logs" / "Security.xml": datetime(2024, 3, 5, 6, 10, 11, tzinfo=timezone.utc),
+        root / "Windows" / "System32" / "config" / "software.reg": datetime(2024, 3, 5, 6, 11, 12, tzinfo=timezone.utc),
+        root / "Users" / "alice" / "NTUSER-shellbags.reg": datetime(2024, 3, 5, 6, 12, 13, tzinfo=timezone.utc),
+        root / "Windows" / "Prefetch" / "POWERSHELL.EXE-12345678.pf": datetime(2024, 3, 5, 6, 13, 14, tzinfo=timezone.utc),
+        root
+        / "Windows"
+        / "System32"
+        / "Tasks"
+        / "Microsoft"
+        / "Windows"
+        / "UpdateOrchestrator"
+        / "SecurityUpdater": datetime(2024, 3, 5, 6, 14, 15, tzinfo=timezone.utc),
+        root
+        / "ProgramData"
+        / "Microsoft"
+        / "Windows Defender"
+        / "Support"
+        / "MPLog-20260426.log": datetime(2024, 3, 5, 6, 15, 16, tzinfo=timezone.utc),
+        root / "Windows" / "System32" / "LogFiles" / "Firewall" / "pfirewall.log": datetime(2024, 3, 5, 6, 16, 17, tzinfo=timezone.utc),
+        root
+        / "ProgramData"
+        / "Microsoft"
+        / "Windows"
+        / "WER"
+        / "ReportArchive"
+        / "AppCrash_powershell.exe_123"
+        / "Report.wer": datetime(2024, 3, 5, 6, 17, 18, tzinfo=timezone.utc),
+        root / "Users" / "alice" / "Downloads" / "report.zip.Zone.Identifier": datetime(2024, 3, 5, 6, 18, 19, tzinfo=timezone.utc),
+    }
+    for path, timestamp in stable_artifact_times.items():
+        if path.exists():
+            set_mtime(path, timestamp)
 
 
 def load_json(path: Path) -> Any:

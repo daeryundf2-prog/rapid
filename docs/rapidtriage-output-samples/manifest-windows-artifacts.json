@@ -333,8 +333,152 @@
             "executable_hint": "POWERSHELL.EXE",
             "entry_name": "POWERSHELL.EXE-12345678.pf",
             "size": 17,
-            "modified_at": "2026-04-26T01:33:08.625073+00:00",
+            "modified_at": "2024-03-05T06:13:14+00:00",
             "note": "Prefetch binary inventory; full run-count parsing requires a dedicated PF parser."
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-system-artifacts",
+      "description": "Windows Task Scheduler, Defender, Firewall, WER, and Zone.Identifier artifacts",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "windows-system-artifacts",
+          "artifact_type": "defender-support-log",
+          "path": "<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
+          "supported": true,
+          "details": {
+            "parser": "windows-system-artifacts",
+            "parser_version": "windows-system-v1",
+            "source_path": "<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
+            "source_format": "text-log",
+            "source_size": 199,
+            "entry_count": 3,
+            "interesting_entry_count": 3,
+            "interesting_entries": [
+              "2026-04-26T01:02:03.000Z Threat Name: Trojan:Win32/TestLoader",
+              "2026-04-26T01:02:04.000Z Remediation action: Quarantine",
+              "2026-04-26T01:02:05.000Z Exclusion path observed: C:\\Users\\alice\\AppData\\Roaming"
+            ],
+            "modified_at": "2024-03-05T06:15:16+00:00",
+            "raw_preview": "2026-04-26T01:02:03.000Z Threat Name: Trojan:Win32/TestLoader\n2026-04-26T01:02:04.000Z Remediation action: Quarantine\n2026-04-26T01:02:05.000Z Exclusion path observed: C:\\Users\\alice\\AppData\\Roaming"
+          }
+        },
+        {
+          "provider": "windows-system-artifacts",
+          "artifact_type": "firewall-log",
+          "path": "<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
+          "supported": true,
+          "details": {
+            "parser": "windows-system-artifacts",
+            "parser_version": "windows-system-v1",
+            "source_path": "<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
+            "source_format": "w3c-log",
+            "source_size": 216,
+            "entry_count": 2,
+            "blocked_count": 1,
+            "sample_entries": [
+              {
+                "date": "2026-04-26",
+                "time": "01:03:00",
+                "action": "DROP",
+                "protocol": "TCP",
+                "src-ip": "10.0.0.5",
+                "dst-ip": "203.0.113.9",
+                "src-port": "51512",
+                "dst-port": "4444",
+                "size": "60"
+              },
+              {
+                "date": "2026-04-26",
+                "time": "01:03:05",
+                "action": "ALLOW",
+                "protocol": "TCP",
+                "src-ip": "10.0.0.5",
+                "dst-ip": "198.51.100.7",
+                "src-port": "51513",
+                "dst-port": "443",
+                "size": "120"
+              }
+            ],
+            "modified_at": "2024-03-05T06:16:17+00:00",
+            "raw_preview": "#Version: 1.5\n#Fields: date time action protocol src-ip dst-ip src-port dst-port size\n2026-04-26 01:03:00 DROP TCP 10.0.0.5 203.0.113.9 51512 4444 60\n2026-04-26 01:03:05 ALLOW TCP 10.0.0.5 198.51.100.7 51513 443 120\n"
+          }
+        },
+        {
+          "provider": "windows-system-artifacts",
+          "artifact_type": "task-scheduler-task",
+          "path": "<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
+          "supported": true,
+          "details": {
+            "parser": "windows-system-artifacts",
+            "parser_version": "windows-system-v1",
+            "source_path": "<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
+            "source_format": "task-xml",
+            "source_size": 685,
+            "task_uri": "\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater",
+            "command": "powershell.exe",
+            "arguments": "-ExecutionPolicy Bypass -File C:\\Users\\alice\\AppData\\Roaming\\updater.ps1",
+            "author": "alice",
+            "user_id": "S-1-5-21-1000",
+            "trigger_types": [
+              "LogonTrigger"
+            ],
+            "modified_at": "2024-03-05T06:14:15+00:00",
+            "raw_preview": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Task version=\"1.4\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n  <RegistrationInfo>\n    <Author>alice</Author>\n    <URI>\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater</URI>\n  </RegistrationInfo>\n  <Triggers>\n    <LogonTrigger>\n      <Enabled>true</Enabled>\n    </LogonTrigger>\n  </Triggers>\n  <Principals>\n    <Principal id=\"Author\">\n      <UserId>S-1-5-21-1000</UserId>\n    </Principal>\n  </Principals>\n  <Actions Context=\"Author\">\n    <Exec>\n      <Command>powershell.exe</Command>\n      <Arguments>-ExecutionPolicy Bypass -File C:\\"
+          }
+        },
+        {
+          "provider": "windows-system-artifacts",
+          "artifact_type": "wer-report",
+          "path": "<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
+          "supported": true,
+          "details": {
+            "parser": "windows-system-artifacts",
+            "parser_version": "windows-system-v1",
+            "source_path": "<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
+            "source_format": "wer",
+            "source_size": 94,
+            "event_type": "APPCRASH",
+            "application": "powershell.exe",
+            "module": "evil.dll",
+            "bucket": "123456789",
+            "fields": {
+              "Version": "1",
+              "EventType": "APPCRASH",
+              "AppName": "powershell.exe",
+              "FaultModuleName": "evil.dll",
+              "Bucket": "123456789"
+            },
+            "modified_at": "2024-03-05T06:17:18+00:00",
+            "raw_preview": "Version=1\nEventType=APPCRASH\nAppName=powershell.exe\nFaultModuleName=evil.dll\nBucket=123456789\n"
+          }
+        },
+        {
+          "provider": "windows-system-artifacts",
+          "artifact_type": "zone-identifier",
+          "path": "<ROOT>/Users/alice/Downloads/report.zip.Zone.Identifier",
+          "supported": true,
+          "details": {
+            "parser": "windows-system-artifacts",
+            "parser_version": "windows-system-v1",
+            "source_path": "<ROOT>/Users/alice/Downloads/report.zip.Zone.Identifier",
+            "source_format": "ini-ads-export",
+            "source_size": 119,
+            "target_name": "report.zip",
+            "zone_id": "3",
+            "referrer_url": "https://mail.example.com/message/1",
+            "host_url": "https://download.example.com/report.zip",
+            "fields": {
+              "ZoneId": "3",
+              "ReferrerUrl": "https://mail.example.com/message/1",
+              "HostUrl": "https://download.example.com/report.zip"
+            },
+            "modified_at": "2024-03-05T06:18:19+00:00",
+            "raw_preview": "[ZoneTransfer]\nZoneId=3\nReferrerUrl=https://mail.example.com/message/1\nHostUrl=https://download.example.com/report.zip\n"
           }
         }
       ]

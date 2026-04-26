@@ -4,6 +4,7 @@ from .prefetch import WindowsPrefetchProvider
 from .recent_files import WindowsRecentFilesProvider
 from .registry import WindowsRegistryProvider
 from .shellbags import WindowsShellbagsProvider
+from .system import WindowsSystemArtifactsProvider
 
 __all__ = [
     "browser",
@@ -11,10 +12,12 @@ __all__ = [
     "recent_files",
     "registry",
     "shellbags",
+    "system",
     "WindowsBrowserArtifactsProvider",
     "WindowsEventLogProvider",
     "WindowsPrefetchProvider",
     "WindowsRecentFilesProvider",
     "WindowsRegistryProvider",
     "WindowsShellbagsProvider",
+    "WindowsSystemArtifactsProvider",
 ]

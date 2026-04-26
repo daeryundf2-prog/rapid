@@ -28,7 +28,7 @@ RapidTriage should absorb this as a product principle:
 | Registry | Deleted key/value recovery and visual marking. | Planned | Add registry hive parser/recovery module after validation corpus exists. |
 | Event logs | Event semantic tags, recovered deleted records, parameter-level filters. | Planned | EVTX parser should emit normalized `Event` plus typed parameters. |
 | VSC | Compare current volume with Volume Shadow Copies and detect VSC deletion commands. | Planned | Add VSC import/compare workflow as Windows advanced parser work. |
-| MFT/EDB/WER/Defender/Firewall/ADS | Broad Windows forensic artifacts. | Planned | Prioritize MFT, Zone.Identifier ADS, Defender, Firewall, WER, Task Scheduler. |
+| MFT/EDB/WER/Defender/Firewall/ADS | Broad Windows forensic artifacts. | Partial | WER, Defender MPLog, Firewall W3C, Zone.Identifier sidecar, and Task Scheduler XML are fixture-backed; MFT/EDB remain planned. |
 | Password cracking | Built-in password cracking workflow. | Deferred | Integrate only as optional external-tool workflow with legal warnings. |
 | OCR/translation | Korean OCR and translation-oriented review. | Partial | Keep OCR optional; evaluate Korean OCR quality separately. |
 | Linux/XFS | Strong Linux filesystem coverage including XFS. | Planned | Treat XFS as evidence adapter/filesystem extraction requirement. |
@@ -50,7 +50,7 @@ High priority:
 - Add processing profiles: `fast`, `standard`, `deep`, where `fast` avoids full carving/OCR-heavy indexing.
 - Add Windows account/OS parser: hostname, timezone, last boot, users, admin membership, created/deleted/login times.
 - Add unified browser normalized model for history, downloads, cookies metadata where legally appropriate, and AI prompt artifacts.
-- Add Zone.Identifier ADS parser for downloaded-file provenance.
+- Add Zone.Identifier ADS parser for downloaded-file provenance. Status: sidecar/export parsing implemented.
 - Add EVTX parser contract with event semantic tags and typed parameters.
 - Add MFT metadata parser and timeline merge.
 - Add VSC compare design: current vs snapshots, deleted file deltas, VSC deletion command detection.
@@ -59,7 +59,7 @@ High priority:
 Medium priority:
 
 - Add SQLite/JSON/XML/email dedicated viewers.
-- Add Defender, Firewall, Task Scheduler, WER, Prefetch, JumpList, LNK, ShellBags, USB history parsers.
+- Add Defender, Firewall, Task Scheduler, WER, Prefetch, JumpList, LNK, ShellBags, USB history parsers. Status: first-pass fixture-backed coverage exists except deeper binary JumpList/LNK parsing.
 - Add optional TI connector plugin contract for URL/IP/hash enrichment.
 - Add Korean OCR validation set and OCR quality metrics.
 - Add VMDK/VHD/XVA adapter plan with external-tool diagnostics.

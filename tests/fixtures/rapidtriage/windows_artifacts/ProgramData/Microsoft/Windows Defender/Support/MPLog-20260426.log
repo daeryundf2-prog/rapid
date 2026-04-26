@@ -1,0 +1,3 @@
+2026-04-26T01:02:03.000Z Threat Name: Trojan:Win32/TestLoader
+2026-04-26T01:02:04.000Z Remediation action: Quarantine
+2026-04-26T01:02:05.000Z Exclusion path observed: C:\Users\alice\AppData\Roaming

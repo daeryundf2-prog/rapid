@@ -12,9 +12,9 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 
 ## Parser Coverage
 
-- Browser and recent-file artifacts are implemented first.
-- Windows Event Logs, Registry hives, Prefetch, Jump Lists, ShellBags, SRUM, mobile, and cloud imports are roadmap items.
-- MFT, Zone.Identifier ADS, Defender/Firewall/WER, Task Scheduler, VSC comparison, AI prompt extraction, and LotL command correlation are roadmap items.
+- Browser, recent-file, EventLog export, Registry export, ShellBags export, Prefetch inventory, Task Scheduler XML, Defender MPLog, Firewall W3C log, WER report, and Zone.Identifier sidecar artifacts are implemented first.
+- Binary EVTX, binary Prefetch run-count parsing, full Jump List/LNK destination parsing, SRUM, mobile, and cloud imports are roadmap items.
+- MFT, VSC comparison, AI prompt extraction, and deeper LotL command correlation are roadmap items.
 - APK malware triage, memory forensics, password cracking, live USB collection, and remote-agent collection are deferred until the security and validation model matures.
 - Parser output should be verified against source evidence before report inclusion.
 

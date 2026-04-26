@@ -153,9 +153,15 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `shellbag-key`
 - `windows-prefetch`
   - `prefetch-file`
+- `windows-system`
+  - `task-scheduler-task`
+  - `defender-support-log`
+  - `firewall-log`
+  - `wer-report`
+  - `zone-identifier`
 
 Current browser rows carry `user`, `browser`, `profile`, `history_count`, `download_count`, `history`, and `downloads` under `details`.
 
 Current recent/jumplist rows carry `user`, `entry_name`, `entry_hint`, `size`, and `modified_at` under `details`.
 
-Current Windows parser rows include source validation fields where available: `parser`, `parser_version`, `source_path`, `source_format`, and a bounded `raw_preview`. EventLog XML/JSON exports emit normalized `event_id`, `provider_name`, `channel`, `computer`, `event_created_at`, and `data`. Registry `.reg` exports emit `key`, `hive_hint`, `value_count`, and `values`. Prefetch inventory rows emit `executable_hint`, `entry_name`, `size`, and `modified_at`.
+Current Windows parser rows include source validation fields where available: `parser`, `parser_version`, `source_path`, `source_format`, and a bounded `raw_preview`. EventLog XML/JSON exports emit normalized `event_id`, `provider_name`, `channel`, `computer`, `event_created_at`, and `data`. Registry `.reg` exports emit `key`, `hive_hint`, `value_count`, and `values`. Prefetch inventory rows emit `executable_hint`, `entry_name`, `size`, and `modified_at`. Windows system rows emit Task Scheduler commands/arguments, Defender interesting entries, Firewall blocked/sample entries, WER app/module/bucket fields, and Zone.Identifier host/referrer URLs.

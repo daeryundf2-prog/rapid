@@ -45,6 +45,23 @@ The web start screen shows a run-plan preview before processing. Use `Fast first
 
 After a run, the Summary tab and generated Markdown report include a processing transparency section. Check warning badges for zero-row parsers, read-only extraction skips, missing source paths, existing destinations, and max-file or max-size caps before treating the run as complete.
 
+## Windows System Artifacts
+
+On mounted or exported Windows evidence, RapidTriage now collects high-value system artifacts in addition to browser/recent-file data:
+
+- Task Scheduler XML tasks, including command, arguments, author, user SID, and trigger type.
+- Windows Defender `MPLog*.log` support logs, with threat/remediation/exclusion-looking lines highlighted.
+- Windows Firewall W3C logs, including blocked connection counts and sample rows.
+- Windows Error Reporting `Report.wer` files, including crashed app, module, and bucket fields.
+- Zone.Identifier sidecar exports, including ZoneId, referrer URL, and host URL.
+
+Use:
+
+```bash
+rapidtriage artifacts ./mounted-case --kind windows-system --output windows-system.json
+rapidtriage run ./mounted-case --mode hacking --output-dir ./case-run --read-only
+```
+
 ## Review Workflow
 
 A search hit can be marked as relevant, excluded, follow-up, or report-worthy:

@@ -9,6 +9,7 @@ from .windows.prefetch import WindowsPrefetchProvider
 from .windows.recent_files import WindowsRecentFilesProvider
 from .windows.registry import WindowsRegistryProvider
 from .windows.shellbags import WindowsShellbagsProvider
+from .windows.system import WindowsSystemArtifactsProvider
 
 
 def all_providers() -> List[object]:
@@ -20,6 +21,7 @@ def all_providers() -> List[object]:
         WindowsRegistryProvider(),
         WindowsShellbagsProvider(),
         WindowsPrefetchProvider(),
+        WindowsSystemArtifactsProvider(),
     ]
 
 

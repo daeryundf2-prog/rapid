@@ -1,0 +1,4 @@
+#Version: 1.5
+#Fields: date time action protocol src-ip dst-ip src-port dst-port size
+2026-04-26 01:03:00 DROP TCP 10.0.0.5 203.0.113.9 51512 4444 60
+2026-04-26 01:03:05 ALLOW TCP 10.0.0.5 198.51.100.7 51513 443 120

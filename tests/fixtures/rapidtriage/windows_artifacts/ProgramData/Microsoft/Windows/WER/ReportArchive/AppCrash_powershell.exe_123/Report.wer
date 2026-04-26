@@ -1,0 +1,5 @@
+Version=1
+EventType=APPCRASH
+AppName=powershell.exe
+FaultModuleName=evil.dll
+Bucket=123456789
