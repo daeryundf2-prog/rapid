@@ -321,7 +321,11 @@ def _write_execution_fixtures(reg_path: Path, powershell_history: Path) -> None:
 
 def _write_prefetch_fixture(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"prefetch fixture")
+    header = bytearray(256)
+    header[0:4] = (30).to_bytes(4, "little")
+    header[4:8] = b"SCCA"
+    header[16 : 16 + len("POWERSHELL.EXE".encode("utf-16le"))] = "POWERSHELL.EXE".encode("utf-16le")
+    path.write_bytes(bytes(header))
 
 
 def _write_srum_fixture(path: Path) -> None:

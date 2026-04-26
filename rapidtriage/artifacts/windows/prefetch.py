@@ -8,7 +8,7 @@ from ...core.models import ArtifactRecord
 from .common import isoformat_from_timestamp
 
 PREFETCH_ROOT = ("Windows", "Prefetch")
-PARSER_VERSION = "prefetch-inventory-v2"
+PARSER_VERSION = "prefetch-inventory-v3"
 
 
 class WindowsPrefetchProvider:
@@ -28,6 +28,9 @@ class WindowsPrefetchProvider:
             if not path.is_file():
                 continue
             stat_result = path.stat()
+            header = prefetch_header_hints(path)
+            filename_executable_hint = executable_hint(path.name)
+            header_executable_name = str(header.get("header_executable_name") or "")
             yield ArtifactRecord(
                 provider=self.name,
                 artifact_type="prefetch-file",
@@ -41,7 +44,10 @@ class WindowsPrefetchProvider:
                     "source_path": str(path.resolve()),
                     "source_format": "pf",
                     "source_hashes": {"sha256": compute_sha256(path)},
-                    "executable_hint": executable_hint(path.name),
+                    "executable_hint": header_executable_name or filename_executable_hint,
+                    "executable_hint_source": "prefetch_header" if header_executable_name else "filename",
+                    "filename_executable_hint": filename_executable_hint,
+                    **header,
                     "prefetch_hash": prefetch_hash_hint(path.name),
                     "entry_name": path.name,
                     "size": stat_result.st_size,
@@ -49,7 +55,7 @@ class WindowsPrefetchProvider:
                     "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
                     "timestamp_source": "prefetch_file_modified_at",
                     "evidence_strength": "execution-indicator",
-                    "note": "Prefetch binary inventory; full run-count parsing requires a dedicated PF parser.",
+                    "note": "Prefetch triage inventory; header hints are parsed when SCCA is detected, while full run-count parsing remains a dedicated parser task.",
                 },
             )
 
@@ -66,3 +72,40 @@ def prefetch_hash_hint(name: str) -> str:
     if "-" not in stem:
         return ""
     return stem.rsplit("-", 1)[1]
+
+
+def prefetch_header_hints(path: Path) -> dict[str, object]:
+    try:
+        header = path.read_bytes()[:4096]
+    except OSError:
+        return {"binary_format_detected": False}
+    is_scca = len(header) >= 8 and header[4:8] == b"SCCA"
+    hints: dict[str, object] = {
+        "binary_format_detected": is_scca,
+        "prefetch_version": int.from_bytes(header[:4], "little") if is_scca else 0,
+        "header_executable_name": "",
+    }
+    if not is_scca:
+        return hints
+    strings = extract_utf16le_strings(header)
+    executable_names = [item for item in strings if ".exe" in item.lower()]
+    if executable_names:
+        hints["header_executable_name"] = executable_names[0]
+    return hints
+
+
+def extract_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> list[str]:
+    strings: list[str] = []
+    current = bytearray()
+    for offset in range(0, len(blob) - 1, 2):
+        pair = blob[offset : offset + 2]
+        value = int.from_bytes(pair, "little")
+        if 32 <= value <= 126:
+            current.extend(pair)
+            continue
+        if len(current) >= min_chars * 2:
+            strings.append(current.decode("utf-16le", errors="ignore").strip("\x00"))
+        current = bytearray()
+    if len(current) >= min_chars * 2:
+        strings.append(current.decode("utf-16le", errors="ignore").strip("\x00"))
+    return [item for item in strings if item]

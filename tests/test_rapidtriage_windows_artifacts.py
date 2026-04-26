@@ -155,7 +155,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             output = root / "prefetch.json"
             prefetch = root / "Windows" / "Prefetch" / "POWERSHELL.EXE-12345678.pf"
             prefetch.parent.mkdir(parents=True, exist_ok=True)
-            prefetch.write_bytes(b"prefetch fixture")
+            header = bytearray(256)
+            header[0:4] = (30).to_bytes(4, "little")
+            header[4:8] = b"SCCA"
+            header[16 : 16 + len("POWERSHELL.EXE".encode("utf-16le"))] = "POWERSHELL.EXE".encode("utf-16le")
+            prefetch.write_bytes(bytes(header))
 
             self.assertEqual(main(["artifacts", str(root), "--kind", "windows-prefetch", "--output", str(output)]), 0)
             payload = json.loads(output.read_text(encoding="utf-8"))
@@ -164,6 +168,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(payload["kind"], "windows-prefetch")
             self.assertEqual(artifact["artifact_type"], "prefetch-file")
             self.assertEqual(artifact["details"]["executable_hint"], "POWERSHELL.EXE")
+            self.assertEqual(artifact["details"]["executable_hint_source"], "prefetch_header")
+            self.assertTrue(artifact["details"]["binary_format_detected"])
+            self.assertEqual(artifact["details"]["prefetch_version"], 30)
+            self.assertEqual(artifact["details"]["header_executable_name"], "POWERSHELL.EXE")
             self.assertEqual(artifact["details"]["prefetch_hash"], "12345678")
             self.assertEqual(artifact["details"]["evidence_strength"], "execution-indicator")
 

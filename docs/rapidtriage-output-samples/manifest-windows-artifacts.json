@@ -645,7 +645,7 @@
           "supported": true,
           "details": {
             "parser": "windows-prefetch-inventory",
-            "parser_version": "prefetch-inventory-v2",
+            "parser_version": "prefetch-inventory-v3",
             "coverage_status": "detected",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
@@ -654,6 +654,11 @@
               "sha256": "c2c89977424f5c67a309ad39d1bfc7545d0f39413e7db096805254edf7bb1d0a"
             },
             "executable_hint": "POWERSHELL.EXE",
+            "executable_hint_source": "filename",
+            "filename_executable_hint": "POWERSHELL.EXE",
+            "binary_format_detected": false,
+            "prefetch_version": 0,
+            "header_executable_name": "",
             "prefetch_hash": "12345678",
             "entry_name": "POWERSHELL.EXE-12345678.pf",
             "size": 17,
@@ -661,7 +666,7 @@
             "timestamp": "2024-03-05T06:13:14+00:00",
             "timestamp_source": "prefetch_file_modified_at",
             "evidence_strength": "execution-indicator",
-            "note": "Prefetch binary inventory; full run-count parsing requires a dedicated PF parser."
+            "note": "Prefetch triage inventory; header hints are parsed when SCCA is detected, while full run-count parsing remains a dedicated parser task."
           }
         }
       ]
