@@ -31,7 +31,7 @@ RapidTriage should absorb this as a product principle:
 | MFT/EDB/WER/Defender/Firewall/ADS | Broad Windows forensic artifacts. | Partial | WER, Defender MPLog, Firewall W3C, Zone.Identifier sidecar, Task Scheduler XML with suspicious-action risk flags, native `$MFT` inventory, native USN record recovery, and EDB/SRUDB header/string pivots are fixture-backed; full MFT/EDB table/attribute decoding remains planned. |
 | Password cracking | Built-in password cracking workflow. | Deferred | Integrate only as optional external-tool workflow with legal warnings. |
 | OCR/translation | Korean OCR and translation-oriented review. | Partial | Keep OCR optional; evaluate Korean OCR quality separately. |
-| Linux/XFS | Strong Linux filesystem coverage including XFS. | Planned | Treat XFS as evidence adapter/filesystem extraction requirement. |
+| Linux/XFS | Strong Linux filesystem coverage including XFS. | Partial | Linux user, shell history, SSH, auth log, cron, and systemd triage exists; XFS remains an evidence adapter/filesystem extraction requirement. |
 | Virtualization | VMDK/VHD/XVA server dump support. | Detection only | Extend virtual disk adapter; add XVA detection and guidance. |
 | Mobile APK malware | Extract APKs from mobile dumps and flag suspicious apps. | Partial+ | Exported APK inventory/hash/manifest/permission/risk triage plus bounded dex/native suspicious string, URL, and IP pivots exist; full mobile acquisition and YARA-style scanning remain planned. |
 | Cloud exports | Import cloud provider exports into the same review/search workflow. | Partial | Google Takeout-style location/activity JSON and Apple/general account JSON normalization exists; live cloud acquisition remains planned. |

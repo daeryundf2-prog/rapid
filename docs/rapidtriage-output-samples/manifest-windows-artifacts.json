@@ -54,6 +54,13 @@
       "artifacts": []
     },
     {
+      "name": "linux-system-artifacts",
+      "description": "Linux user, shell history, SSH, auth log, cron, and systemd triage artifacts",
+      "target_platform": "linux",
+      "supported": true,
+      "artifacts": []
+    },
+    {
       "name": "macos-system-artifacts",
       "description": "macOS user, browser, quarantine, TCC privacy permission, and LaunchAgent triage artifacts",
       "target_platform": "macos",

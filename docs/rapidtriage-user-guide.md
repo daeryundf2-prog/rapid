@@ -165,8 +165,8 @@ rapidtriage case-search ./case.db --case-id CASE-001 -k deleted --source artifac
 
 When you use `rapidtriage run`, the Windows collectors are wired into the case workflow automatically:
 
-- `seizure`, `fraud`, and `hacking` run browser, recent-file, OS/account, event log, execution, filesystem, Windows system, and macOS system collectors.
-- `recovery` runs recent-file, OS/account, event log, filesystem, and macOS system collectors so deleted-file and restore clues still enter the timeline without doing carving.
+- `seizure`, `fraud`, and `hacking` run browser, recent-file, OS/account, event log, execution, filesystem, Windows system, Linux system, and macOS system collectors.
+- `recovery` runs recent-file, OS/account, event log, filesystem, Linux system, and macOS system collectors so deleted-file and restore clues still enter the timeline without doing carving.
 - Search and Case DB import can then find hits across documents, logs, event exports, PowerShell history, MFT/USN imports, and timeline rows from the same run output.
 
 ## macOS System Artifacts
@@ -184,6 +184,23 @@ Use:
 ```bash
 rapidtriage artifacts ./mounted-mac --kind macos-system --output macos-system.json
 rapidtriage run ./mounted-mac --mode hacking --output-dir ./case-run --read-only
+```
+
+## Linux System Artifacts
+
+On mounted or exported Linux evidence, `linux-system` collects a bounded IR-oriented baseline:
+
+- `/etc/passwd` user inventory with UID 0 and interactive-shell flags.
+- Shell history from common Bash/Zsh/Ash history files, including suspicious command-token flags.
+- SSH `authorized_keys` and `known_hosts` pivots with key material redacted to SHA256.
+- Auth log events for accepted/failed SSH, sudo commands, account creation, and cron execution.
+- Cron entries and systemd service units, including root execution, user-writable paths, and suspicious downloader/reverse-shell command hints.
+
+Use:
+
+```bash
+rapidtriage artifacts ./mounted-linux --kind linux-system --output linux-system.json
+rapidtriage run ./mounted-linux --mode hacking --output-dir ./case-run --read-only
 ```
 
 ## Android APK Triage

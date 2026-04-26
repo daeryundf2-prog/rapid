@@ -96,6 +96,7 @@ Current Windows artifact collector rows surfaced through `manifest` include:
 - `windows-shellbags`
 - `windows-prefetch`
 - `windows-system`
+- `linux-system-artifacts`
 - `macos-system-artifacts`
 
 Browser artifact `details` include the raw `history`/`downloads` rows plus normalized review pivots:
@@ -312,10 +313,10 @@ The collector interface is intentionally narrow so additional Windows-specific c
 
 Current run modes:
 
-- `seizure`: browser, recent files, Windows OS/account, event log, execution, filesystem, system-artifact, and macOS system collectors.
-- `fraud`: browser, recent files, Windows OS/account, event log, execution, filesystem, system-artifact, and macOS system collectors.
-- `hacking`: browser, recent files, Windows OS/account, event log, execution, filesystem, system-artifact, and macOS system collectors.
-- `recovery`: recent files, Windows OS/account, event log, filesystem, and macOS system collectors.
+- `seizure`: browser, recent files, Windows OS/account, event log, execution, filesystem, system-artifact, Linux system, and macOS system collectors.
+- `fraud`: browser, recent files, Windows OS/account, event log, execution, filesystem, system-artifact, Linux system, and macOS system collectors.
+- `hacking`: browser, recent files, Windows OS/account, event log, execution, filesystem, system-artifact, Linux system, and macOS system collectors.
+- `recovery`: recent files, Windows OS/account, event log, filesystem, Linux system, and macOS system collectors.
 
 `rapidtriage-run-summary.json` top-level keys:
 

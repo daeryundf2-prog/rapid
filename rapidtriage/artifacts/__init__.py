@@ -5,6 +5,7 @@ from typing import Dict, List
 from .android import AndroidApkProvider
 from .cloud import CloudExportProvider
 from .generic import GenericDocumentArtifactProvider
+from .linux import LinuxSystemArtifactsProvider
 from .macos import MacOsSystemArtifactsProvider
 from .media import MediaImageProvider
 from .memory import MemoryVolatilityProvider
@@ -27,6 +28,7 @@ def all_providers() -> List[object]:
         GenericDocumentArtifactProvider(),
         AndroidApkProvider(),
         CloudExportProvider(),
+        LinuxSystemArtifactsProvider(),
         MacOsSystemArtifactsProvider(),
         MediaImageProvider(),
         MemoryVolatilityProvider(),
