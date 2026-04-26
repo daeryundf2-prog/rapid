@@ -5,13 +5,14 @@ import hashlib
 import json
 import re
 import xml.etree.ElementTree as ET
+from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v2"
+PARSER_VERSION = "eventlog-normalized-v3"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
 
@@ -77,6 +78,7 @@ class WindowsEventLogProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
+        records: list[ArtifactRecord] = []
         seen: set[Path] = set()
         for path in candidate_eventlog_paths(root):
             resolved = path.resolve()
@@ -85,13 +87,17 @@ class WindowsEventLogProvider:
             seen.add(resolved)
             suffix = path.suffix.lower()
             if suffix == ".xml":
-                yield from collect_xml_events(path)
+                records.extend(collect_xml_events(path))
             elif suffix in {".json", ".jsonl", ".ndjson"}:
-                yield from collect_json_like_events(path)
+                records.extend(collect_json_like_events(path))
             elif suffix == ".csv":
-                yield from collect_csv_events(path)
+                records.extend(collect_csv_events(path))
             elif suffix == ".evtx":
-                yield build_eventlog_file_record(path)
+                records.append(build_eventlog_file_record(path))
+        yield from records
+        summary = build_eventlog_summary(root, records)
+        if summary is not None:
+            yield summary
 
 
 def candidate_eventlog_paths(root: Path) -> Iterable[Path]:
@@ -393,6 +399,103 @@ def build_eventlog_file_record(path: Path) -> ArtifactRecord:
     )
 
 
+def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> ArtifactRecord | None:
+    parsed_rows = [
+        record
+        for record in records
+        if record.artifact_type in {"eventlog-event", "eventlog-detection"} and isinstance(record.details, Mapping)
+    ]
+    inventory_rows = [record for record in records if record.artifact_type == "eventlog-file"]
+    if not parsed_rows and not inventory_rows:
+        return None
+
+    event_id_counts: Counter[str] = Counter()
+    category_counts: Counter[str] = Counter()
+    channel_counts: Counter[str] = Counter()
+    user_counts: Counter[str] = Counter()
+    source_ip_counts: Counter[str] = Counter()
+    process_counts: Counter[str] = Counter()
+    source_paths: set[str] = set()
+    timestamps: list[str] = []
+    high_risk_events: list[dict[str, object]] = []
+    record_ids_by_channel: dict[str, list[int]] = defaultdict(list)
+
+    for record in parsed_rows:
+        details = record.details
+        event_id = str(details.get("event_id") or "")
+        category = str(details.get("event_category") or "")
+        channel = str(details.get("channel") or "unknown")
+        user_name = str(details.get("user_name") or details.get("target_user_name") or details.get("subject_user_name") or "")
+        source_ip = str(details.get("source_ip") or "")
+        process_name = str(details.get("process_name") or details.get("new_process_name") or "")
+        source_path = str(details.get("source_path") or record.path)
+        timestamp = str(details.get("timestamp") or details.get("event_created_at") or "")
+        record_id = int_text(details.get("record_id"))
+
+        increment_counter(event_id_counts, event_id)
+        increment_counter(category_counts, category)
+        increment_counter(channel_counts, channel)
+        increment_counter(user_counts, user_name)
+        increment_counter(source_ip_counts, source_ip)
+        increment_counter(process_counts, process_name)
+        source_paths.add(source_path)
+        if timestamp:
+            timestamps.append(timestamp)
+        if record_id is not None:
+            record_ids_by_channel[channel].append(record_id)
+        if int(details.get("risk_score") or 0) >= 40 or details.get("risk_flags"):
+            high_risk_events.append(
+                {
+                    "timestamp": timestamp,
+                    "event_id": event_id,
+                    "event_category": category,
+                    "channel": channel,
+                    "user_name": user_name,
+                    "source_ip": source_ip,
+                    "process_name": process_name,
+                    "risk_score": details.get("risk_score", 0),
+                    "risk_flags": list(details.get("risk_flags") or []),
+                    "rule": details.get("rule", {}),
+                    "source_path": source_path,
+                }
+            )
+
+    timestamps.sort()
+    details = {
+        "parser": "windows-eventlog-summary",
+        "parser_version": PARSER_VERSION,
+        "coverage_status": "summarized",
+        "reportability": "triage",
+        "source_path": str(root.resolve()),
+        "source_format": "summary",
+        "event_count": len(parsed_rows),
+        "detection_count": sum(1 for record in parsed_rows if record.artifact_type == "eventlog-detection"),
+        "inventory_count": len(inventory_rows),
+        "source_files": sorted(source_paths),
+        "event_id_counts": counter_items(event_id_counts),
+        "event_category_counts": counter_items(category_counts),
+        "channel_counts": counter_items(channel_counts),
+        "user_counts": counter_items(user_counts),
+        "source_ip_counts": counter_items(source_ip_counts),
+        "process_counts": counter_items(process_counts),
+        "first_event_at": timestamps[0] if timestamps else "",
+        "last_event_at": timestamps[-1] if timestamps else "",
+        "high_risk_events": sorted(high_risk_events, key=lambda item: int(item.get("risk_score") or 0), reverse=True)[:50],
+        "record_sequence_gaps": record_sequence_gaps(record_ids_by_channel),
+        "summary_notes": [
+            "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
+            "Binary EVTX rows are inventoried separately until native EVTX decoding is enabled.",
+        ],
+    }
+    return ArtifactRecord(
+        provider=WindowsEventLogProvider.name,
+        artifact_type="eventlog-summary",
+        path=str(root.resolve()),
+        supported=True,
+        details=details,
+    )
+
+
 def event_record(path: Path, artifact_type: str, details: Mapping[str, object]) -> ArtifactRecord:
     return ArtifactRecord(
         provider=WindowsEventLogProvider.name,
@@ -481,6 +584,45 @@ def event_risk_score(event_id: str, terms: list[str], has_rule: bool) -> int:
     if has_rule:
         score += 40
     return min(100, score)
+
+
+def increment_counter(counter: Counter[str], value: str) -> None:
+    if value:
+        counter[value] += 1
+
+
+def counter_items(counter: Counter[str], limit: int = 25) -> list[dict[str, object]]:
+    return [{"value": value, "count": count} for value, count in counter.most_common(limit)]
+
+
+def int_text(value: object) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def record_sequence_gaps(record_ids_by_channel: Mapping[str, Sequence[int]], limit: int = 50) -> list[dict[str, object]]:
+    gaps: list[dict[str, object]] = []
+    for channel, record_ids in sorted(record_ids_by_channel.items()):
+        unique_ids = sorted(set(record_ids))
+        for previous, current in zip(unique_ids, unique_ids[1:]):
+            if current - previous <= 1:
+                continue
+            gaps.append(
+                {
+                    "channel": channel,
+                    "after_record_id": previous,
+                    "before_record_id": current,
+                    "missing_count": current - previous - 1,
+                }
+            )
+            if len(gaps) >= limit:
+                return gaps
+    return gaps
 
 
 def strip_namespace(tag: str) -> str:

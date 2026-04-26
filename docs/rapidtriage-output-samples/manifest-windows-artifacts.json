@@ -277,7 +277,7 @@
           "supported": true,
           "details": {
             "parser": "windows-eventlog-xml",
-            "parser_version": "eventlog-normalized-v2",
+            "parser_version": "eventlog-normalized-v3",
             "coverage_status": "mapped",
             "reportability": "reportable",
             "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
@@ -329,6 +329,65 @@
               "LogonType": "10"
             },
             "raw_preview": "<ns0:Event xmlns:ns0=\"http://schemas.microsoft.com/win/2004/08/events/event\">\n    <ns0:System>\n      <ns0:Provider Name=\"Microsoft-Windows-Security-Auditing\" />\n      <ns0:EventID>4624</ns0:EventID>\n      <ns0:Level>0</ns0:Level>\n      <ns0:Channel>Security</ns0:Channel>\n      <ns0:Computer>WIN-CASE01</ns0:Computer>\n      <ns0:EventRecordID>1001</ns0:EventRecordID>\n      <ns0:TimeCreated SystemTime=\"2024-04-01T12:34:56.0000000Z\" />\n    </ns0:System>\n    <ns0:EventData>\n      <ns0:Data Name=\"TargetUserName\">alice</ns0:Data>\n      <ns0:Data Name=\"IpAddress\">10.0.0.5</ns0:Data>\n      <ns0:Data Name=\"LogonType\">10</ns0:Data>\n    </ns0:EventData>\n  </ns0:Event>\n"
+          }
+        },
+        {
+          "provider": "windows-eventlog",
+          "artifact_type": "eventlog-summary",
+          "path": "<ROOT>",
+          "supported": true,
+          "details": {
+            "parser": "windows-eventlog-summary",
+            "parser_version": "eventlog-normalized-v3",
+            "coverage_status": "summarized",
+            "reportability": "triage",
+            "source_path": "<ROOT>",
+            "source_format": "summary",
+            "event_count": 1,
+            "detection_count": 0,
+            "inventory_count": 0,
+            "source_files": [
+              "<ROOT>/Windows/System32/winevt/Logs/Security.xml"
+            ],
+            "event_id_counts": [
+              {
+                "value": "4624",
+                "count": 1
+              }
+            ],
+            "event_category_counts": [
+              {
+                "value": "logon-success",
+                "count": 1
+              }
+            ],
+            "channel_counts": [
+              {
+                "value": "Security",
+                "count": 1
+              }
+            ],
+            "user_counts": [
+              {
+                "value": "alice",
+                "count": 1
+              }
+            ],
+            "source_ip_counts": [
+              {
+                "value": "10.0.0.5",
+                "count": 1
+              }
+            ],
+            "process_counts": [],
+            "first_event_at": "2024-04-01T12:34:56.000000+00:00",
+            "last_event_at": "2024-04-01T12:34:56.000000+00:00",
+            "high_risk_events": [],
+            "record_sequence_gaps": [],
+            "summary_notes": [
+              "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
+              "Binary EVTX rows are inventoried separately until native EVTX decoding is enabled."
+            ]
           }
         }
       ]

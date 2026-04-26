@@ -68,6 +68,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             event_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-event"]
             detection_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-detection"]
             inventory_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-file"]
+            summary_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-summary"]
 
             self.assertGreaterEqual(len(event_rows), 2)
             logon = [item for item in event_rows if item["details"]["event_id"] == "4624"][0]
@@ -86,6 +87,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(detection_rows[0]["details"]["coverage_status"], "detected-by-rule")
             self.assertEqual(inventory_rows[0]["details"]["coverage_status"], "detected")
             self.assertEqual(inventory_rows[0]["details"]["source_path"], str(fixture.evtx_file.resolve()))
+            summary = summary_rows[0]["details"]
+            self.assertEqual(summary["event_count"], 3)
+            self.assertEqual(summary["detection_count"], 1)
+            self.assertEqual(summary["first_event_at"], "2024-04-01T01:02:03.000000+00:00")
+            self.assertIn({"value": "4104", "count": 2}, summary["event_id_counts"])
+            self.assertTrue(any(item["event_id"] == "4104" for item in summary["high_risk_events"]))
+            self.assertTrue(any(item["channel"] == "Microsoft-Windows-PowerShell/Operational" for item in summary["record_sequence_gaps"]))
 
     def test_windows_os_account_collector_summarizes_profiles_and_reg_exports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

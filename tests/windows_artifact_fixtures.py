@@ -267,7 +267,7 @@ def _write_eventlog_fixtures(xml_path: Path, hayabusa_path: Path, evtx_path: Pat
     )
     hayabusa_path.parent.mkdir(parents=True, exist_ok=True)
     hayabusa_path.write_text(
-        '{"Timestamp":"2024-04-01T02:03:04Z","Computer":"WIN-FIXTURE","Channel":"Microsoft-Windows-PowerShell/Operational","EventID":4104,"Level":"high","RecordID":202,"RuleTitle":"Suspicious Encoded PowerShell","RuleID":"RT-PS-001","MitreTags":"attack.t1059.001","CommandLine":"powershell -enc SQBFAFgA"}\n',
+        '{"Timestamp":"2024-04-01T02:03:04Z","Computer":"WIN-FIXTURE","Channel":"Microsoft-Windows-PowerShell/Operational","EventID":4104,"Level":"high","RecordID":205,"RuleTitle":"Suspicious Encoded PowerShell","RuleID":"RT-PS-001","MitreTags":"attack.t1059.001","CommandLine":"powershell -enc SQBFAFgA"}\n',
         encoding="utf-8",
     )
     evtx_path.write_bytes(b"ElfFile fixture evtx placeholder")

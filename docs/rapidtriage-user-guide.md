@@ -82,6 +82,7 @@ Event log workflow:
 - Native `.evtx` files are inventoried with source hashes and parser guidance.
 - XML/JSON/JSONL/CSV exports from EVTX-oriented tools such as EvtxECmd, Hayabusa, Chainsaw, and Velociraptor are normalized into event rows.
 - Important Event IDs such as logons, failed logons, privileged logons, process creation, scheduled task creation, service installation, log clearing, and PowerShell script blocks are categorized with risk flags.
+- `eventlog-summary` rows aggregate large exports by Event ID, category, channel, user, source IP, and process name, with high-risk event samples and EventRecordID gap hints for review triage.
 
 Use:
 
