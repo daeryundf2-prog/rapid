@@ -108,7 +108,7 @@ rapidtriage artifacts ./registry-exports --kind windows-registry --output regist
 Recent/LNK workflow:
 
 - Recent shortcut rows parse Shell Link metadata when available, including target path, working directory, command-line arguments, target timestamps, link flags, file attributes, source hashes, and embedded path pivots.
-- Jump List files are inventoried as automatic/custom destination containers with embedded path extraction for search triage; full destination stream parsing remains a planned hardening item.
+- Jump List files are inventoried as automatic/custom destination containers; recoverable embedded Shell Link records are promoted into destination rows with target paths, working directories, target timestamps, link flags, and offsets, with fallback embedded path extraction for search triage.
 
 Remote access workflow:
 

@@ -60,7 +60,7 @@ High priority:
 Medium priority:
 
 - Add SQLite/JSON/XML/email dedicated viewers.
-- Add Defender, Firewall, Task Scheduler, WER, Prefetch, JumpList, LNK, ShellBags, USB history parsers. Status: first-pass fixture-backed coverage exists except deeper binary JumpList/LNK parsing.
+- Add Defender, Firewall, Task Scheduler, WER, Prefetch, JumpList, LNK, ShellBags, USB history parsers. Status: first-pass fixture-backed coverage exists, with LNK header/string parsing and recoverable embedded Jump List Shell Link destination promotion; deeper OLE Jump List stream traversal remains later.
 - Add optional TI connector plugin contract for URL/IP/hash enrichment.
 - Add Korean OCR validation set and OCR quality metrics.
 - Add VMDK/VHD/XVA adapter plan with external-tool diagnostics.

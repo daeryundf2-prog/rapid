@@ -274,12 +274,25 @@ def _write_ai_storage_fixture(path: Path) -> None:
 
 def _write_recent_shortcuts(path: Path, shortcuts: list[RecentShortcut]) -> None:
     path.mkdir(parents=True, exist_ok=True)
+    timestamp = shortcuts[0].modified_at if shortcuts else datetime(2024, 1, 1, tzinfo=timezone.utc)
     for shortcut in shortcuts:
         shortcut_path = path / shortcut.name
         target_path = rf"C:\Users\alice\Documents\{shortcut.name.removesuffix('.lnk')}"
         shortcut_path.write_bytes(build_minimal_lnk(target_path, shortcut.modified_at))
         ts = shortcut.modified_at.timestamp()
         os.utime(shortcut_path, (ts, ts))
+    automatic = path / "AutomaticDestinations" / "5f7b5f1e01b83767.automaticDestinations-ms"
+    custom = path / "CustomDestinations" / "9b9cdc69c1c24e2b.customDestinations-ms"
+    automatic.parent.mkdir(parents=True, exist_ok=True)
+    custom.parent.mkdir(parents=True, exist_ok=True)
+    automatic.write_bytes(
+        b"JUMPLIST:AUTO\x00"
+        + build_minimal_lnk(r"C:\Users\alice\Documents\Incident Notes.docx", timestamp)
+    )
+    custom.write_bytes(
+        b"JUMPLIST:CUSTOM\x00"
+        + build_minimal_lnk(r"C:\Users\alice\Downloads\installer.exe", timestamp)
+    )
 
 
 def build_minimal_lnk(target_path: str, timestamp: datetime) -> bytes:

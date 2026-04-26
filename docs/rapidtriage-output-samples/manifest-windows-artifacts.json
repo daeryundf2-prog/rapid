@@ -325,19 +325,48 @@
           "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/5f7b5f1e01b83767.automaticDestinations-ms",
           "supported": true,
           "details": {
+            "parser": "windows-recent-files",
+            "parser_version": "windows-recent-files-v2",
             "user": "alice",
             "entry_name": "5f7b5f1e01b83767.automaticDestinations-ms",
             "entry_hint": "5f7b5f1e01b83767",
-            "size": 13,
+            "size": 224,
             "modified_at": "2024-03-05T06:08:09+00:00",
             "source_hashes": {
-              "sha256": "aadc5dab12bc46d45848be307ab7c678174f0dfc121e5b67d3ab5e5e1304a3d8"
+              "sha256": "247c2f514fcdfdbf9358c1289c7382e3a557f2d7b2f04133fd1ef37a1e7a4d08"
             },
-            "jump_list_parse_status": "inventory",
+            "jump_list_parse_status": "parsed-embedded-lnk",
             "container_hint": "custom-binary",
             "jumplist_kind": "automatic",
-            "embedded_paths": [],
-            "note": "Jump List destination stream parsing is not fully decoded yet; embedded path extraction is provided for triage search."
+            "application_id_hash": "5f7b5f1e01b83767",
+            "embedded_paths": [
+              "C:\\Users\\alice\\Documents\\Case Notes.docx",
+              "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
+            ],
+            "destination_count": 1,
+            "destinations": [
+              {
+                "index": 0,
+                "lnk_offset": 14,
+                "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+                "embedded_paths": [
+                  "C:\\Users\\alice\\Documents\\Case Notes.docx",
+                  "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
+                ],
+                "target_created_at": "2024-03-05T06:08:09+00:00",
+                "target_accessed_at": "2024-03-05T06:08:09+00:00",
+                "target_modified_at": "2024-03-05T06:08:09+00:00",
+                "working_dir": "C:\\Users\\alice\\Documents",
+                "command_line_arguments": "",
+                "link_flag_names": [
+                  "HasRelativePath",
+                  "HasWorkingDir",
+                  "HasArguments",
+                  "IsUnicode"
+                ]
+              }
+            ],
+            "note": "Jump List destination streams are decoded when embedded Shell Link records are recoverable; otherwise embedded path extraction is provided for triage search."
           }
         },
         {
@@ -346,19 +375,48 @@
           "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/CustomDestinations/9b9cdc69c1c24e2b.customDestinations-ms",
           "supported": true,
           "details": {
+            "parser": "windows-recent-files",
+            "parser_version": "windows-recent-files-v2",
             "user": "alice",
             "entry_name": "9b9cdc69c1c24e2b.customDestinations-ms",
             "entry_hint": "9b9cdc69c1c24e2b",
-            "size": 15,
+            "size": 222,
             "modified_at": "2024-03-05T06:09:10+00:00",
             "source_hashes": {
-              "sha256": "27d405dcddb171973bbff3bfc3b078c2820a445261314214fea1d93227e98afa"
+              "sha256": "a1fbe7d6e1240b87cd735ee7a9bfb56adcec0090dbfeb08796a48573b75fb1f7"
             },
-            "jump_list_parse_status": "inventory",
+            "jump_list_parse_status": "parsed-embedded-lnk",
             "container_hint": "custom-binary",
             "jumplist_kind": "custom",
-            "embedded_paths": [],
-            "note": "Jump List destination stream parsing is not fully decoded yet; embedded path extraction is provided for triage search."
+            "application_id_hash": "9b9cdc69c1c24e2b",
+            "embedded_paths": [
+              "C:\\Users\\alice\\Downloads\\installer.exe",
+              "C:\\Users\\alice\\Downloads\\installer.exe\u0018C:\\Users\\alice\\Documents"
+            ],
+            "destination_count": 1,
+            "destinations": [
+              {
+                "index": 0,
+                "lnk_offset": 16,
+                "target_path": "C:\\Users\\alice\\Downloads\\installer.exe",
+                "embedded_paths": [
+                  "C:\\Users\\alice\\Downloads\\installer.exe",
+                  "C:\\Users\\alice\\Downloads\\installer.exe\u0018C:\\Users\\alice\\Documents"
+                ],
+                "target_created_at": "2024-03-05T06:09:10+00:00",
+                "target_accessed_at": "2024-03-05T06:09:10+00:00",
+                "target_modified_at": "2024-03-05T06:09:10+00:00",
+                "working_dir": "C:\\Users\\alice\\Documents",
+                "command_line_arguments": "",
+                "link_flag_names": [
+                  "HasRelativePath",
+                  "HasWorkingDir",
+                  "HasArguments",
+                  "IsUnicode"
+                ]
+              }
+            ],
+            "note": "Jump List destination streams are decoded when embedded Shell Link records are recoverable; otherwise embedded path extraction is provided for triage search."
           }
         },
         {
@@ -367,6 +425,8 @@
           "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/Case Notes.lnk",
           "supported": true,
           "details": {
+            "parser": "windows-recent-files",
+            "parser_version": "windows-recent-files-v2",
             "user": "alice",
             "entry_name": "Case Notes.lnk",
             "entry_hint": "Case Notes",

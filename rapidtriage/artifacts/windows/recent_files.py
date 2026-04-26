@@ -11,6 +11,8 @@ from ...core.models import ArtifactRecord
 from .common import isoformat_from_timestamp, iter_windows_user_homes
 
 RECENT_ROOT = ("AppData", "Roaming", "Microsoft", "Windows", "Recent")
+PARSER_VERSION = "windows-recent-files-v2"
+MAX_JUMPLIST_EMBEDDED_LNKS = 50
 RECENT_PATTERNS: Tuple[Tuple[str, str, Sequence[str]], ...] = (
     ("recent-shortcut", "*.lnk", ()),
     ("jumplist-automatic", "*.automaticDestinations-ms", ("AutomaticDestinations",)),
@@ -85,6 +87,8 @@ class WindowsRecentFilesProvider:
                         path=str(candidate.resolve()),
                         supported=self.supported(),
                         details={
+                            "parser": "windows-recent-files",
+                            "parser_version": PARSER_VERSION,
                             "user": user_root.name,
                             "entry_name": candidate.name,
                             "entry_hint": candidate.stem,
@@ -107,7 +111,10 @@ def parse_lnk_metadata(path: Path) -> dict[str, object]:
         data = path.read_bytes()
     except OSError:
         return {"lnk_parse_status": "read-error"}
+    return parse_lnk_metadata_from_bytes(data)
 
+
+def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
     embedded_paths = extract_windows_paths(data)
     if len(data) < LNK_HEADER_SIZE or data[:4] != b"\x4c\x00\x00\x00" or data[4:20] != LNK_CLSID:
         return {
@@ -202,13 +209,65 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         data = path.read_bytes()
     except OSError:
         return {"jump_list_parse_status": "read-error"}
+    destinations = extract_jumplist_destinations(data)
+    embedded_paths = sorted(
+        {
+            item
+            for item in [
+                *extract_windows_paths(data),
+                *(embedded_path for destination in destinations for embedded_path in destination.get("embedded_paths", [])),
+                *(str(destination.get("target_path") or "") for destination in destinations),
+            ]
+            if item
+        }
+    )
     return {
-        "jump_list_parse_status": "inventory",
+        "jump_list_parse_status": "parsed-embedded-lnk" if destinations else "inventory",
         "container_hint": "ole-compound-file" if data.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1") else "custom-binary",
         "jumplist_kind": "automatic" if artifact_type == "jumplist-automatic" else "custom",
-        "embedded_paths": extract_windows_paths(data),
-        "note": "Jump List destination stream parsing is not fully decoded yet; embedded path extraction is provided for triage search.",
+        "application_id_hash": path.stem.split(".", 1)[0],
+        "embedded_paths": embedded_paths,
+        "destination_count": len(destinations),
+        "destinations": destinations,
+        "note": "Jump List destination streams are decoded when embedded Shell Link records are recoverable; otherwise embedded path extraction is provided for triage search.",
     }
+
+
+def extract_jumplist_destinations(data: bytes) -> list[dict[str, object]]:
+    destinations: list[dict[str, object]] = []
+    for index, offset in enumerate(find_lnk_offsets(data)):
+        metadata = parse_lnk_metadata_from_bytes(data[offset:])
+        if metadata.get("lnk_parse_status") != "parsed":
+            continue
+        target_path = str(metadata.get("target_path") or "")
+        embedded_paths = [str(value) for value in metadata.get("embedded_paths", []) if value]
+        destinations.append(
+            {
+                "index": index,
+                "lnk_offset": offset,
+                "target_path": target_path,
+                "embedded_paths": embedded_paths,
+                "target_created_at": metadata.get("target_created_at", ""),
+                "target_accessed_at": metadata.get("target_accessed_at", ""),
+                "target_modified_at": metadata.get("target_modified_at", ""),
+                "working_dir": metadata.get("working_dir", ""),
+                "command_line_arguments": metadata.get("command_line_arguments", ""),
+                "link_flag_names": metadata.get("link_flag_names", []),
+            }
+        )
+        if len(destinations) >= MAX_JUMPLIST_EMBEDDED_LNKS:
+            break
+    return destinations
+
+
+def find_lnk_offsets(data: bytes) -> Iterable[int]:
+    offset = 0
+    while True:
+        offset = data.find(b"\x4c\x00\x00\x00" + LNK_CLSID, offset)
+        if offset < 0:
+            return
+        yield offset
+        offset += 1
 
 
 def read_lnk_counted_string(data: bytes, offset: int, is_unicode: bool) -> tuple[str, int]:

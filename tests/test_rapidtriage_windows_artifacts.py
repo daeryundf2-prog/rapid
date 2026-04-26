@@ -112,6 +112,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(main(["artifacts", str(root), "--kind", "recent-files", "--output", str(output)]), 0)
             payload = json.loads(output.read_text(encoding="utf-8"))
             shortcut = next(item for item in payload["artifacts"] if item["artifact_type"] == "recent-shortcut")
+            automatic = next(item for item in payload["artifacts"] if item["artifact_type"] == "jumplist-automatic")
+            custom = next(item for item in payload["artifacts"] if item["artifact_type"] == "jumplist-custom")
             details = shortcut["details"]
 
             self.assertEqual(details["entry_name"], fixture.recent_shortcut.name)
@@ -121,6 +123,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("IsUnicode", details["link_flag_names"])
             self.assertIn("ARCHIVE", details["file_attribute_names"])
             self.assertEqual(len(details["source_hashes"]["sha256"]), 64)
+            self.assertEqual(automatic["details"]["jump_list_parse_status"], "parsed-embedded-lnk")
+            self.assertEqual(automatic["details"]["destination_count"], 1)
+            self.assertEqual(automatic["details"]["destinations"][0]["target_path"], r"C:\Users\alice\Documents\Incident Notes.docx")
+            self.assertIn(r"C:\Users\alice\Documents\Incident Notes.docx", automatic["details"]["embedded_paths"])
+            self.assertEqual(custom["details"]["destinations"][0]["target_path"], r"C:\Users\alice\Downloads\installer.exe")
 
     def test_eventlog_collector_normalizes_exports_detections_and_evtx_inventory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -109,7 +109,7 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
     set_mtime(rdp_cache, datetime(2024, 3, 5, 6, 7, 12, tzinfo=timezone.utc))
     set_mtime(rdp_reg, datetime(2024, 3, 5, 6, 7, 13, tzinfo=timezone.utc))
     set_mtime(wmi_objects, datetime(2024, 3, 5, 6, 7, 14, tzinfo=timezone.utc))
-    set_mtime(
+    automatic_jumplist = (
         root
         / "Users"
         / "alice"
@@ -119,10 +119,9 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
         / "Windows"
         / "Recent"
         / "AutomaticDestinations"
-        / "5f7b5f1e01b83767.automaticDestinations-ms",
-        datetime(2024, 3, 5, 6, 8, 9, tzinfo=timezone.utc),
+        / "5f7b5f1e01b83767.automaticDestinations-ms"
     )
-    set_mtime(
+    custom_jumplist = (
         root
         / "Users"
         / "alice"
@@ -132,9 +131,24 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
         / "Windows"
         / "Recent"
         / "CustomDestinations"
-        / "9b9cdc69c1c24e2b.customDestinations-ms",
-        datetime(2024, 3, 5, 6, 9, 10, tzinfo=timezone.utc),
+        / "9b9cdc69c1c24e2b.customDestinations-ms"
     )
+    automatic_jumplist.write_bytes(
+        b"JUMPLIST:AUTO\x00"
+        + build_minimal_lnk(
+            r"C:\Users\alice\Documents\Case Notes.docx",
+            datetime(2024, 3, 5, 6, 8, 9, tzinfo=timezone.utc),
+        )
+    )
+    custom_jumplist.write_bytes(
+        b"JUMPLIST:CUSTOM\x00"
+        + build_minimal_lnk(
+            r"C:\Users\alice\Downloads\installer.exe",
+            datetime(2024, 3, 5, 6, 9, 10, tzinfo=timezone.utc),
+        )
+    )
+    set_mtime(automatic_jumplist, datetime(2024, 3, 5, 6, 8, 9, tzinfo=timezone.utc))
+    set_mtime(custom_jumplist, datetime(2024, 3, 5, 6, 9, 10, tzinfo=timezone.utc))
     stable_artifact_times = {
         root / "Users" / "alice": datetime(2024, 3, 5, 6, 6, 6, tzinfo=timezone.utc),
         root / "Windows" / "System32" / "winevt" / "Logs" / "Security.xml": datetime(2024, 3, 5, 6, 10, 11, tzinfo=timezone.utc),
