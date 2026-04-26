@@ -16,6 +16,7 @@ from .windows.os_account import WindowsOsAccountProvider
 from .windows.prefetch import WindowsPrefetchProvider
 from .windows.recent_files import WindowsRecentFilesProvider
 from .windows.registry import WindowsRegistryProvider
+from .windows.remote_access import WindowsRemoteAccessProvider
 from .windows.search_index import WindowsSearchIndexProvider
 from .windows.shellbags import WindowsShellbagsProvider
 from .windows.system import WindowsSystemArtifactsProvider
@@ -36,6 +37,7 @@ def all_providers() -> List[object]:
         WindowsFilesystemProvider(),
         WindowsEventLogProvider(),
         WindowsRegistryProvider(),
+        WindowsRemoteAccessProvider(),
         WindowsSearchIndexProvider(),
         WindowsShellbagsProvider(),
         WindowsPrefetchProvider(),

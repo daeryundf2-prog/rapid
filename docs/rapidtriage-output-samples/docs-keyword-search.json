@@ -161,6 +161,13 @@
         "artifacts": []
       },
       {
+        "name": "windows-remote-access",
+        "description": "Windows RDP configuration, cache, and exported destination artifacts",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
         "name": "windows-search-index",
         "description": "Windows Search index EDB inventory and CSV/JSON export imports",
         "target_platform": "windows",

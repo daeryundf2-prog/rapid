@@ -110,6 +110,12 @@ Recent/LNK workflow:
 - Recent shortcut rows parse Shell Link metadata when available, including target path, working directory, command-line arguments, target timestamps, link flags, file attributes, source hashes, and embedded path pivots.
 - Jump List files are inventoried as automatic/custom destination containers with embedded path extraction for search triage; full destination stream parsing remains a planned hardening item.
 
+Remote access workflow:
+
+- `windows-remote-access` extracts RDP connection files, including full address, username hint, gateway host, and modified time.
+- Terminal Server Client cache files are inventoried with hashes and timestamps so analysts can preserve and review RDP thumbnail/cache evidence.
+- Exported Terminal Server Client registry keys are normalized into `rdp-destination` rows for quick destination pivots.
+
 Execution and filesystem workflow:
 
 - `windows-execution` imports Amcache/ShimCache/UserAssist/BAM-style `.reg` exports and PowerShell console history.

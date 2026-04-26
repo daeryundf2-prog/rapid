@@ -51,6 +51,9 @@ class WindowsArtifactFixture:
     usn_jsonl: Path
     windows_search_csv: Path
     windows_edb: Path
+    default_rdp: Path
+    rdp_cache_file: Path
+    rdp_reg: Path
 
 
 def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
@@ -91,6 +94,9 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     usn_jsonl = root / "analysis" / "usn.jsonl"
     windows_search_csv = root / "analysis" / "windows-search-index.csv"
     windows_edb = root / "ProgramData" / "Microsoft" / "Search" / "Data" / "Applications" / "Windows" / "Windows.edb"
+    default_rdp = root / "Users" / "alice" / "Documents" / "Default.rdp"
+    rdp_cache_file = root / "Users" / "alice" / "AppData" / "Local" / "Microsoft" / "Terminal Server Client" / "Cache" / "Cache0000.bin"
+    rdp_reg = root / "Windows" / "System32" / "config" / "rdp.reg"
 
     _write_chromium_history(
         chrome_history,
@@ -110,6 +116,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     _write_srum_fixture(srum_csv)
     _write_filesystem_fixtures(mft_csv, usn_jsonl)
     _write_windows_search_fixture(windows_search_csv, windows_edb)
+    _write_remote_access_fixtures(default_rdp, rdp_cache_file, rdp_reg)
 
     return WindowsArtifactFixture(
         root=root,
@@ -129,6 +136,9 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         usn_jsonl=usn_jsonl,
         windows_search_csv=windows_search_csv,
         windows_edb=windows_edb,
+        default_rdp=default_rdp,
+        rdp_cache_file=rdp_cache_file,
+        rdp_reg=rdp_reg,
     )
 
 
@@ -397,6 +407,31 @@ def _write_windows_search_fixture(csv_path: Path, edb_path: Path) -> None:
     )
     edb_path.parent.mkdir(parents=True, exist_ok=True)
     edb_path.write_bytes(b"fixture windows search edb")
+
+
+def _write_remote_access_fixtures(default_rdp: Path, cache_file: Path, reg_path: Path) -> None:
+    default_rdp.parent.mkdir(parents=True, exist_ok=True)
+    default_rdp.write_text(
+        "full address:s:10.0.0.50\n"
+        "username:s:CORP\\alice\n"
+        "gatewayhostname:s:rd-gateway.example\n"
+        "screen mode id:i:2\n",
+        encoding="utf-8",
+    )
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_bytes(b"fixture rdp cache")
+    reg_path.parent.mkdir(parents=True, exist_ok=True)
+    reg_path.write_text(
+        """Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50]
+"MRU0"="10.0.0.50"
+
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Servers\\rdp-target.example]
+"UsernameHint"="CORP\\alice"
+""",
+        encoding="utf-16",
+    )
 
 
 def _to_chrome_time(value: datetime) -> int:

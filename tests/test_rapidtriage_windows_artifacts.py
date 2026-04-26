@@ -260,6 +260,27 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(summary["details"]["inventory_count"], 1)
             self.assertIn({"value": ".docx", "count": 1}, summary["details"]["extension_counts"])
 
+    def test_windows_remote_access_collector_maps_rdp_config_cache_and_destinations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            fixture = build_windows_artifact_fixture(root)
+            output = root / "remote-access.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-remote-access", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifacts = payload["artifacts"]
+            config = next(item for item in artifacts if item["artifact_type"] == "rdp-config")
+            cache = next(item for item in artifacts if item["artifact_type"] == "rdp-cache-file")
+            destinations = [item for item in artifacts if item["artifact_type"] == "rdp-destination"]
+
+            self.assertEqual(config["details"]["destination"], "10.0.0.50")
+            self.assertEqual(config["details"]["username_hint"], r"CORP\alice")
+            self.assertEqual(config["details"]["gateway_hostname"], "rd-gateway.example")
+            self.assertEqual(config["details"]["source_path"], str(fixture.default_rdp.resolve()))
+            self.assertEqual(cache["details"]["source_path"], str(fixture.rdp_cache_file.resolve()))
+            self.assertTrue(any(item["details"]["destination"] == "10.0.0.50" for item in destinations))
+            self.assertTrue(any(item["details"]["destination"] == "rdp-target.example" for item in destinations))
+
 
 if __name__ == "__main__":
     unittest.main()

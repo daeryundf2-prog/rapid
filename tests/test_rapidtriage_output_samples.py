@@ -78,12 +78,33 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
     search_edb = root / "ProgramData" / "Microsoft" / "Search" / "Data" / "Applications" / "Windows" / "Windows.edb"
     search_edb.parent.mkdir(parents=True, exist_ok=True)
     search_edb.write_bytes(b"sample windows search edb")
+    default_rdp = root / "Users" / "alice" / "Documents" / "Default.rdp"
+    default_rdp.parent.mkdir(parents=True, exist_ok=True)
+    default_rdp.write_text(
+        "full address:s:10.0.0.50\nusername:s:CORP\\alice\ngatewayhostname:s:rd-gateway.example\n",
+        encoding="utf-8",
+    )
+    rdp_cache = root / "Users" / "alice" / "AppData" / "Local" / "Microsoft" / "Terminal Server Client" / "Cache" / "Cache0000.bin"
+    rdp_cache.parent.mkdir(parents=True, exist_ok=True)
+    rdp_cache.write_bytes(b"sample rdp cache")
+    rdp_reg = root / "Windows" / "System32" / "config" / "rdp.reg"
+    rdp_reg.write_text(
+        """Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50]
+"MRU0"="10.0.0.50"
+""",
+        encoding="utf-16",
+    )
     set_mtime(
         lnk_path,
         datetime(2024, 3, 5, 6, 7, 8, tzinfo=timezone.utc),
     )
     set_mtime(search_csv, datetime(2024, 3, 5, 6, 7, 9, tzinfo=timezone.utc))
     set_mtime(search_edb, datetime(2024, 3, 5, 6, 7, 10, tzinfo=timezone.utc))
+    set_mtime(default_rdp, datetime(2024, 3, 5, 6, 7, 11, tzinfo=timezone.utc))
+    set_mtime(rdp_cache, datetime(2024, 3, 5, 6, 7, 12, tzinfo=timezone.utc))
+    set_mtime(rdp_reg, datetime(2024, 3, 5, 6, 7, 13, tzinfo=timezone.utc))
     set_mtime(
         root
         / "Users"

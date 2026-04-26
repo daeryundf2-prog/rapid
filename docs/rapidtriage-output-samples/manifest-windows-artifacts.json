@@ -584,6 +584,37 @@
         },
         {
           "provider": "windows-registry",
+          "artifact_type": "registry-key",
+          "path": "<ROOT>/Windows/System32/config/rdp.reg",
+          "supported": true,
+          "details": {
+            "parser": "windows-registry-reg-export",
+            "parser_version": "reg-export-v2",
+            "coverage_status": "mapped",
+            "reportability": "triage",
+            "source_path": "<ROOT>/Windows/System32/config/rdp.reg",
+            "source_format": "reg",
+            "source_hashes": {
+              "sha256": "0f2b6d48874757936e4c25cafff657a0be3041b52644b0198ca64f21f0860183"
+            },
+            "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50",
+            "hive_hint": "HKEY_CURRENT_USER",
+            "value_count": 1,
+            "value_names": [
+              "MRU0"
+            ],
+            "values": {
+              "MRU0": "\"10.0.0.50\""
+            },
+            "persistence_values": [],
+            "usb_device": {},
+            "risk_flags": [],
+            "risk_score": 0,
+            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50]"
+          }
+        },
+        {
+          "provider": "windows-registry",
           "artifact_type": "registry-run-key",
           "path": "<ROOT>/Windows/System32/config/software.reg",
           "supported": true,
@@ -637,15 +668,16 @@
             "reportability": "triage",
             "source_path": "<ROOT>",
             "source_format": "summary",
-            "key_count": 3,
+            "key_count": 4,
             "source_files": [
               "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+              "<ROOT>/Windows/System32/config/rdp.reg",
               "<ROOT>/Windows/System32/config/software.reg"
             ],
             "artifact_type_counts": [
               {
                 "value": "registry-key",
-                "count": 1
+                "count": 2
               },
               {
                 "value": "registry-run-key",
@@ -658,12 +690,12 @@
             ],
             "hive_counts": [
               {
-                "value": "HKEY_LOCAL_MACHINE",
+                "value": "HKEY_CURRENT_USER",
                 "count": 2
               },
               {
-                "value": "HKEY_CURRENT_USER",
-                "count": 1
+                "value": "HKEY_LOCAL_MACHINE",
+                "count": 2
               }
             ],
             "persistence_entries": [
@@ -738,6 +770,88 @@
             "risk_flags": [],
             "risk_score": 0,
             "raw_preview": "[HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890]"
+          }
+        }
+      ]
+    },
+    {
+      "name": "windows-remote-access",
+      "description": "Windows RDP configuration, cache, and exported destination artifacts",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "windows-remote-access",
+          "artifact_type": "rdp-cache-file",
+          "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
+          "supported": true,
+          "details": {
+            "parser": "windows-remote-access",
+            "parser_version": "windows-remote-access-v1",
+            "coverage_status": "mapped",
+            "reportability": "triage",
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
+            "source_format": "rdp-cache",
+            "source_hashes": {
+              "sha256": "be45a509d05e772aa8200d8a922c64a197020bb5ccf6d52913ebf11c27f78e7f"
+            },
+            "user": "alice",
+            "entry_name": "Cache0000.bin",
+            "size": 16,
+            "modified_at": "2024-03-05T06:07:12+00:00",
+            "timestamp": "2024-03-05T06:07:12+00:00",
+            "timestamp_source": "rdp_cache_modified_at",
+            "note": "RDP cache file inventoried for remote-access review; thumbnail decoding is not enabled in this build."
+          }
+        },
+        {
+          "provider": "windows-remote-access",
+          "artifact_type": "rdp-config",
+          "path": "<ROOT>/Users/alice/Documents/Default.rdp",
+          "supported": true,
+          "details": {
+            "parser": "windows-remote-access",
+            "parser_version": "windows-remote-access-v1",
+            "coverage_status": "mapped",
+            "reportability": "triage",
+            "source_path": "<ROOT>/Users/alice/Documents/Default.rdp",
+            "source_format": "rdp",
+            "source_hashes": {
+              "sha256": "e615763020e18b95272df423c489140252c35f7fa7c4b2eb0bbc203cfad96685"
+            },
+            "user": "alice",
+            "destination": "10.0.0.50",
+            "username_hint": "CORP\\alice",
+            "screen_mode": "",
+            "gateway_hostname": "rd-gateway.example",
+            "fields": {
+              "full address": "10.0.0.50",
+              "username": "CORP\\alice",
+              "gatewayhostname": "rd-gateway.example"
+            },
+            "modified_at": "2024-03-05T06:07:11+00:00",
+            "timestamp": "2024-03-05T06:07:11+00:00",
+            "timestamp_source": "rdp_file_modified_at"
+          }
+        },
+        {
+          "provider": "windows-remote-access",
+          "artifact_type": "rdp-destination",
+          "path": "<ROOT>/Windows/System32/config/rdp.reg",
+          "supported": true,
+          "details": {
+            "parser": "windows-remote-access",
+            "parser_version": "windows-remote-access-v1",
+            "coverage_status": "mapped",
+            "reportability": "triage",
+            "source_path": "<ROOT>/Windows/System32/config/rdp.reg",
+            "source_format": "reg-export",
+            "source_hashes": {
+              "sha256": "0f2b6d48874757936e4c25cafff657a0be3041b52644b0198ca64f21f0860183"
+            },
+            "destination": "10.0.0.50",
+            "evidence_strength": "remote-access-destination",
+            "raw_preview": "Windows Registry Editor Version 5.00\n\n[HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50]\n\"MRU0\"=\"10.0.0.50\"\n"
           }
         }
       ]
