@@ -68,6 +68,26 @@
             <input id="outputInput" name="outputDir" placeholder="auto: ROOT/rapidtriage-run-MODE" />
           </label>
 
+          <label>
+            Processing profile
+            <select id="processingProfileInput" name="processingProfile">
+              <option value="fast">Fast first pass - no extraction, quickest review</option>
+              <option value="standard">Standard - bounded extraction</option>
+              <option value="deep">Deep - no extraction cap</option>
+            </select>
+          </label>
+
+          <div class="field-grid">
+            <label>
+              Max extract MB
+              <input id="maxExtractMbInput" name="maxExtractMb" type="number" min="0" value="0" />
+            </label>
+            <label>
+              Max files
+              <input id="maxFileCountInput" name="maxFileCount" type="number" min="0" value="0" />
+            </label>
+          </div>
+
           <div class="toggle-row">
             <label><input id="readOnlyInput" type="checkbox" checked /> Read-only</label>
             <label><input id="dryRunInput" type="checkbox" /> Dry run</label>

@@ -2042,6 +2042,9 @@ function hydrateRunForm() {
     ["#modeInput", "mode"],
     ["#inputKindInput", "inputKind"],
     ["#outputInput", "outputDir"],
+    ["#processingProfileInput", "processingProfile"],
+    ["#maxExtractMbInput", "maxExtractMb"],
+    ["#maxFileCountInput", "maxFileCount"],
     ["#importOutputInput", "importOutputDir"],
   ]) {
     const element = document.querySelector(selector);
@@ -2064,6 +2067,9 @@ function persistRunForm() {
     mode: document.querySelector("#modeInput")?.value || "fraud",
     inputKind: document.querySelector("#inputKindInput")?.value || "",
     outputDir: document.querySelector("#outputInput")?.value || "",
+    processingProfile: document.querySelector("#processingProfileInput")?.value || "fast",
+    maxExtractMb: document.querySelector("#maxExtractMbInput")?.value || "0",
+    maxFileCount: document.querySelector("#maxFileCountInput")?.value || "0",
     importOutputDir: document.querySelector("#importOutputInput")?.value || "",
     readOnly: document.querySelector("#readOnlyInput")?.checked ?? true,
     dryRun: document.querySelector("#dryRunInput")?.checked ?? false,
@@ -2073,10 +2079,55 @@ function persistRunForm() {
 }
 
 function bindRunFormPersistence() {
-  for (const selector of ["#rootInput", "#modeInput", "#inputKindInput", "#outputInput", "#importOutputInput", "#readOnlyInput", "#dryRunInput", "#overwriteInput"]) {
+  for (const selector of [
+    "#rootInput",
+    "#modeInput",
+    "#inputKindInput",
+    "#outputInput",
+    "#processingProfileInput",
+    "#maxExtractMbInput",
+    "#maxFileCountInput",
+    "#importOutputInput",
+    "#readOnlyInput",
+    "#dryRunInput",
+    "#overwriteInput",
+  ]) {
     document.querySelector(selector)?.addEventListener("input", persistRunForm);
     document.querySelector(selector)?.addEventListener("change", persistRunForm);
   }
+  document.querySelector("#processingProfileInput")?.addEventListener("change", applyProcessingProfile);
+}
+
+function applyProcessingProfile() {
+  const profile = document.querySelector("#processingProfileInput")?.value || "fast";
+  const readOnly = document.querySelector("#readOnlyInput");
+  const maxExtractMb = document.querySelector("#maxExtractMbInput");
+  const maxFileCount = document.querySelector("#maxFileCountInput");
+  const overwrite = document.querySelector("#overwriteInput");
+  if (profile === "fast") {
+    if (readOnly) readOnly.checked = true;
+    if (maxExtractMb) maxExtractMb.value = "0";
+    if (maxFileCount) maxFileCount.value = "0";
+    if (overwrite) overwrite.checked = false;
+  }
+  if (profile === "standard") {
+    if (readOnly) readOnly.checked = false;
+    if (maxExtractMb) maxExtractMb.value = "512";
+    if (maxFileCount) maxFileCount.value = "1000";
+    if (overwrite) overwrite.checked = false;
+  }
+  if (profile === "deep") {
+    if (readOnly) readOnly.checked = false;
+    if (maxExtractMb) maxExtractMb.value = "0";
+    if (maxFileCount) maxFileCount.value = "0";
+  }
+  persistRunForm();
+}
+
+function extractLimitBytes() {
+  const mb = Number(document.querySelector("#maxExtractMbInput")?.value || 0);
+  if (!Number.isFinite(mb) || mb <= 0) return 0;
+  return Math.floor(mb * 1024 * 1024);
 }
 
 function searchStorageKey() {
@@ -2116,6 +2167,8 @@ runForm.addEventListener("submit", async (event) => {
     read_only: document.querySelector("#readOnlyInput").checked,
     dry_run: document.querySelector("#dryRunInput").checked,
     overwrite: document.querySelector("#overwriteInput").checked,
+    max_extract_size_bytes: extractLimitBytes(),
+    max_file_count: Number(document.querySelector("#maxFileCountInput")?.value || 0),
   };
   try {
     const run = await api("/api/runs", { method: "POST", body: JSON.stringify(request) });

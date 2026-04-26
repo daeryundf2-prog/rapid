@@ -32,6 +32,7 @@ Windows one-command launcher:
 See [docs/rapidtriage-windows-quickstart.md](docs/rapidtriage-windows-quickstart.md) for the Windows launcher, diagnostics, and E01 fallback guidance.
 See [docs/rapidtriage-maestro-wisdom-intake.md](docs/rapidtriage-maestro-wisdom-intake.md) for the Maestro WISDOM-inspired competitive intake and follow-up parser/viewer backlog.
 See [docs/rapidtriage-user-convenience-principles.md](docs/rapidtriage-user-convenience-principles.md) for the analyst convenience rules that guide UI and workflow decisions.
+See [docs/rapidtriage-community-feedback-intake.md](docs/rapidtriage-community-feedback-intake.md) for public Reddit/Forensic Focus practitioner feedback translated into product requirements.
 
 System dependencies:
 
@@ -189,6 +190,7 @@ The local UI is a browser-based dashboard served by FastAPI. It supports:
 
 - Creating `run` workflows from a folder path, mounted image root, E01-derived folder, or direct `.E01` image path.
 - Checking evidence support before a run, including folders, E01/Ex01, AD1/L01/Lx01, AFF/AFF4, DD/RAW/IMG/001, ISO/DMG/WIM, VHD/VHDX/VMDK/VDI/XVA/QCOW, mobile packages, and memory dumps.
+- Choosing a processing profile: fast first pass, bounded standard extraction, or uncapped deep processing.
 - Showing a guided first-run workflow, safe read-only default, and remembered local form/search inputs to reduce repeated typing.
 - For direct `.E01` input, extracting the image read-only into the run output directory through `ewfmount`, `mmls`, and `tsk_recover`, then running the same triage pipeline on the extracted filesystem.
 - Persisting the local run catalog across server restarts.

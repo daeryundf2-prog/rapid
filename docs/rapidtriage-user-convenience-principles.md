@@ -18,6 +18,7 @@ RapidTriage should be designed for analysts who are tired, under time pressure, 
 - One-click sample case launch from the web UI is available through `Run sample case`.
 - First-run runtime checks are available through `Check runtime`.
 - Evidence preflight is available through `Check evidence support` so users can see whether a folder/image scans directly or needs mounting/export first.
+- Processing profiles are available in the web UI so the first pass can stay fast instead of accidentally enabling deep extraction on a huge case.
 - Whole-case search supports source, extension, and path filters so analysts can narrow noisy cases before opening rows.
 - The evidence viewer computes MD5/SHA1/SHA256 only on demand, avoiding accidental slowdowns on very large files.
 - Add "send to Case DB" and "make submission bundle" actions directly from the completed run summary.
