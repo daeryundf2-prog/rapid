@@ -190,7 +190,15 @@
             "entry_name": "5f7b5f1e01b83767.automaticDestinations-ms",
             "entry_hint": "5f7b5f1e01b83767",
             "size": 13,
-            "modified_at": "2024-03-05T06:08:09+00:00"
+            "modified_at": "2024-03-05T06:08:09+00:00",
+            "source_hashes": {
+              "sha256": "aadc5dab12bc46d45848be307ab7c678174f0dfc121e5b67d3ab5e5e1304a3d8"
+            },
+            "jump_list_parse_status": "inventory",
+            "container_hint": "custom-binary",
+            "jumplist_kind": "automatic",
+            "embedded_paths": [],
+            "note": "Jump List destination stream parsing is not fully decoded yet; embedded path extraction is provided for triage search."
           }
         },
         {
@@ -203,7 +211,15 @@
             "entry_name": "9b9cdc69c1c24e2b.customDestinations-ms",
             "entry_hint": "9b9cdc69c1c24e2b",
             "size": 15,
-            "modified_at": "2024-03-05T06:09:10+00:00"
+            "modified_at": "2024-03-05T06:09:10+00:00",
+            "source_hashes": {
+              "sha256": "27d405dcddb171973bbff3bfc3b078c2820a445261314214fea1d93227e98afa"
+            },
+            "jump_list_parse_status": "inventory",
+            "container_hint": "custom-binary",
+            "jumplist_kind": "custom",
+            "embedded_paths": [],
+            "note": "Jump List destination stream parsing is not fully decoded yet; embedded path extraction is provided for triage search."
           }
         },
         {
@@ -215,8 +231,42 @@
             "user": "alice",
             "entry_name": "Case Notes.lnk",
             "entry_hint": "Case Notes",
-            "size": 15,
-            "modified_at": "2024-03-05T06:07:08+00:00"
+            "size": 210,
+            "modified_at": "2024-03-05T06:07:08+00:00",
+            "source_hashes": {
+              "sha256": "da2e4b2e40f05a29846a074c4b547a8c7433269318482fd77197e4e1f3c736f0"
+            },
+            "lnk_parse_status": "parsed",
+            "lnk_header_size": 76,
+            "link_flags": 184,
+            "link_flag_names": [
+              "HasRelativePath",
+              "HasWorkingDir",
+              "HasArguments",
+              "IsUnicode"
+            ],
+            "file_attributes": 32,
+            "file_attribute_names": [
+              "ARCHIVE"
+            ],
+            "target_created_at": "2024-03-05T06:07:08+00:00",
+            "target_accessed_at": "2024-03-05T06:07:08+00:00",
+            "target_modified_at": "2024-03-05T06:07:08+00:00",
+            "target_file_size": 4096,
+            "show_command": 1,
+            "hot_key": 0,
+            "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+            "embedded_paths": [
+              "C:\\Users\\alice\\Documents\\Case Notes.docx",
+              "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
+            ],
+            "description": "",
+            "relative_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+            "working_dir": "C:\\Users\\alice\\Documents",
+            "command_line_arguments": "",
+            "icon_location": "",
+            "link_info": {},
+            "string_data_offset": 210
           }
         }
       ]

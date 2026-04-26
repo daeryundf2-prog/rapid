@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 CHROME_EPOCH = datetime(1601, 1, 1, tzinfo=timezone.utc)
+LNK_CLSID = bytes.fromhex("0114020000000000c000000000000046")
 
 
 @dataclass(frozen=True)
@@ -216,9 +217,35 @@ def _write_recent_shortcuts(path: Path, shortcuts: list[RecentShortcut]) -> None
     path.mkdir(parents=True, exist_ok=True)
     for shortcut in shortcuts:
         shortcut_path = path / shortcut.name
-        shortcut_path.write_bytes(b"LNK")
+        target_path = rf"C:\Users\alice\Documents\{shortcut.name.removesuffix('.lnk')}"
+        shortcut_path.write_bytes(build_minimal_lnk(target_path, shortcut.modified_at))
         ts = shortcut.modified_at.timestamp()
         os.utime(shortcut_path, (ts, ts))
+
+
+def build_minimal_lnk(target_path: str, timestamp: datetime) -> bytes:
+    link_flags = 0x00000008 | 0x00000010 | 0x00000020 | 0x00000080
+    header = bytearray(0x4C)
+    header[0:4] = (0x4C).to_bytes(4, "little")
+    header[4:20] = LNK_CLSID
+    header[0x14:0x18] = link_flags.to_bytes(4, "little")
+    header[0x18:0x1C] = (0x20).to_bytes(4, "little")
+    filetime = datetime_to_filetime(timestamp)
+    header[0x1C:0x24] = filetime.to_bytes(8, "little")
+    header[0x24:0x2C] = filetime.to_bytes(8, "little")
+    header[0x2C:0x34] = filetime.to_bytes(8, "little")
+    header[0x34:0x38] = (4096).to_bytes(4, "little")
+    header[0x3C:0x40] = (1).to_bytes(4, "little")
+    return bytes(header) + lnk_unicode_string(target_path) + lnk_unicode_string(r"C:\Users\alice\Documents") + lnk_unicode_string("")
+
+
+def lnk_unicode_string(value: str) -> bytes:
+    encoded = value.encode("utf-16le")
+    return (len(value)).to_bytes(2, "little") + encoded
+
+
+def datetime_to_filetime(value: datetime) -> int:
+    return int((value.astimezone(timezone.utc) - CHROME_EPOCH).total_seconds() * 10_000_000)
 
 
 def _write_eventlog_fixtures(xml_path: Path, hayabusa_path: Path, evtx_path: Path) -> None:

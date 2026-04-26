@@ -6,7 +6,7 @@
 | KAPE-style collect planning/export | Implemented baseline | `collect-plan` profiles preview present/missing Windows/macOS collection targets before heavy scanning or copying. `collect-export` can build a bounded source-relative export package with SHA256 copy logs. |
 | Document text | Implemented | Text/log/config/data, PDF, Office OpenXML, OpenDocument where dependencies support extraction. |
 | Browser history/downloads | Implemented baseline | Chrome, Edge, Brave, Firefox local profiles; history/download fixture coverage. |
-| Recent files | Implemented baseline | Recent shortcuts and Jump List file inventory from user profiles. |
+| Recent files | Implemented baseline | Recent shortcuts parse Shell Link header/string fields for target path, working directory, arguments, timestamps, flags, hashes, and embedded path pivots; Jump Lists are inventoried with embedded path extraction. |
 | Timeline merge | Implemented baseline | Files, docs, artifacts, and normalized timeline export. |
 | Case DB FTS | Implemented baseline | Documents, file metadata, artifacts, timeline, review status filters. |
 | OCR | Partial | Depends on local Tesseract and image quality. |
@@ -19,7 +19,7 @@
 | Defender/Firewall/WER/Task Scheduler | Partial | Fixture-backed inventory for Defender MPLog, Windows Firewall W3C logs, WER reports, and Task Scheduler XML. |
 | Prefetch | Partial+ | `.pf` inventory with executable hints, SCCA header detection, version hints, and header executable-name extraction where available; full binary run-count parsing remains planned. Execution-related registry export and PowerShell history imports are available through `windows-execution`, with a grouped execution summary for review pivots. |
 | SRUM | Import baseline | SRUM CSV/JSON/JSONL/NDJSON exports can be normalized into app resource and network usage rows; direct `SRUDB.dat` ESE parsing remains planned. |
-| Jump Lists/LNK | Partial | Recent/Jumplist file inventory implemented; full binary destination parsing remains planned. |
+| Jump Lists/LNK | Partial+ | LNK header/string parsing and embedded path extraction implemented; Jump Lists are inventoried with OLE/custom hints and embedded path extraction, while full destination stream parsing remains planned. |
 | USN Journal | Import baseline | USN CSV/JSON/JSONL exports are normalized with FRN/parent/reason/timestamp fields; native `$J` parsing remains planned. |
 | macOS user/browser/quarantine | Implemented baseline | User home inventory, Safari/Chromium/Firefox history imports, LaunchServices quarantine events, and LaunchAgent plist inventory are available through `macos-system`. |
 | Volume Shadow Copy compare | Implemented baseline | `vsc-compare` compares current vs one or more snapshot folders and emits deleted/added/modified candidates with optional SHA256 confirmation; VSC deletion command hints can also be surfaced from EVTX/PowerShell history imports. |

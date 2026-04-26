@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from rapidtriage.cli import build_parser, main
+from tests.windows_artifact_fixtures import build_minimal_lnk
 
 SAMPLES_DIR = Path(__file__).resolve().parent.parent / "docs" / "rapidtriage-output-samples"
 WINDOWS_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rapidtriage" / "windows_artifacts"
@@ -60,8 +61,15 @@ def set_mtime(path: Path, value: datetime) -> None:
 
 def build_windows_collector_sample_fixture(root: Path) -> None:
     shutil.copytree(WINDOWS_FIXTURE_ROOT, root, dirs_exist_ok=True)
+    lnk_path = root / "Users" / "alice" / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Recent" / "Case Notes.lnk"
+    lnk_path.write_bytes(
+        build_minimal_lnk(
+            r"C:\Users\alice\Documents\Case Notes.docx",
+            datetime(2024, 3, 5, 6, 7, 8, tzinfo=timezone.utc),
+        )
+    )
     set_mtime(
-        root / "Users" / "alice" / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Recent" / "Case Notes.lnk",
+        lnk_path,
         datetime(2024, 3, 5, 6, 7, 8, tzinfo=timezone.utc),
     )
     set_mtime(

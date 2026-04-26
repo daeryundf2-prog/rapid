@@ -31,6 +31,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn(fixture.edge_visit.url, manifest_blob)
             self.assertIn(PureWindowsPath(fixture.download.target_path).name, manifest_blob)
             self.assertIn(fixture.recent_shortcut.name, manifest_blob)
+            self.assertIn(r"C:\\Users\\alice\\Documents\\Incident Notes.docx", manifest_blob)
 
     def test_manifest_windows_artifact_rows_point_inside_fixture_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -55,6 +56,25 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 self.assertTrue(Path(artifact["path"]).is_relative_to(root.resolve()))
                 self.assertIn("supported", artifact)
                 self.assertIsInstance(artifact["details"], dict)
+
+    def test_recent_shortcut_collector_parses_lnk_header_and_target_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            fixture = build_windows_artifact_fixture(root)
+            output = root / "recent.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "recent-files", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            shortcut = next(item for item in payload["artifacts"] if item["artifact_type"] == "recent-shortcut")
+            details = shortcut["details"]
+
+            self.assertEqual(details["entry_name"], fixture.recent_shortcut.name)
+            self.assertEqual(details["lnk_parse_status"], "parsed")
+            self.assertEqual(details["target_path"], r"C:\Users\alice\Documents\Incident Notes.docx")
+            self.assertEqual(details["working_dir"], r"C:\Users\alice\Documents")
+            self.assertIn("IsUnicode", details["link_flag_names"])
+            self.assertIn("ARCHIVE", details["file_attribute_names"])
+            self.assertEqual(len(details["source_hashes"]["sha256"]), 64)
 
     def test_eventlog_collector_normalizes_exports_detections_and_evtx_inventory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
