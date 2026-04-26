@@ -1053,7 +1053,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v1",
+            "parser_version": "windows-system-v2",
             "source_path": "<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
             "source_format": "text-log",
             "source_size": 199,
@@ -1075,7 +1075,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v1",
+            "parser_version": "windows-system-v2",
             "source_path": "<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
             "source_format": "w3c-log",
             "source_size": 216,
@@ -1116,7 +1116,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v1",
+            "parser_version": "windows-system-v2",
             "source_path": "<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
             "source_format": "task-xml",
             "source_size": 685,
@@ -1139,7 +1139,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v1",
+            "parser_version": "windows-system-v2",
             "source_path": "<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
             "source_format": "wer",
             "source_size": 94,
@@ -1160,12 +1160,35 @@
         },
         {
           "provider": "windows-system-artifacts",
+          "artifact_type": "wmi-repository-file",
+          "path": "<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
+          "supported": true,
+          "details": {
+            "parser": "windows-system-artifacts",
+            "parser_version": "windows-system-v2",
+            "source_path": "<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
+            "source_format": "wmi-repository",
+            "source_size": 29,
+            "entry_name": "OBJECTS.DATA",
+            "relative_repository_path": "OBJECTS.DATA",
+            "size": 29,
+            "modified_at": "2024-03-05T06:07:14+00:00",
+            "timestamp": "2024-03-05T06:07:14+00:00",
+            "timestamp_source": "wmi_repository_modified_at",
+            "source_hashes": {
+              "sha256": "460fe33f8af0c81663b71e4c639af092c35bcc4b79c00e4574b1ea2a21741148"
+            },
+            "note": "WMI repository file inventoried for persistence review; repository decoding is not enabled in this build."
+          }
+        },
+        {
+          "provider": "windows-system-artifacts",
           "artifact_type": "zone-identifier",
           "path": "<ROOT>/Users/alice/Downloads/report.zip.Zone.Identifier",
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v1",
+            "parser_version": "windows-system-v2",
             "source_path": "<ROOT>/Users/alice/Downloads/report.zip.Zone.Identifier",
             "source_format": "ini-ads-export",
             "source_size": 119,

@@ -5,12 +5,16 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Iterable
 
+from ...core.audit import compute_sha256
 from ...core.models import ArtifactRecord
 from .common import isoformat_from_timestamp
 
-PARSER_VERSION = "windows-system-v1"
+PARSER_VERSION = "windows-system-v2"
 TASKS_ROOT = ("Windows", "System32", "Tasks")
 DEFENDER_SUPPORT_ROOT = ("ProgramData", "Microsoft", "Windows Defender", "Support")
+WMI_REPOSITORY_ROOT = ("Windows", "System32", "wbem", "Repository")
+WMI_REPOSITORY_NAMES = {"OBJECTS.DATA", "INDEX.BTR", "MAPPING.VER"}
+WMI_REPOSITORY_SUFFIXES = {".MAP", ".BTR", ".DATA"}
 FIREWALL_LOG_PATHS = (
     ("Windows", "System32", "LogFiles", "Firewall", "pfirewall.log"),
     ("Windows", "System32", "LogFiles", "Firewall", "pfirewall.log.old"),
@@ -36,6 +40,7 @@ class WindowsSystemArtifactsProvider:
         yield from collect_defender_support(root)
         yield from collect_firewall_logs(root)
         yield from collect_wer_reports(root)
+        yield from collect_wmi_repository(root)
         yield from collect_zone_identifier_ads(root)
 
 
@@ -150,6 +155,33 @@ def collect_wer_reports(root: Path) -> Iterable[ArtifactRecord]:
                 "fields": fields,
                 "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
                 "raw_preview": preview_text(path),
+            },
+        )
+
+
+def collect_wmi_repository(root: Path) -> Iterable[ArtifactRecord]:
+    repository = root.joinpath(*WMI_REPOSITORY_ROOT)
+    if not repository.is_dir():
+        return
+    for path in sorted((item for item in repository.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
+        if path.name.upper() not in WMI_REPOSITORY_NAMES and path.suffix.upper() not in WMI_REPOSITORY_SUFFIXES:
+            continue
+        stat_result = path.stat()
+        yield ArtifactRecord(
+            provider=WindowsSystemArtifactsProvider.name,
+            artifact_type="wmi-repository-file",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                **source_details(path, "wmi-repository"),
+                "entry_name": path.name,
+                "relative_repository_path": str(path.relative_to(repository)),
+                "size": stat_result.st_size,
+                "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
+                "timestamp_source": "wmi_repository_modified_at",
+                "source_hashes": {"sha256": compute_sha256(path)},
+                "note": "WMI repository file inventoried for persistence review; repository decoding is not enabled in this build.",
             },
         )
 

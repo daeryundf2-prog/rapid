@@ -96,6 +96,9 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
 """,
         encoding="utf-16",
     )
+    wmi_objects = root / "Windows" / "System32" / "wbem" / "Repository" / "OBJECTS.DATA"
+    wmi_objects.parent.mkdir(parents=True, exist_ok=True)
+    wmi_objects.write_bytes(b"sample wmi repository objects")
     set_mtime(
         lnk_path,
         datetime(2024, 3, 5, 6, 7, 8, tzinfo=timezone.utc),
@@ -105,6 +108,7 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
     set_mtime(default_rdp, datetime(2024, 3, 5, 6, 7, 11, tzinfo=timezone.utc))
     set_mtime(rdp_cache, datetime(2024, 3, 5, 6, 7, 12, tzinfo=timezone.utc))
     set_mtime(rdp_reg, datetime(2024, 3, 5, 6, 7, 13, tzinfo=timezone.utc))
+    set_mtime(wmi_objects, datetime(2024, 3, 5, 6, 7, 14, tzinfo=timezone.utc))
     set_mtime(
         root
         / "Users"

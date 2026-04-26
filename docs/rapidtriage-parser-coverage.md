@@ -16,7 +16,7 @@
 | Registry hives | Partial+ | `.reg` exports parse into key/value rows including Run keys, suspicious persistence value hints, USBSTOR device metadata, and registry summary pivots. |
 | MFT | Import baseline | MFT CSV/JSON/JSONL exports are normalized with record number, path, timestamps, and deleted hints; native `$MFT` parsing remains planned. |
 | Zone.Identifier ADS | Partial | Exported `:Zone.Identifier`/`.Zone.Identifier` sidecar files parse ZoneId, referrer URL, and host URL. |
-| Defender/Firewall/WER/Task Scheduler | Partial | Fixture-backed inventory for Defender MPLog, Windows Firewall W3C logs, WER reports, and Task Scheduler XML. |
+| Defender/Firewall/WER/Task Scheduler/WMI | Partial | Fixture-backed inventory for Defender MPLog, Windows Firewall W3C logs, WER reports, Task Scheduler XML, and WMI repository files. |
 | Prefetch | Partial+ | `.pf` inventory with executable hints, SCCA header detection, version hints, header executable-name extraction, best-effort common-version run count, last run timestamps, and referenced path pivots; validate critical findings with PECmd or another dedicated parser. Execution-related registry export and PowerShell history imports are available through `windows-execution`, with a grouped execution summary for review pivots. |
 | SRUM | Import baseline | SRUM CSV/JSON/JSONL/NDJSON exports can be normalized into app resource and network usage rows; direct `SRUDB.dat` ESE parsing remains planned. |
 | Windows Search EDB | Import baseline | `Windows.edb` is inventoried with hashes and export-tool guidance; CSV/JSON/JSONL exports are normalized into searchable index entries with path, title, URL, extension, timestamps, and content snippets. |

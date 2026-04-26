@@ -54,6 +54,7 @@ class WindowsArtifactFixture:
     default_rdp: Path
     rdp_cache_file: Path
     rdp_reg: Path
+    wmi_objects: Path
 
 
 def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
@@ -97,6 +98,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     default_rdp = root / "Users" / "alice" / "Documents" / "Default.rdp"
     rdp_cache_file = root / "Users" / "alice" / "AppData" / "Local" / "Microsoft" / "Terminal Server Client" / "Cache" / "Cache0000.bin"
     rdp_reg = root / "Windows" / "System32" / "config" / "rdp.reg"
+    wmi_objects = root / "Windows" / "System32" / "wbem" / "Repository" / "OBJECTS.DATA"
 
     _write_chromium_history(
         chrome_history,
@@ -117,6 +119,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     _write_filesystem_fixtures(mft_csv, usn_jsonl)
     _write_windows_search_fixture(windows_search_csv, windows_edb)
     _write_remote_access_fixtures(default_rdp, rdp_cache_file, rdp_reg)
+    _write_wmi_repository_fixture(wmi_objects)
 
     return WindowsArtifactFixture(
         root=root,
@@ -139,6 +142,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         default_rdp=default_rdp,
         rdp_cache_file=rdp_cache_file,
         rdp_reg=rdp_reg,
+        wmi_objects=wmi_objects,
     )
 
 
@@ -432,6 +436,11 @@ def _write_remote_access_fixtures(default_rdp: Path, cache_file: Path, reg_path:
 """,
         encoding="utf-16",
     )
+
+
+def _write_wmi_repository_fixture(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"fixture wmi repository objects")
 
 
 def _to_chrome_time(value: datetime) -> int:

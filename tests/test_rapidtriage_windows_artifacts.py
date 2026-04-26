@@ -281,6 +281,21 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(any(item["details"]["destination"] == "10.0.0.50" for item in destinations))
             self.assertTrue(any(item["details"]["destination"] == "rdp-target.example" for item in destinations))
 
+    def test_windows_system_collector_inventories_wmi_repository_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            fixture = build_windows_artifact_fixture(root)
+            output = root / "windows-system.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-system", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            wmi = [item for item in payload["artifacts"] if item["artifact_type"] == "wmi-repository-file"]
+
+            self.assertTrue(wmi)
+            self.assertEqual(wmi[0]["details"]["entry_name"], "OBJECTS.DATA")
+            self.assertEqual(wmi[0]["details"]["source_path"], str(fixture.wmi_objects.resolve()))
+            self.assertEqual(len(wmi[0]["details"]["source_hashes"]["sha256"]), 64)
+
 
 if __name__ == "__main__":
     unittest.main()
