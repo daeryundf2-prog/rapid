@@ -13,6 +13,7 @@ from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
 PARSER_VERSION = "eventlog-normalized-v3"
+BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
 
@@ -67,6 +68,113 @@ SUSPICIOUS_TERMS = (
     "wevtutil cl",
 )
 
+BUILTIN_EVENT_RULES = (
+    {
+        "id": "RT-EVTX-LOG-CLEARED",
+        "title": "Windows event log was cleared",
+        "level": "high",
+        "event_ids": {"1102", "104"},
+        "categories": {"audit-log-cleared", "system-log-cleared"},
+        "mitre_tags": ["attack.defense-evasion", "attack.t1070.001"],
+        "risk_flags": ["log-clear"],
+        "description": "Security or system event logs were cleared; validate operator activity and nearby process/account events.",
+    },
+    {
+        "id": "RT-EVTX-PS-ENCODED",
+        "title": "Suspicious encoded PowerShell activity",
+        "level": "high",
+        "event_ids": {"4103", "4104", "4688", "1"},
+        "categories": {"powershell-module", "powershell-script-block", "process-created", "sysmon-process-created"},
+        "terms": {"powershell -enc", "encodedcommand", "frombase64string", "invoke-expression", "iex "},
+        "mitre_tags": ["attack.execution", "attack.t1059.001"],
+        "risk_flags": ["powershell-encoded-command"],
+        "description": "PowerShell script block, module, or process creation text contains encoded or dynamic execution indicators.",
+    },
+    {
+        "id": "RT-EVTX-RDP-LOGON",
+        "title": "Remote interactive logon",
+        "level": "medium",
+        "event_ids": {"4624"},
+        "categories": {"logon-success"},
+        "logon_types": {"10"},
+        "mitre_tags": ["attack.lateral-movement", "attack.t1021.001"],
+        "risk_flags": ["rdp-logon"],
+        "description": "Successful logon with LogonType 10, commonly associated with RDP remote interactive sessions.",
+    },
+    {
+        "id": "RT-EVTX-FAILED-LOGON",
+        "title": "Failed account logon",
+        "level": "low",
+        "event_ids": {"4625"},
+        "categories": {"logon-failure"},
+        "mitre_tags": ["attack.credential-access", "attack.t1110"],
+        "risk_flags": ["failed-logon"],
+        "description": "Failed logon activity detected; correlate repeated failures by account, host, and source IP.",
+    },
+    {
+        "id": "RT-EVTX-PRIVILEGED-LOGON",
+        "title": "Privileged logon rights assigned",
+        "level": "medium",
+        "event_ids": {"4672"},
+        "categories": {"privileged-logon"},
+        "mitre_tags": ["attack.privilege-escalation"],
+        "risk_flags": ["privileged-logon"],
+        "description": "Special privileges were assigned to a new logon; review account legitimacy and adjacent logon events.",
+    },
+    {
+        "id": "RT-EVTX-SERVICE-INSTALLED",
+        "title": "Service installation event",
+        "level": "medium",
+        "event_ids": {"4697", "7045"},
+        "categories": {"service-installed"},
+        "mitre_tags": ["attack.persistence", "attack.privilege-escalation", "attack.t1543.003"],
+        "risk_flags": ["service-install"],
+        "description": "A service was installed; inspect service name, binary path, signer, and parent activity.",
+    },
+    {
+        "id": "RT-EVTX-SCHEDULED-TASK",
+        "title": "Scheduled task created or updated",
+        "level": "medium",
+        "event_ids": {"4698", "4702"},
+        "categories": {"scheduled-task-created", "scheduled-task-updated"},
+        "mitre_tags": ["attack.persistence", "attack.t1053.005"],
+        "risk_flags": ["scheduled-task-change"],
+        "description": "A scheduled task was created or updated; verify command path, author, trigger, and timestamp.",
+    },
+    {
+        "id": "RT-EVTX-ACCOUNT-CREATED",
+        "title": "Windows account created",
+        "level": "medium",
+        "event_ids": {"4720"},
+        "categories": {"user-created"},
+        "mitre_tags": ["attack.persistence", "attack.t1136.001"],
+        "risk_flags": ["account-created"],
+        "description": "A local or domain account was created; confirm expected administration or onboarding activity.",
+    },
+    {
+        "id": "RT-EVTX-GROUP-MEMBER-ADDED",
+        "title": "Security group membership changed",
+        "level": "medium",
+        "event_ids": {"4728", "4732"},
+        "categories": {"group-member-added", "local-group-member-added"},
+        "mitre_tags": ["attack.persistence", "attack.privilege-escalation", "attack.t1098"],
+        "risk_flags": ["group-member-added"],
+        "description": "A member was added to a security group; inspect target group, subject account, and business justification.",
+    },
+    {
+        "id": "RT-EVTX-SYSMON-NETWORK",
+        "title": "Sysmon network connection event",
+        "level": "info",
+        "event_ids": {"3"},
+        "categories": {"sysmon-network-connection"},
+        "mitre_tags": ["attack.command-and-control"],
+        "risk_flags": ["sysmon-network"],
+        "description": "Sysmon network connection observed; use as a pivot for process, DNS, and destination review.",
+    },
+)
+
+RULE_LEVEL_SCORES = {"info": 15, "low": 25, "medium": 45, "high": 70, "critical": 90}
+
 
 class WindowsEventLogProvider:
     name = "windows-eventlog"
@@ -94,6 +202,7 @@ class WindowsEventLogProvider:
                 records.extend(collect_csv_events(path))
             elif suffix == ".evtx":
                 records.append(build_eventlog_file_record(path))
+        records.extend(build_builtin_detection_records(records))
         yield from records
         summary = build_eventlog_summary(root, records)
         if summary is not None:
@@ -399,7 +508,117 @@ def build_eventlog_file_record(path: Path) -> ArtifactRecord:
     )
 
 
+def build_builtin_detection_records(records: Sequence[ArtifactRecord]) -> list[ArtifactRecord]:
+    detections: list[ArtifactRecord] = []
+    for record in records:
+        if record.artifact_type != "eventlog-event" or not isinstance(record.details, Mapping):
+            continue
+        for rule in BUILTIN_EVENT_RULES:
+            if builtin_rule_matches(rule, record.details):
+                detections.append(build_builtin_detection_record(record, rule))
+    return detections
+
+
+def builtin_rule_matches(rule: Mapping[str, object], details: Mapping[str, object]) -> bool:
+    event_id = str(details.get("event_id") or "")
+    category = str(details.get("event_category") or "")
+    event_ids = {str(item) for item in rule.get("event_ids", set())}
+    categories = {str(item) for item in rule.get("categories", set())}
+    if event_ids and event_id not in event_ids:
+        return False
+    if categories and category not in categories:
+        return False
+
+    logon_types = {str(item) for item in rule.get("logon_types", set())}
+    if logon_types and str(details.get("logon_type") or "") not in logon_types:
+        return False
+
+    terms = {str(item).lower() for item in rule.get("terms", set())}
+    if terms:
+        haystack = " ".join(
+            str(details.get(key) or "")
+            for key in ("command_line", "script_block_text", "process_name", "new_process_name", "raw_preview")
+        ).lower()
+        haystack = f"{haystack} {json.dumps(details.get('data') or {}, ensure_ascii=False, sort_keys=True).lower()}"
+        if not any(term in haystack for term in terms):
+            return False
+
+    return True
+
+
+def build_builtin_detection_record(source_record: ArtifactRecord, rule: Mapping[str, object]) -> ArtifactRecord:
+    details = source_record.details
+    rule_level = str(rule.get("level") or "")
+    rule_flags = [str(item) for item in rule.get("risk_flags", []) if str(item)]
+    risk_flags = sorted(set(list(details.get("risk_flags") or []) + [f"builtin-rule:{rule.get('id')}", *rule_flags]))
+    risk_score = max(int(details.get("risk_score") or 0), RULE_LEVEL_SCORES.get(rule_level.lower(), 40))
+    detection_details = {
+        "parser": "windows-eventlog-builtin-rulepack",
+        "parser_version": PARSER_VERSION,
+        "rulepack_version": BUILTIN_RULEPACK_VERSION,
+        "coverage_status": "detected-by-rule",
+        "reportability": "triage",
+        "source_path": details.get("source_path") or source_record.path,
+        "source_format": details.get("source_format") or "",
+        "source_index": details.get("source_index"),
+        "source_hashes": dict(details.get("source_hashes") or {}),
+        "provider_name": details.get("provider_name") or "",
+        "event_id": details.get("event_id") or "",
+        "event_category": details.get("event_category") or "",
+        "event_description": details.get("event_description") or "",
+        "record_id": details.get("record_id") or "",
+        "channel": details.get("channel") or "",
+        "level": details.get("level") or "",
+        "computer": details.get("computer") or "",
+        "user_sid": details.get("user_sid") or "",
+        "user_name": details.get("user_name") or "",
+        "subject_user_name": details.get("subject_user_name") or "",
+        "target_user_name": details.get("target_user_name") or "",
+        "target_domain_name": details.get("target_domain_name") or "",
+        "logon_type": details.get("logon_type") or "",
+        "source_ip": details.get("source_ip") or "",
+        "source_port": details.get("source_port") or "",
+        "service_name": details.get("service_name") or "",
+        "process_id": details.get("process_id") or "",
+        "thread_id": details.get("thread_id") or "",
+        "process_name": details.get("process_name") or "",
+        "new_process_name": details.get("new_process_name") or "",
+        "parent_process_name": details.get("parent_process_name") or "",
+        "command_line": details.get("command_line") or "",
+        "script_block_text": details.get("script_block_text") or "",
+        "event_created_at": details.get("event_created_at") or "",
+        "timestamp": details.get("timestamp") or "",
+        "rule": {
+            "title": rule.get("title") or "",
+            "id": rule.get("id") or "",
+            "level": rule_level,
+            "mitre_tags": list(rule.get("mitre_tags") or []),
+            "description": rule.get("description") or "",
+            "source": "rapidtriage-builtin",
+        },
+        "risk_flags": risk_flags,
+        "risk_score": min(100, risk_score),
+        "matched_event": {
+            "artifact_type": source_record.artifact_type,
+            "path": source_record.path,
+            "source_index": details.get("source_index"),
+            "record_id": details.get("record_id") or "",
+        },
+    }
+    return event_record(Path(source_record.path), "eventlog-detection", detection_details)
+
+
 def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> ArtifactRecord | None:
+    event_rows = [
+        record
+        for record in records
+        if record.artifact_type == "eventlog-event" and isinstance(record.details, Mapping)
+    ]
+    detection_rows = [
+        record
+        for record in records
+        if record.artifact_type == "eventlog-detection" and isinstance(record.details, Mapping)
+    ]
     parsed_rows = [
         record
         for record in records
@@ -419,8 +638,9 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
     timestamps: list[str] = []
     high_risk_events: list[dict[str, object]] = []
     record_ids_by_channel: dict[str, list[int]] = defaultdict(list)
+    detection_rule_counts: Counter[str] = Counter()
 
-    for record in parsed_rows:
+    for record in event_rows:
         details = record.details
         event_id = str(details.get("event_id") or "")
         category = str(details.get("event_category") or "")
@@ -460,6 +680,37 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
                 }
             )
 
+    for record in detection_rows:
+        details = record.details
+        channel = str(details.get("channel") or "unknown")
+        source_path = str(details.get("source_path") or record.path)
+        timestamp = str(details.get("timestamp") or details.get("event_created_at") or "")
+        record_id = int_text(details.get("record_id"))
+        rule = details.get("rule") if isinstance(details.get("rule"), Mapping) else {}
+        rule_id = str(rule.get("id") or rule.get("title") or "")
+        increment_counter(detection_rule_counts, rule_id)
+        source_paths.add(source_path)
+        if timestamp:
+            timestamps.append(timestamp)
+        if record_id is not None:
+            record_ids_by_channel[channel].append(record_id)
+        if int(details.get("risk_score") or 0) >= 40 or details.get("risk_flags"):
+            high_risk_events.append(
+                {
+                    "timestamp": timestamp,
+                    "event_id": str(details.get("event_id") or ""),
+                    "event_category": str(details.get("event_category") or ""),
+                    "channel": channel,
+                    "user_name": str(details.get("user_name") or details.get("target_user_name") or details.get("subject_user_name") or ""),
+                    "source_ip": str(details.get("source_ip") or ""),
+                    "process_name": str(details.get("process_name") or details.get("new_process_name") or ""),
+                    "risk_score": details.get("risk_score", 0),
+                    "risk_flags": list(details.get("risk_flags") or []),
+                    "rule": rule,
+                    "source_path": source_path,
+                }
+            )
+
     timestamps.sort()
     details = {
         "parser": "windows-eventlog-summary",
@@ -468,10 +719,12 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "reportability": "triage",
         "source_path": str(root.resolve()),
         "source_format": "summary",
-        "event_count": len(parsed_rows),
-        "detection_count": sum(1 for record in parsed_rows if record.artifact_type == "eventlog-detection"),
+        "event_count": len(event_rows),
+        "detection_count": len(detection_rows),
+        "parsed_row_count": len(parsed_rows),
         "inventory_count": len(inventory_rows),
         "source_files": sorted(source_paths),
+        "detection_rule_counts": counter_items(detection_rule_counts),
         "event_id_counts": counter_items(event_id_counts),
         "event_category_counts": counter_items(category_counts),
         "channel_counts": counter_items(channel_counts),

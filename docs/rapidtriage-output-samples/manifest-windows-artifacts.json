@@ -272,6 +272,73 @@
       "artifacts": [
         {
           "provider": "windows-eventlog",
+          "artifact_type": "eventlog-detection",
+          "path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+          "supported": true,
+          "details": {
+            "parser": "windows-eventlog-builtin-rulepack",
+            "parser_version": "eventlog-normalized-v3",
+            "rulepack_version": "eventlog-builtin-rules-v1",
+            "coverage_status": "detected-by-rule",
+            "reportability": "triage",
+            "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+            "source_format": "xml",
+            "source_index": 0,
+            "source_hashes": {
+              "sha256": "3280198506b93b1d8c90fed52b92c8740c1b0ebb493bbe0d86d40941bad6f906"
+            },
+            "provider_name": "Microsoft-Windows-Security-Auditing",
+            "event_id": "4624",
+            "event_category": "logon-success",
+            "event_description": "Authentication success",
+            "record_id": "1001",
+            "channel": "Security",
+            "level": "0",
+            "computer": "WIN-CASE01",
+            "user_sid": "",
+            "user_name": "alice",
+            "subject_user_name": "",
+            "target_user_name": "alice",
+            "target_domain_name": "",
+            "logon_type": "10",
+            "source_ip": "10.0.0.5",
+            "source_port": "",
+            "service_name": "",
+            "process_id": "",
+            "thread_id": "",
+            "process_name": "",
+            "new_process_name": "",
+            "parent_process_name": "",
+            "command_line": "",
+            "script_block_text": "",
+            "event_created_at": "2024-04-01T12:34:56.000000+00:00",
+            "timestamp": "2024-04-01T12:34:56.000000+00:00",
+            "rule": {
+              "title": "Remote interactive logon",
+              "id": "RT-EVTX-RDP-LOGON",
+              "level": "medium",
+              "mitre_tags": [
+                "attack.lateral-movement",
+                "attack.t1021.001"
+              ],
+              "description": "Successful logon with LogonType 10, commonly associated with RDP remote interactive sessions.",
+              "source": "rapidtriage-builtin"
+            },
+            "risk_flags": [
+              "builtin-rule:RT-EVTX-RDP-LOGON",
+              "rdp-logon"
+            ],
+            "risk_score": 45,
+            "matched_event": {
+              "artifact_type": "eventlog-event",
+              "path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+              "source_index": 0,
+              "record_id": "1001"
+            }
+          }
+        },
+        {
+          "provider": "windows-eventlog",
           "artifact_type": "eventlog-event",
           "path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
           "supported": true,
@@ -344,10 +411,17 @@
             "source_path": "<ROOT>",
             "source_format": "summary",
             "event_count": 1,
-            "detection_count": 0,
+            "detection_count": 1,
+            "parsed_row_count": 2,
             "inventory_count": 0,
             "source_files": [
               "<ROOT>/Windows/System32/winevt/Logs/Security.xml"
+            ],
+            "detection_rule_counts": [
+              {
+                "value": "RT-EVTX-RDP-LOGON",
+                "count": 1
+              }
             ],
             "event_id_counts": [
               {
@@ -382,7 +456,34 @@
             "process_counts": [],
             "first_event_at": "2024-04-01T12:34:56.000000+00:00",
             "last_event_at": "2024-04-01T12:34:56.000000+00:00",
-            "high_risk_events": [],
+            "high_risk_events": [
+              {
+                "timestamp": "2024-04-01T12:34:56.000000+00:00",
+                "event_id": "4624",
+                "event_category": "logon-success",
+                "channel": "Security",
+                "user_name": "alice",
+                "source_ip": "10.0.0.5",
+                "process_name": "",
+                "risk_score": 45,
+                "risk_flags": [
+                  "builtin-rule:RT-EVTX-RDP-LOGON",
+                  "rdp-logon"
+                ],
+                "rule": {
+                  "title": "Remote interactive logon",
+                  "id": "RT-EVTX-RDP-LOGON",
+                  "level": "medium",
+                  "mitre_tags": [
+                    "attack.lateral-movement",
+                    "attack.t1021.001"
+                  ],
+                  "description": "Successful logon with LogonType 10, commonly associated with RDP remote interactive sessions.",
+                  "source": "rapidtriage-builtin"
+                },
+                "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml"
+              }
+            ],
             "record_sequence_gaps": [],
             "summary_notes": [
               "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
