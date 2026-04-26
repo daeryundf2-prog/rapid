@@ -169,6 +169,7 @@ rapidtriage files --help
 rapidtriage extract --help
 rapidtriage artifacts --help
 rapidtriage collect-plan --help
+rapidtriage collect-export --help
 rapidtriage run --help
 rapidtriage timeline --help
 rapidtriage case --help
@@ -186,6 +187,7 @@ rapidtriage files . --output rapidtriage-files.json
 rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
 rapidtriage files . --name-contains note --path-contains desktop --output desktop-notes.json
 rapidtriage collect-plan /Volumes/case-mount --profile intrusion --output rapidtriage-collect-plan.json
+rapidtriage collect-export /Volumes/case-mount ./collect-export --profile intrusion --copy
 rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
 rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf --manifest ./docs-out/rapidtriage-extract-manifest.json
 rapidtriage artifacts . --kind browser --output ./rapidtriage-artifacts-browser.json
@@ -263,6 +265,7 @@ Implemented:
 - `docs` searches text/config/log/data files, HTML/RTF, PDF, Office OpenXML (`docx`, `xlsx`, `pptx`), and OpenDocument (`odt`, `ods`, `odp`) bodies for keywords; it can also write an AXIOM-inspired processed-text inverted index sidecar for faster post-processing keyword pivots.
 - `files` performs metadata-only triage over names, paths, extensions, sizes, and mtimes, including document, archive, database, executable/script, email archive, AXIOM-aligned disk/VM/mobile image, memory dump, and vehicle export candidates.
 - `collect-plan` previews KAPE-style Windows/macOS collection targets by profile before scanning or copying evidence. It reports present/missing EventLogs, AccountUsage, BrowserHistory, EvidenceOfExecution, Persistence, RemoteAccess, FileSystemTimeline, and CloudAndSync paths without hashing the whole input root.
+- `collect-export` creates a profile-based evidence package from `collect-plan` targets. It defaults to a dry-run manifest, copies only with `--copy`, preserves source-relative paths under `OUTPUT_DIR/evidence`, records SHA256/source/destination/size/mtime, and skips broad inventory-only directories to avoid accidental whole-profile exports.
 - `extract` copies selected `files` or `docs` results into an output directory with overwrite guards, size/count limits, hashes, and manifest/audit output.
 - `artifacts` exposes dedicated collectors for `browser`, `recent-files`, `eventlog`, `windows-os-account`, `windows-execution`, `windows-filesystem`, `windows-system`, `macos-system`, `android-apk`, `media-image`, `memory-volatility`, and `cloud-export`.
 - `run` orchestrates `manifest`, `docs`, `files`, `extract`, `artifacts`, and `timeline` for `seizure`, `fraud`, `hacking`, and `recovery`; Windows-focused modes automatically include account, event log, execution, filesystem, recent-file, browser, and system-artifact collectors where relevant.
@@ -299,7 +302,7 @@ Planned:
 
 ## Integrity
 
-Every top-level `manifest`, `docs`, `files`, `collect-plan`, `extract`, `artifacts`, `timeline`, `case`, and `run` execution writes audit data. Audit sidecars record command options, input file hashes where applicable, and generated output hashes. `collect-plan` intentionally skips whole-root inventory hashing so large evidence planning stays fast; run `manifest` when you need a full root fingerprint.
+Every top-level `manifest`, `docs`, `files`, `collect-plan`, `collect-export`, `extract`, `artifacts`, `timeline`, `case`, and `run` execution writes audit data. Audit sidecars record command options, input file hashes where applicable, and generated output hashes. `collect-plan` intentionally skips whole-root inventory hashing so large evidence planning stays fast; run `manifest` when you need a full root fingerprint.
 
 Examples:
 

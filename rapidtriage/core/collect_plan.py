@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 import datetime as dt
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Sequence
 
+from .audit import compute_sha256
 from .input_root import InputRoot, resolve_input_root
 
 COLLECT_PLAN_VERSION = "1.0"
 MAX_MATCHES_PER_TARGET = 50
+DEFAULT_COLLECT_EXPORT_MAX_FILE_COUNT = 5000
+DEFAULT_COLLECT_EXPORT_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
+BROAD_DIRECTORY_LABELS = {
+    "Windows user profiles",
+    "Registry hive directory",
+    "macOS user profiles",
+}
 
 
 class CollectPlanError(ValueError):
@@ -340,6 +349,124 @@ def build_collect_plan(root: Path | InputRoot, *, profile: str = "full", input_k
     }
 
 
+def run_collect_export(
+    root: Path | InputRoot,
+    output_dir: Path,
+    *,
+    profile: str = "intrusion",
+    input_kind: str | None = None,
+    copy_files: bool = False,
+    max_file_count: int = DEFAULT_COLLECT_EXPORT_MAX_FILE_COUNT,
+    max_total_bytes: int = DEFAULT_COLLECT_EXPORT_MAX_TOTAL_BYTES,
+    overwrite: bool = False,
+) -> Dict[str, object]:
+    plan = build_collect_plan(root, profile=profile, input_kind=input_kind)
+    root_path = Path(plan["root"])
+    evidence_dir = output_dir / "evidence"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if copy_files:
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+
+    entries: list[Dict[str, object]] = []
+    skipped: list[Dict[str, object]] = []
+    copied_bytes = 0
+    seen_sources: set[str] = set()
+
+    for target in plan["targets"]:
+        if not bool(target.get("exists")):
+            skipped.append(skip_record(target, reason="missing-target"))
+            continue
+        if target.get("label") in BROAD_DIRECTORY_LABELS:
+            skipped.append(skip_record(target, reason="broad-directory-inventory-only"))
+            continue
+        for source_path in iter_target_export_files(target):
+            source_key = str(source_path.resolve())
+            if source_key in seen_sources:
+                skipped.append(skip_record(target, source_path=source_path, reason="duplicate-source"))
+                continue
+            seen_sources.add(source_key)
+            if source_path.is_symlink():
+                skipped.append(skip_record(target, source_path=source_path, reason="symlink-skipped"))
+                continue
+            if not source_path.exists() or not source_path.is_file():
+                skipped.append(skip_record(target, source_path=source_path, reason="not-a-file"))
+                continue
+            try:
+                source_stat = source_path.stat()
+            except (OSError, PermissionError) as exc:
+                skipped.append(skip_record(target, source_path=source_path, reason="stat-failed", error=str(exc)))
+                continue
+            if max_file_count and len(entries) >= max_file_count:
+                skipped.append(skip_record(target, source_path=source_path, reason="max-file-count"))
+                continue
+            if max_total_bytes and copied_bytes + source_stat.st_size > max_total_bytes:
+                skipped.append(skip_record(target, source_path=source_path, reason="max-total-bytes"))
+                continue
+
+            relative_path = safe_relative(source_path, root_path)
+            destination_path = evidence_dir / relative_path
+            entry = {
+                "category": target["category"],
+                "artifact_kind": target["artifact_kind"],
+                "target_label": target["label"],
+                "source_path": str(source_path),
+                "relative_path": relative_path,
+                "destination_path": str(destination_path),
+                "size": source_stat.st_size,
+                "modified_at": dt.datetime.fromtimestamp(source_stat.st_mtime, dt.timezone.utc).isoformat(),
+                "sha256": compute_sha256(source_path),
+                "copied": False,
+            }
+            if copy_files:
+                if destination_path.exists() and not overwrite:
+                    skipped.append(skip_record(target, source_path=source_path, reason="destination-exists"))
+                    continue
+                try:
+                    destination_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source_path, destination_path)
+                except (OSError, PermissionError) as exc:
+                    skipped.append(skip_record(target, source_path=source_path, reason="copy-failed", error=str(exc)))
+                    continue
+                entry["copied"] = True
+                entry["destination_sha256"] = compute_sha256(destination_path)
+                copied_bytes += source_stat.st_size
+            else:
+                skipped.append(skip_record(target, source_path=source_path, reason="dry-run"))
+            entries.append(entry)
+
+    return {
+        "command": "collect-export",
+        "schema_version": COLLECT_PLAN_VERSION,
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "profile": plan["profile"],
+        "root": str(root_path),
+        "output_dir": str(output_dir),
+        "evidence_dir": str(evidence_dir),
+        "safety": {
+            "copy_files": copy_files,
+            "max_file_count": max_file_count,
+            "max_total_bytes": max_total_bytes,
+            "overwrite": overwrite,
+            "broad_directory_labels_skipped": sorted(BROAD_DIRECTORY_LABELS),
+        },
+        "summary": {
+            "planned_target_count": plan["summary"]["target_count"],
+            "present_target_count": plan["summary"]["present_count"],
+            "selected_file_count": len(entries),
+            "copied_file_count": sum(1 for entry in entries if entry.get("copied")),
+            "skipped_count": len(skipped),
+            "copied_bytes": copied_bytes,
+        },
+        "plan": plan,
+        "entries": entries,
+        "skipped": skipped,
+        "next_steps": [
+            f"Re-ingest copied evidence with: rapidtriage run {evidence_dir} --mode hacking --read-only",
+            "Review skipped rows before treating the export as complete.",
+        ],
+    }
+
+
 def describe_target(root: Path, target: CollectTarget) -> Dict[str, object]:
     base = {
         "category": target.category,
@@ -368,6 +495,59 @@ def describe_target(root: Path, target: CollectTarget) -> Dict[str, object]:
     base.update(describe_path(path, root))
     base["exists"] = path.exists()
     return base
+
+
+def iter_target_export_files(target: Mapping[str, object]) -> Iterable[Path]:
+    if target.get("kind") == "glob":
+        for match in target.get("matches", []):
+            if not isinstance(match, Mapping) or not match.get("path"):
+                continue
+            yield from iter_exportable_files(Path(str(match["path"])))
+        return
+    if target.get("path"):
+        yield from iter_exportable_files(Path(str(target["path"])))
+
+
+def iter_exportable_files(path: Path) -> Iterable[Path]:
+    if path.is_file():
+        yield path
+        return
+    if not path.is_dir():
+        return
+    pending = [path]
+    while pending:
+        current = pending.pop()
+        try:
+            entries = sorted(current.iterdir(), key=lambda item: item.name.lower())
+        except (OSError, PermissionError):
+            continue
+        for entry in entries:
+            if entry.is_symlink():
+                yield entry
+                continue
+            if entry.is_dir():
+                pending.append(entry)
+            elif entry.is_file():
+                yield entry
+
+
+def skip_record(
+    target: Mapping[str, object],
+    *,
+    reason: str,
+    source_path: Path | None = None,
+    error: str | None = None,
+) -> Dict[str, object]:
+    record = {
+        "category": target.get("category"),
+        "artifact_kind": target.get("artifact_kind"),
+        "target_label": target.get("label"),
+        "source_path": str(source_path) if source_path else target.get("path"),
+        "reason": reason,
+    }
+    if error:
+        record["error"] = error
+    return record
 
 
 def describe_path(path: Path, root: Path) -> Dict[str, object]:

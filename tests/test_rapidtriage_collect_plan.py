@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from rapidtriage.cli import main
-from rapidtriage.core.collect_plan import build_collect_plan, supported_collect_profiles
+from rapidtriage.core.collect_plan import build_collect_plan, run_collect_export, supported_collect_profiles
 from tests.test_rapidtriage_macos_artifacts import build_macos_fixture
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
@@ -72,6 +72,44 @@ class RapidTriageCollectPlanTests(unittest.TestCase):
             self.assertGreater(payload["summary"]["present_count"], 0)
             self.assertIsNone(audit_payload["provenance"]["input_root"])
             self.assertIn("collect-plan intentionally does not hash", audit_payload["provenance"]["notes"][0])
+
+    def test_collect_export_dry_run_selects_files_without_copying(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "evidence"
+            output_dir = Path(tmp_dir) / "export"
+            fixture = build_windows_artifact_fixture(root)
+
+            payload = run_collect_export(root, output_dir, profile="intrusion", copy_files=False)
+            powershell_entry = next(
+                entry
+                for entry in payload["entries"]
+                if Path(entry["source_path"]).resolve() == fixture.powershell_history.resolve()
+            )
+
+            self.assertEqual(payload["command"], "collect-export")
+            self.assertFalse(powershell_entry["copied"])
+            self.assertEqual(len(powershell_entry["sha256"]), 64)
+            self.assertFalse((output_dir / "evidence").exists())
+            self.assertTrue(any(skip["reason"] == "dry-run" for skip in payload["skipped"]))
+            self.assertTrue(any(skip["reason"] == "broad-directory-inventory-only" for skip in payload["skipped"]))
+
+    def test_collect_export_cli_copies_selected_files_with_hash_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "evidence"
+            output_dir = Path(tmp_dir) / "export"
+            build_macos_fixture(root)
+
+            self.assertEqual(
+                main(["collect-export", str(root), str(output_dir), "--profile", "macos-core", "--copy"]),
+                0,
+            )
+
+            manifest = json.loads((output_dir / "rapidtriage-collect-export.json").read_text(encoding="utf-8"))
+            copied = [entry for entry in manifest["entries"] if entry["copied"]]
+            self.assertGreaterEqual(len(copied), 3)
+            self.assertTrue((output_dir / "evidence" / "Users" / "alice" / "Library" / "Safari" / "History.db").is_file())
+            self.assertTrue(all(entry["sha256"] == entry["destination_sha256"] for entry in copied))
+            self.assertIn("rapidtriage run", manifest["next_steps"][0])
 
     def test_collect_plan_rejects_container_files_until_mounted_or_exported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

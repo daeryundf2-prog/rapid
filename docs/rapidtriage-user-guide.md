@@ -50,6 +50,16 @@ rapidtriage collect-plan ./mounted-case --profile intrusion --output collect-pla
 rapidtriage collect-plan ./mounted-case --profile full --json
 ```
 
+If the plan looks right and you want a bounded KAPE-style package, run `collect-export`. It writes a manifest first by default; add `--copy` only when you intentionally want files copied into `OUTPUT_DIR/evidence`:
+
+```bash
+rapidtriage collect-export ./mounted-case ./case-export --profile intrusion
+rapidtriage collect-export ./mounted-case ./case-export --profile intrusion --copy
+rapidtriage run ./case-export/evidence --mode hacking --read-only
+```
+
+The export log records source path, destination path, SHA256, size, modified time, copied/skipped status, and failure reason. Very broad directories such as whole user profile roots are treated as inventory-only targets so a single click does not accidentally copy a huge profile tree.
+
 Profiles:
 
 - `intrusion`: account usage, event logs, execution, persistence, and remote-access leads.

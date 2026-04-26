@@ -18,7 +18,14 @@ from .core.case import (
 )
 from .core.case_catalog import CaseCatalog, CaseCatalogError, default_case_catalog_path
 from .core.case_db import CaseDatabaseError, open_case_database
-from .core.collect_plan import CollectPlanError, build_collect_plan, supported_collect_profiles
+from .core.collect_plan import (
+    DEFAULT_COLLECT_EXPORT_MAX_FILE_COUNT,
+    DEFAULT_COLLECT_EXPORT_MAX_TOTAL_BYTES,
+    CollectPlanError,
+    build_collect_plan,
+    run_collect_export,
+    supported_collect_profiles,
+)
 from .core.docs import build_manifest, run_docs_search, write_result
 from .core.doctor import format_doctor_text, run_doctor
 from .core.evidence import identify_evidence
@@ -89,6 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage docs . -k incident --index-output rapidtriage-docs-index.json
               rapidtriage files . --output rapidtriage-files.json
               rapidtriage collect-plan /Volumes/case-mount --profile intrusion --output rapidtriage-collect-plan.json
+              rapidtriage collect-export /Volumes/case-mount ./collect-export --profile intrusion --copy
               rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
               rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
               rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
@@ -227,6 +235,44 @@ def build_parser() -> argparse.ArgumentParser:
     collect_plan.add_argument("--profile", choices=sorted(supported_collect_profiles()), default="full", help="Target profile to preview")
     collect_plan.add_argument("--output", default="rapidtriage-collect-plan.json", help="JSON output path")
     collect_plan.add_argument("--json", action="store_true", help="Print the full JSON plan after saving it")
+
+    collect_export = sub.add_parser(
+        "collect-export",
+        help="Export files selected by collect-plan profiles with hashes and copy logs",
+        description="Export files selected by collect-plan profiles with hashes and copy logs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage collect-export /cases/image-mount ./export --profile intrusion
+              rapidtriage collect-export /cases/image-mount ./export --profile windows-core --copy
+              rapidtriage collect-export /cases/image-mount ./export --profile full --copy --max-file-count 0 --max-total-bytes 0
+            """
+        ),
+    )
+    collect_export.add_argument("root", help="Mounted/exported evidence folder to inspect")
+    collect_export.add_argument("output_dir", help="Directory that receives the export manifest and optional copied evidence")
+    collect_export.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
+    collect_export.add_argument("--profile", choices=sorted(supported_collect_profiles()), default="intrusion", help="Target profile to export")
+    collect_export.add_argument("--copy", action="store_true", help="Actually copy selected files; omitted means dry-run manifest only")
+    collect_export.add_argument("--overwrite", action="store_true", help="Allow overwriting existing files in OUTPUT_DIR/evidence")
+    collect_export.add_argument(
+        "--max-file-count",
+        type=int,
+        default=DEFAULT_COLLECT_EXPORT_MAX_FILE_COUNT,
+        help="Maximum selected files to copy or include (0 means unlimited)",
+    )
+    collect_export.add_argument(
+        "--max-total-bytes",
+        type=int,
+        default=DEFAULT_COLLECT_EXPORT_MAX_TOTAL_BYTES,
+        help="Maximum copied source bytes (0 means unlimited)",
+    )
+    collect_export.add_argument(
+        "--manifest",
+        help="Manifest JSON output path (default: OUTPUT_DIR/rapidtriage-collect-export.json)",
+    )
+    collect_export.add_argument("--json", action="store_true", help="Print the full JSON export manifest after saving it")
 
     extract = sub.add_parser(
         "extract",
@@ -1257,6 +1303,71 @@ def main(argv=None) -> int:
                     f"- {category}: {counts['present_count']}/{counts['target_count']} present "
                     f"({counts['missing_count']} missing)"
                 )
+        return 0
+
+    if args.command == "collect-export":
+        root = Path(args.root).expanduser().resolve()
+        output_dir = Path(args.output_dir).expanduser().resolve()
+        manifest_output = (
+            Path(args.manifest).expanduser().resolve()
+            if args.manifest
+            else output_dir / "rapidtriage-collect-export.json"
+        )
+        try:
+            payload = run_collect_export(
+                root,
+                output_dir,
+                profile=args.profile,
+                input_kind=args.input_kind,
+                copy_files=args.copy,
+                max_file_count=args.max_file_count,
+                max_total_bytes=args.max_total_bytes,
+                overwrite=args.overwrite,
+            )
+        except CollectPlanError as exc:
+            parser.error(str(exc))
+        write_result(payload, manifest_output)
+        audit_output = audit_path_for(manifest_output)
+        write_audit_record(
+            audit_output,
+            command="collect-export",
+            options={
+                "root": str(root),
+                "profile": args.profile,
+                "input_kind": args.input_kind,
+                "output_dir": str(output_dir),
+                "manifest": str(manifest_output),
+                "copy": args.copy,
+                "max_file_count": args.max_file_count,
+                "max_total_bytes": args.max_total_bytes,
+                "overwrite": args.overwrite,
+            },
+            input_files=[
+                (f"source:{index}", Path(entry["source_path"]))
+                for index, entry in enumerate(payload.get("entries", []), start=1)
+                if isinstance(entry, dict) and entry.get("source_path")
+            ],
+            output_files=[("collect-export-json", manifest_output)]
+            + [
+                (f"exported:{entry['relative_path']}", Path(entry["destination_path"]))
+                for entry in payload.get("entries", [])
+                if isinstance(entry, dict) and entry.get("copied") and entry.get("destination_path")
+            ],
+            notes=[
+                "collect-export copies only selected profile targets and skips broad inventory-only directories by default.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved collect export JSON: {manifest_output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(f"Evidence directory: {payload['evidence_dir']}")
+            print(
+                f"Selected: {summary['selected_file_count']}  "
+                f"Copied: {summary['copied_file_count']}  Skipped: {summary['skipped_count']}"
+            )
         return 0
 
     root = Path(args.root).expanduser().resolve()
