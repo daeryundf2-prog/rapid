@@ -160,7 +160,7 @@ WINDOWS_TARGETS: tuple[CollectTarget, ...] = (
         "directory",
         "windows-system",
         "scan",
-        "Scheduled tasks provide persistence, execution, author, user SID, command, and trigger clues.",
+        "Scheduled tasks provide persistence, execution, author, user SID, command, trigger, hidden/run-level, and suspicious-action risk clues.",
     ),
     CollectTarget(
         "Persistence",

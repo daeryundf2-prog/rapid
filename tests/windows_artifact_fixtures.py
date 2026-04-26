@@ -59,6 +59,7 @@ class WindowsArtifactFixture:
     default_rdp: Path
     rdp_cache_file: Path
     rdp_reg: Path
+    task_file: Path
     wmi_objects: Path
 
 
@@ -125,6 +126,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     default_rdp = root / "Users" / "alice" / "Documents" / "Default.rdp"
     rdp_cache_file = root / "Users" / "alice" / "AppData" / "Local" / "Microsoft" / "Terminal Server Client" / "Cache" / "Cache0000.bin"
     rdp_reg = root / "Windows" / "System32" / "config" / "rdp.reg"
+    task_file = root / "Windows" / "System32" / "Tasks" / "Microsoft" / "Windows" / "UpdateOrchestrator" / "SecurityUpdater"
     wmi_objects = root / "Windows" / "System32" / "wbem" / "Repository" / "OBJECTS.DATA"
 
     _write_chromium_history(
@@ -148,6 +150,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     _write_filesystem_fixtures(mft_csv, usn_jsonl, mft_native, usn_journal)
     _write_windows_search_fixture(windows_search_csv, windows_edb)
     _write_remote_access_fixtures(default_rdp, rdp_cache_file, rdp_reg)
+    _write_task_scheduler_fixture(task_file)
     _write_wmi_repository_fixture(wmi_objects)
 
     return WindowsArtifactFixture(
@@ -176,6 +179,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         default_rdp=default_rdp,
         rdp_cache_file=rdp_cache_file,
         rdp_reg=rdp_reg,
+        task_file=task_file,
         wmi_objects=wmi_objects,
     )
 
@@ -650,6 +654,43 @@ def _write_remote_access_fixtures(default_rdp: Path, cache_file: Path, reg_path:
 "UsernameHint"="CORP\\alice"
 """,
         encoding="utf-16",
+    )
+
+
+def _write_task_scheduler_fixture(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Author>alice</Author>
+    <URI>\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <StartBoundary>2024-04-01T09:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-21-1000</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <Hidden>true</Hidden>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-ExecutionPolicy Bypass -File C:\\Users\\alice\\AppData\\Roaming\\updater.ps1</Arguments>
+      <WorkingDirectory>C:\\Users\\alice\\AppData\\Roaming</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+""",
+        encoding="utf-8",
     )
 
 

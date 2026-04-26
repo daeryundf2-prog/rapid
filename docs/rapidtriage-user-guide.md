@@ -136,7 +136,7 @@ rapidtriage artifacts ./mft-usn-export --kind windows-filesystem --output filesy
 
 Other Windows system artifacts:
 
-- Task Scheduler XML tasks, including command, arguments, author, user SID, and trigger type.
+- Task Scheduler XML tasks, including command, arguments, action preview, author, user SID, trigger type, start boundaries, hidden/run-level/logon hints, and risk flags for suspicious LOLBin commands, encoded PowerShell, user-writable payload paths, and Microsoft-path masquerading.
 - Windows Defender `MPLog*.log` support logs, with threat/remediation/exclusion-looking lines highlighted.
 - Windows Firewall W3C logs, including blocked connection counts and sample rows.
 - Windows Error Reporting `Report.wer` files, including crashed app, module, and bucket fields.

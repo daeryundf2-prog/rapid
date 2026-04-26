@@ -9,8 +9,48 @@ from ...core.audit import compute_sha256
 from ...core.models import ArtifactRecord
 from .common import isoformat_from_timestamp
 
-PARSER_VERSION = "windows-system-v3"
+PARSER_VERSION = "windows-system-v4"
 TASKS_ROOT = ("Windows", "System32", "Tasks")
+TASK_SUSPICIOUS_TERMS = (
+    "powershell",
+    "pwsh",
+    "-enc",
+    "-encodedcommand",
+    "executionpolicy bypass",
+    "hidden",
+    "wscript",
+    "cscript",
+    "mshta",
+    "rundll32",
+    "regsvr32",
+    "certutil",
+    "bitsadmin",
+    "curl",
+    "http://",
+    "https://",
+)
+TASK_USER_WRITABLE_PATH_TERMS = (
+    "\\users\\",
+    "\\appdata\\",
+    "\\programdata\\",
+    "\\temp\\",
+    "%appdata%",
+    "%localappdata%",
+    "%temp%",
+    "%tmp%",
+)
+TASK_LOLBINS = {
+    "bitsadmin.exe",
+    "certutil.exe",
+    "cscript.exe",
+    "mshta.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "regsvr32.exe",
+    "rundll32.exe",
+    "schtasks.exe",
+    "wscript.exe",
+}
 DEFENDER_SUPPORT_ROOT = ("ProgramData", "Microsoft", "Windows Defender", "Support")
 WMI_REPOSITORY_ROOT = ("Windows", "System32", "wbem", "Repository")
 WMI_REPOSITORY_NAMES = {"OBJECTS.DATA", "INDEX.BTR", "MAPPING.VER"}
@@ -71,8 +111,10 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
         stat_result = path.stat()
         command = first_text(xml_root, "Command")
         arguments = first_text(xml_root, "Arguments")
+        working_directory = first_text(xml_root, "WorkingDirectory")
         uri = first_text(xml_root, "URI") or "\\" + str(path.relative_to(tasks_root)).replace("/", "\\")
         triggers = [local_name(child.tag) for child in find_children(xml_root, "Triggers")]
+        risk_flags = task_scheduler_risk_flags(command, arguments, working_directory, uri)
         yield ArtifactRecord(
             provider=WindowsSystemArtifactsProvider.name,
             artifact_type="task-scheduler-task",
@@ -83,9 +125,17 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
                 "task_uri": uri,
                 "command": command,
                 "arguments": arguments,
+                "working_directory": working_directory,
+                "action_preview": " ".join(item for item in (command, arguments) if item).strip(),
                 "author": first_text(xml_root, "Author"),
                 "user_id": first_text(xml_root, "UserId"),
+                "run_level": first_text(xml_root, "RunLevel"),
+                "logon_type": first_text(xml_root, "LogonType"),
+                "hidden": parse_bool_text(first_text(xml_root, "Hidden")),
                 "trigger_types": triggers,
+                "start_boundaries": all_text(xml_root, "StartBoundary"),
+                "risk_flags": risk_flags,
+                "risk_score": min(100, len(risk_flags) * 12),
                 "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
                 "raw_preview": preview_text(path),
             },
@@ -246,6 +296,14 @@ def first_text(root: ET.Element, target_name: str) -> str:
     return ""
 
 
+def all_text(root: ET.Element, target_name: str) -> list[str]:
+    values: list[str] = []
+    for element in root.iter():
+        if local_name(element.tag) == target_name and element.text:
+            values.append(element.text.strip())
+    return values
+
+
 def find_children(root: ET.Element, target_name: str) -> list[ET.Element]:
     for element in root.iter():
         if local_name(element.tag) == target_name:
@@ -257,6 +315,42 @@ def local_name(tag: str) -> str:
     if "}" in tag:
         return tag.rsplit("}", 1)[1]
     return tag
+
+
+def parse_bool_text(value: str) -> bool | None:
+    normalized = value.strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    return None
+
+
+def task_scheduler_risk_flags(command: str, arguments: str, working_directory: str, uri: str) -> list[str]:
+    haystack = " ".join((command, arguments, working_directory, uri)).lower()
+    flags: list[str] = []
+    for term in TASK_SUSPICIOUS_TERMS:
+        if term in haystack:
+            flags.append(f"task-string:{term.strip('-').replace('://', '')}")
+    normalized_command = command.strip().lower().replace("/", "\\").rsplit("\\", 1)[-1]
+    if normalized_command in TASK_LOLBINS:
+        flags.append(f"task-lolbin:{normalized_command}")
+    if any(term in haystack for term in TASK_USER_WRITABLE_PATH_TERMS):
+        flags.append("task-user-writable-path")
+    if uri.lower().startswith(r"\microsoft\windows") and "task-user-writable-path" in flags:
+        flags.append("task-microsoft-path-user-payload")
+    return unique_preserve_order(flags)
+
+
+def unique_preserve_order(values: list[str]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
 
 
 def read_lines(path: Path, *, limit: int) -> list[str]:

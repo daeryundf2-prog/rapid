@@ -449,6 +449,24 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(any("powershell.exe" in value.lower() for value in wmi[0]["details"]["path_candidates"]))
             self.assertIn("https://example.test/wmi-payload", wmi[0]["details"]["url_candidates"])
 
+    def test_windows_system_collector_flags_suspicious_scheduled_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            fixture = build_windows_artifact_fixture(root)
+            output = root / "windows-system.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-system", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            task = next(item for item in payload["artifacts"] if item["artifact_type"] == "task-scheduler-task")
+
+            self.assertEqual(task["details"]["source_path"], str(fixture.task_file.resolve()))
+            self.assertEqual(task["details"]["task_uri"], r"\Microsoft\Windows\UpdateOrchestrator\SecurityUpdater")
+            self.assertTrue(task["details"]["hidden"])
+            self.assertIn("task-string:powershell", task["details"]["risk_flags"])
+            self.assertIn("task-user-writable-path", task["details"]["risk_flags"])
+            self.assertIn("task-microsoft-path-user-payload", task["details"]["risk_flags"])
+            self.assertGreater(task["details"]["risk_score"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

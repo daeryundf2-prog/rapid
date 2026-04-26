@@ -1397,7 +1397,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v3",
+            "parser_version": "windows-system-v4",
             "source_path": "<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
             "source_format": "text-log",
             "source_size": 199,
@@ -1419,7 +1419,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v3",
+            "parser_version": "windows-system-v4",
             "source_path": "<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
             "source_format": "w3c-log",
             "source_size": 216,
@@ -1460,18 +1460,32 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v3",
+            "parser_version": "windows-system-v4",
             "source_path": "<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
             "source_format": "task-xml",
             "source_size": 685,
             "task_uri": "\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater",
             "command": "powershell.exe",
             "arguments": "-ExecutionPolicy Bypass -File C:\\Users\\alice\\AppData\\Roaming\\updater.ps1",
+            "working_directory": "",
+            "action_preview": "powershell.exe -ExecutionPolicy Bypass -File C:\\Users\\alice\\AppData\\Roaming\\updater.ps1",
             "author": "alice",
             "user_id": "S-1-5-21-1000",
+            "run_level": "",
+            "logon_type": "",
+            "hidden": null,
             "trigger_types": [
               "LogonTrigger"
             ],
+            "start_boundaries": [],
+            "risk_flags": [
+              "task-string:powershell",
+              "task-string:executionpolicy bypass",
+              "task-lolbin:powershell.exe",
+              "task-user-writable-path",
+              "task-microsoft-path-user-payload"
+            ],
+            "risk_score": 60,
             "modified_at": "2024-03-05T06:14:15+00:00",
             "raw_preview": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Task version=\"1.4\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n  <RegistrationInfo>\n    <Author>alice</Author>\n    <URI>\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater</URI>\n  </RegistrationInfo>\n  <Triggers>\n    <LogonTrigger>\n      <Enabled>true</Enabled>\n    </LogonTrigger>\n  </Triggers>\n  <Principals>\n    <Principal id=\"Author\">\n      <UserId>S-1-5-21-1000</UserId>\n    </Principal>\n  </Principals>\n  <Actions Context=\"Author\">\n    <Exec>\n      <Command>powershell.exe</Command>\n      <Arguments>-ExecutionPolicy Bypass -File C:\\"
           }
@@ -1483,7 +1497,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v3",
+            "parser_version": "windows-system-v4",
             "source_path": "<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
             "source_format": "wer",
             "source_size": 94,
@@ -1509,7 +1523,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v3",
+            "parser_version": "windows-system-v4",
             "source_path": "<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
             "source_format": "wmi-repository",
             "source_size": 29,
@@ -1545,7 +1559,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v3",
+            "parser_version": "windows-system-v4",
             "source_path": "<ROOT>/Users/alice/Downloads/report.zip.Zone.Identifier",
             "source_format": "ini-ads-export",
             "source_size": 119,

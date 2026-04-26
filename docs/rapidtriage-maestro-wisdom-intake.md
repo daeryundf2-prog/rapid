@@ -28,7 +28,7 @@ RapidTriage should absorb this as a product principle:
 | Registry | Deleted key/value recovery and visual marking. | Planned | Add registry hive parser/recovery module after validation corpus exists. |
 | Event logs | Event semantic tags, recovered deleted records, parameter-level filters. | Planned | EVTX parser should emit normalized `Event` plus typed parameters. |
 | VSC | Compare current volume with Volume Shadow Copies and detect VSC deletion commands. | Planned | Add VSC import/compare workflow as Windows advanced parser work. |
-| MFT/EDB/WER/Defender/Firewall/ADS | Broad Windows forensic artifacts. | Partial | WER, Defender MPLog, Firewall W3C, Zone.Identifier sidecar, Task Scheduler XML, native `$MFT` inventory, native USN record recovery, and EDB/SRUDB header/string pivots are fixture-backed; full MFT/EDB table/attribute decoding remains planned. |
+| MFT/EDB/WER/Defender/Firewall/ADS | Broad Windows forensic artifacts. | Partial | WER, Defender MPLog, Firewall W3C, Zone.Identifier sidecar, Task Scheduler XML with suspicious-action risk flags, native `$MFT` inventory, native USN record recovery, and EDB/SRUDB header/string pivots are fixture-backed; full MFT/EDB table/attribute decoding remains planned. |
 | Password cracking | Built-in password cracking workflow. | Deferred | Integrate only as optional external-tool workflow with legal warnings. |
 | OCR/translation | Korean OCR and translation-oriented review. | Partial | Keep OCR optional; evaluate Korean OCR quality separately. |
 | Linux/XFS | Strong Linux filesystem coverage including XFS. | Planned | Treat XFS as evidence adapter/filesystem extraction requirement. |
@@ -40,7 +40,7 @@ RapidTriage should absorb this as a product principle:
 | TI integration | Extract IP/URL and query threat intelligence APIs. | Planned | Add optional TI connector plugin contract, disabled by default. |
 | AI prompt artifacts | Extract prompts from AI/search browser artifacts. | Planned | Add parser category for AI assistants/search prompts when source formats are known. |
 | Memory forensics | RAM dump analysis, BitLocker key extraction, process risk visualization. | Partial | Volatility/Volatility3 JSON/JSONL import normalizes process/network/malfind rows; direct RAM parsing and key search remain planned. |
-| LotL detection | PowerShell/WMI/local-admin command collection. | Partial | PowerShell history, WMI repository string pivots, scheduled tasks, and event log rule detections exist; deeper cross-artifact LotL correlation remains planned. |
+| LotL detection | PowerShell/WMI/local-admin command collection. | Partial | PowerShell history, WMI repository string pivots, scheduled-task suspicious command flags, and event log rule detections exist; deeper cross-artifact LotL correlation remains planned. |
 | Deepfake/similar images | Media classification, visual similarity grouping. | Partial | Image dimensions/hash/perceptual-hash/similarity-bucket triage exists; classifier/deepfake detection remains planned. |
 | Chromebook | ChromeOS dump analysis. | Deferred | Track as separate evidence profile after Linux/browser coverage improves. |
 
