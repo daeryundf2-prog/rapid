@@ -537,7 +537,7 @@
             "record_sequence_gaps": [],
             "summary_notes": [
               "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
-              "Binary EVTX rows are inventoried separately until native EVTX decoding is enabled."
+              "Binary EVTX rows include partial native record scans when recoverable; use external parser exports for complete BinXML field fidelity."
             ]
           }
         }

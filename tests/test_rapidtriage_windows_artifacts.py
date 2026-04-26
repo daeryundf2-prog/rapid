@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
 from rapidtriage.cli import main
-from tests.windows_artifact_fixtures import build_windows_artifact_fixture
+from tests.windows_artifact_fixtures import build_minimal_evtx, build_windows_artifact_fixture
 
 
 class RapidTriageWindowsArtifactsTests(unittest.TestCase):
@@ -90,7 +91,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             inventory_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-file"]
             summary_rows = [item for item in artifacts if item["artifact_type"] == "eventlog-summary"]
 
-            self.assertGreaterEqual(len(event_rows), 2)
+            self.assertGreaterEqual(len(event_rows), 3)
             logon = [item for item in event_rows if item["details"]["event_id"] == "4624"][0]
             self.assertEqual(logon["details"]["user_name"], "alice")
             self.assertEqual(logon["details"]["target_user_name"], "alice")
@@ -111,15 +112,50 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(rules_by_id["RT-EVTX-RDP-LOGON"]["details"]["logon_type"], "10")
             self.assertEqual(inventory_rows[0]["details"]["coverage_status"], "detected")
             self.assertEqual(inventory_rows[0]["details"]["source_path"], str(fixture.evtx_file.resolve()))
+            self.assertEqual(inventory_rows[0]["details"]["native_record_count"], 1)
+            native_evtx = [item for item in event_rows if item["details"]["parser"] == "windows-eventlog-evtx-native"][0]
+            self.assertEqual(native_evtx["details"]["coverage_status"], "native-binary-partial")
+            self.assertEqual(native_evtx["details"]["reportability"], "triage")
+            self.assertEqual(native_evtx["details"]["record_id"], "300")
+            self.assertEqual(native_evtx["details"]["timestamp"], "2024-04-01T03:04:05+00:00")
+            self.assertIn("powershell -enc NativeFixture", native_evtx["details"]["extracted_strings"])
+            self.assertIn("suspicious-term:powershell -enc", native_evtx["details"]["risk_flags"])
             summary = summary_rows[0]["details"]
-            self.assertEqual(summary["event_count"], 2)
+            self.assertEqual(summary["event_count"], 3)
             self.assertEqual(summary["detection_count"], 3)
-            self.assertEqual(summary["parsed_row_count"], 5)
+            self.assertEqual(summary["parsed_row_count"], 6)
             self.assertEqual(summary["first_event_at"], "2024-04-01T01:02:03.000000+00:00")
             self.assertIn({"value": "4104", "count": 1}, summary["event_id_counts"])
             self.assertIn({"value": "RT-EVTX-PS-ENCODED", "count": 1}, summary["detection_rule_counts"])
             self.assertTrue(any(item["event_id"] == "4104" for item in summary["high_risk_events"]))
             self.assertTrue(any(item["channel"] == "Microsoft-Windows-PowerShell/Operational" for item in summary["record_sequence_gaps"]))
+
+    def test_eventlog_collector_discovers_evtx_exports_outside_default_log_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evtx_path = root / "analysis" / "evtx" / "Collected-System.evtx"
+            evtx_path.parent.mkdir(parents=True, exist_ok=True)
+            evtx_path.write_bytes(
+                build_minimal_evtx(
+                    record_id=777,
+                    timestamp=datetime(2024, 4, 2, 1, 2, 3, tzinfo=timezone.utc),
+                    strings=["Microsoft-Windows-Security-Auditing", "Security", "WIN-EXPORT", "wevtutil cl Security"],
+                )
+            )
+            output = root / "eventlog.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
+            native_rows = [
+                item
+                for item in artifacts
+                if item["artifact_type"] == "eventlog-event"
+                and item["details"]["parser"] == "windows-eventlog-evtx-native"
+            ]
+
+            self.assertEqual(len(native_rows), 1)
+            self.assertEqual(native_rows[0]["details"]["record_id"], "777")
+            self.assertEqual(native_rows[0]["details"]["source_path"], str(evtx_path.resolve()))
 
     def test_windows_os_account_collector_summarizes_profiles_and_reg_exports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

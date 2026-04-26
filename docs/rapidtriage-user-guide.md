@@ -79,7 +79,7 @@ On mounted or exported Windows evidence, RapidTriage now collects high-value sys
 
 Event log workflow:
 
-- Native `.evtx` files are inventoried with source hashes and parser guidance.
+- Native `.evtx` files are inventoried with source hashes and parser guidance; recoverable binary record headers also emit partial `eventlog-event` rows with record ID, timestamp, extracted UTF-16 strings, and suspicious-term flags.
 - XML/JSON/JSONL/CSV exports from EVTX-oriented tools such as EvtxECmd, Hayabusa, Chainsaw, and Velociraptor are normalized into event rows.
 - Important Event IDs such as logons, failed logons, privileged logons, process creation, scheduled task creation, service installation, log clearing, and PowerShell script blocks are categorized with risk flags.
 - RapidTriage also emits built-in `eventlog-detection` rows for first-pass triage of log clearing, encoded PowerShell, RDP logons, privileged logons, services, tasks, account creation, group membership changes, and Sysmon network events.

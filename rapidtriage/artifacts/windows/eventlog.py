@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import hashlib
 import json
 import re
@@ -16,6 +17,12 @@ PARSER_VERSION = "eventlog-normalized-v3"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
+EVTX_FILE_SIGNATURE = b"ElfFile\x00"
+EVTX_RECORD_MAGIC = b"**\x00\x00"
+EVTX_RECORD_HEADER_SIZE = 24
+MAX_NATIVE_EVTX_RECORDS = 10_000
+MAX_NATIVE_EVTX_RECORD_SIZE = 16 * 1024 * 1024
+MAX_NATIVE_EVTX_STRINGS = 200
 
 EVENT_ID_CATEGORIES = {
     "4624": ("logon-success", "Authentication success"),
@@ -201,7 +208,9 @@ class WindowsEventLogProvider:
             elif suffix == ".csv":
                 records.extend(collect_csv_events(path))
             elif suffix == ".evtx":
-                records.append(build_eventlog_file_record(path))
+                native_records = list(collect_native_evtx_events(path))
+                records.extend(native_records)
+                records.append(build_eventlog_file_record(path, native_record_count=len(native_records)))
         records.extend(build_builtin_detection_records(records))
         yield from records
         summary = build_eventlog_summary(root, records)
@@ -218,7 +227,7 @@ def candidate_eventlog_paths(root: Path) -> Iterable[Path]:
         )
 
     for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
-        if not path.is_file() or path.suffix.lower() not in EVENT_EXPORT_SUFFIXES:
+        if not path.is_file() or path.suffix.lower() not in EVENT_EXPORT_SUFFIXES | {".evtx"}:
             continue
         lowered = str(path.relative_to(root)).lower()
         if any(hint in lowered for hint in EVENT_EXPORT_HINTS):
@@ -298,6 +307,68 @@ def collect_csv_events(path: Path) -> Iterable[ArtifactRecord]:
                 yield event_record(path, artifact_type, details)
     except (OSError, UnicodeError, csv.Error):
         return
+
+
+def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
+    try:
+        blob = path.read_bytes()
+    except OSError:
+        return
+    if not blob.startswith(EVTX_FILE_SIGNATURE):
+        return
+
+    source_hashes = file_hashes(path)
+    for source_index, (offset, record_blob) in enumerate(iter_evtx_record_blobs(blob)):
+        record_id = read_u64(record_blob, 8)
+        timestamp = filetime_to_iso(read_u64(record_blob, 16))
+        payload = record_blob[EVTX_RECORD_HEADER_SIZE:]
+        extracted_strings = extract_utf16le_strings(payload)
+        raw_preview = " ".join(extracted_strings)[:2000]
+        data = {
+            "evtx_parse_status": "native-binary-partial",
+            "evtx_record_offset": offset,
+            "evtx_record_size": len(record_blob),
+            "extracted_strings": extracted_strings[:MAX_NATIVE_EVTX_STRINGS],
+            "extracted_string_count": len(extracted_strings),
+        }
+        provider_name = first_matching_string(extracted_strings, "Microsoft-Windows-")
+        channel = first_matching_string(extracted_strings, "/Operational", "Security", "System", "Application")
+        computer = first_matching_string(extracted_strings, "WIN-", ".local")
+        details = normalize_event_details(
+            parser="windows-eventlog-evtx-native",
+            source_format="evtx",
+            source_path=path,
+            source_index=source_index,
+            source_hashes=source_hashes,
+            provider_name=provider_name,
+            event_id="",
+            record_id=str(record_id or ""),
+            channel=channel,
+            level="",
+            computer=computer,
+            event_created_at=timestamp,
+            data=data,
+            raw_preview=raw_preview,
+            command_line=raw_preview,
+        )
+        details.update(data)
+        yield event_record(path, "eventlog-event", details)
+
+
+def iter_evtx_record_blobs(blob: bytes) -> Iterable[tuple[int, bytes]]:
+    offset = 0
+    emitted = 0
+    while emitted < MAX_NATIVE_EVTX_RECORDS:
+        offset = blob.find(EVTX_RECORD_MAGIC, offset)
+        if offset < 0:
+            return
+        size = read_u32(blob, offset + 4)
+        if size < EVTX_RECORD_HEADER_SIZE or size > MAX_NATIVE_EVTX_RECORD_SIZE or offset + size > len(blob):
+            offset += len(EVTX_RECORD_MAGIC)
+            continue
+        yield offset, blob[offset : offset + size]
+        emitted += 1
+        offset += size
 
 
 def iter_json_rows(path: Path) -> Iterable[Mapping[str, object]]:
@@ -433,12 +504,13 @@ def normalize_event_details(
         risk_flags.extend(f"suspicious-term:{term}" for term in detected_terms)
     if rule_title or rule_id:
         risk_flags.append("detection-rule-hit")
-    reportability = "reportable" if source_format != "evtx" else "inventory-only"
+    is_native_evtx = parser == "windows-eventlog-evtx-native"
+    reportability = "triage" if is_native_evtx else ("reportable" if source_format != "evtx" else "inventory-only")
     normalized_timestamp = normalize_timestamp(event_created_at)
     return {
         "parser": parser,
         "parser_version": PARSER_VERSION,
-        "coverage_status": "detected-by-rule" if rule_title or rule_id else "mapped",
+        "coverage_status": "native-binary-partial" if is_native_evtx else ("detected-by-rule" if rule_title or rule_id else "mapped"),
         "reportability": reportability,
         "source_path": str(source_path.resolve()),
         "source_format": source_format,
@@ -486,7 +558,7 @@ def normalize_event_details(
     }
 
 
-def build_eventlog_file_record(path: Path) -> ArtifactRecord:
+def build_eventlog_file_record(path: Path, *, native_record_count: int = 0) -> ArtifactRecord:
     stat_result = path.stat()
     return ArtifactRecord(
         provider=WindowsEventLogProvider.name,
@@ -502,8 +574,10 @@ def build_eventlog_file_record(path: Path) -> ArtifactRecord:
             "source_format": "evtx",
             "source_hashes": file_hashes(path),
             "size": stat_result.st_size,
+            "native_record_count": native_record_count,
+            "native_parse_status": "partial-record-scan" if native_record_count else "no-records-emitted",
             "recommended_parsers": ["EvtxECmd", "Hayabusa", "Chainsaw", "Velociraptor Windows.EventLogs.Evtx"],
-            "note": "Binary EVTX detected. Native EVTX decoding is not enabled in this build; import EvtxECmd/Hayabusa/Chainsaw/Velociraptor JSONL/CSV/XML output for parsed rows.",
+            "note": "Binary EVTX detected. RapidTriage emits partial native record rows when record headers and UTF-16 strings are recoverable; import EvtxECmd/Hayabusa/Chainsaw/Velociraptor JSONL/CSV/XML output for full BinXML field mapping.",
         },
     )
 
@@ -737,7 +811,7 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "record_sequence_gaps": record_sequence_gaps(record_ids_by_channel),
         "summary_notes": [
             "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
-            "Binary EVTX rows are inventoried separately until native EVTX decoding is enabled.",
+            "Binary EVTX rows include partial native record scans when recoverable; use external parser exports for complete BinXML field fidelity.",
         ],
     }
     return ArtifactRecord(
@@ -796,6 +870,72 @@ def normalize_timestamp(value: object) -> str:
     if text.endswith("Z"):
         text = f"{text[:-1]}+00:00"
     return text
+
+
+def filetime_to_iso(value: int) -> str:
+    if value <= 0:
+        return ""
+    try:
+        base = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
+        moment = base + dt.timedelta(microseconds=value // 10)
+    except (OverflowError, TypeError, ValueError):
+        return ""
+    return moment.isoformat()
+
+
+def read_u32(blob: bytes, offset: int) -> int:
+    if offset < 0 or offset + 4 > len(blob):
+        return 0
+    return int.from_bytes(blob[offset : offset + 4], "little", signed=False)
+
+
+def read_u64(blob: bytes, offset: int) -> int:
+    if offset < 0 or offset + 8 > len(blob):
+        return 0
+    return int.from_bytes(blob[offset : offset + 8], "little", signed=False)
+
+
+def extract_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> list[str]:
+    strings: list[str] = []
+    start: int | None = None
+    cursor = 0
+    while cursor + 1 < len(blob):
+        code_unit = blob[cursor : cursor + 2]
+        value = int.from_bytes(code_unit, "little", signed=False)
+        printable = value in (9, 10, 13) or 32 <= value <= 0xD7FF or 0xE000 <= value <= 0xFFFD
+        if printable and value != 0:
+            if start is None:
+                start = cursor
+        else:
+            if start is not None:
+                text = decode_utf16le_string(blob[start:cursor])
+                if len(text) >= min_chars:
+                    strings.append(text)
+                    if len(strings) >= MAX_NATIVE_EVTX_STRINGS:
+                        return strings
+                start = None
+        cursor += 2
+    if start is not None:
+        text = decode_utf16le_string(blob[start:cursor])
+        if len(text) >= min_chars:
+            strings.append(text)
+    return strings
+
+
+def decode_utf16le_string(blob: bytes) -> str:
+    try:
+        return blob.decode("utf-16le", errors="ignore").strip("\x00\r\n\t ")
+    except UnicodeError:
+        return ""
+
+
+def first_matching_string(values: Sequence[str], *needles: str) -> str:
+    lowered_needles = [needle.lower() for needle in needles if needle]
+    for value in values:
+        lowered = value.lower()
+        if any(needle in lowered for needle in lowered_needles):
+            return value
+    return ""
 
 
 def normalize_key(value: object) -> str:

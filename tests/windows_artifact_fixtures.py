@@ -269,6 +269,21 @@ def datetime_to_filetime(value: datetime) -> int:
     return int((value.astimezone(timezone.utc) - CHROME_EPOCH).total_seconds() * 10_000_000)
 
 
+def build_minimal_evtx(record_id: int, timestamp: datetime, strings: list[str]) -> bytes:
+    payload = b"".join(value.encode("utf-16le") + b"\x00\x00" for value in strings)
+    size = 24 + len(payload)
+    record = (
+        b"**\x00\x00"
+        + size.to_bytes(4, "little")
+        + record_id.to_bytes(8, "little")
+        + datetime_to_filetime(timestamp).to_bytes(8, "little")
+        + payload
+    )
+    header = bytearray(4096)
+    header[0:8] = b"ElfFile\x00"
+    return bytes(header) + record
+
+
 def _write_eventlog_fixtures(xml_path: Path, hayabusa_path: Path, evtx_path: Path) -> None:
     xml_path.parent.mkdir(parents=True, exist_ok=True)
     xml_path.write_text(
@@ -318,7 +333,18 @@ def _write_eventlog_fixtures(xml_path: Path, hayabusa_path: Path, evtx_path: Pat
         '{"Timestamp":"2024-04-01T02:03:04Z","Computer":"WIN-FIXTURE","Channel":"Microsoft-Windows-PowerShell/Operational","EventID":4104,"Level":"high","RecordID":205,"RuleTitle":"Suspicious Encoded PowerShell","RuleID":"RT-PS-001","MitreTags":"attack.t1059.001","CommandLine":"powershell -enc SQBFAFgA"}\n',
         encoding="utf-8",
     )
-    evtx_path.write_bytes(b"ElfFile fixture evtx placeholder")
+    evtx_path.write_bytes(
+        build_minimal_evtx(
+            record_id=300,
+            timestamp=datetime(2024, 4, 1, 3, 4, 5, tzinfo=timezone.utc),
+            strings=[
+                "Microsoft-Windows-PowerShell",
+                "Microsoft-Windows-PowerShell/Operational",
+                "WIN-FIXTURE",
+                "powershell -enc NativeFixture",
+            ],
+        )
+    )
 
 
 def _write_user_profile_fixtures(profile_path: Path, reg_path: Path) -> None:
