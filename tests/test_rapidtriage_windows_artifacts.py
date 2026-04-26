@@ -135,6 +135,24 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("powershell-history-command", groups["powershell.exe"]["signal_types"])
             self.assertIn("suspicious-command:powershell -enc", groups["powershell.exe"]["risk_flags"])
 
+    def test_windows_prefetch_collector_is_available_as_dedicated_artifacts_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            output = root / "prefetch.json"
+            prefetch = root / "Windows" / "Prefetch" / "POWERSHELL.EXE-12345678.pf"
+            prefetch.parent.mkdir(parents=True, exist_ok=True)
+            prefetch.write_bytes(b"prefetch fixture")
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-prefetch", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifact = payload["artifacts"][0]
+
+            self.assertEqual(payload["kind"], "windows-prefetch")
+            self.assertEqual(artifact["artifact_type"], "prefetch-file")
+            self.assertEqual(artifact["details"]["executable_hint"], "POWERSHELL.EXE")
+            self.assertEqual(artifact["details"]["prefetch_hash"], "12345678")
+            self.assertEqual(artifact["details"]["evidence_strength"], "execution-indicator")
+
     def test_windows_filesystem_collector_imports_mft_and_usn_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

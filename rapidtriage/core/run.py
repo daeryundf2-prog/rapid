@@ -62,6 +62,7 @@ RUN_PROFILES: Dict[str, RunProfile] = {
             "windows-os-account",
             "eventlog",
             "windows-execution",
+            "windows-prefetch",
             "windows-filesystem",
             "windows-system",
             "macos-system",
@@ -80,6 +81,7 @@ RUN_PROFILES: Dict[str, RunProfile] = {
             "windows-os-account",
             "eventlog",
             "windows-execution",
+            "windows-prefetch",
             "windows-filesystem",
             "windows-system",
             "macos-system",
@@ -98,6 +100,7 @@ RUN_PROFILES: Dict[str, RunProfile] = {
             "windows-os-account",
             "eventlog",
             "windows-execution",
+            "windows-prefetch",
             "windows-filesystem",
             "windows-system",
             "macos-system",
@@ -121,7 +124,7 @@ RUN_PROFILES: Dict[str, RunProfile] = {
         ),
         file_scan_path_contains=("recycle",),
         preferred_locations=("$recycle.bin", "recycle", "trash", "deleted"),
-        artifacts_kinds=("recent-files", "windows-os-account", "eventlog", "windows-filesystem", "macos-system"),
+        artifacts_kinds=("recent-files", "windows-os-account", "eventlog", "windows-prefetch", "windows-filesystem", "macos-system"),
     ),
 }
 

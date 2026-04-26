@@ -39,10 +39,10 @@ const PROCESSING_PROFILES = {
   },
 };
 const RUN_MODE_COLLECTORS = {
-  seizure: ["browser", "recent files", "OS/account", "event logs", "execution", "MFT/USN", "Windows system", "macOS"],
-  fraud: ["browser", "recent files", "OS/account", "event logs", "execution", "MFT/USN", "Windows system", "macOS"],
-  hacking: ["browser", "recent files", "OS/account", "event logs", "execution", "MFT/USN", "Windows system", "macOS"],
-  recovery: ["recent files", "OS/account", "event logs", "MFT/USN", "macOS"],
+  seizure: ["browser", "recent files", "OS/account", "event logs", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
+  fraud: ["browser", "recent files", "OS/account", "event logs", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
+  hacking: ["browser", "recent files", "OS/account", "event logs", "execution", "prefetch", "MFT/USN", "Windows system", "macOS"],
+  recovery: ["recent files", "OS/account", "event logs", "prefetch", "MFT/USN", "macOS"],
 };
 const PAGE_SIZE = 250;
 const COMPARE_LIMIT = 6;

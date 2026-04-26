@@ -44,6 +44,7 @@ class WindowsArtifactFixture:
     user_profile: Path
     execution_reg: Path
     powershell_history: Path
+    prefetch_file: Path
     mft_csv: Path
     usn_jsonl: Path
 
@@ -80,6 +81,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     user_profile = root / "Users" / "alice"
     execution_reg = root / "Windows" / "System32" / "config" / "execution.reg"
     powershell_history = root / "Users" / "alice" / "AppData" / "Roaming" / "Microsoft" / "Windows" / "PowerShell" / "PSReadLine" / "ConsoleHost_history.txt"
+    prefetch_file = root / "Windows" / "Prefetch" / "POWERSHELL.EXE-12345678.pf"
     mft_csv = root / "analysis" / "mft.csv"
     usn_jsonl = root / "analysis" / "usn.jsonl"
 
@@ -97,6 +99,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     _write_eventlog_fixtures(eventlog_xml, hayabusa_jsonl, evtx_file)
     _write_user_profile_fixtures(user_profile, root / "Windows" / "System32" / "config" / "SYSTEM.reg")
     _write_execution_fixtures(execution_reg, powershell_history)
+    _write_prefetch_fixture(prefetch_file)
     _write_filesystem_fixtures(mft_csv, usn_jsonl)
 
     return WindowsArtifactFixture(
@@ -111,6 +114,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         user_profile=user_profile,
         execution_reg=execution_reg,
         powershell_history=powershell_history,
+        prefetch_file=prefetch_file,
         mft_csv=mft_csv,
         usn_jsonl=usn_jsonl,
     )
@@ -309,6 +313,11 @@ def _write_execution_fixtures(reg_path: Path, powershell_history: Path) -> None:
         "Get-Process\npowershell -enc SQBFAFgA\nvssadmin delete shadows /all /quiet\n",
         encoding="utf-8",
     )
+
+
+def _write_prefetch_fixture(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"prefetch fixture")
 
 
 def _write_filesystem_fixtures(mft_csv: Path, usn_jsonl: Path) -> None:

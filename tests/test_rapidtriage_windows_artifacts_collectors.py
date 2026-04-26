@@ -65,6 +65,9 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             prefetch_provider = providers["windows-prefetch"]
             self.assertEqual(prefetch_provider["artifacts"][0]["artifact_type"], "prefetch-file")
             self.assertEqual(prefetch_provider["artifacts"][0]["details"]["executable_hint"], "POWERSHELL.EXE")
+            self.assertEqual(prefetch_provider["artifacts"][0]["details"]["prefetch_hash"], "12345678")
+            self.assertEqual(prefetch_provider["artifacts"][0]["details"]["coverage_status"], "detected")
+            self.assertEqual(len(prefetch_provider["artifacts"][0]["details"]["source_hashes"]["sha256"]), 64)
 
             system_provider = providers["windows-system-artifacts"]
             system_types = {artifact["artifact_type"] for artifact in system_provider["artifacts"]}

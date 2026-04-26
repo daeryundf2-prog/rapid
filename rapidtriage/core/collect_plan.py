@@ -113,7 +113,7 @@ WINDOWS_TARGETS: tuple[CollectTarget, ...] = (
         "Windows Prefetch directory",
         "Windows/Prefetch",
         "directory",
-        "windows-system",
+        "windows-prefetch",
         "scan",
         "Prefetch inventory is a quick execution lead; full binary run-count parsing remains a future parser.",
     ),

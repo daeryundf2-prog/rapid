@@ -193,6 +193,7 @@ class RapidTriageRunTests(unittest.TestCase):
                 "eventlog",
                 "windows-os-account",
                 "windows-execution",
+                "windows-prefetch",
                 "windows-filesystem",
             ):
                 self.assertIn(kind, summary_payload["summary"]["artifacts"])
@@ -208,6 +209,10 @@ class RapidTriageRunTests(unittest.TestCase):
                 1,
             )
             self.assertGreaterEqual(
+                summary_payload["summary"]["artifacts"]["windows-prefetch"]["artifact_count"],
+                1,
+            )
+            self.assertGreaterEqual(
                 summary_payload["summary"]["artifacts"]["windows-filesystem"]["artifact_count"],
                 1,
             )
@@ -218,6 +223,7 @@ class RapidTriageRunTests(unittest.TestCase):
             timeline_text = json.dumps(timeline_payload, ensure_ascii=False)
             self.assertIn("eventlog-event", timeline_text)
             self.assertIn("powershell-history-command", timeline_text)
+            self.assertIn("prefetch-file", timeline_text)
             self.assertIn("mft-record", timeline_text)
 
             self.assertEqual(
@@ -337,6 +343,7 @@ class RapidTriageRunTests(unittest.TestCase):
                 self.assertIn("recent-files", summary_payload["summary"]["artifacts"])
                 self.assertIn("windows-os-account", summary_payload["summary"]["artifacts"])
                 self.assertIn("eventlog", summary_payload["summary"]["artifacts"])
+                self.assertIn("windows-prefetch", summary_payload["summary"]["artifacts"])
                 self.assertIn("windows-filesystem", summary_payload["summary"]["artifacts"])
                 self.assertIn("images", files_payload["summary"]["category_counts"])
             else:
@@ -345,6 +352,7 @@ class RapidTriageRunTests(unittest.TestCase):
                 self.assertIn("windows-os-account", summary_payload["summary"]["artifacts"])
                 self.assertIn("eventlog", summary_payload["summary"]["artifacts"])
                 self.assertIn("windows-execution", summary_payload["summary"]["artifacts"])
+                self.assertIn("windows-prefetch", summary_payload["summary"]["artifacts"])
                 self.assertIn("windows-filesystem", summary_payload["summary"]["artifacts"])
             for artifact_path in artifact_paths.values():
                 self.assertTrue(artifact_path.is_file())

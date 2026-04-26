@@ -112,6 +112,7 @@ Use:
 
 ```bash
 rapidtriage artifacts ./mounted-case-or-export --kind windows-execution --output execution.json
+rapidtriage artifacts ./mounted-case --kind windows-prefetch --output prefetch.json
 rapidtriage artifacts ./mft-usn-export --kind windows-filesystem --output filesystem.json
 ```
 
