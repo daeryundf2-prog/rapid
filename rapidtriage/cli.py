@@ -18,6 +18,7 @@ from .core.case import (
 )
 from .core.case_catalog import CaseCatalog, CaseCatalogError, default_case_catalog_path
 from .core.case_db import CaseDatabaseError, open_case_database
+from .core.collect_plan import CollectPlanError, build_collect_plan, supported_collect_profiles
 from .core.docs import build_manifest, run_docs_search, write_result
 from .core.doctor import format_doctor_text, run_doctor
 from .core.evidence import identify_evidence
@@ -87,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage docs . -k incident -k registry --output rapidtriage-docs.json
               rapidtriage docs . -k incident --index-output rapidtriage-docs-index.json
               rapidtriage files . --output rapidtriage-files.json
+              rapidtriage collect-plan /Volumes/case-mount --profile intrusion --output rapidtriage-collect-plan.json
               rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
               rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
               rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
@@ -205,6 +207,26 @@ def build_parser() -> argparse.ArgumentParser:
     files.add_argument("--modified-after", help="Only keep files modified at or after this ISO timestamp/date")
     files.add_argument("--modified-before", help="Only keep files modified at or before this ISO timestamp/date")
     add_rules_argument(files)
+
+    collect_plan = sub.add_parser(
+        "collect-plan",
+        help="Preview KAPE-style evidence collection targets before scanning or copying",
+        description="Preview KAPE-style evidence collection targets before scanning or copying",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage collect-plan /cases/image-mount --profile intrusion
+              rapidtriage collect-plan /cases/image-mount --profile windows-core --output collect-plan.json --json
+              rapidtriage collect-plan /cases/mac-export --profile macos-core
+            """
+        ),
+    )
+    collect_plan.add_argument("root", help="Mounted/exported evidence folder to inspect")
+    collect_plan.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
+    collect_plan.add_argument("--profile", choices=sorted(supported_collect_profiles()), default="full", help="Target profile to preview")
+    collect_plan.add_argument("--output", default="rapidtriage-collect-plan.json", help="JSON output path")
+    collect_plan.add_argument("--json", action="store_true", help="Print the full JSON plan after saving it")
 
     extract = sub.add_parser(
         "extract",
@@ -1194,6 +1216,47 @@ def main(argv=None) -> int:
         print(f"Saved search JSON: {output}")
         print(f"Saved audit JSON: {audit_output}")
         print(f"Matches: {payload['summary']['match_count']}")
+        return 0
+
+    if args.command == "collect-plan":
+        root = Path(args.root).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        try:
+            payload = build_collect_plan(root, profile=args.profile, input_kind=args.input_kind)
+        except CollectPlanError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="collect-plan",
+            options={
+                "root": str(root),
+                "profile": args.profile,
+                "input_kind": args.input_kind,
+                "output": str(output),
+            },
+            output_files=[("collect-plan-json", output)],
+            notes=[
+                "collect-plan intentionally does not hash or inventory the entire input root to keep large evidence planning fast.",
+                "Use manifest/run when a full input-root inventory hash is required.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved collect plan JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(
+                f"Profile: {payload['profile']}  "
+                f"Present: {summary['present_count']}  Missing: {summary['missing_count']}"
+            )
+            for category, counts in summary["category_counts"].items():
+                print(
+                    f"- {category}: {counts['present_count']}/{counts['target_count']} present "
+                    f"({counts['missing_count']} missing)"
+                )
         return 0
 
     root = Path(args.root).expanduser().resolve()

@@ -1,0 +1,458 @@
+from __future__ import annotations
+
+import datetime as dt
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Iterable, List, Mapping, Sequence
+
+from .input_root import InputRoot, resolve_input_root
+
+COLLECT_PLAN_VERSION = "1.0"
+MAX_MATCHES_PER_TARGET = 50
+
+
+class CollectPlanError(ValueError):
+    """Raised when a collect-plan request cannot be built."""
+
+
+@dataclass(frozen=True)
+class CollectTarget:
+    category: str
+    label: str
+    relative_path: str
+    kind: str
+    artifact_kind: str
+    recommended_action: str
+    notes: str = ""
+
+
+WINDOWS_TARGETS: tuple[CollectTarget, ...] = (
+    CollectTarget(
+        "EventLogs",
+        "Windows EVTX log directory",
+        "Windows/System32/winevt/Logs",
+        "directory",
+        "eventlog",
+        "scan-or-import",
+        "Binary EVTX files are inventoried; export XML/JSON/CSV with EvtxECmd, Hayabusa, Chainsaw, or Velociraptor for normalized rows.",
+    ),
+    CollectTarget(
+        "EventLogs",
+        "External event log parser exports",
+        "analysis/*event*",
+        "glob",
+        "eventlog",
+        "import",
+        "Use this for Hayabusa/Chainsaw/EvtxECmd/Velociraptor exports placed next to the mounted image.",
+    ),
+    CollectTarget(
+        "AccountUsage",
+        "Windows user profiles",
+        "Users",
+        "directory",
+        "windows-os-account",
+        "scan",
+        "Profiles, NTUSER.DAT, UsrClass.dat, Recent items, browser data, and PowerShell history normally fan out below this path.",
+    ),
+    CollectTarget(
+        "AccountUsage",
+        "Registry hive directory",
+        "Windows/System32/config",
+        "directory",
+        "windows-os-account",
+        "scan-or-export",
+        "SYSTEM/SOFTWARE/SAM/SECURITY hives support computer/account/timezone and execution context when exported.",
+    ),
+    CollectTarget(
+        "AccountUsage",
+        "Per-user NTUSER.DAT hives",
+        "Users/*/NTUSER.DAT",
+        "glob",
+        "windows-os-account",
+        "scan-or-export",
+        "User hives are high value for UserAssist, Run keys, ShellBags, typed paths, and account-specific settings.",
+    ),
+    CollectTarget(
+        "BrowserHistory",
+        "Chromium browser profiles",
+        "Users/*/AppData/Local/*/*/User Data/*/History",
+        "glob",
+        "browser",
+        "scan",
+        "Chrome, Edge, Brave, and Chromium-style History SQLite databases are searched from user profiles.",
+    ),
+    CollectTarget(
+        "BrowserHistory",
+        "Firefox profiles",
+        "Users/*/AppData/Roaming/Mozilla/Firefox/Profiles/*/places.sqlite",
+        "glob",
+        "browser",
+        "scan",
+        "Firefox places.sqlite contains history and download-related browsing context.",
+    ),
+    CollectTarget(
+        "EvidenceOfExecution",
+        "PowerShell PSReadLine history",
+        "Users/*/AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine/ConsoleHost_history.txt",
+        "glob",
+        "windows-execution",
+        "scan",
+        "Fast signal for interactive commands, LotL behavior, staged downloads, and cleanup attempts.",
+    ),
+    CollectTarget(
+        "EvidenceOfExecution",
+        "Windows Prefetch directory",
+        "Windows/Prefetch",
+        "directory",
+        "windows-system",
+        "scan",
+        "Prefetch inventory is a quick execution lead; full binary run-count parsing remains a future parser.",
+    ),
+    CollectTarget(
+        "EvidenceOfExecution",
+        "Amcache hive",
+        "Windows/AppCompat/Programs/Amcache.hve",
+        "file",
+        "windows-execution",
+        "export-or-import",
+        "Export with a trusted parser for normalized execution rows.",
+    ),
+    CollectTarget(
+        "Persistence",
+        "Task Scheduler XML tasks",
+        "Windows/System32/Tasks",
+        "directory",
+        "windows-system",
+        "scan",
+        "Scheduled tasks provide persistence, execution, author, user SID, command, and trigger clues.",
+    ),
+    CollectTarget(
+        "Persistence",
+        "Startup folders",
+        "Users/*/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup",
+        "glob",
+        "recent-files",
+        "scan",
+        "Startup entries are quick persistence review targets.",
+    ),
+    CollectTarget(
+        "Persistence",
+        "WMI repository",
+        "Windows/System32/wbem/Repository",
+        "directory",
+        "windows-system",
+        "review",
+        "Useful for WMI persistence; dedicated parsing is planned, so preserve it for external review when present.",
+    ),
+    CollectTarget(
+        "RemoteAccess",
+        "Remote Desktop cache",
+        "Users/*/AppData/Local/Microsoft/Terminal Server Client/Cache",
+        "glob",
+        "windows-system",
+        "review",
+        "RDP cache artifacts can support remote-access review and screenshots/thumbnails workflows.",
+    ),
+    CollectTarget(
+        "RemoteAccess",
+        "Remote-access application logs",
+        "ProgramData/*/*log*",
+        "glob",
+        "docs",
+        "search",
+        "TeamViewer, AnyDesk, VPN, EDR, and support-tool logs often land under ProgramData vendor folders.",
+    ),
+    CollectTarget(
+        "FileSystemTimeline",
+        "Master File Table",
+        "$MFT",
+        "file",
+        "windows-filesystem",
+        "export-or-import",
+        "Native $MFT parsing is planned; external CSV/JSON exports can be imported now.",
+    ),
+    CollectTarget(
+        "FileSystemTimeline",
+        "Recycle Bin",
+        "$Recycle.Bin",
+        "directory",
+        "recent-files",
+        "scan",
+        "Deleted-file names and paths are high-value triage clues.",
+    ),
+    CollectTarget(
+        "FileSystemTimeline",
+        "MFT/USN parser exports",
+        "analysis/*",
+        "glob",
+        "windows-filesystem",
+        "import",
+        "Place MFT/USN CSV, JSON, JSONL, or NDJSON exports here for normalized filesystem timeline import.",
+    ),
+    CollectTarget(
+        "CloudAndSync",
+        "Common sync folders",
+        "Users/*/*Drive*",
+        "glob",
+        "cloud-export",
+        "scan",
+        "OneDrive, Google Drive, iCloud Drive, and similar folders can hold synced evidence and metadata exports.",
+    ),
+)
+
+MACOS_TARGETS: tuple[CollectTarget, ...] = (
+    CollectTarget(
+        "AccountUsage",
+        "macOS user profiles",
+        "Users",
+        "directory",
+        "macos-system",
+        "scan",
+        "User homes provide browser, quarantine, LaunchAgent, documents, downloads, and review context.",
+    ),
+    CollectTarget(
+        "BrowserHistory",
+        "Safari history databases",
+        "Users/*/Library/Safari/History.db",
+        "glob",
+        "macos-system",
+        "scan",
+        "Safari History.db is normalized by macos-system when present.",
+    ),
+    CollectTarget(
+        "BrowserHistory",
+        "Chromium browser profiles",
+        "Users/*/Library/Application Support/*/*/History",
+        "glob",
+        "macos-system",
+        "scan",
+        "Chrome, Edge, Brave, and Chromium-style profile databases are searched from user homes.",
+    ),
+    CollectTarget(
+        "BrowserHistory",
+        "Firefox profiles",
+        "Users/*/Library/Application Support/Firefox/Profiles/*/places.sqlite",
+        "glob",
+        "macos-system",
+        "scan",
+        "Firefox places.sqlite contains history and download-related browsing context.",
+    ),
+    CollectTarget(
+        "EvidenceOfExecution",
+        "LaunchServices quarantine database",
+        "Users/*/Library/Preferences/com.apple.LaunchServices.QuarantineEventsV2",
+        "glob",
+        "macos-system",
+        "scan",
+        "Quarantine events help trace downloaded files back to agents and origin URLs.",
+    ),
+    CollectTarget(
+        "Persistence",
+        "User LaunchAgents",
+        "Users/*/Library/LaunchAgents",
+        "glob",
+        "macos-system",
+        "scan",
+        "User LaunchAgents are common persistence and auto-run targets.",
+    ),
+    CollectTarget(
+        "Persistence",
+        "System LaunchDaemons",
+        "Library/LaunchDaemons",
+        "directory",
+        "macos-system",
+        "scan",
+        "System LaunchDaemons provide machine-wide persistence clues.",
+    ),
+    CollectTarget(
+        "FileSystemTimeline",
+        "User Trash folders",
+        "Users/*/.Trash",
+        "glob",
+        "files",
+        "scan",
+        "Deleted-file staging area for user-level recovery and intent review.",
+    ),
+    CollectTarget(
+        "RemoteAccess",
+        "Remote login and shell history candidates",
+        "Users/*/.*history",
+        "glob",
+        "docs",
+        "search",
+        "Shell history is useful for remote login, command execution, and cleanup review when present.",
+    ),
+    CollectTarget(
+        "CloudAndSync",
+        "macOS cloud and sync folders",
+        "Users/*/Library/Mobile Documents",
+        "glob",
+        "cloud-export",
+        "scan",
+        "iCloud Drive and Mobile Documents can contain synchronized user evidence.",
+    ),
+)
+
+PROFILE_TARGETS: Mapping[str, tuple[CollectTarget, ...]] = {
+    "windows-core": WINDOWS_TARGETS,
+    "macos-core": MACOS_TARGETS,
+    "intrusion": tuple(
+        target
+        for target in WINDOWS_TARGETS + MACOS_TARGETS
+        if target.category in {"EventLogs", "EvidenceOfExecution", "Persistence", "RemoteAccess", "AccountUsage"}
+    ),
+    "browser-history": tuple(
+        target for target in WINDOWS_TARGETS + MACOS_TARGETS if target.category in {"BrowserHistory", "CloudAndSync"}
+    ),
+    "filesystem-timeline": tuple(
+        target for target in WINDOWS_TARGETS + MACOS_TARGETS if target.category == "FileSystemTimeline"
+    ),
+    "full": WINDOWS_TARGETS + MACOS_TARGETS,
+}
+
+
+def supported_collect_profiles() -> tuple[str, ...]:
+    return tuple(PROFILE_TARGETS.keys())
+
+
+def build_collect_plan(root: Path | InputRoot, *, profile: str = "full", input_kind: str | None = None) -> Dict[str, object]:
+    normalized_profile = profile.strip().lower()
+    if normalized_profile not in PROFILE_TARGETS:
+        supported = ", ".join(supported_collect_profiles())
+        raise CollectPlanError(f"unsupported collect profile: {profile} (supported: {supported})")
+
+    input_root = resolve_input_root(root, kind=input_kind)
+    root_path = input_root.root_path
+    if root_path.exists() and not root_path.is_dir():
+        raise CollectPlanError("collect-plan expects a mounted/exported folder root, not an evidence container file")
+
+    targets = [describe_target(root_path, target) for target in PROFILE_TARGETS[normalized_profile]]
+    return {
+        "command": "collect-plan",
+        "schema_version": COLLECT_PLAN_VERSION,
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "profile": normalized_profile,
+        "root": str(root_path),
+        "input_root": input_root.to_dict(),
+        "summary": summarize_targets(targets),
+        "targets": targets,
+        "next_steps": build_next_steps(targets),
+    }
+
+
+def describe_target(root: Path, target: CollectTarget) -> Dict[str, object]:
+    base = {
+        "category": target.category,
+        "label": target.label,
+        "relative_path": target.relative_path,
+        "kind": target.kind,
+        "artifact_kind": target.artifact_kind,
+        "recommended_action": target.recommended_action,
+        "notes": target.notes,
+    }
+    if target.kind == "glob":
+        matches = sorted(root.glob(target.relative_path), key=lambda item: item.as_posix().lower())
+        visible_matches = [describe_path(match, root) for match in matches[:MAX_MATCHES_PER_TARGET]]
+        base.update(
+            {
+                "path": str(root / target.relative_path),
+                "exists": bool(matches),
+                "match_count": len(matches),
+                "matches": visible_matches,
+                "truncated": len(matches) > MAX_MATCHES_PER_TARGET,
+            }
+        )
+        return base
+
+    path = root / target.relative_path
+    base.update(describe_path(path, root))
+    base["exists"] = path.exists()
+    return base
+
+
+def describe_path(path: Path, root: Path) -> Dict[str, object]:
+    record: Dict[str, object] = {
+        "path": str(path),
+        "relative_path": safe_relative(path, root),
+        "exists": path.exists(),
+    }
+    if not path.exists():
+        return record
+    try:
+        stat_result = path.stat()
+    except (OSError, PermissionError):
+        record["error"] = "stat-failed"
+        return record
+    if path.is_dir():
+        record["path_kind"] = "directory"
+        record["direct_child_count"] = count_direct_children(path)
+    elif path.is_file():
+        record["path_kind"] = "file"
+        record["size"] = stat_result.st_size
+    else:
+        record["path_kind"] = "other"
+    record["modified_at"] = dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat()
+    return record
+
+
+def safe_relative(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def count_direct_children(path: Path) -> int:
+    try:
+        return sum(1 for _ in path.iterdir())
+    except (OSError, PermissionError):
+        return 0
+
+
+def summarize_targets(targets: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+    present = [target for target in targets if bool(target.get("exists"))]
+    missing = [target for target in targets if not bool(target.get("exists"))]
+    category_counts: Dict[str, Dict[str, int]] = {}
+    artifact_counts: Dict[str, Dict[str, int]] = {}
+    for target in targets:
+        increment_summary(category_counts, str(target["category"]), bool(target.get("exists")))
+        increment_summary(artifact_counts, str(target["artifact_kind"]), bool(target.get("exists")))
+    return {
+        "target_count": len(targets),
+        "present_count": len(present),
+        "missing_count": len(missing),
+        "category_counts": category_counts,
+        "artifact_kind_counts": artifact_counts,
+        "missing_by_category": summarize_missing(missing),
+    }
+
+
+def increment_summary(summary: Dict[str, Dict[str, int]], key: str, exists: bool) -> None:
+    if key not in summary:
+        summary[key] = {"target_count": 0, "present_count": 0, "missing_count": 0}
+    summary[key]["target_count"] += 1
+    if exists:
+        summary[key]["present_count"] += 1
+    else:
+        summary[key]["missing_count"] += 1
+
+
+def summarize_missing(targets: Iterable[Mapping[str, object]]) -> Dict[str, List[str]]:
+    missing: Dict[str, List[str]] = {}
+    for target in targets:
+        category = str(target["category"])
+        missing.setdefault(category, []).append(str(target["label"]))
+    return missing
+
+
+def build_next_steps(targets: Sequence[Mapping[str, object]]) -> list[str]:
+    present_artifacts = sorted({str(target["artifact_kind"]) for target in targets if target.get("exists")})
+    steps = [
+        "Review present targets before running heavy extraction; this plan does not copy evidence.",
+        "Run rapidtriage run ROOT --mode hacking --read-only for a broad first pass after the plan looks correct.",
+    ]
+    if present_artifacts:
+        steps.append("Focused collectors likely to produce rows: " + ", ".join(present_artifacts) + ".")
+    if any(target.get("kind") == "glob" and target.get("truncated") for target in targets):
+        steps.append("One or more glob targets were truncated in the plan; inspect the source folder directly before exporting.")
+    return steps

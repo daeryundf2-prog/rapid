@@ -43,6 +43,24 @@ The web Case DB panel also supports selecting repetitive results and batch-marki
 
 The web start screen shows a run-plan preview before processing. Use `Fast first pass` first for large evidence because it keeps extraction read-only and focuses on indexing/search. Use `Standard` when you want bounded copied evidence for review, and use `Deep` only when you intentionally want uncapped extraction.
 
+Before running a large mounted image, use `collect-plan` to preview high-value Windows/macOS artifact locations without copying files or hashing the whole tree:
+
+```bash
+rapidtriage collect-plan ./mounted-case --profile intrusion --output collect-plan.json
+rapidtriage collect-plan ./mounted-case --profile full --json
+```
+
+Profiles:
+
+- `intrusion`: account usage, event logs, execution, persistence, and remote-access leads.
+- `windows-core`: Windows EVTX, registry/user hives, browser paths, execution, persistence, remote access, filesystem timeline, and sync folders.
+- `macos-core`: macOS users, Safari/Chromium/Firefox history, quarantine, LaunchAgents/Daemons, Trash, shell history, and iCloud-style folders.
+- `browser-history`: browser and cloud/sync paths for web-activity-heavy review.
+- `filesystem-timeline`: MFT/USN/Recycle Bin and macOS Trash targets.
+- `full`: all built-in collection targets.
+
+Treat missing targets as a review cue, not automatically as absence of activity. A mounted image may use different drive layouts, language-specific profile names, or parser-export folders outside the default `analysis` directory.
+
 After a run, the Summary tab and generated Markdown report include a processing transparency section. Check warning badges for zero-row parsers, read-only extraction skips, missing source paths, existing destinations, and max-file or max-size caps before treating the run as complete.
 
 ## Windows System Artifacts

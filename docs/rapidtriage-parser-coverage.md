@@ -3,6 +3,7 @@
 | Area | Status | Notes |
 | --- | --- | --- |
 | File metadata | Implemented | Names, paths, extensions, sizes, modified time, categories. |
+| KAPE-style collect planning | Implemented baseline | `collect-plan` profiles preview present/missing Windows/macOS collection targets before heavy scanning or copying. |
 | Document text | Implemented | Text/log/config/data, PDF, Office OpenXML, OpenDocument where dependencies support extraction. |
 | Browser history/downloads | Implemented baseline | Chrome, Edge, Brave, Firefox local profiles; history/download fixture coverage. |
 | Recent files | Implemented baseline | Recent shortcuts and Jump List file inventory from user profiles. |
