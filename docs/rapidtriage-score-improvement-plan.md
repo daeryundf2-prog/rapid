@@ -4,11 +4,11 @@ This plan is scored from a real analyst/user perspective, not from a feature-cou
 
 ## Current Score
 
-Estimated current score: 88/100.
+Estimated current score: 90/100.
 
 Why:
 
-- The tool now has a usable local web UI, sample case, doctor check, evidence preflight, processing plan preview, whole-case search, source viewer, review board, compare tray with text diff, hashes, report templates, SQLite Case DB saved searches/batch review, fixture-backed Windows artifact parsers, high-value Windows system artifact coverage, exported APK triage, image perceptual-hash triage, portable reviewer bundle, Windows quickstart, and packaging tests.
+- The tool now has a usable local web UI, sample case, doctor check, evidence preflight, processing plan preview, whole-case search, source viewer, review board, compare tray with text diff, hashes, report templates, SQLite Case DB saved searches/batch review, fixture-backed Windows artifact parsers, high-value Windows system artifact coverage, exported APK triage, image perceptual-hash triage, Volatility-style memory import, portable reviewer bundle, Windows quickstart, and packaging tests.
 - It is useful for folder-based triage and light forensic review.
 - It is not yet comparable to AXIOM/WISDOM for broad native evidence ingestion, binary Windows artifact depth, mobile/cloud acquisition, large-case indexing proof, or commercial validation trust.
 
@@ -127,7 +127,7 @@ Tasks:
 - Add mobile extraction imports from Cellebrite/XRY/GrayKey/AXIOM-style exports where legally and technically feasible. Status: exported `.apk` inventory/hash/manifest/permission/risk triage is implemented; full vendor package import remains planned.
 - Add cloud export/import workflows.
 - Add image/media triage: thumbnails, OCR queues, perceptual hash, similarity grouping, optional AI classification. Status: image hash/dimensions/perceptual-hash/similarity-bucket/OCR-queue hints implemented; thumbnails and classifier workflows remain planned.
-- Add memory forensics integration with Volatility-style output normalization.
+- Add memory forensics integration with Volatility-style output normalization. Status: Volatility/Volatility3 JSON/JSONL process, cmdline, netscan, and malfind normalization is implemented with risk flags and source hashes.
 - Add support/training/legal validation package.
 
 Acceptance criteria:

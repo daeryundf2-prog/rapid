@@ -5,6 +5,7 @@ from typing import Dict, List
 from .android import AndroidApkProvider
 from .generic import GenericDocumentArtifactProvider
 from .media import MediaImageProvider
+from .memory import MemoryVolatilityProvider
 from .windows.browser import WindowsBrowserArtifactsProvider
 from .windows.eventlog import WindowsEventLogProvider
 from .windows.prefetch import WindowsPrefetchProvider
@@ -19,6 +20,7 @@ def all_providers() -> List[object]:
         GenericDocumentArtifactProvider(),
         AndroidApkProvider(),
         MediaImageProvider(),
+        MemoryVolatilityProvider(),
         WindowsBrowserArtifactsProvider(),
         WindowsRecentFilesProvider(),
         WindowsEventLogProvider(),

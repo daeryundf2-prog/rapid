@@ -148,6 +148,17 @@ Media image collector rows:
 
 Current media image rows carry `parser`, `parser_version`, `source_path`, `source_format`, `hashes`, `width`, `height`, `channel_count`, `perceptual_hash`, `similarity_bucket`, and `ocr_candidate` under `details` when decoding succeeds.
 
+Memory Volatility collector rows:
+
+- `memory-volatility-artifacts`
+  - `memory-process`
+  - `memory-cmdline`
+  - `memory-network`
+  - `memory-malfind`
+  - `memory-artifact`
+
+Current memory rows carry `parser`, `parser_version`, `source_path`, `source_plugin`, `source_index`, `source_hashes`, normalized process fields, network endpoints, `risk_flags`, `risk_score`, and the original row under `raw`.
+
 ## Windows artifact collector rows
 
 The `manifest-windows-artifacts.json` sample also fixes the current artifact row shape for:

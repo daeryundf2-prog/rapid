@@ -84,6 +84,16 @@ rapidtriage artifacts ./mounted-case --kind media-image --output media-images.js
 
 The collector records file hashes, dimensions, channel count, an average perceptual hash, a short similarity bucket, and whether the file should be queued for OCR. The perceptual hash is a grouping hint for fast review, not a courtroom-grade similarity conclusion by itself.
 
+## Memory Forensics Imports
+
+RapidTriage does not parse raw RAM dumps directly yet, but it can import Volatility/Volatility3 JSON or JSONL output for review and search. Export plugins such as `pslist`, `cmdline`, `netscan`, or `malfind`, then point the collector at the folder:
+
+```bash
+rapidtriage artifacts ./volatility-output --kind memory-volatility --output memory-artifacts.json
+```
+
+The importer normalizes process name, PID/PPID, command line, network endpoints, offsets, source hashes, and risk flags such as suspicious command lines, external network connections, malfind rows, and writable executable memory.
+
 ## Review Workflow
 
 A search hit can be marked as relevant, excluded, follow-up, or report-worthy:

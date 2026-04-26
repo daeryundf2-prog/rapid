@@ -38,7 +38,7 @@ RapidTriage should absorb this as a product principle:
 | Browser integration | Unified browser history/download viewer across Chrome/Edge/Firefox. | Partial | Normalize browser artifacts into one timeline/search surface. |
 | TI integration | Extract IP/URL and query threat intelligence APIs. | Planned | Add optional TI connector plugin contract, disabled by default. |
 | AI prompt artifacts | Extract prompts from AI/search browser artifacts. | Planned | Add parser category for AI assistants/search prompts when source formats are known. |
-| Memory forensics | RAM dump analysis, BitLocker key extraction, process risk visualization. | Deferred | Add memory parser/plugin lane; do not block disk triage workflow. |
+| Memory forensics | RAM dump analysis, BitLocker key extraction, process risk visualization. | Partial | Volatility/Volatility3 JSON/JSONL import normalizes process/network/malfind rows; direct RAM parsing and key search remain planned. |
 | LotL detection | PowerShell/WMI/local-admin command collection. | Partial | Add Windows command history, WMI, scheduled task, event log correlation rules. |
 | Deepfake/similar images | Media classification, visual similarity grouping. | Partial | Image dimensions/hash/perceptual-hash/similarity-bucket triage exists; classifier/deepfake detection remains planned. |
 | Chromebook | ChromeOS dump analysis. | Deferred | Track as separate evidence profile after Linux/browser coverage improves. |

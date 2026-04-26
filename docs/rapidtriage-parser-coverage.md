@@ -24,9 +24,9 @@
 | Raw/split images DD/RAW/IMG/001 | Detection | UI/API adapter detection exists; mount or recover externally, then scan the folder. |
 | Optical/archive images ISO/DMG/WIM/SWM | Detection | UI/API adapter detection exists; mount/extract externally, then scan the folder. |
 | Virtual disks VHD/VHDX/VMDK/VDI/XVA/QCOW/QCOW2 | Detection | UI/API adapter detection exists with platform tool hints; extraction/mount orchestration is planned. |
-| Memory dumps MEM/DMP/VMEM/VMSS/VMSN/HPAK | Detection | Inventory/hash detection exists; deep memory parsing remains deferred to Volatility-style tools. |
+| Memory dumps MEM/DMP/VMEM/VMSS/VMSN/HPAK | Detection + import | Memory dump detection exists; Volatility/Volatility3 JSON/JSONL outputs can be imported as process, network, cmdline, and malfind artifacts. |
 | APK malware triage | Partial | Exported `.apk` files are inventoried with hashes, manifest metadata, permissions, dex/native-library counts, and risk flags. |
-| Memory forensics | Deferred | RAM dump parsing, BitLocker key search, and process-risk visualization are separate long-term work. |
+| Memory forensics | Partial | Volatility-style output normalization is implemented; direct RAM parsing, BitLocker key search, and process-risk visualization remain long-term work. |
 | Threat intelligence enrichment | Planned | Optional URL/IP/hash enrichment plugin, disabled by default. |
 | AI prompt artifacts | Planned | Browser/search/AI assistant prompt extraction when source formats are understood. |
 | Mobile/cloud acquisition | Deferred | Long-term domain, not current desktop triage scope. |

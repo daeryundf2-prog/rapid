@@ -54,6 +54,13 @@
       "artifacts": []
     },
     {
+      "name": "memory-volatility-artifacts",
+      "description": "Volatility/Volatility3 JSON or JSONL output normalization for process, network, and injected-code triage",
+      "target_platform": "memory",
+      "supported": true,
+      "artifacts": []
+    },
+    {
       "name": "windows-browser-artifacts",
       "description": "Windows browser history/download collectors backed by real profile files",
       "target_platform": "windows",
