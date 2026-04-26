@@ -508,7 +508,7 @@
     },
     {
       "name": "windows-filesystem",
-      "description": "Windows MFT and USN Journal CSV/JSON/JSONL imports",
+      "description": "Windows MFT and USN Journal imports plus bounded native NTFS inventory",
       "target_platform": "windows",
       "supported": true,
       "artifacts": []

@@ -123,7 +123,7 @@ Execution and filesystem workflow:
 - `windows-prefetch` parses SCCA Prefetch headers for executable hints, best-effort run counts, last run timestamps, and referenced path pivots. Treat these as triage leads and validate important claims with a dedicated Prefetch parser.
 - SRUM CSV/JSON/JSONL/NDJSON exports from trusted tools can be imported as app resource or network usage rows with bytes, energy, user, timestamp, and source hashes; `SRUDB.dat` is also preserved with ESE header metadata and bounded string/path/URL pivots.
 - `windows-search-index` inventories `Windows.edb` with ESE header metadata and bounded string/path/URL pivots, and imports Windows Search CSV/JSON exports so indexed filenames, paths, URLs, titles, and content snippets can be searched alongside documents and artifacts.
-- `windows-filesystem` imports MFT/USN CSV, JSON, JSONL, or NDJSON exports from trusted external tools.
+- `windows-filesystem` imports MFT/USN CSV, JSON, JSONL, or NDJSON exports from trusted external tools; it also inventories native `$MFT` and `$J`/USN journal files with hashes, bounded record/header samples, path pivots, and recoverable native USN rows.
 - These rows are labeled as triage/reportability hints so weak artifacts such as ShimCache are not overclaimed as proof of execution.
 
 Use:

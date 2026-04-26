@@ -51,7 +51,9 @@ class WindowsArtifactFixture:
     srum_csv: Path
     srum_db: Path
     mft_csv: Path
+    mft_native: Path
     usn_jsonl: Path
+    usn_journal: Path
     windows_search_csv: Path
     windows_edb: Path
     default_rdp: Path
@@ -115,7 +117,9 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     srum_csv = root / "analysis" / "srum.csv"
     srum_db = root / "Windows" / "System32" / "sru" / "SRUDB.dat"
     mft_csv = root / "analysis" / "mft.csv"
+    mft_native = root / "$MFT"
     usn_jsonl = root / "analysis" / "usn.jsonl"
+    usn_journal = root / "$Extend" / "$UsnJrnl" / "$J"
     windows_search_csv = root / "analysis" / "windows-search-index.csv"
     windows_edb = root / "ProgramData" / "Microsoft" / "Search" / "Data" / "Applications" / "Windows" / "Windows.edb"
     default_rdp = root / "Users" / "alice" / "Documents" / "Default.rdp"
@@ -141,7 +145,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     _write_prefetch_fixture(prefetch_file)
     _write_srum_fixture(srum_csv)
     _write_srum_database_fixture(srum_db)
-    _write_filesystem_fixtures(mft_csv, usn_jsonl)
+    _write_filesystem_fixtures(mft_csv, usn_jsonl, mft_native, usn_journal)
     _write_windows_search_fixture(windows_search_csv, windows_edb)
     _write_remote_access_fixtures(default_rdp, rdp_cache_file, rdp_reg)
     _write_wmi_repository_fixture(wmi_objects)
@@ -164,7 +168,9 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         srum_csv=srum_csv,
         srum_db=srum_db,
         mft_csv=mft_csv,
+        mft_native=mft_native,
         usn_jsonl=usn_jsonl,
+        usn_journal=usn_journal,
         windows_search_csv=windows_search_csv,
         windows_edb=windows_edb,
         default_rdp=default_rdp,
@@ -535,7 +541,7 @@ def _write_srum_database_fixture(path: Path) -> None:
     )
 
 
-def _write_filesystem_fixtures(mft_csv: Path, usn_jsonl: Path) -> None:
+def _write_filesystem_fixtures(mft_csv: Path, usn_jsonl: Path, mft_native: Path, usn_journal: Path) -> None:
     mft_csv.parent.mkdir(parents=True, exist_ok=True)
     mft_csv.write_text(
         "EntryNumber,FullPath,Deleted,Created0x10\n"
@@ -546,6 +552,51 @@ def _write_filesystem_fixtures(mft_csv: Path, usn_jsonl: Path) -> None:
         '{"FRN":"42","ParentFRN":"5","Name":"deleted.txt","Reason":"FILE_DELETE","Timestamp":"2024-04-01T04:06:07Z"}\n',
         encoding="utf-8",
     )
+    mft_native.parent.mkdir(parents=True, exist_ok=True)
+    mft_native.write_bytes(build_minimal_mft())
+    usn_journal.parent.mkdir(parents=True, exist_ok=True)
+    usn_journal.write_bytes(
+        build_minimal_usn_journal(
+            file_name="deleted.txt",
+            timestamp=datetime(2024, 4, 1, 4, 6, 7, tzinfo=timezone.utc),
+            reason=0x00000200,
+        )
+    )
+
+
+def build_minimal_mft() -> bytes:
+    record = bytearray(1024)
+    record[0:4] = b"FILE"
+    record[0x10:0x12] = (3).to_bytes(2, "little")
+    record[0x12:0x14] = (1).to_bytes(2, "little")
+    record[0x14:0x16] = (0x38).to_bytes(2, "little")
+    record[0x16:0x18] = (0x01).to_bytes(2, "little")
+    record[0x18:0x1C] = (512).to_bytes(4, "little")
+    record[0x1C:0x20] = (1024).to_bytes(4, "little")
+    path = r"C:\Users\alice\Desktop\deleted.txt".encode("utf-16le")
+    record[0x100 : 0x100 + len(path)] = path
+    return bytes(record)
+
+
+def build_minimal_usn_journal(file_name: str, timestamp: datetime, reason: int) -> bytes:
+    encoded_name = file_name.encode("utf-16le")
+    name_offset = 60
+    length = name_offset + len(encoded_name)
+    record = bytearray(length)
+    record[0:4] = length.to_bytes(4, "little")
+    record[4:6] = (2).to_bytes(2, "little")
+    record[6:8] = (0).to_bytes(2, "little")
+    record[8:16] = (42).to_bytes(8, "little")
+    record[16:24] = (5).to_bytes(8, "little")
+    record[24:32] = (9001).to_bytes(8, "little")
+    record[32:40] = datetime_to_filetime(timestamp).to_bytes(8, "little")
+    record[40:44] = reason.to_bytes(4, "little")
+    record[48:52] = (100).to_bytes(4, "little")
+    record[52:56] = (0x20).to_bytes(4, "little")
+    record[56:58] = len(encoded_name).to_bytes(2, "little")
+    record[58:60] = name_offset.to_bytes(2, "little")
+    record[name_offset : name_offset + len(encoded_name)] = encoded_name
+    return bytes(record)
 
 
 def _write_windows_search_fixture(csv_path: Path, edb_path: Path) -> None:

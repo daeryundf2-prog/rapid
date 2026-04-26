@@ -353,13 +353,34 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             payload = json.loads(output.read_text(encoding="utf-8"))
             artifacts = payload["artifacts"]
             mft = [item for item in artifacts if item["artifact_type"] == "mft-record"]
-            usn = [item for item in artifacts if item["artifact_type"] == "usn-record"]
+            usn = [
+                item
+                for item in artifacts
+                if item["artifact_type"] == "usn-record"
+                and item["details"]["parser"] == "windows-filesystem-import"
+            ]
+            native_usn = [
+                item
+                for item in artifacts
+                if item["artifact_type"] == "usn-record"
+                and item["details"]["parser"] == "windows-usn-native"
+            ]
+            mft_files = [item for item in artifacts if item["artifact_type"] == "mft-file"]
+            usn_files = [item for item in artifacts if item["artifact_type"] == "usn-journal-file"]
 
             self.assertEqual(mft[0]["details"]["record_number"], "42")
             self.assertTrue(mft[0]["details"]["deleted_hint"])
             self.assertEqual(mft[0]["details"]["source_path"], str(fixture.mft_csv.resolve()))
             self.assertEqual(usn[0]["details"]["reason"], "FILE_DELETE")
             self.assertEqual(usn[0]["details"]["source_path"], str(fixture.usn_jsonl.resolve()))
+            self.assertEqual(mft_files[0]["details"]["source_path"], str(fixture.mft_native.resolve()))
+            self.assertEqual(mft_files[0]["details"]["native_record_count"], 1)
+            self.assertTrue(mft_files[0]["details"]["record_header_samples"][0]["in_use"])
+            self.assertIn(r"C:\Users\alice\Desktop\deleted.txt", mft_files[0]["details"]["path_candidates"])
+            self.assertEqual(usn_files[0]["details"]["source_path"], str(fixture.usn_journal.resolve()))
+            self.assertEqual(usn_files[0]["details"]["native_record_count"], 1)
+            self.assertEqual(native_usn[0]["details"]["file_path"], "deleted.txt")
+            self.assertIn("FILE_DELETE", native_usn[0]["details"]["reason_flags"])
 
     def test_windows_search_index_collector_imports_exports_and_inventories_edb(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
