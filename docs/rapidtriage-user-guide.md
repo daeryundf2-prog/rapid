@@ -147,6 +147,16 @@ rapidtriage benchmark --output-dir ./benchmark-small --file-count 1000 --json
 
 The command writes JSON and Markdown with ingest time, search p50/p95, peak memory, output size, and result counts.
 
+## Release Validation Package
+
+Before handing a build to analysts, generate a validation package:
+
+```bash
+rapidtriage validation --output-dir ./release-validation --overwrite --json
+```
+
+The package writes JSON and Markdown listing required checks, release commands, user-facing documents, known limitations, chain-of-custody expectations, and external responsibilities such as legal validation, signed installers, and support SLAs. Treat it as the release evidence checklist that should sit next to benchmark output, sample-case output, and build artifacts.
+
 ## Portable Reviewer Bundle
 
 Use a bundle when a reviewer should see selected evidence metadata, review state, hashes, and the report draft without receiving the original evidence image:

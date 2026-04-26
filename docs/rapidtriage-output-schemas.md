@@ -14,6 +14,24 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 
 ## Samples
 
+### `validation`
+
+- Output: `rapidtriage-validation-package.json`
+- Top-level keys:
+  - `command`
+  - `generated_at`
+  - `platform`
+  - `score_target`
+  - `status`
+  - `output_dir`
+  - `outputs`
+  - `checks`
+  - `recommended_commands`
+  - `required_documents`
+  - `known_limits`
+  - `release_decision`
+- The Markdown sidecar is `rapidtriage-validation-report.md`.
+
 ### `manifest`
 
 - Sample: `docs/rapidtriage-output-samples/manifest-windows-artifacts.json`

@@ -21,6 +21,8 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
         self.assertIn("bundle", commands)
         self.assertIn("--allowed-root", commands["bundle"].format_help())
         self.assertIn("plugins", commands)
+        self.assertIn("validation", commands)
+        self.assertIn("--output-dir", commands["validation"].format_help())
 
     def test_timeline_export_and_normalize_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

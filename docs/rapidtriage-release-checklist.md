@@ -8,6 +8,7 @@
 - Run `python -m build --wheel --sdist --no-isolation`.
 - Run `rapidtriage sample --run --overwrite`.
 - Run `rapidtriage benchmark --output-dir ./release-benchmark --file-count 1000 --overwrite`.
+- Run `rapidtriage validation --output-dir ./release-validation --overwrite`.
 - Run the Windows/macOS usability checklist in `docs/rapidtriage-fresh-machine-smoke-test.md` before calling the release analyst-ready.
 
 ## Artifact Build
@@ -23,6 +24,7 @@ Expected artifacts:
 - Windows launchers.
 - User guide and Windows quick-start docs.
 - macOS/Linux quick-start docs, E01 workflow docs, and fresh-machine smoke test docs.
+- Release validation JSON/Markdown package.
 
 ## Release Notes Must Include
 

@@ -117,6 +117,12 @@ Track performance with a synthetic benchmark:
 rapidtriage benchmark --output-dir ./rapidtriage-benchmark --file-count 1000
 ```
 
+Build a release validation package before handing a build to analysts:
+
+```bash
+rapidtriage validation --output-dir ./rapidtriage-validation --overwrite
+```
+
 Register a completed run in the local case catalog:
 
 ```bash
@@ -269,6 +275,7 @@ Implemented:
 - `case-review` stores DB-backed review/verification marks, tags, notes, reviewer names, and report-candidate flags for individual search targets.
 - `evidence` identifies folder, E01/Ex01, raw image, ISO, and virtual-disk source adapters and reports whether required external tooling is available.
 - `benchmark` writes JSON and Markdown benchmark results with ingest/search latency, peak memory, output size, and result counts.
+- `validation` writes JSON and Markdown release-readiness checks, required command evidence, required documents, known limits, and operator-owned external responsibilities.
 - `case-catalog` stores user-facing case metadata, associated run outputs, and portable catalog archives.
 - `timeline-export` writes an AXIOM-style normalized timeline with stable event IDs and filters for date, source, event type, and review status.
 - `normalize` converts completed run outputs into stable model collections for files, artifacts, events, and indexed documents.

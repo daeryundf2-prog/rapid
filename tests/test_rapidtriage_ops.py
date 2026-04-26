@@ -24,6 +24,8 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("--file-count", commands["benchmark"].format_help())
         self.assertIn("case-catalog", commands)
         self.assertIn("--add-run", commands["case-catalog"].format_help())
+        self.assertIn("validation", commands)
+        self.assertIn("--output-dir", commands["validation"].format_help())
 
     def test_benchmark_command_writes_json_and_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -52,6 +54,33 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue((output_dir / "rapidtriage-benchmark.md").is_file())
             self.assertGreaterEqual(payload["metrics"]["ingest_seconds"], 0)
             self.assertIn("search_p50_seconds", payload["metrics"])
+
+    def test_validation_command_writes_release_package(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "validation"
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "validation",
+                        "--output-dir",
+                        str(output_dir),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["command"], "validation")
+            self.assertEqual(payload["score_target"], 100)
+            self.assertTrue((output_dir / "rapidtriage-validation-package.json").is_file())
+            self.assertTrue((output_dir / "rapidtriage-validation-report.md").is_file())
+            check_ids = {item["id"] for item in payload["checks"]}
+            self.assertIn("unit-tests", check_ids)
+            self.assertIn("known-limitations", check_ids)
+            command_names = {item["name"] for item in payload["recommended_commands"]}
+            self.assertIn("validation-package", command_names)
 
     def test_case_catalog_adds_exports_and_imports_case(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

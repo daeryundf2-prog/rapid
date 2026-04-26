@@ -32,6 +32,7 @@ from .core.sample_case import DEFAULT_SAMPLE_DIR, DEFAULT_SAMPLE_MODE, SampleCas
 from .core.search import SearchError, run_unified_search
 from .core.timeline import TimelineError, build_timeline_report, run_timeline
 from .core.timeline_export import TimelineExportError, build_unified_timeline_export
+from .core.validation import ValidationError, build_validation_package
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 TOP_LEVEL_EPILOG = """Examples:
@@ -103,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage case-review ./rapidtriage-case.db --case-id CASE-001 --target-type indexed_document --target-id 1 --status relevant --verification-status source_opened
               rapidtriage evidence ./case.E01
               rapidtriage benchmark --output-dir ./rapidtriage-benchmark --file-count 1000
+              rapidtriage validation --output-dir ./rapidtriage-validation --overwrite
               rapidtriage case-catalog --add-run ./rapidtriage-run --case-id CASE-001 --list
               rapidtriage timeline-export ./rapidtriage-run --source artifacts --output timeline-export.json
               rapidtriage normalize ./rapidtriage-run --output normalized-case.json
@@ -443,6 +445,23 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--search-iterations", type=int, default=3, help="Repeated search samples for p50/p95")
     benchmark.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty benchmark output directory")
     benchmark.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    validation = sub.add_parser(
+        "validation",
+        help="Build a release validation package",
+        description="Build a release validation package with required checks, commands, documents, and known limits",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage validation --output-dir ./rapidtriage-validation
+              rapidtriage validation --output-dir ./rapidtriage-validation --overwrite --json
+            """
+        ),
+    )
+    validation.add_argument("--output-dir", required=True, help="Directory for validation JSON and Markdown outputs")
+    validation.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty validation output directory")
+    validation.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     case_catalog = sub.add_parser(
         "case-catalog",
@@ -1007,6 +1026,22 @@ def main(argv=None) -> int:
                 f"{metrics['ingest_seconds']}s  Search p50: {metrics['search_p50_seconds']}s  "
                 f"Search p95: {metrics['search_p95_seconds']}s"
             )
+        return 0
+
+    if args.command == "validation":
+        try:
+            payload = build_validation_package(
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+                overwrite=args.overwrite,
+            )
+        except (ValidationError, OSError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved validation JSON: {payload['outputs']['json']}")
+            print(f"Saved validation report: {payload['outputs']['markdown']}")
+            print(f"Score target: {payload['score_target']}/100")
         return 0
 
     if args.command == "case-catalog":

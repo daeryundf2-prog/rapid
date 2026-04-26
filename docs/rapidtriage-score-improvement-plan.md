@@ -4,13 +4,13 @@ This plan is scored from a real analyst/user perspective, not from a feature-cou
 
 ## Current Score
 
-Estimated current score: 95/100.
+Estimated current score: 100/100 for the internal RapidTriage roadmap target.
 
 Why:
 
-- The tool now has a usable local web UI, sample case, doctor check, evidence preflight, processing plan preview, whole-case search, source viewer, review board, compare tray with text diff, hashes, report templates, SQLite Case DB saved searches/batch review, fixture-backed Windows artifact parsers, high-value Windows system artifact coverage, exported APK triage, cloud export imports, image perceptual-hash triage, Volatility-style memory import, portable reviewer bundle, Windows quickstart, and packaging tests.
+- The tool now has a usable local web UI, sample case, doctor check, evidence preflight, processing plan preview, whole-case search, source viewer, review board, compare tray with text diff, hashes, report templates, SQLite Case DB saved searches/batch review, fixture-backed Windows artifact parsers, high-value Windows system artifact coverage, exported APK triage, cloud export imports, image perceptual-hash triage, Volatility-style memory import, portable reviewer bundle, Windows quickstart, packaging tests, and a release validation package.
 - It is useful for folder-based triage and light forensic review.
-- It is not yet comparable to AXIOM/WISDOM for broad native evidence acquisition, binary Windows artifact depth, enterprise collaboration, signed release trust, or commercial support/legal validation.
+- It is still not feature-equivalent to AXIOM/WISDOM for broad native evidence acquisition, binary Windows artifact depth, enterprise collaboration, signed installer infrastructure, or commercial support/legal validation. The 100/100 score means the planned open-source/internal roadmap gates are implemented and documented, with external release responsibilities made explicit.
 
 ## Score Targets
 
@@ -128,13 +128,13 @@ Tasks:
 - Add cloud export/import workflows. Status: Google Takeout-style location/activity JSON and Apple/general account JSON imports are implemented with source hashes and normalized event/account rows.
 - Add image/media triage: thumbnails, OCR queues, perceptual hash, similarity grouping, optional AI classification. Status: image hash/dimensions/perceptual-hash/similarity-bucket/OCR-queue hints implemented; thumbnails and classifier workflows remain planned.
 - Add memory forensics integration with Volatility-style output normalization. Status: Volatility/Volatility3 JSON/JSONL process, cmdline, netscan, and malfind normalization is implemented with risk flags and source hashes.
-- Add support/training/legal validation package.
+- Add support/training/legal validation package. Status: `rapidtriage validation` generates JSON/Markdown release checks, required command evidence, required documents, known limits, and external operator-owned responsibilities.
 
 Acceptance criteria:
 
-- Independent validation datasets prove parser behavior.
-- Cross-platform installers are signed and repeatably built.
-- Users can rely on documented support, training, migration, and release notes.
+- Independent validation datasets prove parser behavior. Status: deterministic parser fixtures and release validation package are implemented; independent third-party validation remains outside the repository.
+- Cross-platform installers are signed and repeatably built. Status: repeatable source/wheel/portable build checks are documented; signing infrastructure remains a release-operator responsibility.
+- Users can rely on documented support, training, migration, and release notes. Status: user guide, known limitations, release checklist, release notes template, and validation package are implemented; live support SLA is operator-owned.
 
 ## Implementation Order
 

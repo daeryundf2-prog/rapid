@@ -32,6 +32,7 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - Markdown report generation is available.
 - PDF/DOCX polished exports are not yet first-class release artifacts.
 - Reports should include analyst review notes and hash manifests for defensibility.
+- The validation package is a release-readiness checklist; it does not replace independent legal validation, signed installer infrastructure, or a maintained support program.
 
 ## Security
 
