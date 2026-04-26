@@ -86,11 +86,35 @@
           "path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
           "supported": true,
           "details": {
+            "parser": "browser-history",
+            "parser_version": "windows-browser-v2",
+            "coverage_status": "parsed",
+            "reportability": "triage",
+            "source_path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+            "source_hashes": {
+              "md5": "220306cae6f1c00bb9852539e0738ac6",
+              "sha1": "fa1f60b336407af7b82b7501738d607a80a2236f",
+              "sha256": "a500ca837ddabfd418bd3103fb020923eb2d21ca85e4bfa38e2af8159573c99a"
+            },
             "user": "alice",
             "browser": "firefox",
             "profile": "default-release",
             "history_count": 1,
             "download_count": 0,
+            "internet_usage_count": 1,
+            "ai_usage_count": 0,
+            "internet_category_counts": [
+              {
+                "value": "download",
+                "count": 1
+              }
+            ],
+            "top_domains": [
+              {
+                "value": "support.mozilla.org",
+                "count": 1
+              }
+            ],
             "history": [
               {
                 "url": "https://support.mozilla.org/kb/download-firefox",
@@ -99,7 +123,21 @@
                 "last_visited_at": "2026-04-06T08:00:00+00:00"
               }
             ],
-            "downloads": []
+            "downloads": [],
+            "internet_usage": [
+              {
+                "source_index": 0,
+                "url": "https://support.mozilla.org/kb/download-firefox",
+                "title": "Firefox Support",
+                "domain": "support.mozilla.org",
+                "category": "download",
+                "visit_count": 3,
+                "last_visited_at": "2026-04-06T08:00:00+00:00",
+                "ai_service": "",
+                "query_hint": ""
+              }
+            ],
+            "ai_usage": []
           }
         },
         {
@@ -108,11 +146,43 @@
           "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
           "supported": true,
           "details": {
+            "parser": "browser-history",
+            "parser_version": "windows-browser-v2",
+            "coverage_status": "parsed",
+            "reportability": "triage",
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+            "source_hashes": {
+              "md5": "512e2bc96d901588756f1b1ddfe60685",
+              "sha1": "f76080b4212e3878e4502f562b9df48d0a2e4a6f",
+              "sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c"
+            },
             "user": "alice",
             "browser": "chrome",
             "profile": "Default",
             "history_count": 2,
             "download_count": 1,
+            "internet_usage_count": 2,
+            "ai_usage_count": 0,
+            "internet_category_counts": [
+              {
+                "value": "download",
+                "count": 1
+              },
+              {
+                "value": "web",
+                "count": 1
+              }
+            ],
+            "top_domains": [
+              {
+                "value": "download.example.com",
+                "count": 1
+              },
+              {
+                "value": "example.com",
+                "count": 1
+              }
+            ],
             "history": [
               {
                 "url": "https://example.com/case",
@@ -137,7 +207,32 @@
                 "started_at": "2026-04-08T16:01:00+00:00",
                 "ended_at": "2026-04-08T16:02:00+00:00"
               }
-            ]
+            ],
+            "internet_usage": [
+              {
+                "source_index": 0,
+                "url": "https://example.com/case",
+                "title": "Case Portal",
+                "domain": "example.com",
+                "category": "web",
+                "visit_count": 4,
+                "last_visited_at": "2026-04-09T10:30:00+00:00",
+                "ai_service": "",
+                "query_hint": ""
+              },
+              {
+                "source_index": 1,
+                "url": "https://download.example.com/report.zip",
+                "title": "Evidence Download",
+                "domain": "download.example.com",
+                "category": "download",
+                "visit_count": 2,
+                "last_visited_at": "2026-04-08T16:05:00+00:00",
+                "ai_service": "",
+                "query_hint": ""
+              }
+            ],
+            "ai_usage": []
           }
         },
         {
@@ -146,11 +241,35 @@
           "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
           "supported": true,
           "details": {
+            "parser": "browser-history",
+            "parser_version": "windows-browser-v2",
+            "coverage_status": "parsed",
+            "reportability": "triage",
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+            "source_hashes": {
+              "md5": "7fbcd3ae3d9f3a910bed54850656e78b",
+              "sha1": "b39f4e8f409d2902d5567bc64d03ae2bc99f48ef",
+              "sha256": "da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639"
+            },
             "user": "alice",
             "browser": "edge",
             "profile": "Profile 1",
             "history_count": 1,
             "download_count": 1,
+            "internet_usage_count": 1,
+            "ai_usage_count": 0,
+            "internet_category_counts": [
+              {
+                "value": "web",
+                "count": 1
+              }
+            ],
+            "top_domains": [
+              {
+                "value": "contoso.example",
+                "count": 1
+              }
+            ],
             "history": [
               {
                 "url": "https://contoso.example/recent",
@@ -169,7 +288,21 @@
                 "started_at": "2026-04-07T09:10:00+00:00",
                 "ended_at": "2026-04-07T09:11:00+00:00"
               }
-            ]
+            ],
+            "internet_usage": [
+              {
+                "source_index": 0,
+                "url": "https://contoso.example/recent",
+                "title": "Recent Activity",
+                "domain": "contoso.example",
+                "category": "web",
+                "visit_count": 7,
+                "last_visited_at": "2026-04-07T09:15:00+00:00",
+                "ai_service": "",
+                "query_hint": ""
+              }
+            ],
+            "ai_usage": []
           }
         }
       ]

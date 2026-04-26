@@ -1167,6 +1167,10 @@ def artifact_title(row: Mapping[str, object]) -> str:
     if event_id:
         category = details.get("event_category") or "event"
         return f"{artifact_type} {event_id} {category}"
+    if "browser" in artifact_type:
+        nested = artifact_nested_preview(details)
+        if nested:
+            return f"{artifact_type}: {compact_text(nested, 80)}"
     for key in (
         "relative_path",
         "current_path",
@@ -1273,6 +1277,17 @@ def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "profile",
         "history_count",
         "download_count",
+        "internet_usage_count",
+        "ai_usage_count",
+        "ai_service",
+        "domain",
+        "query_hint",
+        "prompt_hint",
+        "first_seen_at",
+        "last_seen_at",
+        "ai_service_counts",
+        "internet_category_counts",
+        "top_domains",
         "agent_name",
         "data_url",
         "origin_url",
@@ -1304,14 +1319,14 @@ def artifact_index_text(row: Mapping[str, object]) -> str:
 
 
 def artifact_nested_preview(details: Mapping[str, object]) -> str:
-    for key in ("downloads", "history"):
+    for key in ("ai_usage", "internet_usage", "downloads", "history"):
         rows = details.get(key)
         if not isinstance(rows, list):
             continue
         for row in rows:
             if not isinstance(row, Mapping):
                 continue
-            for value_key in ("source_url", "url", "target_path", "title"):
+            for value_key in ("ai_service", "query_hint", "prompt_hint", "source_url", "url", "target_path", "title", "domain"):
                 value = row.get(value_key)
                 if value:
                     return str(value)

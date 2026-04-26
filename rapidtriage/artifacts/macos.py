@@ -9,6 +9,7 @@ from typing import Iterable
 
 from ..core.models import ArtifactRecord
 from .windows.browser import (
+    build_browser_artifacts,
     extract_chromium_history_and_downloads,
     extract_firefox_history,
     sqlite_table_exists,
@@ -102,7 +103,7 @@ def collect_macos_browsers(user_root: Path) -> Iterable[ArtifactRecord]:
                 continue
             history_rows, download_rows = extract_chromium_history_and_downloads(history_path)
             if history_rows or download_rows:
-                yield browser_record(user_root, browser_name, profile_dir.name, history_path, history_rows, download_rows)
+                yield from browser_records(user_root, browser_name, profile_dir.name, history_path, history_rows, download_rows)
 
     firefox_root = user_root.joinpath(*FIREFOX_PROFILE_ROOT)
     if firefox_root.is_dir():
@@ -112,43 +113,35 @@ def collect_macos_browsers(user_root: Path) -> Iterable[ArtifactRecord]:
                 continue
             history_rows = extract_firefox_history(places_path)
             if history_rows:
-                yield browser_record(user_root, "firefox", profile_dir.name, places_path, history_rows, [])
+                yield from browser_records(user_root, "firefox", profile_dir.name, places_path, history_rows, [])
 
     safari_path = user_root.joinpath(*SAFARI_HISTORY)
     if safari_path.is_file():
         history_rows = extract_safari_history(safari_path)
         if history_rows:
-            yield browser_record(user_root, "safari", "Default", safari_path, history_rows, [])
+            yield from browser_records(user_root, "safari", "Default", safari_path, history_rows, [])
 
 
-def browser_record(
+def browser_records(
     user_root: Path,
     browser: str,
     profile: str,
     path: Path,
     history_rows: list[dict[str, object]],
     download_rows: list[dict[str, object]],
-) -> ArtifactRecord:
-    return ArtifactRecord(
+) -> list[ArtifactRecord]:
+    return build_browser_artifacts(
         provider=MacOsSystemArtifactsProvider.name,
         artifact_type="macos-browser-history-downloads",
-        path=str(path.resolve()),
-        supported=True,
-        details={
-            "parser": "macos-browser-history",
-            "parser_version": PARSER_VERSION,
-            "coverage_status": "parsed",
-            "reportability": "triage",
-            "source_path": str(path.resolve()),
-            "source_hashes": file_hashes(path),
-            "user": user_root.name,
-            "browser": browser,
-            "profile": profile,
-            "history_count": len(history_rows),
-            "download_count": len(download_rows),
-            "history": history_rows,
-            "downloads": download_rows,
-        },
+        user=user_root.name,
+        browser=browser,
+        profile=profile,
+        source_path=path,
+        history_rows=history_rows,
+        download_rows=download_rows,
+        parser="macos-browser-history",
+        parser_version=PARSER_VERSION,
+        ai_artifact_type="macos-browser-ai-usage",
     )
 
 

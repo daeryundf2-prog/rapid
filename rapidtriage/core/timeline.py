@@ -394,7 +394,7 @@ def build_artifact_event_type(artifact_type: str, path_parts: Sequence[str], tim
 
 
 def singularize(value: str) -> str:
-    overrides = {"downloads": "download"}
+    overrides = {"ai_usage": "ai-usage", "downloads": "download", "internet_usage": "internet-usage"}
     return overrides.get(value, value)
 
 
@@ -418,6 +418,12 @@ def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapp
             field_label("cmd", context.get("command_line") or context.get("script_block_text")),
         ]
         return f"{label}: {' '.join(bit for bit in bits if bit)}".strip()
+    if "ai_service" in context:
+        bits = [
+            str(context.get("ai_service") or "AI service"),
+            str(context.get("query_hint") or context.get("prompt_hint") or context.get("title") or context.get("url") or ""),
+        ]
+        return f"AI usage: {' '.join(bit for bit in bits if bit)}".strip()
     if "url" in context:
         return f"Artifact event: {artifact_type} {context['url']}"
     if "source_url" in context:

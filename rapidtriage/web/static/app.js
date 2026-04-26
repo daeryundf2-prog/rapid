@@ -647,7 +647,13 @@ function artifactPreviewText(artifact) {
       details.command_line || details.script_block_text ? `cmd=${details.command_line || details.script_block_text}` : "",
     ].filter(Boolean).join(" · ");
   }
-  for (const key of ["command_line", "script_block_text", "file_path", "executable_path", "source_url", "target_path", "entry_name", "service_name", "process_name"]) {
+  if (details.ai_usage_count) {
+    const firstAi = Array.isArray(details.ai_usage) ? details.ai_usage[0] : null;
+    const service = firstAi?.ai_service || details.ai_service || "AI usage";
+    const hint = firstAi?.query_hint || firstAi?.prompt_hint || firstAi?.title || firstAi?.url || "";
+    return [service, hint].filter(Boolean).join(" · ");
+  }
+  for (const key of ["command_line", "script_block_text", "file_path", "executable_path", "ai_service", "domain", "source_url", "target_path", "entry_name", "service_name", "process_name"]) {
     if (details[key]) return String(details[key]);
   }
   return artifact.artifact_type || "artifact";
@@ -656,8 +662,10 @@ function artifactPreviewText(artifact) {
 function renderArtifactDetails(artifact) {
   if (!artifact.details) return "";
   const eventLogCard = renderEventLogArtifactCard(artifact);
+  const aiUsageCard = renderAiUsageArtifactCard(artifact);
   return `
     ${eventLogCard}
+    ${aiUsageCard}
     <details class="match-details">
       <summary>Inspect artifact details</summary>
       <pre>${escapeHtml(JSON.stringify(artifact.details, null, 2))}</pre>
@@ -697,6 +705,36 @@ function renderEventLogArtifactCard(artifact) {
       <div class="eventlog-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
       <dl class="eventlog-fields">
         ${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd>`).join("")}
+      </dl>
+    </section>
+  `;
+}
+
+function renderAiUsageArtifactCard(artifact) {
+  const details = artifact.details || {};
+  if (!["browser-ai-usage", "macos-browser-ai-usage", "browser-history-downloads", "browser-history", "macos-browser-history-downloads"].includes(artifact.artifact_type)) return "";
+  const rows = Array.isArray(details.ai_usage) ? details.ai_usage : [];
+  if (!rows.length) return "";
+  const chips = [
+    details.browser,
+    details.profile,
+    details.user ? `user ${details.user}` : "",
+    `${rows.length} AI visit(s)`,
+    details.coverage_status || "",
+  ].filter(Boolean);
+  const topRows = rows.slice(0, 5);
+  return `
+    <section class="eventlog-card">
+      <div class="eventlog-card-header">
+        <strong>AI Usage</strong>
+        <span>${escapeHtml(details.triage_recommendation || "AI service visits detected from browser history.")}</span>
+      </div>
+      <div class="eventlog-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      <dl class="eventlog-fields">
+        ${topRows.map((row) => `
+          <dt>${escapeHtml(row.ai_service || "AI")}</dt>
+          <dd>${escapeHtml([row.last_visited_at, row.query_hint || row.prompt_hint || row.title || row.url].filter(Boolean).join(" · "))}</dd>
+        `).join("")}
       </dl>
     </section>
   `;

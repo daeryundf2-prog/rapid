@@ -36,6 +36,7 @@ class RecentShortcut:
 class WindowsArtifactFixture:
     root: Path
     chrome_visit: ChromiumVisit
+    ai_visit: ChromiumVisit
     edge_visit: ChromiumVisit
     download: ChromiumDownload
     recent_shortcut: RecentShortcut
@@ -62,6 +63,11 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         url="https://example.com/browser-history",
         title="Browser History Fixture",
         visited_at=datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc),
+    )
+    ai_visit = ChromiumVisit(
+        url="https://chatgpt.com/?q=timeline%20analysis%20for%20evtx",
+        title="ChatGPT - timeline analysis for evtx",
+        visited_at=datetime(2024, 1, 2, 4, 5, 6, tzinfo=timezone.utc),
     )
     edge_visit = ChromiumVisit(
         url="https://contoso.example/downloads",
@@ -102,7 +108,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
 
     _write_chromium_history(
         chrome_history,
-        visits=[chrome_visit],
+        visits=[chrome_visit, ai_visit],
         downloads=[],
     )
     _write_chromium_history(
@@ -124,6 +130,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     return WindowsArtifactFixture(
         root=root,
         chrome_visit=chrome_visit,
+        ai_visit=ai_visit,
         edge_visit=edge_visit,
         download=download,
         recent_shortcut=recent_shortcut,

@@ -195,6 +195,15 @@ def create_chromium_history(path: Path) -> None:
             ("https://example.test/tools/payload-installer.exe", "Payload Download", 1, downloaded_at),
         )
         connection.execute(
+            "INSERT INTO urls (url, title, visit_count, last_visit_time) VALUES (?, ?, ?, ?)",
+            (
+                "https://chatgpt.com/?q=windows%20event%20log%20timeline",
+                "ChatGPT - windows event log timeline",
+                2,
+                downloaded_at + 1_000_000,
+            ),
+        )
+        connection.execute(
             """
             INSERT INTO downloads
                 (id, target_path, current_path, tab_url, total_bytes, state, start_time, end_time)

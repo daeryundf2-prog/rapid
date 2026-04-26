@@ -5,7 +5,7 @@
 | File metadata | Implemented | Names, paths, extensions, sizes, modified time, categories. |
 | KAPE-style collect planning/export | Implemented baseline | `collect-plan` profiles preview present/missing Windows/macOS collection targets before heavy scanning or copying. `collect-export` can build a bounded source-relative export package with SHA256 copy logs. |
 | Document text | Implemented | Text/log/config/data, PDF, Office OpenXML, OpenDocument where dependencies support extraction. |
-| Browser history/downloads | Implemented baseline | Chrome, Edge, Brave, Firefox local profiles; history/download fixture coverage. |
+| Browser history/downloads | Implemented baseline+ | Chrome, Edge, Brave, Firefox local profiles; history/download fixture coverage; internet usage summaries, top-domain/category pivots, source hashes, and browser-derived AI service usage detections are normalized for Windows and macOS. |
 | Recent files | Implemented baseline | Recent shortcuts parse Shell Link header/string fields for target path, working directory, arguments, timestamps, flags, hashes, and embedded path pivots; Jump Lists are inventoried with embedded path extraction. |
 | Timeline merge | Implemented baseline | Files, docs, artifacts, and normalized timeline export. |
 | Case DB FTS | Implemented baseline | Documents and artifact metadata are indexed with SQLite FTS5; file metadata, timeline rows, review status filters, verification filters, and promoted artifact metadata filters are supported. |
@@ -23,7 +23,7 @@
 | Windows remote access | Implemented baseline | RDP files, Terminal Server Client cache files, and exported Terminal Server Client registry destinations are normalized for remote-access triage; thumbnail decoding and vendor-specific remote tool parsers remain planned. |
 | Jump Lists/LNK | Partial+ | LNK header/string parsing and embedded path extraction implemented; Jump Lists are inventoried with OLE/custom hints and embedded path extraction, while full destination stream parsing remains planned. |
 | USN Journal | Import baseline | USN CSV/JSON/JSONL exports are normalized with FRN/parent/reason/timestamp fields; native `$J` parsing remains planned. |
-| macOS user/browser/quarantine | Implemented baseline | User home inventory, Safari/Chromium/Firefox history imports, LaunchServices quarantine events, and LaunchAgent plist inventory are available through `macos-system`. |
+| macOS user/browser/quarantine | Implemented baseline | User home inventory, Safari/Chromium/Firefox history imports with web/AI usage pivots, LaunchServices quarantine events, and LaunchAgent plist inventory are available through `macos-system`. |
 | Volume Shadow Copy compare | Implemented baseline | `vsc-compare` compares current vs one or more snapshot folders and emits deleted/added/modified candidates with optional SHA256 confirmation; VSC deletion command hints can also be surfaced from EVTX/PowerShell history imports. |
 | Linux XFS | Planned | Filesystem adapter/extraction requirement for Linux server images. |
 | Forensic containers AD1/L01/Lx01/AFF/AFF4 | Detection | UI/API adapter detection exists; direct parsing requires vendor/tool export first. |
@@ -34,7 +34,7 @@
 | APK malware triage | Partial | Exported `.apk` files are inventoried with hashes, manifest metadata, permissions, dex/native-library counts, and risk flags. |
 | Memory forensics | Partial | Volatility-style output normalization is implemented; direct RAM parsing, BitLocker key search, and process-risk visualization remain long-term work. |
 | Threat intelligence enrichment | Planned | Optional URL/IP/hash enrichment plugin, disabled by default. |
-| AI prompt artifacts | Planned | Browser/search/AI assistant prompt extraction when source formats are understood. |
+| AI prompt artifacts | Partial | Browser history now detects common AI service visits such as ChatGPT, Claude, Gemini, Perplexity, Copilot, Poe, Hugging Face Chat, Grok, You.com, Phind, Mistral, DeepSeek, Meta AI, Character.AI, and Notion AI. URL query/title hints are captured when present, but full prompt recovery still requires cache/app/cloud-specific parsers. |
 | Cloud export import | Partial | Google Takeout-style location/activity JSON and Apple/general account JSON exports are normalized with source hashes. |
 | Mobile/cloud acquisition | Partial | Exported APK and cloud export imports exist; direct cloud acquisition/API collection remains deferred. |
 

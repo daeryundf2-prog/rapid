@@ -29,6 +29,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             manifest_blob = "\n".join(serialized_artifacts)
 
             self.assertIn(fixture.chrome_visit.url, manifest_blob)
+            self.assertIn(fixture.ai_visit.url, manifest_blob)
+            self.assertIn("browser-ai-usage", manifest_blob)
+            self.assertIn("timeline analysis for evtx", manifest_blob)
             self.assertIn(fixture.edge_visit.url, manifest_blob)
             self.assertIn(PureWindowsPath(fixture.download.target_path).name, manifest_blob)
             self.assertIn(fixture.recent_shortcut.name, manifest_blob)
@@ -57,6 +60,32 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 self.assertTrue(Path(artifact["path"]).is_relative_to(root.resolve()))
                 self.assertIn("supported", artifact)
                 self.assertIsInstance(artifact["details"], dict)
+
+    def test_browser_collector_detects_internet_and_ai_usage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            fixture = build_windows_artifact_fixture(root)
+            output = root / "browser.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "browser", "--output", str(output)]), 0)
+            artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
+            chrome = next(
+                artifact
+                for artifact in artifacts
+                if artifact["artifact_type"] == "browser-history-downloads"
+                and artifact["details"]["browser"] == "chrome"
+            )
+            ai_usage = next(artifact for artifact in artifacts if artifact["artifact_type"] == "browser-ai-usage")
+
+            self.assertEqual(chrome["details"]["history_count"], 2)
+            self.assertEqual(chrome["details"]["ai_usage_count"], 1)
+            self.assertIn({"value": "ai", "count": 1}, chrome["details"]["internet_category_counts"])
+            self.assertEqual(ai_usage["details"]["browser"], "chrome")
+            self.assertEqual(ai_usage["details"]["ai_usage_count"], 1)
+            self.assertEqual(ai_usage["details"]["ai_usage"][0]["ai_service"], "ChatGPT")
+            self.assertEqual(ai_usage["details"]["ai_usage"][0]["url"], fixture.ai_visit.url)
+            self.assertEqual(ai_usage["details"]["ai_usage"][0]["prompt_hint"], "timeline analysis for evtx")
+            self.assertEqual(len(ai_usage["details"]["source_hashes"]["sha256"]), 64)
 
     def test_recent_shortcut_collector_parses_lnk_header_and_target_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

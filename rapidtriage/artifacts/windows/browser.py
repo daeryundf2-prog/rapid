@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
+from urllib.parse import parse_qs, unquote_plus, urlparse
 
 from ...core.models import ArtifactRecord
 from .common import (
@@ -18,6 +20,37 @@ CHROMIUM_BROWSER_ROOTS: Tuple[Tuple[str, Sequence[str]], ...] = (
     ("brave", ("AppData", "Local", "BraveSoftware", "Brave-Browser", "User Data")),
 )
 FIREFOX_PROFILE_ROOT = ("AppData", "Roaming", "Mozilla", "Firefox", "Profiles")
+PARSER_VERSION = "windows-browser-v2"
+MAX_USAGE_ROWS = 500
+
+AI_SERVICE_DOMAINS: Tuple[Tuple[str, str], ...] = (
+    ("chatgpt.com", "ChatGPT"),
+    ("chat.openai.com", "ChatGPT"),
+    ("openai.com", "OpenAI"),
+    ("claude.ai", "Claude"),
+    ("gemini.google.com", "Gemini"),
+    ("bard.google.com", "Gemini"),
+    ("aistudio.google.com", "Google AI Studio"),
+    ("perplexity.ai", "Perplexity"),
+    ("copilot.microsoft.com", "Microsoft Copilot"),
+    ("bing.com", "Microsoft Copilot/Bing Chat"),
+    ("poe.com", "Poe"),
+    ("huggingface.co", "Hugging Face"),
+    ("grok.com", "Grok"),
+    ("x.ai", "Grok"),
+    ("you.com", "You.com"),
+    ("phind.com", "Phind"),
+    ("chat.mistral.ai", "Mistral Le Chat"),
+    ("deepseek.com", "DeepSeek"),
+    ("meta.ai", "Meta AI"),
+    ("character.ai", "Character.AI"),
+    ("notion.so", "Notion AI"),
+)
+QUERY_HINT_KEYS = ("q", "query", "prompt", "text", "message", "ask", "p")
+SEARCH_HOST_HINTS = ("google.", "bing.com", "duckduckgo.com", "naver.com", "daum.net", "yahoo.")
+EMAIL_HOST_HINTS = ("mail.google.com", "outlook.live.com", "outlook.office.com", "mail.naver.com", "mail.daum.net")
+SOCIAL_HOST_HINTS = ("facebook.com", "instagram.com", "x.com", "twitter.com", "threads.net", "linkedin.com")
+CLOUD_HOST_HINTS = ("drive.google.com", "onedrive.live.com", "dropbox.com", "icloud.com", "box.com")
 
 
 class WindowsBrowserArtifactsProvider:
@@ -45,20 +78,15 @@ class WindowsBrowserArtifactsProvider:
                     history_rows, download_rows = extract_chromium_history_and_downloads(history_path)
                     if not history_rows and not download_rows:
                         continue
-                    yield ArtifactRecord(
+                    yield from build_browser_artifacts(
                         provider=self.name,
                         artifact_type="browser-history-downloads",
-                        path=str(history_path.resolve()),
-                        supported=self.supported(),
-                        details={
-                            "user": user_name,
-                            "browser": browser_name,
-                            "profile": profile_dir.name,
-                            "history_count": len(history_rows),
-                            "download_count": len(download_rows),
-                            "history": history_rows,
-                            "downloads": download_rows,
-                        },
+                        user=user_name,
+                        browser=browser_name,
+                        profile=profile_dir.name,
+                        source_path=history_path,
+                        history_rows=history_rows,
+                        download_rows=download_rows,
                     )
 
             firefox_root = user_root.joinpath(*FIREFOX_PROFILE_ROOT)
@@ -73,21 +101,249 @@ class WindowsBrowserArtifactsProvider:
                 history_rows = extract_firefox_history(places_path)
                 if not history_rows:
                     continue
-                yield ArtifactRecord(
+                yield from build_browser_artifacts(
                     provider=self.name,
                     artifact_type="browser-history",
-                    path=str(places_path.resolve()),
-                    supported=self.supported(),
-                    details={
-                        "user": user_name,
-                        "browser": "firefox",
-                        "profile": profile_dir.name,
-                        "history_count": len(history_rows),
-                        "download_count": 0,
-                        "history": history_rows,
-                        "downloads": [],
-                    },
+                    user=user_name,
+                    browser="firefox",
+                    profile=profile_dir.name,
+                    source_path=places_path,
+                    history_rows=history_rows,
+                    download_rows=[],
                 )
+
+
+def build_browser_artifacts(
+    *,
+    provider: str,
+    artifact_type: str,
+    user: str,
+    browser: str,
+    profile: str,
+    source_path: Path,
+    history_rows: List[Dict[str, object]],
+    download_rows: List[Dict[str, object]],
+    parser: str | None = None,
+    parser_version: str = PARSER_VERSION,
+    ai_artifact_type: str = "browser-ai-usage",
+) -> List[ArtifactRecord]:
+    usage_rows = summarize_internet_usage(history_rows)
+    ai_rows = extract_ai_usage(history_rows)
+    source_hashes = file_hashes(source_path)
+    base_details = {
+        "parser": parser or "browser-history",
+        "parser_version": parser_version,
+        "coverage_status": "parsed",
+        "reportability": "triage",
+        "source_path": str(source_path.resolve()),
+        "source_hashes": source_hashes,
+        "user": user,
+        "browser": browser,
+        "profile": profile,
+        "history_count": len(history_rows),
+        "download_count": len(download_rows),
+        "internet_usage_count": len(usage_rows),
+        "ai_usage_count": len(ai_rows),
+        "internet_category_counts": count_field(usage_rows, "category"),
+        "top_domains": count_field(usage_rows, "domain", limit=20),
+        "history": history_rows,
+        "downloads": download_rows,
+        "internet_usage": usage_rows,
+        "ai_usage": ai_rows,
+    }
+    records = [
+        ArtifactRecord(
+            provider=provider,
+            artifact_type=artifact_type,
+            path=str(source_path.resolve()),
+            supported=True,
+            details=base_details,
+        )
+    ]
+    if ai_rows:
+        seen = sorted([str(row.get("last_visited_at")) for row in ai_rows if row.get("last_visited_at")])
+        records.append(
+            ArtifactRecord(
+                provider=provider,
+                artifact_type=ai_artifact_type,
+                path=str(source_path.resolve()),
+                supported=True,
+                details={
+                    "parser": "browser-ai-usage",
+                    "parser_version": parser_version,
+                    "coverage_status": "detected",
+                    "reportability": "review",
+                    "source_path": str(source_path.resolve()),
+                    "source_hashes": source_hashes,
+                    "user": user,
+                    "browser": browser,
+                    "profile": profile,
+                    "ai_usage_count": len(ai_rows),
+                    "ai_service_counts": count_field(ai_rows, "ai_service"),
+                    "first_seen_at": seen[0] if seen else None,
+                    "last_seen_at": seen[-1] if seen else None,
+                    "ai_usage": ai_rows,
+                    "risk_flags": ["ai-service-usage"],
+                    "triage_recommendation": (
+                        "Browser history proves visits to AI services only. Review page titles, URL query hints, "
+                        "browser cache, downloads, synced cloud exports, and app logs before claiming prompt content."
+                    ),
+                },
+            )
+        )
+    return records
+
+
+def summarize_internet_usage(history_rows: Sequence[Mapping[str, object]]) -> List[Dict[str, object]]:
+    usage_rows: List[Dict[str, object]] = []
+    for index, row in enumerate(history_rows[:MAX_USAGE_ROWS]):
+        url = str(row.get("url") or "")
+        parsed = safe_parse_url(url)
+        if not parsed.scheme.startswith("http") or not parsed.netloc:
+            continue
+        title = str(row.get("title") or "")
+        service = detect_ai_service(url, title)
+        usage_rows.append(
+            {
+                "source_index": index,
+                "url": url,
+                "title": title,
+                "domain": normalize_host(parsed.netloc),
+                "category": classify_url(parsed, title, service),
+                "visit_count": int(row.get("visit_count") or 0),
+                "last_visited_at": row.get("last_visited_at"),
+                "ai_service": service,
+                "query_hint": extract_query_hint(url),
+            }
+        )
+    return usage_rows
+
+
+def extract_ai_usage(history_rows: Sequence[Mapping[str, object]]) -> List[Dict[str, object]]:
+    ai_rows: List[Dict[str, object]] = []
+    for index, row in enumerate(history_rows[:MAX_USAGE_ROWS]):
+        url = str(row.get("url") or "")
+        title = str(row.get("title") or "")
+        service = detect_ai_service(url, title)
+        if not service:
+            continue
+        parsed = safe_parse_url(url)
+        query_hint = extract_query_hint(url)
+        ai_rows.append(
+            {
+                "source_index": index,
+                "ai_service": service,
+                "url": url,
+                "domain": normalize_host(parsed.netloc),
+                "title": title,
+                "visit_count": int(row.get("visit_count") or 0),
+                "last_visited_at": row.get("last_visited_at"),
+                "query_hint": query_hint,
+                "prompt_hint": query_hint,
+                "confidence": ai_usage_confidence(service, url, title, query_hint),
+                "evidence_note": "AI service visit detected from browser history; prompt contents may be absent from history.",
+            }
+        )
+    return ai_rows
+
+
+def detect_ai_service(url: str, title: str = "") -> str:
+    parsed = safe_parse_url(url)
+    host = normalize_host(parsed.netloc)
+    lowered = f"{url} {title}".lower()
+    for domain, service in AI_SERVICE_DOMAINS:
+        if not host_matches(host, domain):
+            continue
+        if domain == "bing.com" and not any(token in lowered for token in ("copilot", "bing chat", "chat")):
+            continue
+        if domain == "notion.so" and "ai" not in lowered:
+            continue
+        return service
+    if "chatgpt" in lowered:
+        return "ChatGPT"
+    if "claude" in lowered:
+        return "Claude"
+    if "perplexity" in lowered:
+        return "Perplexity"
+    if "copilot" in lowered or "bing chat" in lowered:
+        return "Microsoft Copilot"
+    return ""
+
+
+def classify_url(parsed, title: str, ai_service: str) -> str:
+    host = normalize_host(parsed.netloc)
+    lowered = f"{host} {parsed.path} {parsed.query} {title}".lower()
+    if ai_service:
+        return "ai"
+    if any(token in host for token in SEARCH_HOST_HINTS):
+        return "search"
+    if any(host_matches(host, token) for token in EMAIL_HOST_HINTS):
+        return "email"
+    if any(host_matches(host, token) for token in SOCIAL_HOST_HINTS):
+        return "social"
+    if any(host_matches(host, token) for token in CLOUD_HOST_HINTS):
+        return "cloud"
+    if any(token in lowered for token in ("download", ".zip", ".exe", ".dmg", ".pkg", ".msi")):
+        return "download"
+    return "web"
+
+
+def extract_query_hint(url: str) -> str:
+    query = parse_qs(safe_parse_url(url).query, keep_blank_values=False)
+    for key in QUERY_HINT_KEYS:
+        values = query.get(key)
+        if not values:
+            continue
+        value = unquote_plus(str(values[0])).strip()
+        if value:
+            return value[:240]
+    return ""
+
+
+def ai_usage_confidence(service: str, url: str, title: str, query_hint: str) -> float:
+    if query_hint:
+        return 0.9
+    lowered = f"{url} {title}".lower()
+    if service and service.lower().split()[0] in lowered:
+        return 0.85
+    return 0.75
+
+
+def safe_parse_url(url: str):
+    try:
+        return urlparse(url)
+    except ValueError:
+        return urlparse("")
+
+
+def normalize_host(host: str) -> str:
+    return host.lower().split("@")[-1].split(":")[0].strip(".")
+
+
+def host_matches(host: str, domain: str) -> bool:
+    domain = domain.lower()
+    return host == domain or host.endswith(f".{domain}")
+
+
+def count_field(rows: Sequence[Mapping[str, object]], key: str, *, limit: int = 10) -> List[Dict[str, object]]:
+    counts: Dict[str, int] = {}
+    for row in rows:
+        value = str(row.get(key) or "")
+        if value:
+            counts[value] = counts.get(value, 0) + 1
+    return [
+        {"value": value, "count": count}
+        for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]
+    ]
+
+
+def file_hashes(path: Path) -> dict[str, str]:
+    digests = {"md5": hashlib.md5(), "sha1": hashlib.sha1(), "sha256": hashlib.sha256()}
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            for digest in digests.values():
+                digest.update(chunk)
+    return {name: digest.hexdigest() for name, digest in digests.items()}
 
 
 def extract_chromium_history_and_downloads(history_db: Path) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
