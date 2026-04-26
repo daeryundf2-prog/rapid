@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import codecs
+import csv
 import datetime as dt
 import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -11,8 +13,9 @@ from ...core.models import ArtifactRecord
 from .common import iter_windows_user_homes
 from .os_account import decode_reg_export
 
-PARSER_VERSION = "windows-execution-v1"
+PARSER_VERSION = "windows-execution-v2"
 REGISTRY_EXPORT_EXT = ".reg"
+SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 POWERSHELL_HISTORY = ("AppData", "Roaming", "Microsoft", "Windows", "PowerShell", "PSReadLine", "ConsoleHost_history.txt")
 
 EXECUTION_KEYWORDS = {
@@ -46,7 +49,11 @@ class WindowsExecutionProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        records = [*collect_execution_reg_exports(root), *collect_powershell_history(root)]
+        records = [
+            *collect_execution_reg_exports(root),
+            *collect_powershell_history(root),
+            *collect_srum_imports(root),
+        ]
         yield from records
         summary = build_execution_summary(root, records)
         if summary is not None:
@@ -173,6 +180,62 @@ def collect_powershell_history(root: Path) -> Iterable[ArtifactRecord]:
             )
 
 
+def collect_srum_imports(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.suffix.lower() not in SRUM_IMPORT_SUFFIXES:
+            continue
+        if "srum" not in str(path).lower() and "srudb" not in str(path).lower():
+            continue
+        rows = iter_csv_rows(path) if path.suffix.lower() == ".csv" else iter_json_rows(path)
+        for index, row in enumerate(rows):
+            if isinstance(row, Mapping):
+                yield build_srum_record(path, row, index)
+
+
+def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> ArtifactRecord:
+    lowered = {normalize_key(key): value for key, value in row.items()}
+    app_id = str(first_value(lowered, "app", "appid", "application", "applicationname", "executable", "executablepath") or "")
+    user = str(first_value(lowered, "user", "username", "useraccount", "sid") or "")
+    timestamp = str(first_value(lowered, "timestamp", "eventtime", "starttime", "endtime", "time") or "").replace("Z", "+00:00")
+    bytes_sent = number_value(first_value(lowered, "bytessent", "sendbytes", "sentbytes", "networkbytessent"))
+    bytes_received = number_value(first_value(lowered, "bytesreceived", "receivebytes", "receivedbytes", "networkbytesreceived"))
+    cpu_time = number_value(first_value(lowered, "cputime", "cpu", "cpucycletime"))
+    energy = number_value(first_value(lowered, "energy", "energyusage", "energyusagemwh"))
+    artifact_type = "srum-network-usage" if bytes_sent or bytes_received else "srum-app-resource-usage"
+    risk_flags = [f"suspicious-app:{term}" for term in SUSPICIOUS_COMMAND_TERMS if term.split()[0] in app_id.lower()]
+    details = {
+        "parser": "windows-srum-import",
+        "parser_version": PARSER_VERSION,
+        "coverage_status": "mapped",
+        "reportability": "triage",
+        "source_path": str(path.resolve()),
+        "source_format": path.suffix.lower().lstrip("."),
+        "source_hashes": file_hashes(path),
+        "source_index": index,
+        "app_id": app_id,
+        "executable_path": app_id if looks_like_executable_path(app_id) else "",
+        "user": user,
+        "timestamp": timestamp,
+        "timestamp_source": "srum_import_timestamp",
+        "bytes_sent": bytes_sent,
+        "bytes_received": bytes_received,
+        "cpu_time": cpu_time,
+        "energy_usage": energy,
+        "evidence_strength": "application-resource-usage-indicator",
+        "risk_flags": risk_flags,
+        "risk_score": min(100, len(risk_flags) * 20),
+        "raw": dict(row),
+        "raw_preview": json.dumps(row, ensure_ascii=False, sort_keys=True)[:2000],
+    }
+    return ArtifactRecord(
+        provider=WindowsExecutionProvider.name,
+        artifact_type=artifact_type,
+        path=str(path.resolve()),
+        supported=True,
+        details=details,
+    )
+
+
 def build_execution_summary(root: Path, records: Iterable[ArtifactRecord]) -> ArtifactRecord | None:
     groups: dict[str, dict[str, object]] = {}
     for record in records:
@@ -287,6 +350,64 @@ def normalize_execution_group(group: Mapping[str, object]) -> dict[str, object]:
         "source_paths": sorted(cast_set(group["source_paths"])),
         "command_line_samples": list(group.get("command_line_samples", [])),
     }
+
+
+def iter_csv_rows(path: Path) -> Iterable[Mapping[str, object]]:
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            yield from csv.DictReader(handle)
+    except (OSError, UnicodeError, csv.Error):
+        return
+
+
+def iter_json_rows(path: Path) -> Iterable[Mapping[str, object]]:
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeError):
+        return
+    if path.suffix.lower() in {".jsonl", ".ndjson"}:
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, Mapping):
+                yield row
+        return
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return
+    rows = payload if isinstance(payload, list) else payload.get("rows", []) if isinstance(payload, Mapping) else []
+    for row in rows:
+        if isinstance(row, Mapping):
+            yield row
+
+
+def normalize_key(value: object) -> str:
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
+
+
+def first_value(row: Mapping[str, object], *keys: str) -> object:
+    for key in keys:
+        value = row.get(normalize_key(key))
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def number_value(value: object) -> int | float | str:
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    try:
+        number = float(text)
+    except ValueError:
+        return text
+    return int(number) if number.is_integer() else number
 
 
 def parse_reg_value(line: str) -> tuple[str, str]:

@@ -45,6 +45,7 @@ class WindowsArtifactFixture:
     execution_reg: Path
     powershell_history: Path
     prefetch_file: Path
+    srum_csv: Path
     mft_csv: Path
     usn_jsonl: Path
 
@@ -82,6 +83,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     execution_reg = root / "Windows" / "System32" / "config" / "execution.reg"
     powershell_history = root / "Users" / "alice" / "AppData" / "Roaming" / "Microsoft" / "Windows" / "PowerShell" / "PSReadLine" / "ConsoleHost_history.txt"
     prefetch_file = root / "Windows" / "Prefetch" / "POWERSHELL.EXE-12345678.pf"
+    srum_csv = root / "analysis" / "srum.csv"
     mft_csv = root / "analysis" / "mft.csv"
     usn_jsonl = root / "analysis" / "usn.jsonl"
 
@@ -100,6 +102,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     _write_user_profile_fixtures(user_profile, root / "Windows" / "System32" / "config" / "SYSTEM.reg")
     _write_execution_fixtures(execution_reg, powershell_history)
     _write_prefetch_fixture(prefetch_file)
+    _write_srum_fixture(srum_csv)
     _write_filesystem_fixtures(mft_csv, usn_jsonl)
 
     return WindowsArtifactFixture(
@@ -115,6 +118,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         execution_reg=execution_reg,
         powershell_history=powershell_history,
         prefetch_file=prefetch_file,
+        srum_csv=srum_csv,
         mft_csv=mft_csv,
         usn_jsonl=usn_jsonl,
     )
@@ -318,6 +322,15 @@ def _write_execution_fixtures(reg_path: Path, powershell_history: Path) -> None:
 def _write_prefetch_fixture(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"prefetch fixture")
+
+
+def _write_srum_fixture(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "Timestamp,Application,User,BytesSent,BytesReceived,EnergyUsage\n"
+        "2024-04-01T05:06:07Z,powershell.exe,alice,512,2048,3\n",
+        encoding="utf-8",
+    )
 
 
 def _write_filesystem_fixtures(mft_csv: Path, usn_jsonl: Path) -> None:

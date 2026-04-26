@@ -18,6 +18,7 @@
 | Zone.Identifier ADS | Partial | Exported `:Zone.Identifier`/`.Zone.Identifier` sidecar files parse ZoneId, referrer URL, and host URL. |
 | Defender/Firewall/WER/Task Scheduler | Partial | Fixture-backed inventory for Defender MPLog, Windows Firewall W3C logs, WER reports, and Task Scheduler XML. |
 | Prefetch | Partial | `.pf` inventory with executable hints; full binary run-count parsing remains planned. Execution-related registry export and PowerShell history imports are available through `windows-execution`, with a grouped execution summary for review pivots. |
+| SRUM | Import baseline | SRUM CSV/JSON/JSONL/NDJSON exports can be normalized into app resource and network usage rows; direct `SRUDB.dat` ESE parsing remains planned. |
 | Jump Lists/LNK | Partial | Recent/Jumplist file inventory implemented; full binary destination parsing remains planned. |
 | USN Journal | Import baseline | USN CSV/JSON/JSONL exports are normalized with FRN/parent/reason/timestamp fields; native `$J` parsing remains planned. |
 | macOS user/browser/quarantine | Implemented baseline | User home inventory, Safari/Chromium/Firefox history imports, LaunchServices quarantine events, and LaunchAgent plist inventory are available through `macos-system`. |
