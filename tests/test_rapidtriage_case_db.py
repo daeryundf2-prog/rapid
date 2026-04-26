@@ -18,6 +18,7 @@ from rapidtriage.core.case_db import (
     table_columns,
 )
 from rapidtriage.core.sample_case import run_sample_workflow
+from tests.test_rapidtriage_macos_artifacts import build_macos_fixture
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
 
@@ -315,6 +316,46 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             filesystem_matches = [match for match in payload["matches"] if match["kind"] in {"mft-record", "usn-record"}]
             self.assertTrue(filesystem_matches)
             self.assertTrue(any("deleted.txt" in str(match["metadata"].get("file_path", "")) for match in filesystem_matches))
+
+    def test_case_search_exposes_macos_artifact_metadata_for_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evidence_root = root / "mac-case"
+            output_dir = root / "run-out"
+            build_macos_fixture(evidence_root)
+
+            self.assertEqual(
+                main(["run", str(evidence_root), "--mode", "hacking", "--output-dir", str(output_dir), "--read-only"]),
+                0,
+            )
+            database = open_case_database(root / "case.db")
+            database.import_run_output(output_dir, case_id="CASE-MACOS-ARTIFACTS")
+
+            payload = database.search_case(
+                case_id="CASE-MACOS-ARTIFACTS",
+                keywords=["example.test", "com.example.persist", "osascript"],
+                sources=["artifacts"],
+                limit=50,
+            )
+
+            self.assertEqual(payload["command"], "case-search")
+            self.assertGreaterEqual(payload["summary"]["match_count"], 3)
+            self.assertTrue(all(match["source"] == "artifacts" for match in payload["matches"]))
+
+            quarantine_matches = [match for match in payload["matches"] if match["kind"] == "macos-quarantine-event"]
+            self.assertTrue(quarantine_matches)
+            self.assertTrue(any(match["metadata"].get("agent_name") == "Safari" for match in quarantine_matches))
+            self.assertTrue(any(match["metadata"].get("origin_url") == "https://example.test" for match in quarantine_matches))
+
+            launch_agent_matches = [match for match in payload["matches"] if match["kind"] == "macos-launch-agent"]
+            self.assertTrue(launch_agent_matches)
+            self.assertTrue(any(match["metadata"].get("label") == "com.example.persist" for match in launch_agent_matches))
+            self.assertTrue(any("/usr/bin/osascript" in match["metadata"].get("program_arguments", []) for match in launch_agent_matches))
+
+            browser_matches = [match for match in payload["matches"] if match["kind"] == "macos-browser-history-downloads"]
+            self.assertTrue(browser_matches)
+            self.assertTrue(any(match["metadata"].get("browser") == "safari" for match in browser_matches))
+            self.assertTrue(any("example.test" in str(match["metadata"].get("preview_value", "")) for match in browser_matches))
 
     def test_cli_case_search_outputs_json_and_can_write_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

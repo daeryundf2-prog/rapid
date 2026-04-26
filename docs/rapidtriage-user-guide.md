@@ -28,7 +28,7 @@ rapidtriage case-db ./case.db --import-run ./case-run --case-id CASE-001
 rapidtriage case-search ./case.db --case-id CASE-001 -k password --source documents
 ```
 
-Search reaches indexed document text, file metadata, artifact summaries, and timeline events. Artifact results keep reviewable source paths and high-value metadata such as event IDs, usernames, source IPs, command lines, PowerShell script blocks, MFT paths, and USN reasons. Use source filters to narrow heavy cases.
+Search reaches indexed document text, file metadata, artifact summaries, and timeline events. Artifact results keep reviewable source paths and high-value metadata such as event IDs, usernames, source IPs, command lines, PowerShell script blocks, MFT paths, USN reasons, macOS quarantine URLs, browser history previews, and LaunchAgent labels/programs. Use source filters to narrow heavy cases.
 
 For repeated review, save useful Case DB searches and filter by review state:
 

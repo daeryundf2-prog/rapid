@@ -271,7 +271,7 @@ Implemented:
 - `case-report` writes a Korean/English-friendly Markdown report draft with case metadata, analysis scope, reviewed evidence, hashes, skipped hash rows, conclusion text, and audit sidecar.
 - `web` starts a local FastAPI server with a browser UI for launching runs, importing existing outputs, searching evidence, previewing source files, reviewing hits, organizing case findings, downloading generated files, and reading reports.
 - `case-db` initializes the experimental SQLite case database v1 with tables for cases, evidence sources, files, hashes, artifacts, events, indexed documents/FTS, reviews, audit events, report items, jobs, and stable citation ID sequences.
-- `case-search` searches imported SQLite case databases across FTS-indexed documents, file records, artifacts, and timeline events while preserving citation IDs; artifact hits expose reviewable source paths plus key Windows metadata for event logs, PowerShell history, MFT, and USN rows.
+- `case-search` searches imported SQLite case databases across FTS-indexed documents, file records, artifacts, and timeline events while preserving citation IDs; artifact hits expose reviewable source paths plus key Windows and macOS metadata for event logs, PowerShell history, MFT/USN rows, browser history, quarantine events, and LaunchAgents.
 - `case-review` stores DB-backed review/verification marks, tags, notes, reviewer names, and report-candidate flags for individual search targets.
 - `evidence` identifies folder, E01/Ex01, raw image, ISO, and virtual-disk source adapters and reports whether required external tooling is available.
 - `benchmark` writes JSON and Markdown benchmark results with ingest/search latency, peak memory, output size, and result counts.

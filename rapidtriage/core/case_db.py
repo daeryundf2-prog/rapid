@@ -996,9 +996,14 @@ def artifact_summary(row: Mapping[str, object]) -> str:
         "script_block_text",
         "file_path",
         "executable_path",
+        "data_url",
+        "origin_url",
         "url",
         "source_url",
         "target_path",
+        "label",
+        "program",
+        "home_path",
         "entry_name",
         "service_name",
         "process_name",
@@ -1007,6 +1012,9 @@ def artifact_summary(row: Mapping[str, object]) -> str:
         value = details_payload.get(key) or row.get(key)
         if value:
             return str(value)
+    nested = artifact_nested_preview(details_payload)
+    if nested:
+        return nested
     return str(row.get("path") or row.get("artifact_type") or "artifact")
 
 
@@ -1017,10 +1025,23 @@ def artifact_title(row: Mapping[str, object]) -> str:
     if event_id:
         category = details.get("event_category") or "event"
         return f"{artifact_type} {event_id} {category}"
-    for key in ("command_line", "file_path", "executable_path", "entry_name", "source_path"):
+    for key in (
+        "command_line",
+        "file_path",
+        "executable_path",
+        "data_url",
+        "origin_url",
+        "label",
+        "program",
+        "entry_name",
+        "source_path",
+    ):
         value = details.get(key)
         if value:
             return f"{artifact_type}: {compact_text(str(value), 80)}"
+    nested = artifact_nested_preview(details)
+    if nested:
+        return f"{artifact_type}: {compact_text(nested, 80)}"
     return artifact_type
 
 
@@ -1064,8 +1085,42 @@ def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "risk_score",
         "risk_flags",
         "evidence_strength",
+        "user",
+        "browser",
+        "profile",
+        "history_count",
+        "download_count",
+        "agent_name",
+        "data_url",
+        "origin_url",
+        "sender_name",
+        "home_path",
+        "label",
+        "program",
+        "program_arguments",
+        "run_at_load",
+        "modified_at",
     )
-    return {key: details[key] for key in keys if details.get(key) not in (None, "", [])}
+    metadata = {key: details[key] for key in keys if details.get(key) not in (None, "", [])}
+    nested = artifact_nested_preview(details)
+    if nested:
+        metadata["preview_value"] = nested
+    return metadata
+
+
+def artifact_nested_preview(details: Mapping[str, object]) -> str:
+    for key in ("downloads", "history"):
+        rows = details.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            for value_key in ("source_url", "url", "target_path", "title"):
+                value = row.get(value_key)
+                if value:
+                    return str(value)
+    return ""
 
 
 def parse_json_object(value: object) -> dict[str, object]:
