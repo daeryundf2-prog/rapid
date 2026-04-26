@@ -19,6 +19,7 @@ from ..core.case import CaseBookmarkError, create_or_update_case_payload, load_c
 from ..core.case_catalog import CaseCatalog, CaseCatalogError, default_case_catalog_path
 from ..core.case_report import build_case_report_markdown
 from ..core.case_db import CaseDatabaseError, open_case_database
+from ..core.collect_plan import CollectPlanError, build_collect_plan, supported_collect_profiles
 from ..core.docs import SUPPORTED_DOC_EXTS, extract_text
 from ..core.doctor import run_doctor
 from ..core.evidence import identify_evidence, supported_evidence_formats
@@ -154,6 +155,12 @@ class EvidenceIdentifyRequest(BaseModel):
     path: str = Field(..., min_length=1)
 
 
+class CollectPlanRequest(BaseModel):
+    root: str = Field(..., min_length=1)
+    profile: str = "intrusion"
+    input_kind: Optional[str] = None
+
+
 def create_app(job_store: RunJobStore | None = None, auth_token: str | None = None) -> FastAPI:
     store = job_store or default_job_store
     api = FastAPI(title="rapidtriage local API", version="0.2.0")
@@ -190,6 +197,21 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 "formats": supported_evidence_formats(),
             }
         except OSError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @api.get("/api/collect/profiles")
+    def collect_profiles() -> Dict[str, object]:
+        return {"profiles": list(supported_collect_profiles())}
+
+    @api.post("/api/collect/plan")
+    def collect_plan(request: CollectPlanRequest) -> Dict[str, object]:
+        try:
+            return build_collect_plan(
+                Path(request.root).expanduser().resolve(),
+                profile=request.profile,
+                input_kind=request.input_kind,
+            )
+        except (CollectPlanError, OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/sample-case/run", status_code=201)

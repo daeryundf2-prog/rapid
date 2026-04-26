@@ -87,6 +87,27 @@
           </label>
           <section id="runPlanPreview" class="run-plan-preview" aria-live="polite"></section>
 
+          <section class="run-plan-preview" aria-label="Collection profile preview">
+            <p class="eyebrow">target collection</p>
+            <h3>Preview KAPE-style artifact targets</h3>
+            <p>Before a heavy run, check which Windows/macOS artifact locations are present and which categories are missing.</p>
+            <label>
+              Collection profile
+              <select id="collectProfileInput" name="collectProfile">
+                <option value="intrusion">Intrusion - accounts, EVTX, execution, persistence, remote access</option>
+                <option value="windows-core">Windows core</option>
+                <option value="macos-core">macOS core</option>
+                <option value="browser-history">Browser history and cloud/sync</option>
+                <option value="filesystem-timeline">Filesystem timeline</option>
+                <option value="full">Full target plan</option>
+              </select>
+            </label>
+            <button id="collectPlanButton" class="secondary-button" type="button">Preview collection targets</button>
+            <div id="collectPlanPreview" class="collect-plan-preview" aria-live="polite">
+              <p class="empty-state">Select a root path, then preview collection targets.</p>
+            </div>
+          </section>
+
           <div class="field-grid">
             <label>
               Max extract MB

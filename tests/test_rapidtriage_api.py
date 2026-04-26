@@ -13,6 +13,7 @@ from rapidtriage.cli import build_web_parser
 from rapidtriage.core.jobs import RunJobStore
 from tests.schema_validation import validate
 from tests.test_rapidtriage_run import build_run_fixture
+from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -78,6 +79,27 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(payload["result"]["supported"], True)
             self.assertEqual(payload["result"]["can_extract"], False)
             self.assertTrue(any(".ad1" in item["suffixes"] for item in payload["formats"]))
+
+    def test_collect_plan_api_previews_profile_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            build_windows_artifact_fixture(root)
+            client = TestClient(create_app(RunJobStore()))
+
+            profiles_response = client.get("/api/collect/profiles")
+            plan_response = client.post(
+                "/api/collect/plan",
+                json={"root": str(root), "profile": "intrusion", "input_kind": "mounted-image"},
+            )
+
+            self.assertEqual(profiles_response.status_code, 200)
+            self.assertIn("intrusion", profiles_response.json()["profiles"])
+            self.assertEqual(plan_response.status_code, 200, plan_response.text)
+            payload = plan_response.json()
+            self.assertEqual(payload["command"], "collect-plan")
+            self.assertEqual(payload["profile"], "intrusion")
+            self.assertGreater(payload["summary"]["present_count"], 0)
+            self.assertIn("EventLogs", payload["summary"]["category_counts"])
 
     def test_create_run_waits_and_exposes_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

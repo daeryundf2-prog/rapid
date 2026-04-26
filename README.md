@@ -210,6 +210,7 @@ The local UI is a browser-based dashboard served by FastAPI. It supports:
 - Creating `run` workflows from a folder path, mounted image root, E01-derived folder, or direct `.E01` image path.
 - Checking evidence support before a run, including folders, E01/Ex01, AD1/L01/Lx01, AFF/AFF4, DD/RAW/IMG/001, ISO/DMG/WIM, VHD/VHDX/VMDK/VDI/XVA/QCOW, mobile packages, and memory dumps.
 - Choosing a processing profile: fast first pass, bounded standard extraction, or uncapped deep processing.
+- Previewing KAPE-style collection profiles from the start screen so users can see present/missing Windows/macOS artifact targets before a heavy run.
 - Showing a guided first-run workflow, safe read-only default, and remembered local form/search inputs to reduce repeated typing.
 - For direct `.E01` input, extracting the image read-only into the run output directory through `ewfmount`, `mmls`, and `tsk_recover`, then running the same triage pipeline on the extracted filesystem.
 - Persisting the local run catalog across server restarts.

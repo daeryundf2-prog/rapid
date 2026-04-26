@@ -8,6 +8,7 @@ const sampleRunButton = document.querySelector("#sampleRunButton");
 const doctorButton = document.querySelector("#doctorButton");
 const evidenceCheckButton = document.querySelector("#evidenceCheckButton");
 const evidenceCheckStatus = document.querySelector("#evidenceCheckStatus");
+const collectPlanButton = document.querySelector("#collectPlanButton");
 const runList = document.querySelector("#runList");
 const detailPanel = document.querySelector("#detailPanel");
 const RUN_FORM_STORAGE_KEY = "rapidtriage.runForm.v1";
@@ -2334,6 +2335,7 @@ function hydrateRunForm() {
     ["#inputKindInput", "inputKind"],
     ["#outputInput", "outputDir"],
     ["#processingProfileInput", "processingProfile"],
+    ["#collectProfileInput", "collectProfile"],
     ["#maxExtractMbInput", "maxExtractMb"],
     ["#maxFileCountInput", "maxFileCount"],
     ["#importOutputInput", "importOutputDir"],
@@ -2359,6 +2361,7 @@ function persistRunForm() {
     inputKind: document.querySelector("#inputKindInput")?.value || "",
     outputDir: document.querySelector("#outputInput")?.value || "",
     processingProfile: document.querySelector("#processingProfileInput")?.value || "fast",
+    collectProfile: document.querySelector("#collectProfileInput")?.value || "intrusion",
     maxExtractMb: document.querySelector("#maxExtractMbInput")?.value || "0",
     maxFileCount: document.querySelector("#maxFileCountInput")?.value || "0",
     importOutputDir: document.querySelector("#importOutputInput")?.value || "",
@@ -2376,6 +2379,7 @@ function bindRunFormPersistence() {
     "#inputKindInput",
     "#outputInput",
     "#processingProfileInput",
+    "#collectProfileInput",
     "#maxExtractMbInput",
     "#maxFileCountInput",
     "#importOutputInput",
@@ -2389,6 +2393,7 @@ function bindRunFormPersistence() {
     document.querySelector(selector)?.addEventListener("change", refreshRunPlanPreview);
   }
   document.querySelector("#processingProfileInput")?.addEventListener("change", applyProcessingProfile);
+  collectPlanButton?.addEventListener("click", previewCollectPlan);
 }
 
 function applyProcessingProfile() {
@@ -2451,6 +2456,79 @@ function extractLimitBytes() {
   const mb = Number(document.querySelector("#maxExtractMbInput")?.value || 0);
   if (!Number.isFinite(mb) || mb <= 0) return 0;
   return Math.floor(mb * 1024 * 1024);
+}
+
+async function previewCollectPlan() {
+  const target = document.querySelector("#collectPlanPreview");
+  const root = document.querySelector("#rootInput")?.value || "";
+  const profile = document.querySelector("#collectProfileInput")?.value || "intrusion";
+  const inputKind = document.querySelector("#inputKindInput")?.value || null;
+  if (!target) return;
+  if (!root.trim()) {
+    target.innerHTML = '<p class="empty-state">Enter a mounted/exported evidence root first.</p>';
+    return;
+  }
+  collectPlanButton.disabled = true;
+  collectPlanButton.textContent = "Previewing...";
+  target.innerHTML = '<p class="empty-state">Checking high-value target paths...</p>';
+  try {
+    const payload = await api("/api/collect/plan", {
+      method: "POST",
+      body: JSON.stringify({ root, profile, input_kind: inputKind }),
+    });
+    target.innerHTML = renderCollectPlanPreview(payload);
+  } catch (error) {
+    target.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  } finally {
+    collectPlanButton.disabled = false;
+    collectPlanButton.textContent = "Preview collection targets";
+  }
+}
+
+function renderCollectPlanPreview(payload) {
+  const summary = payload.summary || {};
+  const categoryCounts = summary.category_counts || {};
+  const presentTargets = (payload.targets || []).filter((target) => target.exists).slice(0, 8);
+  const exportCommand = `rapidtriage collect-export ${shellQuote(payload.root || "ROOT")} ./collect-export --profile ${shellQuote(payload.profile || "intrusion")} --copy`;
+  return `
+    <div class="processing-caps">
+      <span>Profile: ${escapeHtml(payload.profile || "")}</span>
+      <span>Present: ${formatNumber(summary.present_count || 0)}</span>
+      <span>Missing: ${formatNumber(summary.missing_count || 0)}</span>
+      <span>Total targets: ${formatNumber(summary.target_count || 0)}</span>
+    </div>
+    <div class="processing-step-grid">
+      ${Object.entries(categoryCounts).map(([category, counts]) => `
+        <article class="processing-step ${counts.present_count ? "none" : "notice"}">
+          <div>
+            <strong>${escapeHtml(category)}</strong>
+            <span>${formatNumber(counts.present_count || 0)}/${formatNumber(counts.target_count || 0)}</span>
+          </div>
+          <p>${formatNumber(counts.missing_count || 0)} missing targets</p>
+        </article>
+      `).join("")}
+    </div>
+    ${presentTargets.length ? `
+      <div class="dense-list">
+        ${presentTargets.map((target) => `
+          <div class="dense-row">
+            <strong>${escapeHtml(target.label || target.relative_path || "target")}</strong>
+            <span>${escapeHtml(target.relative_path || target.path || "")}</span>
+          </div>
+        `).join("")}
+      </div>
+    ` : '<p class="empty-state">No target paths were found for this profile.</p>'}
+    <div class="command-list">
+      <code>${escapeHtml(exportCommand)}</code>
+      <code>rapidtriage run ./collect-export/evidence --mode hacking --read-only</code>
+    </div>
+  `;
+}
+
+function shellQuote(value) {
+  const text = String(value || "");
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(text)) return text;
+  return `'${text.replace(/'/g, "'\\''")}'`;
 }
 
 function searchStorageKey() {
