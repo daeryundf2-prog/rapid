@@ -36,6 +36,9 @@ sh scripts/start-rapidtriage.sh
 ```
 
 See [docs/rapidtriage-windows-quickstart.md](docs/rapidtriage-windows-quickstart.md) for the Windows launcher, diagnostics, and E01 fallback guidance.
+See [docs/rapidtriage-macos-linux-quickstart.md](docs/rapidtriage-macos-linux-quickstart.md) for the macOS/Linux launcher and first-run flow.
+See [docs/rapidtriage-e01-workflow.md](docs/rapidtriage-e01-workflow.md) for what direct E01/Ex01 input does today and when to mount/export first.
+See [docs/rapidtriage-fresh-machine-smoke-test.md](docs/rapidtriage-fresh-machine-smoke-test.md) for the Windows/macOS release usability smoke test.
 See [docs/rapidtriage-maestro-wisdom-intake.md](docs/rapidtriage-maestro-wisdom-intake.md) for the Maestro WISDOM-inspired competitive intake and follow-up parser/viewer backlog.
 See [docs/rapidtriage-user-convenience-principles.md](docs/rapidtriage-user-convenience-principles.md) for the analyst convenience rules that guide UI and workflow decisions.
 See [docs/rapidtriage-community-feedback-intake.md](docs/rapidtriage-community-feedback-intake.md) for public Reddit/Forensic Focus practitioner feedback translated into product requirements.

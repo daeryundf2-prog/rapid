@@ -6,8 +6,8 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 
 - Mounted folders and exported evidence folders are the most reliable input.
 - E01/Ex01 direct handling requires external `libewf` and Sleuth Kit tools.
-- Raw, ISO, VHD/VHDX, and VMDK formats are currently detected by adapters, but full native extraction is still planned.
-- XVA, XFS, Volume Shadow Copy comparison, and native virtual-server dump workflows are not implemented yet.
+- Raw, split images, ISO, DMG, WIM, AD1, AFF/AFF4, VHD/VHDX, VMDK, VDI, XVA, QCOW/QCOW2, mobile packages, and memory dumps are detected by adapters, but full native extraction/parsing is still planned.
+- XFS, Volume Shadow Copy comparison, and native virtual-server dump workflows are not implemented yet.
 - Deep deleted-file carving is not implemented.
 
 ## Parser Coverage

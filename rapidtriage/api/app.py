@@ -245,6 +245,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
 
     @api.post("/api/runs", status_code=202)
     def create_run(request: RunCreateRequest) -> Dict[str, Any]:
+        validate_run_evidence_source(request.root)
         run_request = RunRequest(
             root=request.root,
             mode=request.mode,
@@ -547,6 +548,26 @@ def get_job(store: RunJobStore, run_id: str):
         return store.get(run_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="run not found")
+
+
+def validate_run_evidence_source(raw_root: str) -> None:
+    source = Path(raw_root).expanduser()
+    try:
+        evidence = identify_evidence(source)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    result = evidence.to_dict()
+    if source.is_dir():
+        return
+    if source.is_file() and not bool(result.get("can_extract")):
+        detail = str(result.get("message") or "This evidence file cannot be scanned directly.")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{detail} Mount or export the evidence first, then select the resulting folder. "
+                "Use Check evidence support for adapter details."
+            ),
+        )
 
 
 def get_job_payload(store: RunJobStore, run_id: str, *, include_summary: bool) -> Dict[str, object]:

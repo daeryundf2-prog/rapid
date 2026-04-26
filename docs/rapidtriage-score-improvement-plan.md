@@ -31,15 +31,15 @@ Tasks:
 
 - Add one-click launcher polish: Windows `.bat`, PowerShell, macOS shell launcher, and a clear startup page. Status: macOS/Linux shell launcher added; Windows launchers already exist.
 - Add first-run checklist in UI: runtime status, sample case, evidence support, output directory, and next step. Status: first-run checklist added to the web start screen.
-- Add UI warnings for unsupported direct image formats instead of letting users discover limitations after failure.
-- Add packaged release smoke test instructions for fresh Windows and macOS machines.
-- Add a short "What E01 does today" guide: direct support only when external tools exist; otherwise mount/export first.
+- Add UI warnings for unsupported direct image formats instead of letting users discover limitations after failure. Status: web/API run creation now blocks detected image files that must be mounted/exported first.
+- Add packaged release smoke test instructions for fresh Windows and macOS machines. Status: fresh-machine smoke checklist added.
+- Add a short "What E01 does today" guide: direct support only when external tools exist; otherwise mount/export first. Status: E01/Ex01 workflow guide added.
 
 Acceptance criteria:
 
-- Fresh Windows user can run the web UI in under 15 minutes from README.
-- Sample case completes and opens automatically.
-- Missing optional tools are shown as warnings, not confusing failures.
+- Fresh Windows user can run the web UI in under 15 minutes from README. Status: documented launcher flow and smoke checklist exist; real external Windows smoke test still required before release.
+- Sample case completes and opens automatically. Status: implemented in web UI and covered by API test.
+- Missing optional tools are shown as warnings, not confusing failures. Status: doctor/evidence preflight exists; direct unsupported image run is blocked with mount/export guidance.
 
 ## Plan To Reach 70
 

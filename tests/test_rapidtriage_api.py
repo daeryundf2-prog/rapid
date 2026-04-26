@@ -199,6 +199,25 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(first_artifact_group["pagination"]["collection"], "artifacts")
             self.assertLessEqual(len(first_artifact_group["artifacts"]), 1)
 
+    def test_create_run_rejects_detected_image_that_cannot_be_scanned_directly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source = Path(tmp_dir) / "case.ad1"
+            source.write_bytes(b"fixture")
+            client = TestClient(create_app(RunJobStore()))
+
+            response = client.post(
+                "/api/runs",
+                json={
+                    "root": str(source),
+                    "mode": "fraud",
+                    "read_only": True,
+                    "wait": True,
+                },
+            )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("Mount or export the evidence first", response.json()["detail"])
+
     def test_bookmark_api_writes_run_case_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
