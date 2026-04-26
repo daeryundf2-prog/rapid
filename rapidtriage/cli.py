@@ -31,6 +31,7 @@ from .core.doctor import format_doctor_text, run_doctor
 from .core.evidence import identify_evidence
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
 from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
+from .core.indicators import IndicatorSummaryError, build_indicator_summary
 from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS, resolve_input_root
 from .core.normalize import NormalizationError, build_normalized_case
 from .core.plugins import PluginError, load_plugin_registry, validate_plugin_manifest, read_plugin_manifest
@@ -110,6 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage run . --mode fraud --output-dir ./rapidtriage-run --read-only
               rapidtriage run ./case.E01 --mode fraud --output-dir ./rapidtriage-run-e01
               rapidtriage search ./rapidtriage-run-fraud -k invoice -k password
+              rapidtriage indicators ./rapidtriage-run-fraud --output rapidtriage-indicators.json
               rapidtriage sample --run --overwrite
               rapidtriage case-db ./rapidtriage-case.db --create-case CASE-001 --name "Case 001"
               rapidtriage case-search ./rapidtriage-case.db --case-id CASE-001 -k password
@@ -380,6 +382,26 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--output", default="rapidtriage-search.json", help="JSON output path")
     search.add_argument("--limit", type=int, default=500, help="Maximum number of combined matches")
     search.add_argument("--no-ocr", action="store_true", help="Skip OCR over image candidates")
+
+    indicators = sub.add_parser(
+        "indicators",
+        help="Summarize URL, domain, IP, and hash indicators from a completed run",
+        description="Summarize URL, domain, IP, and hash indicators from a completed run",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage indicators ./rapidtriage-run-fraud --output rapidtriage-indicators.json
+              rapidtriage indicators ./rapidtriage-run-fraud/rapidtriage-run-summary.json --rules iocs.yaml
+            """
+        ),
+    )
+    indicators.add_argument("run_output", help="Run output directory or rapidtriage-run-summary.json")
+    indicators.add_argument("--output", default="rapidtriage-indicators.json", help="JSON output path")
+    indicators.add_argument("--limit", type=int, default=1000, help="Maximum number of indicators to keep")
+    indicators.add_argument("--max-sources", type=int, default=10, help="Maximum source references per indicator")
+    indicators.add_argument("--json", action="store_true", help="Print JSON to stdout")
+    add_rules_argument(indicators)
 
     doctor = sub.add_parser(
         "doctor",
@@ -1316,6 +1338,41 @@ def main(argv=None) -> int:
         print(f"Saved search JSON: {output}")
         print(f"Saved audit JSON: {audit_output}")
         print(f"Matches: {payload['summary']['match_count']}")
+        return 0
+
+    if args.command == "indicators":
+        run_output = Path(args.run_output).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        try:
+            payload = build_indicator_summary(
+                run_output,
+                rule_set=rule_set,
+                max_indicators=args.limit,
+                max_sources_per_indicator=args.max_sources,
+            )
+        except IndicatorSummaryError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        audit_output = audit_path_for(output)
+        input_summary = run_output / "rapidtriage-run-summary.json" if run_output.is_dir() else run_output
+        write_audit_record(
+            audit_output,
+            command="indicators",
+            options={
+                "output": str(output),
+                "limit": args.limit,
+                "max_sources": args.max_sources,
+                "rules": str(rule_set.path) if rule_set else None,
+            },
+            input_files=[("run-summary", input_summary)],
+            output_files=[("indicators-json", output)],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved indicators JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(f"Indicators: {payload['summary']['indicator_count']}")
         return 0
 
     if args.command == "vsc-compare":

@@ -310,6 +310,7 @@ The collector interface is intentionally narrow so additional Windows-specific c
 - `rapidtriage-run-report.md`
 - `rapidtriage-timeline.json`
 - `rapidtriage-timeline-report.md`
+- `rapidtriage-indicators.json`
 
 Current run modes:
 

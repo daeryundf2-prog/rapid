@@ -12,6 +12,7 @@ from .docs import build_manifest, run_docs_search, write_result
 from .e01 import E01ExtractionError, E01ExtractionResult, extract_e01_to_directory, is_e01_path
 from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, SUPPORTED_DOC_KINDS, run_extract
 from .files import run_files_scan
+from .indicators import build_indicator_summary
 from .input_root import InputRoot, derive_child_input_root, resolve_input_root
 from .reporting import build_run_report_context, render_run_markdown_report
 from .rules import RuleSet, summarize_payload_annotations
@@ -191,6 +192,7 @@ def run_triage_mode(
     files_extract_manifest = files_extract_dir / DEFAULT_EXTRACT_MANIFEST_NAME
     timeline_path = output_dir / "rapidtriage-timeline.json"
     timeline_report_path = output_dir / "rapidtriage-timeline-report.md"
+    indicators_path = output_dir / "rapidtriage-indicators.json"
     summary_path = output_dir / "rapidtriage-run-summary.json"
     report_path = output_dir / "rapidtriage-run-report.md"
     e01_metadata_path = output_dir / "rapidtriage-e01.json"
@@ -258,6 +260,23 @@ def run_triage_mode(
     write_result(timeline_payload, timeline_path)
     timeline_report_path.write_text(build_timeline_report(timeline_payload), encoding="utf-8")
 
+    provisional_outputs = {
+        "manifest": manifest_path,
+        "docs": docs_path,
+        "docs_index": docs_index_path,
+        "files": files_path,
+        "docs_extract_manifest": docs_extract_manifest,
+        "files_extract_manifest": files_extract_manifest,
+        "timeline": timeline_path,
+        "timeline_report": timeline_report_path,
+        **{f"artifacts_{kind}": path for kind, path in artifact_outputs.items()},
+    }
+    indicators_payload = build_indicator_summary(
+        {"outputs": {key: str(path) for key, path in provisional_outputs.items()}},
+        rule_set=rule_set,
+    )
+    write_result(indicators_payload, indicators_path)
+
     outputs = {
         "manifest": manifest_path,
         "docs": docs_path,
@@ -267,6 +286,7 @@ def run_triage_mode(
         "files_extract_manifest": files_extract_manifest,
         "timeline": timeline_path,
         "timeline_report": timeline_report_path,
+        "indicators": indicators_path,
         **{f"artifacts_{kind}": path for kind, path in artifact_outputs.items()},
         "summary": summary_path,
         "report": report_path,

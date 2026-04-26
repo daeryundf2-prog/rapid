@@ -135,6 +135,21 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - from `files`: `categories`
   - from `docs`: `kind`, `matched_keywords`
 
+### `indicators`
+
+- Output: `rapidtriage-indicators.json`
+- Top-level keys:
+  - `command`
+  - `generated_at`
+  - `run_summary`
+  - `options`
+  - `summary`
+  - `indicators`
+- Each indicator row includes `type`, `value`, `count`, `classification`, `risk_flags`, and `sources`.
+- Supported indicator types are `url`, `domain`, `ip`, `md5`, `sha1`, and `sha256`.
+- Source rows keep the originating run output, output path, JSON pointer, and path/artifact/event context where available.
+- When `--rules` is provided, matching local IOC rules are emitted as `matched_rules`; no external threat-intelligence API is contacted by default.
+
 ### `submission-manifest`
 
 - Schema: `rapidtriage/schemas/submission-manifest.schema.json`

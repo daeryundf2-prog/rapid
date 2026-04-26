@@ -256,6 +256,7 @@ class RapidTriageRunTests(unittest.TestCase):
             files_extract_manifest_path = output_dir / "files-extract" / "rapidtriage-extract-manifest.json"
             timeline_path = output_dir / "rapidtriage-timeline.json"
             timeline_report_path = output_dir / "rapidtriage-timeline-report.md"
+            indicators_path = output_dir / "rapidtriage-indicators.json"
             summary_path = output_dir / "rapidtriage-run-summary.json"
             report_path = output_dir / "rapidtriage-run-report.md"
             artifact_paths = {
@@ -272,6 +273,7 @@ class RapidTriageRunTests(unittest.TestCase):
                 files_extract_manifest_path,
                 timeline_path,
                 timeline_report_path,
+                indicators_path,
                 summary_path,
                 report_path,
             ]
@@ -332,6 +334,7 @@ class RapidTriageRunTests(unittest.TestCase):
             )
             self.assertEqual(Path(summary_payload["outputs"]["timeline"]).resolve(), timeline_path.resolve())
             self.assertEqual(Path(summary_payload["outputs"]["timeline_report"]).resolve(), timeline_report_path.resolve())
+            self.assertEqual(Path(summary_payload["outputs"]["indicators"]).resolve(), indicators_path.resolve())
             self.assertEqual(Path(summary_payload["outputs"]["summary"]).resolve(), summary_path.resolve())
             self.assertEqual(Path(summary_payload["outputs"]["report"]).resolve(), report_path.resolve())
             self.assertGreaterEqual(summary_payload["summary"]["timeline_event_count"], 1)
