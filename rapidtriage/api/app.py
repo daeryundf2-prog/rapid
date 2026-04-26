@@ -21,6 +21,8 @@ from ..core.case_db import CaseDatabaseError, open_case_database
 from ..core.docs import SUPPORTED_DOC_EXTS, extract_text
 from ..core.doctor import run_doctor
 from ..core.jobs import RunJobStore, RunRequest, default_job_store, is_relative_to, run_output_dir
+from ..core.run import RunModeError
+from ..core.sample_case import DEFAULT_SAMPLE_MODE, SampleCaseError, run_sample_workflow
 from ..core.search import SearchError, run_unified_search
 from ..core.submission import build_submission_manifest
 
@@ -41,6 +43,13 @@ class RunCreateRequest(BaseModel):
 
 class RunImportRequest(BaseModel):
     output_dir: str = Field(..., min_length=1)
+
+
+class SampleCaseRunRequest(BaseModel):
+    output_dir: Optional[str] = None
+    mode: str = DEFAULT_SAMPLE_MODE
+    overwrite: bool = True
+    read_only: bool = True
 
 
 class BookmarkCreateRequest(BaseModel):
@@ -128,6 +137,25 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     @api.get("/api/doctor")
     def doctor() -> Dict[str, object]:
         return run_doctor(include_port_check=False)
+
+    @api.post("/api/sample-case/run", status_code=201)
+    def run_sample_case(request: SampleCaseRunRequest) -> Dict[str, object]:
+        try:
+            output_dir = Path(request.output_dir).expanduser() if request.output_dir else Path.home() / ".rapidtriage" / "sample-case"
+            sample_payload = run_sample_workflow(
+                output_dir,
+                mode=request.mode,
+                overwrite=request.overwrite,
+                read_only=request.read_only,
+            )
+            job = store.import_completed_run(Path(str(sample_payload["run"]["output_dir"])))
+            return {
+                "command": "sample-case.run",
+                "sample": sample_payload,
+                "run": job.to_dict(include_summary=True),
+            }
+        except (SampleCaseError, RunModeError, OSError, json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/case-db/import-run")
     def import_run_to_case_db(request: CaseDbImportRunRequest) -> Dict[str, object]:

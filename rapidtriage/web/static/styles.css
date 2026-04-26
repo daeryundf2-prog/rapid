@@ -154,6 +154,38 @@ h2 {
   font-size: 0.8rem;
 }
 
+.mode-help,
+.empty-state-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  border: 1px dashed rgba(31, 111, 104, 0.32);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(31, 111, 104, 0.07), rgba(255, 255, 255, 0.74)),
+    #fffdf8;
+  padding: 12px;
+}
+
+.mode-help p,
+.empty-state-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.mode-help strong {
+  color: var(--ink);
+}
+
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -647,6 +679,31 @@ mark {
   color: var(--ok);
 }
 
+.step-item.failed {
+  border-color: rgba(178, 87, 44, 0.35);
+  color: var(--warn);
+}
+
+.run-step-list {
+  margin-top: 2px;
+}
+
+.command-list {
+  display: grid;
+  gap: 6px;
+}
+
+.command-list code {
+  display: block;
+  overflow-wrap: anywhere;
+  border: 1px solid rgba(30, 37, 40, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--ink);
+  padding: 8px 10px;
+  font-size: 0.78rem;
+}
+
 .guidance-card {
   display: grid;
   gap: 12px;
@@ -1094,6 +1151,10 @@ mark {
   .shortcut-grid,
   .view-switcher,
   .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .quick-actions {
     grid-template-columns: 1fr;
   }
 

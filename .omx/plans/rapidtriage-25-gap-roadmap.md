@@ -3016,3 +3016,37 @@ By the end of Week 1:
 - Current tests still pass.
 
 This is intentionally not glamorous. It is the foundation that makes everything after it feel like a product instead of a pile of forensic scripts.
+
+## Competitive Intake Addendum: Maestro WISDOM
+
+Source: user-provided product notes. These notes are absorbed as competitive/product requirements, not independently verified benchmark facts.
+
+Key lessons:
+
+- Fast default processing matters. Full carving and heavy indexing should be explicit follow-up jobs, not mandatory first-pass work.
+- Artifact breadth matters, but only if results are stable, categorized, source-linked, and viewer-friendly.
+- Windows depth is a major differentiator: OS/account metadata, EVTX, Registry, MFT, EDB, WER, Defender/Firewall, Task Scheduler, ADS, VSC, LotL activity, and browser unification.
+- Analyst UX matters as much as parser count: SQL/JSON/XML/email/media/browser viewers reduce context switching.
+- Trust comes from verified-source output, confidence fields, parser versioning, hash traceability, benchmark transparency, and fast bug-fix loops.
+
+Backlog absorbed from this intake:
+
+1. Add run processing profiles: `fast`, `standard`, `deep`.
+2. Keep full carving, OCR-heavy media work, and expensive indexing out of `fast`.
+3. Add Windows OS/account summary parser: hostname, timezone, last boot, admin membership, account lifecycle.
+4. Add Zone.Identifier ADS parser for download provenance.
+5. Add unified browser model for Chrome, Edge, Firefox history/downloads and AI prompt artifacts.
+6. Add EVTX parser skeleton with semantic tags and typed parameters.
+7. Add Registry hive parser/recovery roadmap with deleted key/value marking.
+8. Add MFT parser and timeline merge.
+9. Add VSC compare workflow for deleted-file deltas and VSC deletion command detection.
+10. Add Defender, Firewall, WER, Task Scheduler, Prefetch, LNK, JumpList, ShellBags, USB history parser backlog.
+11. Add optional TI enrichment plugin for URLs, IPs, domains, and hashes.
+12. Add Korean OCR validation set and OCR quality metrics.
+13. Add Linux XFS and virtual-server dump requirements, including XVA detection.
+14. Add APK malware triage as a future mobile-dump feature before full acquisition.
+15. Defer live USB collection, remote agents, memory forensics, password cracking, deepfake detection, and similar-image clustering until validation/security posture is stronger.
+
+Design rule:
+
+- Do not chase an unvalidated "500 artifact" number. Prefer a smaller set of parser outputs with fixtures, expected results, parser versions, confidence, source paths, hashes, timeline integration, and report traceability.

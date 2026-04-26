@@ -4,6 +4,8 @@ const runButton = document.querySelector("#runButton");
 const importForm = document.querySelector("#importForm");
 const importButton = document.querySelector("#importButton");
 const refreshButton = document.querySelector("#refreshButton");
+const sampleRunButton = document.querySelector("#sampleRunButton");
+const doctorButton = document.querySelector("#doctorButton");
 const runList = document.querySelector("#runList");
 const detailPanel = document.querySelector("#detailPanel");
 const RUN_FORM_STORAGE_KEY = "rapidtriage.runForm.v1";
@@ -118,7 +120,7 @@ async function loadRuns() {
 function renderRunList(runs) {
   runList.innerHTML = "";
   if (!runs.length) {
-    runList.innerHTML = '<p class="empty-state">No runs yet.</p>';
+    runList.innerHTML = renderEmptyRunList();
     return;
   }
   for (const run of runs) {
@@ -135,6 +137,22 @@ function renderRunList(runs) {
     button.addEventListener("click", () => loadRunDetail(run.run_id, activeTab));
     runList.appendChild(button);
   }
+}
+
+function renderEmptyRunList() {
+  return `
+    <section class="empty-state-card">
+      <p class="eyebrow">first run</p>
+      <h3>Start with the sample, then move to real evidence</h3>
+      <p>처음이면 샘플 케이스로 UI 흐름을 익힌 뒤 실제 증거를 넣는 쪽이 가장 안전합니다.</p>
+      <div class="command-list">
+        <code>Click “Check runtime” to verify optional tools.</code>
+        <code>Click “Run sample case” to create a safe practice case.</code>
+        <code>Use Import run if you already have rapidtriage output.</code>
+      </div>
+      <p class="help-text">Existing run output이 있다면 왼쪽의 Import run으로 바로 불러올 수 있습니다.</p>
+    </section>
+  `;
 }
 
 async function loadRunDetail(runId, tab = "summary") {
@@ -164,7 +182,22 @@ function renderPendingRun(run) {
       <p class="eyebrow">working</p>
       <h3>${run.error ? "Run needs attention" : "Run is still processing"}</h3>
       <p>${run.error ? escapeHtml(run.error) : "You can keep this page open. The list refreshes automatically and the run will open when it completes."}</p>
+      ${renderRunStepList(run.steps || [])}
+      ${run.error ? '<p class="help-text">실패한 단계만 확인한 뒤 같은 output directory로 재실행하면 완료된 산출물을 최대한 보존하면서 다시 점검할 수 있습니다.</p>' : ""}
     </section>
+  `;
+}
+
+function renderRunStepList(steps) {
+  if (!steps.length) return "";
+  return `
+    <div class="step-list run-step-list">
+      ${steps.map((step) => `
+        <span class="step-item ${step.status === "completed" ? "done" : ""} ${step.status === "failed" ? "failed" : ""}">
+          ${escapeHtml(step.name || "step")}: ${escapeHtml(step.status || "pending")}
+        </span>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -431,6 +464,7 @@ function renderWorkflowGuide(summary) {
         <button class="secondary-button" type="button" data-open-tab="search">Start keyword search</button>
         <button class="secondary-button" type="button" data-open-tab="review">Open review board</button>
       </div>
+      <p class="help-text">헷갈리면 순서는 단순합니다: 전체 검색 -> 뷰어로 원본 확인 -> relevant/excluded 표시 -> 보고서 후보만 남기기.</p>
     </section>
   `;
 }
@@ -2030,6 +2064,72 @@ importForm.addEventListener("submit", async (event) => {
     importButton.textContent = "Import results";
   }
 });
+
+sampleRunButton?.addEventListener("click", async () => {
+  sampleRunButton.disabled = true;
+  sampleRunButton.textContent = "Creating sample...";
+  detailPanel.innerHTML = `
+    <section class="empty-state-card">
+      <p class="eyebrow">sample case</p>
+      <h3>Creating a safe practice case</h3>
+      <p>샘플 증거를 만들고 read-only triage를 실행하는 중입니다. 보통 몇 초 안에 완료됩니다.</p>
+    </section>
+  `;
+  try {
+    const payload = await api("/api/sample-case/run", {
+      method: "POST",
+      body: JSON.stringify({ overwrite: true, read_only: true, mode: "fraud" }),
+    });
+    selectedRunId = payload.run.run_id;
+    activeTab = "summary";
+    await loadRuns();
+    await loadRunDetail(payload.run.run_id, activeTab);
+  } catch (error) {
+    detailPanel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  } finally {
+    sampleRunButton.disabled = false;
+    sampleRunButton.textContent = "Run sample case";
+  }
+});
+
+doctorButton?.addEventListener("click", async () => {
+  doctorButton.disabled = true;
+  doctorButton.textContent = "Checking...";
+  try {
+    const payload = await api("/api/doctor");
+    detailPanel.innerHTML = renderDoctorPanel(payload);
+  } catch (error) {
+    detailPanel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  } finally {
+    doctorButton.disabled = false;
+    doctorButton.textContent = "Check runtime";
+  }
+});
+
+function renderDoctorPanel(payload) {
+  const checks = payload.checks || [];
+  return `
+    <section class="guidance-card">
+      <p class="eyebrow">runtime check</p>
+      <h3>RapidTriage is ${escapeHtml(payload.status || "unknown")}</h3>
+      <div class="metric-grid">
+        ${metric("OK", payload.summary?.ok)}
+        ${metric("Warnings", payload.summary?.warn)}
+        ${metric("Errors", payload.summary?.error)}
+        ${metric("Checks", payload.summary?.check_count)}
+      </div>
+      <div class="dense-list">
+        ${checks.map((check) => `
+          <div class="dense-row">
+            <strong>${escapeHtml(check.name || "")} · ${escapeHtml(check.status || "")}</strong>
+            <span>${escapeHtml(check.summary || "")}</span>
+            ${check.remediation ? `<span>${escapeHtml(check.remediation)}</span>` : ""}
+          </div>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
 
 async function removeSelectedRun() {
   if (!selectedRunId) return;

@@ -7,12 +7,15 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - Mounted folders and exported evidence folders are the most reliable input.
 - E01/Ex01 direct handling requires external `libewf` and Sleuth Kit tools.
 - Raw, ISO, VHD/VHDX, and VMDK formats are currently detected by adapters, but full native extraction is still planned.
+- XVA, XFS, Volume Shadow Copy comparison, and native virtual-server dump workflows are not implemented yet.
 - Deep deleted-file carving is not implemented.
 
 ## Parser Coverage
 
 - Browser and recent-file artifacts are implemented first.
 - Windows Event Logs, Registry hives, Prefetch, Jump Lists, ShellBags, SRUM, mobile, and cloud imports are roadmap items.
+- MFT, Zone.Identifier ADS, Defender/Firewall/WER, Task Scheduler, VSC comparison, AI prompt extraction, and LotL command correlation are roadmap items.
+- APK malware triage, memory forensics, password cracking, live USB collection, and remote-agent collection are deferred until the security and validation model matures.
 - Parser output should be verified against source evidence before report inclusion.
 
 ## Search And OCR

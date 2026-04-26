@@ -42,6 +42,26 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(index_response.status_code, 200)
         self.assertIn("rapidtriage", index_response.text)
 
+    def test_sample_case_api_creates_and_imports_practice_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            client = TestClient(create_app(RunJobStore()))
+            response = client.post(
+                "/api/sample-case/run",
+                json={
+                    "output_dir": str(Path(tmp_dir) / "sample"),
+                    "mode": "fraud",
+                    "overwrite": True,
+                    "read_only": True,
+                },
+            )
+
+            self.assertEqual(response.status_code, 201, response.text)
+            payload = response.json()
+            self.assertEqual(payload["command"], "sample-case.run")
+            self.assertEqual(payload["run"]["status"], "completed")
+            self.assertEqual(payload["run"]["origin"], "imported")
+            self.assertTrue((Path(tmp_dir) / "sample" / "run-output" / "rapidtriage-run-summary.json").is_file())
+
     def test_create_run_waits_and_exposes_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
