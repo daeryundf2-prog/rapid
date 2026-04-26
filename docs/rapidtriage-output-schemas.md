@@ -22,10 +22,13 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `generated_at`
   - `platform`
   - `score_target`
+  - `internal_roadmap_score`
+  - `commercial_readiness_score`
   - `status`
   - `output_dir`
   - `outputs`
   - `checks`
+  - `commercial_gap_assessment`
   - `recommended_commands`
   - `required_documents`
   - `known_limits`

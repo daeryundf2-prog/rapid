@@ -33,6 +33,8 @@ def build_validation_package(*, output_dir: Path, overwrite: bool = False) -> di
         "generated_at": now_iso(),
         "platform": platform.platform(),
         "score_target": 100,
+        "internal_roadmap_score": 100,
+        "commercial_readiness_score": 68,
         "status": "release-validation-package-ready",
         "output_dir": str(output_dir),
         "outputs": {
@@ -40,6 +42,7 @@ def build_validation_package(*, output_dir: Path, overwrite: bool = False) -> di
             "markdown": str(markdown_path),
         },
         "checks": build_validation_checks(),
+        "commercial_gap_assessment": build_commercial_gap_assessment(),
         "recommended_commands": build_recommended_commands(),
         "required_documents": build_required_documents(),
         "known_limits": build_known_limits(),
@@ -132,6 +135,46 @@ def build_validation_checks() -> list[dict[str, object]]:
     ]
 
 
+def build_commercial_gap_assessment() -> list[dict[str, object]]:
+    return [
+        {
+            "area": "native-evidence-acquisition",
+            "severity": "high",
+            "current_status": "E01/Ex01 direct extraction works only when external libewf/Sleuth Kit tools are present; other image families are detected with guidance.",
+            "needed_for_commercial_parity": "Read-only native or orchestrated handling for raw/split images, AD1/L01/Lx01, AFF/AFF4, VHD/VHDX, VMDK, VDI, XVA, QCOW/QCOW2, ISO, DMG, WIM/SWM, and reliable partition/filesystem selection.",
+            "operator_workaround": "Mount or export with validated forensic tooling and scan the resulting folder.",
+        },
+        {
+            "area": "binary-windows-artifact-depth",
+            "severity": "high",
+            "current_status": "EVTX native scanning is partial; MFT/USN/SRUM/Windows.edb and several registry artifacts rely on exports or inventory-level parsing.",
+            "needed_for_commercial_parity": "Full EVTX BinXML, native Registry hive, SRUDB ESE, Windows.edb ESE, $MFT, $UsnJrnl, JumpList, ShellBags, Amcache, ShimCache, and Prefetch parsers with validation corpora.",
+            "operator_workaround": "Import exports from trusted tools such as EvtxECmd, Hayabusa, Chainsaw, Velociraptor, PECmd, MFTECmd, and SRUM/EDB export utilities.",
+        },
+        {
+            "area": "mobile-cloud-memory-depth",
+            "severity": "high",
+            "current_status": "APK triage, cloud export imports, and Volatility-style output imports exist; direct acquisition and deep native analysis are not implemented.",
+            "needed_for_commercial_parity": "Vendor package importers, app database parsers, direct cloud/API acquisition workflows, raw memory analysis, BitLocker key search, and malware process scoring.",
+            "operator_workaround": "Use Cellebrite/XRY/GrayKey/AXIOM/cloud provider exports and Volatility outputs, then import the resulting folder/files.",
+        },
+        {
+            "area": "cross-platform-release",
+            "severity": "medium",
+            "current_status": "Source/wheel build and launchers exist, but signed Windows/macOS installers and notarization are outside the repo.",
+            "needed_for_commercial_parity": "Signed installers, notarized macOS packages, update channel, repeatable release artifacts, and fresh-machine test evidence.",
+            "operator_workaround": "Run fresh-machine smoke tests and distribute through an internally controlled packaging process.",
+        },
+        {
+            "area": "legal-validation-support",
+            "severity": "medium",
+            "current_status": "Validation package and deterministic fixtures exist, but independent legal validation, training, and SLA are operator-owned.",
+            "needed_for_commercial_parity": "Third-party validation datasets, documented support process, training material, release notes, and escalation SLA.",
+            "operator_workaround": "Attach validation output, benchmark output, known limitations, and analyst verification notes to every internal release.",
+        },
+    ]
+
+
 def build_recommended_commands() -> list[dict[str, str]]:
     return [
         {"name": "unit-tests", "command": "python -m unittest discover -s tests"},
@@ -178,13 +221,19 @@ def render_validation_markdown(payload: Mapping[str, object]) -> str:
     commands = payload.get("recommended_commands") if isinstance(payload.get("recommended_commands"), list) else []
     documents = payload.get("required_documents") if isinstance(payload.get("required_documents"), list) else []
     limits = payload.get("known_limits") if isinstance(payload.get("known_limits"), list) else []
+    commercial_gaps = (
+        payload.get("commercial_gap_assessment")
+        if isinstance(payload.get("commercial_gap_assessment"), list)
+        else []
+    )
 
     lines = [
         "# RapidTriage Release Validation Package",
         "",
         f"- Generated at: `{payload.get('generated_at', '')}`",
         f"- Platform: `{payload.get('platform', '')}`",
-        f"- Score target: `{payload.get('score_target', '')}/100`",
+        f"- Internal roadmap score: `{payload.get('internal_roadmap_score', payload.get('score_target', ''))}/100`",
+        f"- Commercial readiness score: `{payload.get('commercial_readiness_score', '')}/100`",
         f"- Status: `{payload.get('status', '')}`",
         "",
         "## Required Checks",
@@ -210,12 +259,29 @@ def render_validation_markdown(payload: Mapping[str, object]) -> str:
     for item in limits:
         lines.append(f"- {item}")
 
+    lines.extend(["", "## Commercial Gap Assessment", ""])
+    for item in commercial_gaps:
+        if not isinstance(item, Mapping):
+            continue
+        lines.extend(
+            [
+                f"### {item.get('area', '')}",
+                "",
+                f"- Severity: `{item.get('severity', '')}`",
+                f"- Current status: {item.get('current_status', '')}",
+                f"- Needed for commercial parity: {item.get('needed_for_commercial_parity', '')}",
+                f"- Operator workaround: {item.get('operator_workaround', '')}",
+                "",
+            ]
+        )
+
     lines.extend(
         [
             "",
             "## Release Decision",
             "",
             "The internal 100-point target means the repository can generate a repeatable validation package.",
+            "The commercial readiness score is intentionally lower and reflects gaps versus full forensic suites such as AXIOM/WISDOM.",
             "It does not replace independent legal validation, signed installer infrastructure, or a maintained support program.",
             "",
         ]

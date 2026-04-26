@@ -1107,9 +1107,21 @@ def main(argv=None) -> int:
             print(f"Adapter: {payload['adapter']}")
             print(f"Format: {payload['detected_format']}")
             print(f"Supported now: {payload['supported']}")
+            print(f"Support level: {payload.get('support_level', '')}")
+            print(f"Scan strategy: {payload.get('scan_strategy', '')}")
             print(f"Message: {payload['message']}")
             if payload["missing_tools"]:
                 print(f"Missing tools: {', '.join(payload['missing_tools'])}")
+            next_actions = payload.get("next_actions") if isinstance(payload.get("next_actions"), list) else []
+            if next_actions:
+                print("Next actions:")
+                for action in next_actions:
+                    print(f"- {action}")
+            warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+            if warnings:
+                print("Warnings:")
+                for warning in warnings:
+                    print(f"- {warning}")
         return 0
 
     if args.command == "benchmark":

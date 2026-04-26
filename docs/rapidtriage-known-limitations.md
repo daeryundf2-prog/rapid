@@ -7,6 +7,7 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - Mounted folders and exported evidence folders are the most reliable input.
 - E01/Ex01 direct handling requires external `libewf` and Sleuth Kit tools.
 - Raw, split images, ISO, DMG, WIM, AD1, AFF/AFF4, VHD/VHDX, VMDK, VDI, XVA, QCOW/QCOW2, mobile packages, and memory dumps are detected by adapters, but full native extraction/parsing is still planned.
+- `rapidtriage evidence PATH --json` now reports `support_level`, `scan_strategy`, `next_actions`, `warnings`, and missing tools so analysts can decide whether to scan directly, install tooling, mount read-only, or vendor-export first.
 - XFS, Volume Shadow Copy comparison, and native virtual-server dump workflows are not implemented yet.
 - Deep deleted-file carving is not implemented.
 

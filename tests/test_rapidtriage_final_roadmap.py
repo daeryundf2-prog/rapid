@@ -24,6 +24,22 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
         self.assertIn("validation", commands)
         self.assertIn("--output-dir", commands["validation"].format_help())
 
+    def test_validation_package_separates_internal_and_commercial_scores(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["validation", "--output-dir", tmp_dir, "--json"])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["internal_roadmap_score"], 100)
+            self.assertLess(payload["commercial_readiness_score"], payload["internal_roadmap_score"])
+            gaps = payload["commercial_gap_assessment"]
+            self.assertTrue(any(item["area"] == "native-evidence-acquisition" for item in gaps))
+            report = Path(tmp_dir) / "rapidtriage-validation-report.md"
+            self.assertIn("Commercial Gap Assessment", report.read_text(encoding="utf-8"))
+
     def test_timeline_export_and_normalize_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

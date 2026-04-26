@@ -20,6 +20,9 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["detected_format"], "folder")
             self.assertEqual(result["supported"], True)
             self.assertEqual(result["can_extract"], False)
+            self.assertEqual(result["support_level"], "direct-folder")
+            self.assertEqual(result["scan_strategy"], "scan-folder")
+            self.assertFalse(result["external_validation_required"])
 
     def test_identifies_e01_and_reports_external_tool_readiness(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -33,6 +36,8 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertIn("ewfmount", result["required_tools"])
             self.assertEqual(result["supported"], result["missing_tools"] == [])
             self.assertEqual(result["can_extract"], result["missing_tools"] == [])
+            self.assertIn(result["support_level"], {"direct-extract", "tooling-required"})
+            self.assertTrue(result["next_actions"])
 
     def test_identifies_common_image_formats_as_planned_adapters(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -51,6 +56,9 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 self.assertEqual(result["detected_format"], detected_format)
                 self.assertEqual(result["supported"], True)
                 self.assertEqual(result["can_extract"], False)
+                self.assertEqual(result["support_level"], "detected-only")
+                self.assertTrue(result["next_actions"])
+                self.assertTrue(result["warnings"])
 
     def test_unknown_format_is_not_supported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -61,6 +69,8 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
 
             self.assertEqual(result["adapter"], "unsupported")
             self.assertEqual(result["supported"], False)
+            self.assertEqual(result["support_level"], "unsupported")
+            self.assertEqual(result["scan_strategy"], "manual-export-first")
 
     def test_cli_evidence_outputs_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -72,6 +82,8 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["adapter"], "folder")
+            self.assertEqual(payload["support_level"], "direct-folder")
+            self.assertIn("next_actions", payload)
 
 
 if __name__ == "__main__":
