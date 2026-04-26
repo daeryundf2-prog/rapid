@@ -4,7 +4,7 @@
 | --- | --- | --- |
 | File metadata | Implemented | Names, paths, extensions, sizes, modified time, categories. |
 | KAPE-style collect planning/export | Implemented baseline | `collect-plan` profiles preview present/missing Windows/macOS collection targets before heavy scanning or copying. `collect-export` can build a bounded source-relative export package with SHA256 copy logs. |
-| Document text | Implemented | Text/log/config/data, PDF, Office OpenXML, OpenDocument where dependencies support extraction. |
+| Document text | Implemented | Text/log/config/data, EML/MBOX email, bounded Outlook MSG strings, PDF, Office OpenXML, and OpenDocument where dependencies support extraction. |
 | Browser history/downloads | Implemented baseline+ | Chrome, Edge, Brave, Firefox local profiles; history/download fixture coverage; internet usage summaries, top-domain/category pivots, source hashes, browser-derived AI service usage detections, and browser-storage AI conversation candidates are normalized for Windows and macOS. |
 | Recent files | Implemented baseline+ | Recent shortcuts parse Shell Link header/string fields for target path, working directory, arguments, timestamps, flags, hashes, and embedded path pivots; Jump Lists promote recoverable embedded Shell Link destination records and fall back to embedded path extraction. |
 | Timeline merge | Implemented baseline | Files, docs, artifacts, and normalized timeline export. |

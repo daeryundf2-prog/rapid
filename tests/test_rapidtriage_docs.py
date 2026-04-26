@@ -71,6 +71,16 @@ def write_minimal_odt(path: Path, text: str) -> None:
         archive.writestr("content.xml", xml)
 
 
+def write_minimal_msg(path: Path, text: str) -> None:
+    path.write_bytes(
+        b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+        + b"\x00" * 64
+        + "Subject: Outlook Fixture".encode("utf-16le")
+        + b"\x00\x00"
+        + text.encode("utf-16le")
+    )
+
+
 class RapidTriageDocsTests(unittest.TestCase):
     def test_docs_command_scans_supported_document_extensions_and_writes_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -85,6 +95,24 @@ class RapidTriageDocsTests(unittest.TestCase):
             write_minimal_xlsx(root / "ledger.xlsx", "secret spreadsheet")
             write_minimal_pptx(root / "deck.pptx", "keyword slide")
             write_minimal_odt(root / "memo.odt", "secret open document")
+            (root / "message.eml").write_text(
+                "From: alice@example.test\n"
+                "To: bob@example.test\n"
+                "Subject: secret mail\n"
+                "\n"
+                "email body keyword\n",
+                encoding="utf-8",
+            )
+            (root / "mailbox.mbox").write_text(
+                "From alice@example.test Mon Apr 01 00:00:00 2024\n"
+                "From: alice@example.test\n"
+                "To: bob@example.test\n"
+                "Subject: mbox fixture\n"
+                "\n"
+                "secret mailbox keyword\n",
+                encoding="utf-8",
+            )
+            write_minimal_msg(root / "outlook.msg", "secret outlook msg keyword")
             output = root / "results.json"
 
             exit_code = main(
@@ -102,8 +130,8 @@ class RapidTriageDocsTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             payload = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(payload["summary"]["candidate_count"], 10)
-            self.assertEqual(payload["summary"]["match_count"], 10)
+            self.assertEqual(payload["summary"]["candidate_count"], 13)
+            self.assertEqual(payload["summary"]["match_count"], 13)
             result_paths = {Path(item["path"]).name for item in payload["results"]}
             self.assertEqual(
                 result_paths,
@@ -114,7 +142,10 @@ class RapidTriageDocsTests(unittest.TestCase):
                     "evidence.pdf",
                     "ledger.xlsx",
                     "memo.odt",
+                    "message.eml",
                     "note.txt",
+                    "mailbox.mbox",
+                    "outlook.msg",
                     "page.html",
                     "report.docx",
                     "table.csv",
@@ -122,6 +153,7 @@ class RapidTriageDocsTests(unittest.TestCase):
             )
             self.assertIn(".xlsx", payload["summary"]["supported_extensions"])
             self.assertIn(".odt", payload["summary"]["supported_extensions"])
+            self.assertIn(".msg", payload["summary"]["supported_extensions"])
 
     def test_docs_command_can_write_processed_text_index_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

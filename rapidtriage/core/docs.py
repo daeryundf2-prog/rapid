@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import email
 import hashlib
 import json
 import os
@@ -9,6 +10,8 @@ import re
 import zipfile
 import zlib
 from collections import Counter
+from email import policy
+from email.message import EmailMessage
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Union
 from xml.etree import ElementTree as ET
@@ -31,6 +34,8 @@ SUPPORTED_DOC_EXTS = {
     ".jsonl",
     ".log",
     ".md",
+    ".mbox",
+    ".msg",
     ".odp",
     ".ods",
     ".odt",
@@ -48,7 +53,6 @@ TEXT_EXTS = {
     "cfg",
     "conf",
     "csv",
-    "eml",
     "ini",
     "json",
     "jsonl",
@@ -237,6 +241,12 @@ def write_result(payload: Dict[str, object], output: Path) -> None:
 def extract_text(path: Path, kind: str) -> str:
     if kind in TEXT_EXTS:
         return path.read_text(encoding="utf-8", errors="ignore")
+    if kind == "eml":
+        return _extract_eml_text(path)
+    if kind == "mbox":
+        return _extract_mbox_text(path)
+    if kind == "msg":
+        return _extract_msg_text(path)
     if kind in HTML_EXTS:
         return _strip_markup(path.read_text(encoding="utf-8", errors="ignore"))
     if kind in OFFICE_OPEN_XML_EXTS:
@@ -322,6 +332,116 @@ def _extract_rtf_text(path: Path) -> str:
     text = re.sub(r"\\[a-zA-Z]+\d* ?", " ", text)
     text = text.replace("{", " ").replace("}", " ")
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _extract_eml_text(path: Path) -> str:
+    message = email.message_from_bytes(path.read_bytes(), policy=policy.default)
+    return _email_message_to_text(message)
+
+
+def _extract_mbox_text(path: Path, *, message_limit: int = 25) -> str:
+    data = path.read_bytes()
+    chunks = re.split(rb"\n(?=From [^\n]+\n)", data)
+    texts: list[str] = []
+    for chunk in chunks[:message_limit]:
+        if chunk.startswith(b"From "):
+            chunk = chunk.split(b"\n", 1)[1] if b"\n" in chunk else b""
+        if not chunk.strip():
+            continue
+        message = email.message_from_bytes(chunk, policy=policy.default)
+        texts.append(_email_message_to_text(message))
+    return "\n\n".join(text for text in texts if text)
+
+
+def _extract_msg_text(path: Path, *, scan_limit: int = 2 * 1024 * 1024) -> str:
+    blob = path.read_bytes()[:scan_limit]
+    strings = _unique_strings([*_extract_ascii_strings(blob), *_extract_utf16_strings(blob)])
+    return "\n".join(strings)
+
+
+def _email_message_to_text(message: EmailMessage) -> str:
+    header_names = ("From", "To", "Cc", "Bcc", "Subject", "Date", "Message-ID", "In-Reply-To")
+    sections: list[str] = []
+    for name in header_names:
+        value = message.get(name)
+        if value:
+            sections.append(f"{name}: {value}")
+    body_parts: list[str] = []
+    if message.is_multipart():
+        for part in message.walk():
+            if part.get_content_maintype() == "multipart":
+                continue
+            body = _email_part_to_text(part)
+            if body:
+                body_parts.append(body)
+    else:
+        body = _email_part_to_text(message)
+        if body:
+            body_parts.append(body)
+    sections.extend(body_parts)
+    return "\n".join(sections)
+
+
+def _email_part_to_text(part: EmailMessage) -> str:
+    content_type = part.get_content_type().lower()
+    if content_type not in {"text/plain", "text/html"}:
+        return ""
+    try:
+        content = part.get_content()
+    except (LookupError, UnicodeDecodeError):
+        payload = part.get_payload(decode=True) or b""
+        content = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+    if not isinstance(content, str):
+        return ""
+    if content_type == "text/html":
+        return _strip_markup(content)
+    return content.strip()
+
+
+def _extract_ascii_strings(blob: bytes, *, min_chars: int = 5) -> list[str]:
+    strings: list[str] = []
+    current = bytearray()
+    for byte in blob:
+        if 32 <= byte <= 126:
+            current.append(byte)
+            continue
+        if len(current) >= min_chars:
+            strings.append(current.decode("ascii", errors="ignore"))
+        current.clear()
+    if len(current) >= min_chars:
+        strings.append(current.decode("ascii", errors="ignore"))
+    return strings
+
+
+def _extract_utf16_strings(blob: bytes, *, min_chars: int = 4) -> list[str]:
+    strings: list[str] = []
+    for start in (0, 1):
+        current = bytearray()
+        for index in range(start, len(blob) - 1, 2):
+            value = int.from_bytes(blob[index : index + 2], "little", signed=False)
+            if 32 <= value <= 126:
+                current.extend(blob[index : index + 2])
+                continue
+            if len(current) >= min_chars * 2:
+                strings.append(current.decode("utf-16le", errors="ignore").strip())
+            current.clear()
+        if len(current) >= min_chars * 2:
+            strings.append(current.decode("utf-16le", errors="ignore").strip())
+    return strings
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cleaned = " ".join(value.split()).strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        unique.append(cleaned)
+        if len(unique) >= 500:
+            break
+    return unique
 
 
 def _strip_markup(text: str) -> str:

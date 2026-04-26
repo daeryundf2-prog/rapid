@@ -84,6 +84,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `candidate_count`
   - `match_count`
   - `supported_extensions`
+- Supported document extensions include text/config/log/data, HTML/RTF, PDF, Office/OpenDocument files, EML/MBOX email, and bounded Outlook MSG string extraction.
 - Optional `docs-index` sidecars use a processed-text inverted index and do not store full extracted text.
 
 ### `files`
