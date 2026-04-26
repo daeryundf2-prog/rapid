@@ -801,8 +801,9 @@ class CaseDatabase:
                         continue
                     artifact_type = str(row.get("artifact_type") or name.removeprefix("artifacts_"))
                     details = artifact_details(row)
+                    title = artifact_title(row)
                     summary = artifact_summary(row)
-                    connection.execute(
+                    cursor = connection.execute(
                         """
                         INSERT INTO artifact (
                             citation_id, case_id, evidence_source_id, artifact_type, parser_name,
@@ -817,12 +818,16 @@ class CaseDatabase:
                             artifact_type,
                             str(details.get("parser") or row.get("provider") or name),
                             str(details.get("parser_version") or ""),
-                            artifact_title(row),
+                            title,
                             summary,
                             json.dumps(dict(row), ensure_ascii=False, sort_keys=True),
                             None,
                             now_iso(),
                         ),
+                    )
+                    connection.execute(
+                        "INSERT INTO artifact_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
+                        (int(cursor.lastrowid), title, summary, artifact_index_text(row)),
                     )
                     count += 1
         return count
@@ -884,7 +889,9 @@ class CaseDatabase:
                         continue
                     artifact = vsc_artifact_row(record, snapshot_label=snapshot_label, snapshot_root=snapshot_root, index=index)
                     details = artifact_details(artifact)
-                    connection.execute(
+                    title = artifact_title(artifact)
+                    summary = artifact_summary(artifact)
+                    cursor = connection.execute(
                         """
                         INSERT INTO artifact (
                             citation_id, case_id, evidence_source_id, artifact_type, parser_name,
@@ -899,12 +906,16 @@ class CaseDatabase:
                             str(artifact.get("artifact_type") or "vsc-change"),
                             str(details.get("parser") or "rapidtriage-vsc-compare"),
                             str(details.get("parser_version") or "1"),
-                            artifact_title(artifact),
-                            artifact_summary(artifact),
+                            title,
+                            summary,
                             json.dumps(artifact, ensure_ascii=False, sort_keys=True),
                             None,
                             now_iso(),
                         ),
+                    )
+                    connection.execute(
+                        "INSERT INTO artifact_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
+                        (int(cursor.lastrowid), title, summary, artifact_index_text(artifact)),
                     )
                     count += 1
         return count
@@ -1212,8 +1223,11 @@ def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "current_sha256",
         "event_id",
         "event_category",
+        "event_family",
+        "event_tags",
         "event_description",
         "channel",
+        "channel_family",
         "computer",
         "user_name",
         "subject_user_name",
@@ -1222,12 +1236,31 @@ def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "logon_type",
         "source_ip",
         "source_port",
+        "destination_ip",
+        "destination_hostname",
+        "destination_port",
         "service_name",
+        "service_file_name",
         "process_name",
         "new_process_name",
         "parent_process_name",
+        "parent_command_line",
         "command_line",
         "script_block_text",
+        "query_name",
+        "target_object",
+        "image_loaded",
+        "task_name",
+        "workstation_name",
+        "logon_process_name",
+        "authentication_package_name",
+        "status_code",
+        "failure_reason",
+        "share_name",
+        "relative_target_name",
+        "triage_recommendation",
+        "matched_fields",
+        "false_positive_note",
         "file_path",
         "executable_path",
         "reason",
@@ -1256,6 +1289,18 @@ def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
     if nested:
         metadata["preview_value"] = nested
     return metadata
+
+
+def artifact_index_text(row: Mapping[str, object]) -> str:
+    details = artifact_details(row)
+    searchable = {
+        "artifact_type": row.get("artifact_type"),
+        "provider": row.get("provider"),
+        "path": row.get("path"),
+        "details": details,
+        "metadata": artifact_search_metadata(row),
+    }
+    return json.dumps(searchable, ensure_ascii=False, sort_keys=True)
 
 
 def artifact_nested_preview(details: Mapping[str, object]) -> str:
@@ -1457,6 +1502,19 @@ def search_artifacts(
     keywords: list[str],
     limit: int,
 ) -> list[dict[str, object]]:
+    if artifact_fts_has_rows(connection, case_id):
+        fts_matches = search_artifacts_fts(connection, case_id, keywords, limit)
+        scan_matches = search_artifacts_scan(connection, case_id, keywords, limit)
+        return dedupe_matches([*fts_matches, *scan_matches], limit=limit)
+    return search_artifacts_scan(connection, case_id, keywords, limit)
+
+
+def search_artifacts_scan(
+    connection: sqlite3.Connection,
+    case_id: str,
+    keywords: list[str],
+    limit: int,
+) -> list[dict[str, object]]:
     rows = connection.execute(
         """
         SELECT citation_id, id, artifact_type, title, summary, data_json
@@ -1490,6 +1548,88 @@ def search_artifacts(
         )
         if limit and len(matches) >= limit:
             break
+    return matches
+
+
+def dedupe_matches(matches: list[dict[str, object]], *, limit: int) -> list[dict[str, object]]:
+    output = []
+    seen: set[tuple[str, str]] = set()
+    for match in matches:
+        key = (str(match.get("target_type") or ""), str(match.get("target_id") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(match)
+        if limit and len(output) >= limit:
+            break
+    return output
+
+
+def artifact_fts_has_rows(connection: sqlite3.Connection, case_id: str) -> bool:
+    try:
+        row = connection.execute(
+            """
+            SELECT 1
+            FROM artifact_fts
+            JOIN artifact ON artifact_fts.rowid = artifact.id
+            WHERE artifact.case_id = ?
+            LIMIT 1
+            """,
+            (case_id,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return False
+    return row is not None
+
+
+def search_artifacts_fts(
+    connection: sqlite3.Connection,
+    case_id: str,
+    keywords: list[str],
+    limit: int,
+) -> list[dict[str, object]]:
+    query = build_fts_query(keywords)
+    try:
+        rows = connection.execute(
+            """
+            SELECT
+                artifact.citation_id,
+                artifact.id,
+                artifact.artifact_type,
+                artifact.title,
+                artifact.summary,
+                artifact.data_json,
+                snippet(artifact_fts, 2, '[', ']', ' ... ', 18) AS snippet
+            FROM artifact_fts
+            JOIN artifact ON artifact_fts.rowid = artifact.id
+            WHERE artifact.case_id = ?
+              AND artifact_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?
+            """,
+            (case_id, query, limit or -1),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    matches = []
+    for row in rows:
+        artifact_row = parse_json_object(row["data_json"])
+        metadata = artifact_search_metadata(artifact_row)
+        preview = str(row["summary"] or row["snippet"] or row["artifact_type"])
+        matches.append(
+            {
+                "source": "artifacts",
+                "citation_id": str(row["citation_id"]),
+                "target_type": "artifact",
+                "target_id": str(row["id"]),
+                "title": str(row["title"] or row["artifact_type"]),
+                "kind": str(row["artifact_type"]),
+                "path": artifact_source_path(artifact_row),
+                "matched_keywords": matched_keywords(f"{row['title']} {row['summary']} {row['snippet']}", keywords),
+                "preview": preview,
+                "metadata": metadata,
+            }
+        )
     return matches
 
 
@@ -1705,6 +1845,14 @@ CREATE TABLE IF NOT EXISTS artifact (
     FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE,
     FOREIGN KEY (evidence_source_id) REFERENCES evidence_source(id) ON DELETE SET NULL,
     FOREIGN KEY (file_record_id) REFERENCES file_record(id) ON DELETE SET NULL
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS artifact_fts USING fts5(
+    title,
+    summary,
+    metadata,
+    content='artifact',
+    content_rowid='id'
 );
 
 CREATE TABLE IF NOT EXISTS event (

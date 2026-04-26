@@ -81,9 +81,9 @@ Event log workflow:
 
 - Native `.evtx` files are inventoried with source hashes and parser guidance; recoverable binary record headers also emit partial `eventlog-event` rows with record ID, timestamp, extracted UTF-16 strings, and suspicious-term flags.
 - XML/JSON/JSONL/CSV exports from EVTX-oriented tools such as EvtxECmd, Hayabusa, Chainsaw, and Velociraptor are normalized into event rows.
-- Important Event IDs such as logons, failed logons, privileged logons, process creation, scheduled task creation, service installation, log clearing, and PowerShell script blocks are categorized with risk flags.
-- RapidTriage also emits built-in `eventlog-detection` rows for first-pass triage of log clearing, encoded PowerShell, RDP logons, privileged logons, services, tasks, account creation, group membership changes, and Sysmon network events.
-- `eventlog-summary` rows aggregate large exports by Event ID, category, channel, user, source IP, process name, and detection rule, with high-risk event samples and EventRecordID gap hints for review triage.
+- Important Event IDs such as logons, failed logons, privileged logons, process creation, scheduled task creation, service installation, log clearing, PowerShell script blocks, RDP sessions, WMI, Defender, Firewall, USB/device, share access, and Sysmon events are categorized with `event_family`, `channel_family`, `event_tags`, parser confidence, source hashes, and triage recommendations.
+- RapidTriage also emits built-in `eventlog-detection` rows for first-pass triage of log clearing, encoded PowerShell, RDP logons/sessions, privileged logons, services, tasks, account changes, group membership changes, suspicious process commands, Defender detections, WMI activity, VSC deletion commands, and Sysmon network/DNS/registry/image-load events.
+- `eventlog-summary` rows aggregate large exports by Event ID, event family, category, channel family, channel, user, source IP, process name, parser status, reportability, suspicious term, detection level, and detection rule, with high-risk event samples and EventRecordID gap hints for review triage.
 
 Use:
 

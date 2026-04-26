@@ -340,9 +340,17 @@
             "provider_name": "Microsoft-Windows-Security-Auditing",
             "event_id": "4624",
             "event_category": "logon-success",
+            "event_family": "authentication",
+            "event_tags": [
+              "category:logon-success",
+              "channel:security",
+              "event-id:4624",
+              "family:authentication"
+            ],
             "event_description": "Authentication success",
             "record_id": "1001",
             "channel": "Security",
+            "channel_family": "security",
             "level": "0",
             "computer": "WIN-CASE01",
             "user_sid": "",
@@ -353,14 +361,30 @@
             "logon_type": "10",
             "source_ip": "10.0.0.5",
             "source_port": "",
+            "destination_ip": "",
+            "destination_hostname": "",
+            "destination_port": "",
             "service_name": "",
+            "service_file_name": "",
             "process_id": "",
             "thread_id": "",
             "process_name": "",
             "new_process_name": "",
             "parent_process_name": "",
+            "parent_command_line": "",
             "command_line": "",
             "script_block_text": "",
+            "query_name": "",
+            "target_object": "",
+            "image_loaded": "",
+            "task_name": "",
+            "workstation_name": "",
+            "logon_process_name": "",
+            "authentication_package_name": "",
+            "status_code": "",
+            "failure_reason": "",
+            "share_name": "",
+            "relative_target_name": "",
             "event_created_at": "2024-04-01T12:34:56.000000+00:00",
             "timestamp": "2024-04-01T12:34:56.000000+00:00",
             "rule": {
@@ -379,11 +403,21 @@
               "rdp-logon"
             ],
             "risk_score": 45,
+            "matched_fields": [
+              "event_category",
+              "event_id",
+              "logon_type"
+            ],
+            "false_positive_note": "Validate expected administration, source host, account owner, and nearby activity before reporting.",
+            "triage_recommendation": "Pivot by account, source IP/host, logon type, and nearby failures/successes.",
             "matched_event": {
               "artifact_type": "eventlog-event",
               "path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
               "source_index": 0,
-              "record_id": "1001"
+              "record_id": "1001",
+              "source_hashes": {
+                "sha256": "3280198506b93b1d8c90fed52b92c8740c1b0ebb493bbe0d86d40941bad6f906"
+              }
             }
           }
         },
@@ -397,6 +431,8 @@
             "parser_version": "eventlog-normalized-v3",
             "coverage_status": "mapped",
             "reportability": "reportable",
+            "parser_confidence": 0.9,
+            "evidence_strength": "event-log-record",
             "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
             "source_format": "xml",
             "source_index": 0,
@@ -406,9 +442,17 @@
             "provider_name": "Microsoft-Windows-Security-Auditing",
             "event_id": "4624",
             "event_category": "logon-success",
+            "event_family": "authentication",
+            "event_tags": [
+              "category:logon-success",
+              "channel:security",
+              "event-id:4624",
+              "family:authentication"
+            ],
             "event_description": "Authentication success",
             "record_id": "1001",
             "channel": "Security",
+            "channel_family": "security",
             "level": "0",
             "computer": "WIN-CASE01",
             "user_sid": "",
@@ -419,14 +463,30 @@
             "logon_type": "10",
             "source_ip": "10.0.0.5",
             "source_port": "",
+            "destination_ip": "",
+            "destination_hostname": "",
+            "destination_port": "",
             "service_name": "",
+            "service_file_name": "",
             "process_id": "",
             "thread_id": "",
             "process_name": "",
             "new_process_name": "",
             "parent_process_name": "",
+            "parent_command_line": "",
             "command_line": "",
             "script_block_text": "",
+            "query_name": "",
+            "target_object": "",
+            "image_loaded": "",
+            "task_name": "",
+            "workstation_name": "",
+            "logon_process_name": "",
+            "authentication_package_name": "",
+            "status_code": "",
+            "failure_reason": "",
+            "share_name": "",
+            "relative_target_name": "",
             "task": "",
             "opcode": "",
             "keywords": "",
@@ -440,6 +500,7 @@
             },
             "risk_flags": [],
             "risk_score": 0,
+            "triage_recommendation": "Pivot by account, source IP/host, logon type, and nearby failures/successes.",
             "data": {
               "TargetUserName": "alice",
               "IpAddress": "10.0.0.5",
@@ -485,9 +546,21 @@
                 "count": 1
               }
             ],
+            "event_family_counts": [
+              {
+                "value": "authentication",
+                "count": 1
+              }
+            ],
             "channel_counts": [
               {
                 "value": "Security",
+                "count": 1
+              }
+            ],
+            "channel_family_counts": [
+              {
+                "value": "security",
                 "count": 1
               }
             ],
@@ -504,6 +577,33 @@
               }
             ],
             "process_counts": [],
+            "parser_status_counts": [
+              {
+                "value": "mapped",
+                "count": 1
+              },
+              {
+                "value": "detected-by-rule",
+                "count": 1
+              }
+            ],
+            "reportability_counts": [
+              {
+                "value": "reportable",
+                "count": 1
+              },
+              {
+                "value": "triage",
+                "count": 1
+              }
+            ],
+            "risk_term_counts": [],
+            "detection_level_counts": [
+              {
+                "value": "medium",
+                "count": 1
+              }
+            ],
             "first_event_at": "2024-04-01T12:34:56.000000+00:00",
             "last_event_at": "2024-04-01T12:34:56.000000+00:00",
             "high_risk_events": [

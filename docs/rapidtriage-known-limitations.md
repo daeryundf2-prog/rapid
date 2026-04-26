@@ -24,7 +24,7 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 
 ## Search And OCR
 
-- Case DB search currently uses SQLite FTS5 and metadata scans.
+- Case DB search currently uses SQLite FTS5 for documents and artifact metadata, plus metadata scans for file/timeline/review filters.
 - OCR depends on local Tesseract availability and quality varies by image.
 - Large-case performance must be tracked with `rapidtriage benchmark`.
 

@@ -966,6 +966,63 @@ mark {
   white-space: pre-wrap;
 }
 
+.eventlog-card {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffdf8;
+  padding: 10px;
+}
+
+.eventlog-card-header {
+  display: grid;
+  gap: 2px;
+}
+
+.eventlog-card-header strong {
+  color: var(--ink);
+}
+
+.eventlog-card-header span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.eventlog-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.eventlog-chip-row span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f8f5ef;
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 3px 7px;
+}
+
+.eventlog-fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.eventlog-fields dt {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.eventlog-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .tab-body {
   overflow-x: auto;
 }

@@ -104,6 +104,8 @@ def timestamp_kind(event_type: str) -> str:
         return "accessed"
     if "review" in lowered:
         return "reviewed"
+    if "eventlog" in lowered:
+        return "event-created"
     if "execut" in lowered or "prefetch" in lowered:
         return "executed"
     return "observed"

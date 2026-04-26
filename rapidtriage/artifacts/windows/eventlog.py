@@ -28,25 +28,63 @@ EVENT_ID_CATEGORIES = {
     "4624": ("logon-success", "Authentication success"),
     "4625": ("logon-failure", "Authentication failure"),
     "4634": ("logoff", "Account logoff"),
+    "4647": ("user-initiated-logoff", "User initiated logoff"),
     "4648": ("explicit-credential-logon", "Explicit credential logon"),
+    "4616": ("system-time-changed", "System time changed"),
     "4672": ("privileged-logon", "Special privileges assigned to new logon"),
     "4688": ("process-created", "Process creation"),
     "4697": ("service-installed", "Service installed"),
     "4698": ("scheduled-task-created", "Scheduled task created"),
+    "4699": ("scheduled-task-deleted", "Scheduled task deleted"),
+    "4700": ("scheduled-task-enabled", "Scheduled task enabled"),
+    "4701": ("scheduled-task-disabled", "Scheduled task disabled"),
     "4702": ("scheduled-task-updated", "Scheduled task updated"),
+    "4719": ("audit-policy-changed", "System audit policy changed"),
     "4720": ("user-created", "User account created"),
     "4722": ("user-enabled", "User account enabled"),
     "4724": ("password-reset", "Password reset attempted"),
+    "4725": ("user-disabled", "User account disabled"),
+    "4726": ("user-deleted", "User account deleted"),
     "4728": ("group-member-added", "Member added to global group"),
     "4732": ("local-group-member-added", "Member added to local group"),
     "4738": ("user-changed", "User account changed"),
+    "4739": ("domain-policy-changed", "Domain policy changed"),
     "4740": ("account-locked", "User account locked"),
+    "4741": ("computer-created", "Computer account created"),
+    "4756": ("universal-group-member-added", "Member added to universal group"),
     "4768": ("kerberos-tgt-request", "Kerberos TGT request"),
     "4769": ("kerberos-service-ticket", "Kerberos service ticket request"),
     "4771": ("kerberos-preauth-failure", "Kerberos pre-authentication failed"),
     "4776": ("credential-validation", "Credential validation"),
+    "4778": ("rdp-session-reconnected", "Remote session reconnected"),
+    "4779": ("rdp-session-disconnected", "Remote session disconnected"),
+    "4800": ("workstation-locked", "Workstation locked"),
+    "4801": ("workstation-unlocked", "Workstation unlocked"),
+    "5140": ("network-share-accessed", "Network share object accessed"),
+    "5145": ("network-share-detailed-access", "Detailed file share access checked"),
+    "5156": ("firewall-connection-allowed", "Windows Filtering Platform permitted connection"),
+    "5158": ("firewall-bind-allowed", "Windows Filtering Platform permitted bind"),
+    "6416": ("external-device-recognized", "External device recognized"),
     "1102": ("audit-log-cleared", "Audit log cleared"),
     "104": ("system-log-cleared", "Event log cleared"),
+    "106": ("scheduled-task-registered", "Task Scheduler task registered"),
+    "140": ("scheduled-task-updated", "Task Scheduler task updated"),
+    "141": ("scheduled-task-deleted", "Task Scheduler task deleted"),
+    "200": ("scheduled-task-started", "Task Scheduler action started"),
+    "201": ("scheduled-task-completed", "Task Scheduler action completed"),
+    "1149": ("rdp-authentication-succeeded", "Terminal Services user authentication succeeded"),
+    "21": ("rdp-session-logon", "Terminal Services session logon"),
+    "24": ("rdp-session-disconnected", "Terminal Services session disconnected"),
+    "25": ("rdp-session-reconnected", "Terminal Services session reconnected"),
+    "1116": ("defender-malware-detected", "Microsoft Defender malware detected"),
+    "1117": ("defender-remediation-action", "Microsoft Defender remediation action"),
+    "5007": ("defender-config-changed", "Microsoft Defender configuration changed"),
+    "2004": ("firewall-rule-added", "Windows Firewall rule added"),
+    "2005": ("firewall-rule-modified", "Windows Firewall rule modified"),
+    "2006": ("firewall-rule-deleted", "Windows Firewall rule deleted"),
+    "5857": ("wmi-activity", "WMI provider started"),
+    "5858": ("wmi-activity-error", "WMI activity error"),
+    "5861": ("wmi-permanent-event", "WMI permanent event consumer activity"),
     "7045": ("service-installed", "Service installed"),
     "4103": ("powershell-module", "PowerShell module logging"),
     "4104": ("powershell-script-block", "PowerShell script block"),
@@ -58,7 +96,94 @@ EVENT_ID_CATEGORIES = {
     "22": ("sysmon-dns-query", "Sysmon DNS query"),
 }
 
-HIGH_RISK_EVENT_IDS = {"1102", "104", "4672", "4697", "4698", "4720", "4728", "4732", "7045", "4104"}
+HIGH_RISK_EVENT_IDS = {
+    "1102",
+    "104",
+    "4672",
+    "4697",
+    "4698",
+    "4719",
+    "4720",
+    "4724",
+    "4726",
+    "4728",
+    "4732",
+    "4756",
+    "7045",
+    "4104",
+    "1116",
+    "5007",
+    "5861",
+}
+EVENT_FAMILY_BY_CATEGORY = {
+    "logon-success": "authentication",
+    "logon-failure": "authentication",
+    "logoff": "authentication",
+    "user-initiated-logoff": "authentication",
+    "explicit-credential-logon": "authentication",
+    "privileged-logon": "authentication",
+    "rdp-authentication-succeeded": "remote-access",
+    "rdp-session-logon": "remote-access",
+    "rdp-session-reconnected": "remote-access",
+    "rdp-session-disconnected": "remote-access",
+    "process-created": "execution",
+    "powershell-module": "execution",
+    "powershell-script-block": "execution",
+    "sysmon-process-created": "execution",
+    "service-installed": "persistence",
+    "scheduled-task-created": "persistence",
+    "scheduled-task-updated": "persistence",
+    "scheduled-task-deleted": "persistence",
+    "scheduled-task-registered": "persistence",
+    "scheduled-task-started": "execution",
+    "scheduled-task-completed": "execution",
+    "audit-log-cleared": "defense-evasion",
+    "system-log-cleared": "defense-evasion",
+    "audit-policy-changed": "defense-evasion",
+    "defender-config-changed": "defense-evasion",
+    "user-created": "account-management",
+    "user-enabled": "account-management",
+    "user-disabled": "account-management",
+    "user-deleted": "account-management",
+    "password-reset": "account-management",
+    "group-member-added": "account-management",
+    "local-group-member-added": "account-management",
+    "universal-group-member-added": "account-management",
+    "computer-created": "account-management",
+    "kerberos-preauth-failure": "authentication",
+    "credential-validation": "authentication",
+    "sysmon-network-connection": "network",
+    "sysmon-dns-query": "network",
+    "firewall-connection-allowed": "network",
+    "firewall-bind-allowed": "network",
+    "firewall-rule-added": "network",
+    "firewall-rule-modified": "network",
+    "firewall-rule-deleted": "network",
+    "network-share-accessed": "file-share",
+    "network-share-detailed-access": "file-share",
+    "external-device-recognized": "device",
+    "defender-malware-detected": "malware",
+    "defender-remediation-action": "malware",
+    "wmi-activity": "wmi",
+    "wmi-activity-error": "wmi",
+    "wmi-permanent-event": "persistence",
+    "sysmon-registry-value-set": "registry",
+    "sysmon-image-loaded": "execution",
+}
+CHANNEL_FAMILY_HINTS = (
+    ("powershell", "powershell"),
+    ("sysmon", "sysmon"),
+    ("terminalservices", "remote-access"),
+    ("remoteconnectionmanager", "remote-access"),
+    ("localsessionmanager", "remote-access"),
+    ("taskscheduler", "persistence"),
+    ("defender", "defender"),
+    ("firewall", "firewall"),
+    ("wmi-activity", "wmi"),
+    ("security", "security"),
+    ("system", "system"),
+    ("application", "application"),
+)
 SUSPICIOUS_TERMS = (
     "powershell -enc",
     "frombase64string",
@@ -177,6 +302,214 @@ BUILTIN_EVENT_RULES = (
         "mitre_tags": ["attack.command-and-control"],
         "risk_flags": ["sysmon-network"],
         "description": "Sysmon network connection observed; use as a pivot for process, DNS, and destination review.",
+    },
+    {
+        "id": "RT-EVTX-EXPLICIT-CREDS",
+        "title": "Explicit credential logon",
+        "level": "medium",
+        "event_ids": {"4648"},
+        "categories": {"explicit-credential-logon"},
+        "mitre_tags": ["attack.credential-access", "attack.lateral-movement"],
+        "risk_flags": ["explicit-credentials"],
+        "description": "A process used explicit credentials; review target server, account, and nearby process activity.",
+    },
+    {
+        "id": "RT-EVTX-SUSPICIOUS-PROCESS",
+        "title": "Suspicious process creation command",
+        "level": "high",
+        "event_ids": {"4688", "1"},
+        "categories": {"process-created", "sysmon-process-created"},
+        "terms": {"rundll32", "regsvr32", "wmic", "bitsadmin", "certutil", "procdump"},
+        "mitre_tags": ["attack.execution", "attack.defense-evasion"],
+        "risk_flags": ["suspicious-process-command"],
+        "description": "Process creation text includes common living-off-the-land or credential-access tooling.",
+    },
+    {
+        "id": "RT-EVTX-ACCOUNT-DELETED",
+        "title": "Windows account deleted",
+        "level": "medium",
+        "event_ids": {"4726"},
+        "categories": {"user-deleted"},
+        "mitre_tags": ["attack.impact"],
+        "risk_flags": ["account-deleted"],
+        "description": "A user account was deleted; validate expected administration and adjacent logon activity.",
+    },
+    {
+        "id": "RT-EVTX-ACCOUNT-DISABLED",
+        "title": "Windows account disabled",
+        "level": "low",
+        "event_ids": {"4725"},
+        "categories": {"user-disabled"},
+        "mitre_tags": ["attack.impact"],
+        "risk_flags": ["account-disabled"],
+        "description": "A user account was disabled; useful for account lifecycle reconstruction.",
+    },
+    {
+        "id": "RT-EVTX-PASSWORD-RESET",
+        "title": "Password reset attempted",
+        "level": "medium",
+        "event_ids": {"4724"},
+        "categories": {"password-reset"},
+        "mitre_tags": ["attack.persistence", "attack.credential-access"],
+        "risk_flags": ["password-reset"],
+        "description": "A password reset was attempted; inspect subject account and target account.",
+    },
+    {
+        "id": "RT-EVTX-ACCOUNT-LOCKED",
+        "title": "Account lockout",
+        "level": "low",
+        "event_ids": {"4740"},
+        "categories": {"account-locked"},
+        "mitre_tags": ["attack.credential-access", "attack.t1110"],
+        "risk_flags": ["account-lockout"],
+        "description": "An account lockout occurred; correlate with failed logons by source host/account.",
+    },
+    {
+        "id": "RT-EVTX-KERBEROS-PREAUTH-FAIL",
+        "title": "Kerberos pre-authentication failure",
+        "level": "low",
+        "event_ids": {"4771"},
+        "categories": {"kerberos-preauth-failure"},
+        "mitre_tags": ["attack.credential-access", "attack.t1110"],
+        "risk_flags": ["kerberos-preauth-failure"],
+        "description": "Kerberos pre-authentication failed; correlate repeated failures by client and account.",
+    },
+    {
+        "id": "RT-EVTX-SYSTEM-TIME-CHANGED",
+        "title": "System time changed",
+        "level": "medium",
+        "event_ids": {"4616"},
+        "categories": {"system-time-changed"},
+        "mitre_tags": ["attack.defense-evasion"],
+        "risk_flags": ["system-time-change"],
+        "description": "System time changed; validate expected time synchronization versus timestomping or log confusion.",
+    },
+    {
+        "id": "RT-EVTX-AUDIT-POLICY-CHANGED",
+        "title": "Audit policy changed",
+        "level": "high",
+        "event_ids": {"4719"},
+        "categories": {"audit-policy-changed"},
+        "mitre_tags": ["attack.defense-evasion"],
+        "risk_flags": ["audit-policy-change"],
+        "description": "Audit policy changed; review whether logging was weakened or redirected.",
+    },
+    {
+        "id": "RT-EVTX-RDP-SESSION",
+        "title": "Terminal Services RDP session activity",
+        "level": "medium",
+        "event_ids": {"1149", "21", "22", "24", "25", "4778", "4779"},
+        "categories": {
+            "rdp-authentication-succeeded",
+            "rdp-session-logon",
+            "rdp-session-reconnected",
+            "rdp-session-disconnected",
+        },
+        "mitre_tags": ["attack.lateral-movement", "attack.t1021.001"],
+        "risk_flags": ["rdp-session-activity"],
+        "description": "RDP session activity was observed; pivot by user, host, and source address.",
+    },
+    {
+        "id": "RT-EVTX-WMI-ACTIVITY",
+        "title": "WMI activity of interest",
+        "level": "medium",
+        "event_ids": {"5857", "5858", "5861"},
+        "categories": {"wmi-activity", "wmi-activity-error", "wmi-permanent-event"},
+        "mitre_tags": ["attack.execution", "attack.persistence", "attack.t1047"],
+        "risk_flags": ["wmi-activity"],
+        "description": "WMI provider or permanent consumer activity observed; inspect query/consumer details.",
+    },
+    {
+        "id": "RT-EVTX-DEFENDER-DETECTION",
+        "title": "Microsoft Defender malware detection",
+        "level": "high",
+        "event_ids": {"1116", "1117"},
+        "categories": {"defender-malware-detected", "defender-remediation-action"},
+        "mitre_tags": ["attack.execution"],
+        "risk_flags": ["defender-detection"],
+        "description": "Defender reported malware detection/remediation; preserve threat name, path, and action.",
+    },
+    {
+        "id": "RT-EVTX-DEFENDER-CONFIG",
+        "title": "Microsoft Defender configuration changed",
+        "level": "medium",
+        "event_ids": {"5007"},
+        "categories": {"defender-config-changed"},
+        "mitre_tags": ["attack.defense-evasion"],
+        "risk_flags": ["defender-config-change"],
+        "description": "Defender configuration changed; inspect exclusions, disabled features, and responsible process/user.",
+    },
+    {
+        "id": "RT-EVTX-FIREWALL-RULE-CHANGE",
+        "title": "Windows Firewall rule changed",
+        "level": "medium",
+        "event_ids": {"2004", "2005", "2006"},
+        "categories": {"firewall-rule-added", "firewall-rule-modified", "firewall-rule-deleted"},
+        "mitre_tags": ["attack.defense-evasion", "attack.command-and-control"],
+        "risk_flags": ["firewall-rule-change"],
+        "description": "A firewall rule was added, modified, or deleted; inspect application, direction, and port.",
+    },
+    {
+        "id": "RT-EVTX-USB-DEVICE",
+        "title": "External device recognized",
+        "level": "info",
+        "event_ids": {"6416"},
+        "categories": {"external-device-recognized"},
+        "mitre_tags": ["attack.exfiltration"],
+        "risk_flags": ["external-device"],
+        "description": "An external device was recognized; correlate with USB registry and file access artifacts.",
+    },
+    {
+        "id": "RT-EVTX-SHARE-ACCESS",
+        "title": "Network share access",
+        "level": "info",
+        "event_ids": {"5140", "5145"},
+        "categories": {"network-share-accessed", "network-share-detailed-access"},
+        "mitre_tags": ["attack.collection", "attack.lateral-movement"],
+        "risk_flags": ["network-share-access"],
+        "description": "Network share access was observed; pivot by share, relative path, user, and source address.",
+    },
+    {
+        "id": "RT-EVTX-SYSMON-DNS",
+        "title": "Sysmon DNS query",
+        "level": "info",
+        "event_ids": {"22"},
+        "categories": {"sysmon-dns-query"},
+        "mitre_tags": ["attack.command-and-control"],
+        "risk_flags": ["sysmon-dns"],
+        "description": "Sysmon DNS query observed; correlate query name with process and network connections.",
+    },
+    {
+        "id": "RT-EVTX-SYSMON-REGISTRY",
+        "title": "Sysmon registry value set",
+        "level": "medium",
+        "event_ids": {"13"},
+        "categories": {"sysmon-registry-value-set"},
+        "mitre_tags": ["attack.persistence", "attack.defense-evasion"],
+        "risk_flags": ["sysmon-registry"],
+        "description": "Sysmon registry value set event observed; inspect target object and process.",
+    },
+    {
+        "id": "RT-EVTX-SYSMON-IMAGELOAD",
+        "title": "Sysmon image load",
+        "level": "info",
+        "event_ids": {"7"},
+        "categories": {"sysmon-image-loaded"},
+        "terms": {"\\temp\\", "appdata", "rundll32", "regsvr32"},
+        "mitre_tags": ["attack.defense-evasion"],
+        "risk_flags": ["sysmon-image-load-interest"],
+        "description": "Sysmon image load contains location/process hints that may deserve review.",
+    },
+    {
+        "id": "RT-EVTX-VSC-DELETION",
+        "title": "Volume shadow copy deletion command",
+        "level": "critical",
+        "event_ids": {"4103", "4104", "4688", "1"},
+        "categories": {"powershell-module", "powershell-script-block", "process-created", "sysmon-process-created"},
+        "terms": {"vssadmin delete shadows"},
+        "mitre_tags": ["attack.impact", "attack.t1490"],
+        "risk_flags": ["vsc-deletion-command"],
+        "description": "Command text indicates volume shadow copy deletion; correlate with VSC deltas and ransomware indicators.",
     },
 )
 
@@ -484,9 +817,25 @@ def normalize_event_details(
     source_ip = first_data_text(data, "IpAddress", "SourceAddress", "SourceIp", "SourceNetworkAddress")
     source_port = first_data_text(data, "IpPort", "SourcePort")
     service_name = first_data_text(data, "ServiceName")
+    service_file_name = first_data_text(data, "ServiceFileName", "ImagePath")
     new_process_name = first_data_text(data, "NewProcessName", "ProcessName", "Image")
     parent_process_name = first_data_text(data, "ParentProcessName", "CreatorProcessName")
+    parent_command_line = first_data_text(data, "ParentCommandLine", "ParentProcessCommandLine")
     script_block_text = first_data_text(data, "ScriptBlockText")
+    destination_ip = first_data_text(data, "DestinationIp", "DestAddress", "DestinationAddress")
+    destination_hostname = first_data_text(data, "DestinationHostname", "DestinationHostName", "DestHost")
+    destination_port = first_data_text(data, "DestinationPort", "DestPort")
+    query_name = first_data_text(data, "QueryName", "Query", "DnsQuery")
+    target_object = first_data_text(data, "TargetObject", "ObjectName", "ObjectValueName")
+    image_loaded = first_data_text(data, "ImageLoaded", "LoadedImage")
+    task_name = first_data_text(data, "TaskName", "TaskContent")
+    workstation_name = first_data_text(data, "WorkstationName", "Workstation")
+    logon_process_name = first_data_text(data, "LogonProcessName")
+    authentication_package_name = first_data_text(data, "AuthenticationPackageName")
+    status_code = first_data_text(data, "Status", "SubStatus", "ErrorCode")
+    failure_reason = first_data_text(data, "FailureReason")
+    share_name = first_data_text(data, "ShareName")
+    relative_target_name = first_data_text(data, "RelativeTargetName", "FileName")
     if not user_sid:
         user_sid = first_data_text(data, "TargetUserSid", "SubjectUserSid", "UserSid")
     if not user_name:
@@ -495,7 +844,9 @@ def normalize_event_details(
         process_name = new_process_name
     if not command_line:
         command_line = first_data_text(data, "CommandLine", "ProcessCommandLine") or script_block_text
-    category, description = EVENT_ID_CATEGORIES.get(normalized_event_id, ("event", "Windows event log record"))
+    category, description = event_category_for(normalized_event_id, channel)
+    channel_family_value = channel_family(channel)
+    event_family = inferred_event_family(category, channel_family_value)
     detected_terms = suspicious_terms(data, command_line)
     risk_flags = []
     if normalized_event_id in HIGH_RISK_EVENT_IDS:
@@ -506,12 +857,15 @@ def normalize_event_details(
         risk_flags.append("detection-rule-hit")
     is_native_evtx = parser == "windows-eventlog-evtx-native"
     reportability = "triage" if is_native_evtx else ("reportable" if source_format != "evtx" else "inventory-only")
+    parser_confidence = parser_confidence_score(parser, source_format)
     normalized_timestamp = normalize_timestamp(event_created_at)
     return {
         "parser": parser,
         "parser_version": PARSER_VERSION,
         "coverage_status": "native-binary-partial" if is_native_evtx else ("detected-by-rule" if rule_title or rule_id else "mapped"),
         "reportability": reportability,
+        "parser_confidence": parser_confidence,
+        "evidence_strength": "partial-event-record" if is_native_evtx else "event-log-record",
         "source_path": str(source_path.resolve()),
         "source_format": source_format,
         "source_index": source_index,
@@ -519,9 +873,12 @@ def normalize_event_details(
         "provider_name": provider_name,
         "event_id": normalized_event_id,
         "event_category": category,
+        "event_family": event_family,
+        "event_tags": event_tags(normalized_event_id, category, event_family, channel_family_value, detected_terms),
         "event_description": description,
         "record_id": str(record_id or ""),
         "channel": channel,
+        "channel_family": channel_family_value,
         "level": level,
         "computer": computer,
         "user_sid": user_sid,
@@ -532,14 +889,30 @@ def normalize_event_details(
         "logon_type": logon_type,
         "source_ip": source_ip,
         "source_port": source_port,
+        "destination_ip": destination_ip,
+        "destination_hostname": destination_hostname,
+        "destination_port": destination_port,
         "service_name": service_name,
+        "service_file_name": service_file_name,
         "process_id": process_id,
         "thread_id": thread_id,
         "process_name": process_name,
         "new_process_name": new_process_name,
         "parent_process_name": parent_process_name,
+        "parent_command_line": parent_command_line,
         "command_line": command_line,
         "script_block_text": script_block_text,
+        "query_name": query_name,
+        "target_object": target_object,
+        "image_loaded": image_loaded,
+        "task_name": task_name,
+        "workstation_name": workstation_name,
+        "logon_process_name": logon_process_name,
+        "authentication_package_name": authentication_package_name,
+        "status_code": status_code,
+        "failure_reason": failure_reason,
+        "share_name": share_name,
+        "relative_target_name": relative_target_name,
         "task": task,
         "opcode": opcode,
         "keywords": keywords,
@@ -553,6 +926,7 @@ def normalize_event_details(
         },
         "risk_flags": risk_flags,
         "risk_score": event_risk_score(normalized_event_id, detected_terms, bool(rule_title or rule_id)),
+        "triage_recommendation": triage_recommendation(category, detected_terms),
         "data": dict(data),
         "raw_preview": raw_preview,
     }
@@ -639,9 +1013,12 @@ def build_builtin_detection_record(source_record: ArtifactRecord, rule: Mapping[
         "provider_name": details.get("provider_name") or "",
         "event_id": details.get("event_id") or "",
         "event_category": details.get("event_category") or "",
+        "event_family": details.get("event_family") or "",
+        "event_tags": list(details.get("event_tags") or []),
         "event_description": details.get("event_description") or "",
         "record_id": details.get("record_id") or "",
         "channel": details.get("channel") or "",
+        "channel_family": details.get("channel_family") or "",
         "level": details.get("level") or "",
         "computer": details.get("computer") or "",
         "user_sid": details.get("user_sid") or "",
@@ -652,14 +1029,30 @@ def build_builtin_detection_record(source_record: ArtifactRecord, rule: Mapping[
         "logon_type": details.get("logon_type") or "",
         "source_ip": details.get("source_ip") or "",
         "source_port": details.get("source_port") or "",
+        "destination_ip": details.get("destination_ip") or "",
+        "destination_hostname": details.get("destination_hostname") or "",
+        "destination_port": details.get("destination_port") or "",
         "service_name": details.get("service_name") or "",
+        "service_file_name": details.get("service_file_name") or "",
         "process_id": details.get("process_id") or "",
         "thread_id": details.get("thread_id") or "",
         "process_name": details.get("process_name") or "",
         "new_process_name": details.get("new_process_name") or "",
         "parent_process_name": details.get("parent_process_name") or "",
+        "parent_command_line": details.get("parent_command_line") or "",
         "command_line": details.get("command_line") or "",
         "script_block_text": details.get("script_block_text") or "",
+        "query_name": details.get("query_name") or "",
+        "target_object": details.get("target_object") or "",
+        "image_loaded": details.get("image_loaded") or "",
+        "task_name": details.get("task_name") or "",
+        "workstation_name": details.get("workstation_name") or "",
+        "logon_process_name": details.get("logon_process_name") or "",
+        "authentication_package_name": details.get("authentication_package_name") or "",
+        "status_code": details.get("status_code") or "",
+        "failure_reason": details.get("failure_reason") or "",
+        "share_name": details.get("share_name") or "",
+        "relative_target_name": details.get("relative_target_name") or "",
         "event_created_at": details.get("event_created_at") or "",
         "timestamp": details.get("timestamp") or "",
         "rule": {
@@ -672,11 +1065,15 @@ def build_builtin_detection_record(source_record: ArtifactRecord, rule: Mapping[
         },
         "risk_flags": risk_flags,
         "risk_score": min(100, risk_score),
+        "matched_fields": rule_matched_fields(rule, details),
+        "false_positive_note": rule.get("false_positive_note") or "Validate expected administration, source host, account owner, and nearby activity before reporting.",
+        "triage_recommendation": rule.get("triage_recommendation") or details.get("triage_recommendation") or "",
         "matched_event": {
             "artifact_type": source_record.artifact_type,
             "path": source_record.path,
             "source_index": details.get("source_index"),
             "record_id": details.get("record_id") or "",
+            "source_hashes": dict(details.get("source_hashes") or {}),
         },
     }
     return event_record(Path(source_record.path), "eventlog-detection", detection_details)
@@ -704,21 +1101,29 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
 
     event_id_counts: Counter[str] = Counter()
     category_counts: Counter[str] = Counter()
+    family_counts: Counter[str] = Counter()
     channel_counts: Counter[str] = Counter()
+    channel_family_counts: Counter[str] = Counter()
     user_counts: Counter[str] = Counter()
     source_ip_counts: Counter[str] = Counter()
     process_counts: Counter[str] = Counter()
+    parser_status_counts: Counter[str] = Counter()
+    reportability_counts: Counter[str] = Counter()
+    risk_term_counts: Counter[str] = Counter()
     source_paths: set[str] = set()
     timestamps: list[str] = []
     high_risk_events: list[dict[str, object]] = []
     record_ids_by_channel: dict[str, list[int]] = defaultdict(list)
     detection_rule_counts: Counter[str] = Counter()
+    detection_level_counts: Counter[str] = Counter()
 
     for record in event_rows:
         details = record.details
         event_id = str(details.get("event_id") or "")
         category = str(details.get("event_category") or "")
+        family = str(details.get("event_family") or "")
         channel = str(details.get("channel") or "unknown")
+        channel_family_value = str(details.get("channel_family") or "unknown")
         user_name = str(details.get("user_name") or details.get("target_user_name") or details.get("subject_user_name") or "")
         source_ip = str(details.get("source_ip") or "")
         process_name = str(details.get("process_name") or details.get("new_process_name") or "")
@@ -728,10 +1133,18 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
 
         increment_counter(event_id_counts, event_id)
         increment_counter(category_counts, category)
+        increment_counter(family_counts, family)
         increment_counter(channel_counts, channel)
+        increment_counter(channel_family_counts, channel_family_value)
         increment_counter(user_counts, user_name)
         increment_counter(source_ip_counts, source_ip)
         increment_counter(process_counts, process_name)
+        increment_counter(parser_status_counts, str(details.get("coverage_status") or ""))
+        increment_counter(reportability_counts, str(details.get("reportability") or ""))
+        for flag in details.get("risk_flags") or []:
+            text = str(flag)
+            if text.startswith("suspicious-term:"):
+                increment_counter(risk_term_counts, text.removeprefix("suspicious-term:"))
         source_paths.add(source_path)
         if timestamp:
             timestamps.append(timestamp)
@@ -762,7 +1175,11 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         record_id = int_text(details.get("record_id"))
         rule = details.get("rule") if isinstance(details.get("rule"), Mapping) else {}
         rule_id = str(rule.get("id") or rule.get("title") or "")
+        rule_level = str(rule.get("level") or "")
         increment_counter(detection_rule_counts, rule_id)
+        increment_counter(detection_level_counts, rule_level)
+        increment_counter(parser_status_counts, str(details.get("coverage_status") or ""))
+        increment_counter(reportability_counts, str(details.get("reportability") or ""))
         source_paths.add(source_path)
         if timestamp:
             timestamps.append(timestamp)
@@ -801,10 +1218,16 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "detection_rule_counts": counter_items(detection_rule_counts),
         "event_id_counts": counter_items(event_id_counts),
         "event_category_counts": counter_items(category_counts),
+        "event_family_counts": counter_items(family_counts),
         "channel_counts": counter_items(channel_counts),
+        "channel_family_counts": counter_items(channel_family_counts),
         "user_counts": counter_items(user_counts),
         "source_ip_counts": counter_items(source_ip_counts),
         "process_counts": counter_items(process_counts),
+        "parser_status_counts": counter_items(parser_status_counts),
+        "reportability_counts": counter_items(reportability_counts),
+        "risk_term_counts": counter_items(risk_term_counts),
+        "detection_level_counts": counter_items(detection_level_counts),
         "first_event_at": timestamps[0] if timestamps else "",
         "last_event_at": timestamps[-1] if timestamps else "",
         "high_risk_events": sorted(high_risk_events, key=lambda item: int(item.get("risk_score") or 0), reverse=True)[:50],
@@ -977,6 +1400,92 @@ def event_risk_score(event_id: str, terms: list[str], has_rule: bool) -> int:
     if has_rule:
         score += 40
     return min(100, score)
+
+
+def event_category_for(event_id: str, channel: str) -> tuple[str, str]:
+    if event_id == "22" and "terminalservices" in normalize_key(channel):
+        return "rdp-session-logon", "Terminal Services session logon"
+    return EVENT_ID_CATEGORIES.get(event_id, ("event", "Windows event log record"))
+
+
+def event_family_for(category: str) -> str:
+    return EVENT_FAMILY_BY_CATEGORY.get(category, category.split("-", 1)[0] if category else "event")
+
+
+def inferred_event_family(category: str, channel_family_value: str) -> str:
+    family = event_family_for(category)
+    if family != "event":
+        return family
+    if channel_family_value in {"powershell", "sysmon"}:
+        return "execution"
+    if channel_family_value in {"remote-access", "wmi", "defender", "firewall"}:
+        return channel_family_value
+    return family
+
+
+def channel_family(channel: str) -> str:
+    normalized = normalize_key(channel)
+    for needle, family in CHANNEL_FAMILY_HINTS:
+        if needle.replace("-", "") in normalized:
+            return family
+    return "unknown" if not channel else "other"
+
+
+def event_tags(event_id: str, category: str, family: str, channel_family_value: str, terms: Sequence[str]) -> list[str]:
+    tags = [f"family:{family}", f"category:{category}"] if category else [f"family:{family}"]
+    if event_id:
+        tags.append(f"event-id:{event_id}")
+    if channel_family_value and channel_family_value != "unknown":
+        tags.append(f"channel:{channel_family_value}")
+    tags.extend(f"term:{term}" for term in terms)
+    return sorted(set(tags))
+
+
+def parser_confidence_score(parser: str, source_format: str) -> float:
+    if parser == "windows-eventlog-evtx-native":
+        return 0.62
+    if parser == "windows-eventlog-xml":
+        return 0.9
+    if "evtxecmd" in parser:
+        return 0.9
+    if "hayabusa" in parser or "chainsaw" in parser:
+        return 0.85
+    if source_format in {"json", "jsonl", "ndjson", "csv"}:
+        return 0.78
+    return 0.7
+
+
+def triage_recommendation(category: str, terms: Sequence[str]) -> str:
+    family = event_family_for(category)
+    if terms:
+        return "Review command text, parent/child process context, account, host, and adjacent timeline events."
+    if family == "authentication":
+        return "Pivot by account, source IP/host, logon type, and nearby failures/successes."
+    if family in {"persistence", "wmi"}:
+        return "Review created service/task/WMI object, command path, author, and surrounding execution artifacts."
+    if family == "remote-access":
+        return "Correlate session event with logon records, source address, user, and remote-access artifacts."
+    if family in {"defense-evasion", "malware"}:
+        return "Prioritize for analyst review and correlate with process, Defender, VSC, and file-system evidence."
+    return "Use as a timeline/search pivot and validate source hash, parser, and surrounding events before reporting."
+
+
+def rule_matched_fields(rule: Mapping[str, object], details: Mapping[str, object]) -> list[str]:
+    fields: list[str] = []
+    if rule.get("event_ids"):
+        fields.append("event_id")
+    if rule.get("categories"):
+        fields.append("event_category")
+    if rule.get("logon_types"):
+        fields.append("logon_type")
+    terms = {str(item).lower() for item in rule.get("terms", set())}
+    if terms:
+        for field in ("command_line", "script_block_text", "process_name", "new_process_name", "raw_preview", "data"):
+            value = details.get(field)
+            text = json.dumps(value, ensure_ascii=False, sort_keys=True).lower() if isinstance(value, Mapping) else str(value or "").lower()
+            if any(term in text for term in terms):
+                fields.append(field)
+    return sorted(set(fields))
 
 
 def increment_counter(counter: Counter[str], value: str) -> None:

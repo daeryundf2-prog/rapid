@@ -30,6 +30,7 @@ REQUIRED_TABLES = {
     "file_record",
     "hash_record",
     "artifact",
+    "artifact_fts",
     "event",
     "indexed_document",
     "indexed_document_fts",
@@ -366,6 +367,8 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             ]
             self.assertTrue(eventlog_matches)
             self.assertTrue(any(match["metadata"].get("event_id") == "4104" for match in eventlog_matches))
+            self.assertTrue(any(match["metadata"].get("event_family") == "execution" for match in eventlog_matches))
+            self.assertTrue(any(match["metadata"].get("channel_family") == "powershell" for match in eventlog_matches))
             self.assertTrue(any(match["metadata"].get("source_ip") == "10.0.0.5" for match in eventlog_matches))
             self.assertTrue(any("powershell -enc" in str(match["metadata"].get("command_line", "")).lower() for match in eventlog_matches))
 

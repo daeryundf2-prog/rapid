@@ -267,11 +267,65 @@ def extract_artifact_events(payload: Mapping[str, object], input_path: Path) -> 
 
 
 def iter_artifact_detail_events(artifact_type: str, details: Mapping[str, object]) -> Iterable[Dict[str, object]]:
+    if artifact_type in {"eventlog-event", "eventlog-detection"}:
+        event = eventlog_detail_event(artifact_type, details)
+        if event is not None:
+            yield event
+            return
     yield from _walk_artifact_detail_values(
         artifact_type=artifact_type,
         value=details,
         path_parts=("details",),
     )
+
+
+def eventlog_detail_event(artifact_type: str, details: Mapping[str, object]) -> Dict[str, object] | None:
+    timestamp = str(details.get("event_created_at") or details.get("timestamp") or "")
+    if not timestamp:
+        return None
+    event_id = str(details.get("event_id") or "")
+    category = str(details.get("event_category") or "event")
+    family = str(details.get("event_family") or "")
+    context = collect_selected_context(
+        details,
+        (
+            "parser",
+            "coverage_status",
+            "reportability",
+            "source_path",
+            "source_hashes",
+            "record_id",
+            "event_id",
+            "event_category",
+            "event_family",
+            "event_tags",
+            "channel",
+            "channel_family",
+            "provider_name",
+            "computer",
+            "user_name",
+            "target_user_name",
+            "subject_user_name",
+            "source_ip",
+            "destination_ip",
+            "process_name",
+            "command_line",
+            "script_block_text",
+            "risk_score",
+            "risk_flags",
+            "rule",
+        ),
+    )
+    return {
+        "timestamp": timestamp,
+        "event_type": f"eventlog-{category}" if artifact_type == "eventlog-event" else "eventlog-detection",
+        "field_path": "details.event_created_at",
+        "context": {
+            **context,
+            "timestamp_kind": "event-created",
+            "timeline_family": family or category,
+        },
+    }
 
 
 def _walk_artifact_detail_values(
@@ -315,6 +369,16 @@ def collect_scalar_context(value: Mapping[str, object], *, skip_keys: set[str]) 
     return context
 
 
+def collect_selected_context(value: Mapping[str, object], keys: Sequence[str]) -> Dict[str, object]:
+    context: Dict[str, object] = {}
+    for key in keys:
+        item = value.get(key)
+        if item in (None, "", []):
+            continue
+        context[key] = item
+    return context
+
+
 def build_artifact_event_type(artifact_type: str, path_parts: Sequence[str], timestamp_key: str) -> str:
     section = ""
     for part in reversed(path_parts):
@@ -338,7 +402,22 @@ def normalize_token(value: str) -> str:
     return value.strip().lower().replace("_", "-")
 
 
+def field_label(name: str, value: object) -> str:
+    return f"{name}={value}" if value not in (None, "") else ""
+
+
 def build_artifact_summary(artifact_type: str, artifact_path: str, context: Mapping[str, object]) -> str:
+    if artifact_type in {"eventlog-event", "eventlog-detection"}:
+        label = "EventLog detection" if artifact_type == "eventlog-detection" else "EventLog event"
+        bits = [
+            field_label("id", context.get("event_id")),
+            str(context.get("event_category") or ""),
+            field_label("channel", context.get("channel")),
+            field_label("user", context.get("user_name") or context.get("target_user_name") or context.get("subject_user_name")),
+            field_label("src", context.get("source_ip")),
+            field_label("cmd", context.get("command_line") or context.get("script_block_text")),
+        ]
+        return f"{label}: {' '.join(bit for bit in bits if bit)}".strip()
     if "url" in context:
         return f"Artifact event: {artifact_type} {context['url']}"
     if "source_url" in context:

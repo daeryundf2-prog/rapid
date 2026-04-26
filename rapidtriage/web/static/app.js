@@ -655,11 +655,50 @@ function artifactPreviewText(artifact) {
 
 function renderArtifactDetails(artifact) {
   if (!artifact.details) return "";
+  const eventLogCard = renderEventLogArtifactCard(artifact);
   return `
+    ${eventLogCard}
     <details class="match-details">
       <summary>Inspect artifact details</summary>
       <pre>${escapeHtml(JSON.stringify(artifact.details, null, 2))}</pre>
     </details>
+  `;
+}
+
+function renderEventLogArtifactCard(artifact) {
+  if (!["eventlog-event", "eventlog-detection"].includes(artifact.artifact_type)) return "";
+  const details = artifact.details || {};
+  const chips = [
+    details.event_id ? `Event ${details.event_id}` : "",
+    details.event_family || details.event_category || "",
+    details.channel_family || details.channel || "",
+    details.risk_score !== undefined ? `risk ${details.risk_score}` : "",
+    details.coverage_status || "",
+  ].filter(Boolean);
+  const rows = [
+    ["Time", details.timestamp || details.event_created_at],
+    ["Channel", details.channel],
+    ["Provider", details.provider_name],
+    ["Computer", details.computer],
+    ["User", details.user_name || details.target_user_name || details.subject_user_name],
+    ["Source IP", details.source_ip],
+    ["Destination", [details.destination_hostname, details.destination_ip, details.destination_port].filter(Boolean).join(":")],
+    ["Process", details.process_name || details.new_process_name],
+    ["Command", details.command_line || details.script_block_text],
+    ["Rule", details.rule?.title || details.rule?.id],
+    ["Recommendation", details.triage_recommendation],
+  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim());
+  return `
+    <section class="eventlog-card">
+      <div class="eventlog-card-header">
+        <strong>${escapeHtml(artifact.artifact_type === "eventlog-detection" ? "Detection" : "Windows Event")}</strong>
+        <span>${escapeHtml(details.event_description || details.event_category || "")}</span>
+      </div>
+      <div class="eventlog-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      <dl class="eventlog-fields">
+        ${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd>`).join("")}
+      </dl>
+    </section>
   `;
 }
 
