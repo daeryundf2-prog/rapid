@@ -135,6 +135,17 @@ rapidtriage artifacts ./mounted-case --kind windows-system --output windows-syst
 rapidtriage run ./mounted-case --mode hacking --output-dir ./case-run --read-only
 ```
 
+Volume Shadow Copy comparison:
+
+- Use `vsc-compare` after mounting or exporting the current volume and one or more VSC snapshots.
+- The default comparison is fast and metadata-based; add `--hash` when you need byte-level modified-file confirmation.
+- Deleted means present in the snapshot but missing from the current tree, which is useful for ransomware, wiper, and user-deletion review pivots.
+
+```bash
+rapidtriage vsc-compare ./current-volume ./vss/snapshot-1 --output vsc-delta.json
+rapidtriage vsc-compare ./current-volume ./vss/snapshot-1 ./vss/snapshot-2 --hash --max-records 5000
+```
+
 When you use `rapidtriage run`, the Windows collectors are wired into the case workflow automatically:
 
 - `seizure`, `fraud`, and `hacking` run browser, recent-file, OS/account, event log, execution, filesystem, Windows system, and macOS system collectors.

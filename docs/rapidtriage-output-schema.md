@@ -36,6 +36,7 @@ Planned rule-engine / IOC lookup additions are tracked separately in `docs/rapid
 | `rapidtriage files ROOT` | `rapidtriage-files.json` | metadata-only candidate file scan |
 | `rapidtriage extract INPUT_JSON OUTPUT_DIR` | `OUTPUT_DIR/rapidtriage-extract-manifest.json` | copied originals plus hash/mtime manifest |
 | `rapidtriage artifacts ROOT --kind KIND` | `./rapidtriage-artifacts-KIND.json` | dedicated collector output for one artifact family |
+| `rapidtriage vsc-compare CURRENT SNAPSHOT...` | `rapidtriage-vsc-compare.json` | current-vs-VSC snapshot deleted/added/modified candidates, optionally hash-confirmed |
 | `rapidtriage run ROOT --mode MODE` | `OUTPUT_DIR/rapidtriage-run-summary.json` | workflow summary JSON plus `rapidtriage-run-report.md`, `rapidtriage-timeline.json`, and `rapidtriage-timeline-report.md` |
 | `rapidtriage search RUN_OUTPUT -k KEYWORD` | `rapidtriage-search.json` | unified keyword search over completed run outputs, including optional OCR |
 | `rapidtriage validation --output-dir DIR` | `DIR/rapidtriage-validation-package.json` | release checks, required commands, required documents, known limits, and validation report sidecar |

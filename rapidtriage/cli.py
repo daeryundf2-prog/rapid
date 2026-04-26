@@ -41,6 +41,7 @@ from .core.search import SearchError, run_unified_search
 from .core.timeline import TimelineError, build_timeline_report, run_timeline
 from .core.timeline_export import TimelineExportError, build_unified_timeline_export
 from .core.validation import ValidationError, build_validation_package
+from .core.vsc import VscCompareError, compare_vsc_snapshots
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 TOP_LEVEL_EPILOG = """Examples:
@@ -97,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage files . --output rapidtriage-files.json
               rapidtriage collect-plan /Volumes/case-mount --profile intrusion --output rapidtriage-collect-plan.json
               rapidtriage collect-export /Volumes/case-mount ./collect-export --profile intrusion --copy
+              rapidtriage vsc-compare ./current ./vss/snapshot-1 --output vsc-delta.json
               rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
               rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
               rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
@@ -273,6 +275,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Manifest JSON output path (default: OUTPUT_DIR/rapidtriage-collect-export.json)",
     )
     collect_export.add_argument("--json", action="store_true", help="Print the full JSON export manifest after saving it")
+
+    vsc_compare = sub.add_parser(
+        "vsc-compare",
+        help="Compare current files against one or more Volume Shadow Copy snapshot folders",
+        description="Compare current files against one or more Volume Shadow Copy snapshot folders",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage vsc-compare ./current ./snapshot-1 --output vsc-delta.json
+              rapidtriage vsc-compare ./current ./snapshot-1 ./snapshot-2 --hash --max-records 5000
+            """
+        ),
+    )
+    vsc_compare.add_argument("current_root", help="Current mounted/exported file tree")
+    vsc_compare.add_argument("snapshot_roots", nargs="+", help="One or more VSC snapshot file trees to compare")
+    vsc_compare.add_argument("--output", default="rapidtriage-vsc-compare.json", help="JSON output path")
+    vsc_compare.add_argument("--hash", action="store_true", help="Hash common files before deciding modified status")
+    vsc_compare.add_argument("--case-sensitive", action="store_true", help="Compare paths case-sensitively")
+    vsc_compare.add_argument("--max-records", type=int, default=10000, help="Maximum change records per snapshot (0 means unlimited)")
+    vsc_compare.add_argument("--json", action="store_true", help="Print the full JSON comparison after saving it")
 
     extract = sub.add_parser(
         "extract",
@@ -1262,6 +1285,52 @@ def main(argv=None) -> int:
         print(f"Saved search JSON: {output}")
         print(f"Saved audit JSON: {audit_output}")
         print(f"Matches: {payload['summary']['match_count']}")
+        return 0
+
+    if args.command == "vsc-compare":
+        current_root = Path(args.current_root).expanduser().resolve()
+        snapshot_roots = [Path(item).expanduser().resolve() for item in args.snapshot_roots]
+        output = Path(args.output).expanduser().resolve()
+        try:
+            payload = compare_vsc_snapshots(
+                current_root,
+                snapshot_roots,
+                compute_hashes=args.hash,
+                case_sensitive=args.case_sensitive,
+                max_records=args.max_records,
+            )
+        except VscCompareError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="vsc-compare",
+            options={
+                "current_root": str(current_root),
+                "snapshot_roots": [str(path) for path in snapshot_roots],
+                "output": str(output),
+                "hash": args.hash,
+                "case_sensitive": args.case_sensitive,
+                "max_records": args.max_records,
+            },
+            input_root=current_root,
+            output_files=[("vsc-compare-json", output)],
+            notes=[
+                "Snapshot roots are recorded in options; input_root inventory covers the current root only.",
+                "Use --hash for byte-level modified confirmation when runtime permits.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved VSC compare JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(
+                f"Snapshots: {summary['snapshot_count']}  "
+                f"Deleted: {summary['deleted']}  Added: {summary['added']}  Modified: {summary['modified']}"
+            )
         return 0
 
     if args.command == "collect-plan":

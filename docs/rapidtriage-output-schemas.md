@@ -48,6 +48,21 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `supported`
   - `artifacts`
 
+### `vsc-compare`
+
+- Output: `rapidtriage-vsc-compare.json`
+- Top-level keys:
+  - `generated_at`
+  - `tool`
+  - `current_root`
+  - `snapshot_roots`
+  - `options`
+  - `summary`
+  - `comparisons`
+  - `notes`
+- Each comparison includes `snapshot_root`, `snapshot_label`, a per-snapshot `summary`, and change `records`.
+- Change records include `status` (`deleted`, `added`, or `modified`), `relative_path`, and `snapshot`/`current` file payloads with path, size, mtime, and optional SHA256.
+
 ### `docs`
 
 - Sample: `docs/rapidtriage-output-samples/docs-keyword-search.json`

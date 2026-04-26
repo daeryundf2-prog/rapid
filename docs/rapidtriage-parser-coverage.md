@@ -22,7 +22,7 @@
 | Jump Lists/LNK | Partial | Recent/Jumplist file inventory implemented; full binary destination parsing remains planned. |
 | USN Journal | Import baseline | USN CSV/JSON/JSONL exports are normalized with FRN/parent/reason/timestamp fields; native `$J` parsing remains planned. |
 | macOS user/browser/quarantine | Implemented baseline | User home inventory, Safari/Chromium/Firefox history imports, LaunchServices quarantine events, and LaunchAgent plist inventory are available through `macos-system`. |
-| Volume Shadow Copy compare | Planned | Current-vs-snapshot deleted file delta is planned; VSC deletion command hints can be surfaced from EVTX/PowerShell history imports. |
+| Volume Shadow Copy compare | Implemented baseline | `vsc-compare` compares current vs one or more snapshot folders and emits deleted/added/modified candidates with optional SHA256 confirmation; VSC deletion command hints can also be surfaced from EVTX/PowerShell history imports. |
 | Linux XFS | Planned | Filesystem adapter/extraction requirement for Linux server images. |
 | Forensic containers AD1/L01/Lx01/AFF/AFF4 | Detection | UI/API adapter detection exists; direct parsing requires vendor/tool export first. |
 | Raw/split images DD/RAW/IMG/001 | Detection | UI/API adapter detection exists; mount or recover externally, then scan the folder. |
