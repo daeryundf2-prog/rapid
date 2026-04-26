@@ -31,8 +31,8 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 
 ## Reporting
 
-- Markdown, browser-friendly HTML, and portable DOCX report exports are available from the web API and reviewer bundle.
-- PDF generation, digital signing, notarization, and court-specific certification packets still require external release infrastructure and independent validation.
+- Markdown, browser-friendly HTML, portable DOCX, dependency-free PDF, and report export hash manifests are available from the web API and reviewer bundle.
+- Digital signing, notarization, and court-specific certification packets still require external release infrastructure and independent validation.
 - Reports should include analyst review notes and hash manifests for defensibility.
 - The validation package is a release-readiness checklist; it does not replace independent legal validation, signed installer infrastructure, or a maintained support program.
 

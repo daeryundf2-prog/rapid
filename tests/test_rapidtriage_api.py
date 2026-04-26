@@ -335,13 +335,22 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn(evidence["hashes"]["sha256"], report_payload["markdown"])
             self.assertIn("html", report_payload["exports"])
             self.assertIn("docx", report_payload["exports"])
+            self.assertIn("pdf", report_payload["exports"])
+            self.assertIn("manifest", report_payload["exports"])
             self.assertTrue((output_dir / "rapidtriage-case-report.md").is_file())
             self.assertTrue((output_dir / "rapidtriage-case-report.html").is_file())
             self.assertTrue((output_dir / "rapidtriage-case-report.docx").is_file())
+            self.assertTrue((output_dir / "rapidtriage-case-report.pdf").is_file())
+            self.assertTrue((output_dir / "rapidtriage-case-report.exports.json").is_file())
             self.assertTrue((output_dir / "rapidtriage-case-report.audit.md").is_file())
             self.assertIn("case-report-docx", (output_dir / "rapidtriage-case-report.audit.md").read_text(encoding="utf-8"))
+            self.assertIn("case-report-pdf", (output_dir / "rapidtriage-case-report.audit.md").read_text(encoding="utf-8"))
+            export_manifest = json.loads((output_dir / "rapidtriage-case-report.exports.json").read_text(encoding="utf-8"))
+            self.assertIn("sha256", export_manifest["files"]["pdf"])
+            self.assertEqual(export_manifest["files"]["pdf"]["filename"], "rapidtriage-case-report.pdf")
             with zipfile.ZipFile(output_dir / "rapidtriage-case-report.docx") as report_docx:
                 self.assertIn("word/document.xml", report_docx.namelist())
+            self.assertEqual((output_dir / "rapidtriage-case-report.pdf").read_bytes()[:5], b"%PDF-")
 
             report_file_response = client.get(f"/api/runs/{run_id}/case-report/file")
             self.assertEqual(report_file_response.status_code, 200)
@@ -352,6 +361,12 @@ class RapidTriageApiTests(unittest.TestCase):
             docx_report_response = client.get(f"/api/runs/{run_id}/case-report/file/docx")
             self.assertEqual(docx_report_response.status_code, 200)
             self.assertGreater(len(docx_report_response.content), 500)
+            pdf_report_response = client.get(f"/api/runs/{run_id}/case-report/file/pdf")
+            self.assertEqual(pdf_report_response.status_code, 200)
+            self.assertEqual(pdf_report_response.content[:5], b"%PDF-")
+            export_manifest_response = client.get(f"/api/runs/{run_id}/case-report/file/manifest")
+            self.assertEqual(export_manifest_response.status_code, 200)
+            self.assertIn("case-report.exports", export_manifest_response.text)
 
     def test_run_catalog_persists_and_imports_existing_output_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

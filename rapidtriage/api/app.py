@@ -609,7 +609,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     @api.get("/api/runs/{run_id}/case-report/file/{format_name}")
     def download_case_report_format(run_id: str, format_name: str) -> FileResponse:
         normalized = format_name.lower()
-        if normalized not in {"md", "html", "docx"}:
+        if normalized not in {"md", "html", "docx", "pdf", "manifest"}:
             raise HTTPException(status_code=404, detail="unsupported case report format")
         request = CaseReportCreateRequest()
         report_path = default_case_report_path(store, run_id)
@@ -621,6 +621,8 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             "md": "text/markdown",
             "html": "text/html",
             "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "pdf": "application/pdf",
+            "manifest": "application/json",
         }
         return FileResponse(path, filename=path.name, media_type=media_types[normalized])
 
@@ -917,6 +919,8 @@ def write_case_report_audit(
             ("case-report", exports["md"]),
             ("case-report-html", exports["html"]),
             ("case-report-docx", exports["docx"]),
+            ("case-report-pdf", exports["pdf"]),
+            ("case-report-export-manifest", exports["manifest"]),
         ],
     )
 

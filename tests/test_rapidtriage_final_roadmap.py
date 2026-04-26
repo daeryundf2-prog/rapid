@@ -131,17 +131,24 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertTrue((bundle_dir / "rapidtriage-case-report.md").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-case-report.html").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-case-report.docx").is_file())
+            self.assertTrue((bundle_dir / "rapidtriage-case-report.pdf").is_file())
+            self.assertTrue((bundle_dir / "rapidtriage-case-report.exports.json").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-reviewer.html").is_file())
             self.assertIn("Reviewer Bundle", (bundle_dir / "rapidtriage-reviewer.html").read_text(encoding="utf-8"))
             with zipfile.ZipFile(bundle_dir / "rapidtriage-case-report.docx") as report_docx:
                 self.assertIn("word/document.xml", report_docx.namelist())
+            self.assertEqual((bundle_dir / "rapidtriage-case-report.pdf").read_bytes()[:5], b"%PDF-")
             with zipfile.ZipFile(payload["archive"]) as bundle_zip:
                 self.assertIn("rapidtriage-case-report.html", bundle_zip.namelist())
                 self.assertIn("rapidtriage-case-report.docx", bundle_zip.namelist())
+                self.assertIn("rapidtriage-case-report.pdf", bundle_zip.namelist())
+                self.assertIn("rapidtriage-case-report.exports.json", bundle_zip.namelist())
             self.assertTrue(Path(payload["archive"]).is_file())
             self.assertIn("sha256", payload["archive_hashes"])
             self.assertIn("report_html", payload["outputs"])
             self.assertIn("report_docx", payload["outputs"])
+            self.assertIn("report_pdf", payload["outputs"])
+            self.assertIn("report_export_manifest", payload["outputs"])
             self.assertIn("reviewer", payload["outputs"])
 
     def test_plugins_command_lists_builtins_and_validates_external_manifest(self) -> None:

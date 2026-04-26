@@ -1302,6 +1302,8 @@ async function saveCaseReport(event) {
       `<a class="mini-link" href="${baseUrl}" target="_blank" rel="noreferrer">Markdown</a>`,
       `<a class="mini-link" href="${baseUrl}/html" target="_blank" rel="noreferrer">HTML</a>`,
       `<a class="mini-link" href="${baseUrl}/docx" target="_blank" rel="noreferrer">DOCX</a>`,
+      `<a class="mini-link" href="${baseUrl}/pdf" target="_blank" rel="noreferrer">PDF</a>`,
+      `<a class="mini-link" href="${baseUrl}/manifest" target="_blank" rel="noreferrer">Hashes</a>`,
     ].join(" ");
     if (payload.report_path) {
       status.insertAdjacentHTML("beforeend", ` <span>${escapeHtml(payload.report_path)}</span>`);

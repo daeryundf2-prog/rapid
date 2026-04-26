@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import datetime as dt
+import hashlib
 import html
+import json
 import re
 import zipfile
 from pathlib import Path
@@ -12,6 +15,8 @@ CASE_REPORT_EXPORTS = {
     "md": "rapidtriage-case-report.md",
     "html": "rapidtriage-case-report.html",
     "docx": "rapidtriage-case-report.docx",
+    "pdf": "rapidtriage-case-report.pdf",
+    "manifest": "rapidtriage-case-report.exports.json",
 }
 
 
@@ -219,12 +224,15 @@ def build_hash_only_report(
 
 
 def write_case_report_exports(markdown: str, markdown_path: Path) -> dict[str, str]:
-    """Write markdown plus portable HTML and DOCX report variants."""
+    """Write markdown plus portable HTML, DOCX, PDF, and hash manifest variants."""
     markdown_path.parent.mkdir(parents=True, exist_ok=True)
     paths = case_report_export_paths(markdown_path)
     paths["md"].write_text(markdown, encoding="utf-8")
     paths["html"].write_text(render_case_report_html(markdown), encoding="utf-8")
     write_case_report_docx(markdown, paths["docx"])
+    write_case_report_pdf(markdown, paths["pdf"])
+    manifest = build_case_report_export_manifest(paths)
+    paths["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {key: str(path) for key, path in paths.items()}
 
 
@@ -234,7 +242,35 @@ def case_report_export_paths(markdown_path: Path) -> dict[str, Path]:
         "md": markdown_path,
         "html": base_dir / CASE_REPORT_EXPORTS["html"],
         "docx": base_dir / CASE_REPORT_EXPORTS["docx"],
+        "pdf": base_dir / CASE_REPORT_EXPORTS["pdf"],
+        "manifest": base_dir / CASE_REPORT_EXPORTS["manifest"],
     }
+
+
+def build_case_report_export_manifest(paths: Mapping[str, Path]) -> dict[str, object]:
+    files: dict[str, object] = {}
+    for format_name in ("md", "html", "docx", "pdf"):
+        path = paths[format_name]
+        files[format_name] = {
+            "path": str(path),
+            "filename": path.name,
+            "size": path.stat().st_size,
+            "sha256": hash_path(path),
+        }
+    return {
+        "command": "case-report.exports",
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "formats": list(files),
+        "files": files,
+    }
+
+
+def hash_path(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 def render_case_report_html(markdown: str) -> str:
@@ -338,6 +374,131 @@ def write_case_report_docx(markdown: str, path: Path) -> None:
         archive.writestr("docProps/core.xml", docx_core_properties())
         archive.writestr("docProps/app.xml", DOCX_APP_PROPERTIES)
         archive.writestr("word/document.xml", docx_document_xml(markdown))
+
+
+def write_case_report_pdf(markdown: str, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_lines = markdown_to_pdf_lines(markdown)
+    pages = paginate_pdf_lines(pdf_lines)
+    path.write_bytes(build_pdf_document(pages))
+
+
+def markdown_to_pdf_lines(markdown: str) -> list[tuple[str, int]]:
+    lines: list[tuple[str, int]] = []
+    for raw_line in markdown.splitlines():
+        line = raw_line.strip()
+        if not line:
+            lines.append(("", 10))
+            continue
+        size = 10
+        prefix = ""
+        if line.startswith("# "):
+            size = 18
+            line = line[2:].strip()
+        elif line.startswith("## "):
+            size = 14
+            line = line[3:].strip()
+        elif line.startswith("### "):
+            size = 12
+            line = line[4:].strip()
+        elif line.startswith("- "):
+            prefix = "- "
+            line = line[2:].strip()
+        elif line.startswith("> "):
+            prefix = "> "
+            line = line[2:].strip()
+        cleaned = prefix + strip_markdown_inline(line)
+        for wrapped in wrap_pdf_text(cleaned, max_chars=92 if size <= 10 else 72):
+            lines.append((wrapped, size))
+    return lines
+
+
+def wrap_pdf_text(text: str, *, max_chars: int) -> list[str]:
+    if len(text) <= max_chars:
+        return [text]
+    chunks = []
+    remaining = text
+    while remaining:
+        chunks.append(remaining[:max_chars])
+        remaining = remaining[max_chars:]
+    return chunks
+
+
+def paginate_pdf_lines(lines: list[tuple[str, int]]) -> list[list[tuple[str, int, float]]]:
+    pages: list[list[tuple[str, int, float]]] = []
+    current: list[tuple[str, int, float]] = []
+    y = 760.0
+    for text, size in lines:
+        height = 10.0 if not text else max(13.0, size * 1.55)
+        if y - height < 48 and current:
+            pages.append(current)
+            current = []
+            y = 760.0
+        if text:
+            current.append((text, size, y))
+        y -= height
+    pages.append(current)
+    return pages
+
+
+def build_pdf_document(pages: list[list[tuple[str, int, float]]]) -> bytes:
+    objects: list[bytes] = [
+        b"",
+        b"",
+        b"<< /Type /Font /Subtype /Type0 /BaseFont /HYGoThic-Medium /Encoding /UniKS-UCS2-H /DescendantFonts [4 0 R] >>",
+        b"<< /Type /Font /Subtype /CIDFontType0 /BaseFont /HYGoThic-Medium /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 2 >> /FontDescriptor 5 0 R >>",
+        b"<< /Type /FontDescriptor /FontName /HYGoThic-Medium /Flags 4 /FontBBox [-1000 -1000 1000 1000] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 >>",
+    ]
+    page_ids: list[int] = []
+    for page in pages:
+        content = build_pdf_page_content(page)
+        content_id = len(objects) + 1
+        objects.append(b"<< /Length " + str(len(content)).encode("ascii") + b" >>\nstream\n" + content + b"\nendstream")
+        page_id = len(objects) + 1
+        objects.append(
+            (
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                f"/Resources << /Font << /F1 3 0 R >> >> /Contents {content_id} 0 R >>"
+            ).encode("ascii")
+        )
+        page_ids.append(page_id)
+    objects[0] = b"<< /Type /Catalog /Pages 2 0 R >>"
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    objects[1] = f"<< /Type /Pages /Kids [{kids}] /Count {len(page_ids)} >>".encode("ascii")
+    return serialize_pdf(objects)
+
+
+def build_pdf_page_content(page: list[tuple[str, int, float]]) -> bytes:
+    commands: list[str] = []
+    for text, size, y in page:
+        commands.append(f"BT /F1 {size} Tf 72 {y:.2f} Td {pdf_hex_text(text)} Tj ET")
+    return "\n".join(commands).encode("ascii")
+
+
+def pdf_hex_text(text: str) -> str:
+    return "<" + text.encode("utf-16-be", errors="replace").hex().upper() + ">"
+
+
+def serialize_pdf(objects: list[bytes]) -> bytes:
+    output = bytearray(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0]
+    for object_id, payload in enumerate(objects, start=1):
+        offsets.append(len(output))
+        output.extend(f"{object_id} 0 obj\n".encode("ascii"))
+        output.extend(payload)
+        output.extend(b"\nendobj\n")
+    xref_start = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    output.extend(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_start}\n%%EOF\n"
+        ).encode("ascii")
+    )
+    return bytes(output)
 
 
 def docx_document_xml(markdown: str) -> str:

@@ -245,6 +245,6 @@ Each `items[]` row includes bookmark context, review state, and an `evidence` ob
 
 ## `rapidtriage case-report`
 
-The local web API writes `rapidtriage-case-report.md`, `rapidtriage-case-report.html`, and `rapidtriage-case-report.docx` from case review data and the submission hash manifest.
+The local web API writes `rapidtriage-case-report.md`, `rapidtriage-case-report.html`, `rapidtriage-case-report.docx`, `rapidtriage-case-report.pdf`, and `rapidtriage-case-report.exports.json` from case review data and the submission hash manifest.
 
-The report draft includes case metadata, analyst/requester fields, analysis scope, run summary, reviewed/report-candidate counts, report-candidate evidence with MD5/SHA1/SHA256, skipped hash rows, conclusion/opinion text, and attachment references. HTML is optimized for browser review/printing; DOCX is a portable OpenXML handoff draft.
+The report draft includes case metadata, analyst/requester fields, analysis scope, run summary, reviewed/report-candidate counts, report-candidate evidence with MD5/SHA1/SHA256, skipped hash rows, conclusion/opinion text, and attachment references. HTML is optimized for browser review/printing; DOCX is a portable OpenXML handoff draft; PDF supports quick sharing; the export manifest hashes every generated report file.

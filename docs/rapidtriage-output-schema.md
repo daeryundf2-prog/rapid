@@ -258,7 +258,7 @@ Rows are skipped when the source path is unavailable, missing, outside the run e
 
 ## `case-report` exports
 
-The web API can generate `rapidtriage-case-report.md`, `rapidtriage-case-report.html`, and `rapidtriage-case-report.docx` from `rapidtriage-case.json` and `rapidtriage-submission-manifest.json`.
+The web API can generate `rapidtriage-case-report.md`, `rapidtriage-case-report.html`, `rapidtriage-case-report.docx`, `rapidtriage-case-report.pdf`, and `rapidtriage-case-report.exports.json` from `rapidtriage-case.json` and `rapidtriage-submission-manifest.json`.
 
 The report draft includes:
 
@@ -271,7 +271,7 @@ The report draft includes:
 - conclusion/opinion text
 - attachment list for case JSON, hash manifest, audit sidecars, and run report
 
-The HTML export is intended for browser review and printing. The DOCX export is a dependency-free OpenXML handoff draft for analyst/legal editing. Both are generated from the same Markdown source and should be verified against the source evidence and hash manifest before submission.
+The HTML export is intended for browser review and printing. The DOCX export is a dependency-free OpenXML handoff draft for analyst/legal editing. The PDF export is generated without external rendering tools for quick sharing. The export manifest records each report file path, filename, size, and SHA256 so the delivered report set can be verified later.
 
 ## `artifacts` JSON
 

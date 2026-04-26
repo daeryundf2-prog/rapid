@@ -66,6 +66,8 @@ def build_submission_bundle(
             "report": report_exports["md"],
             "report_html": report_exports["html"],
             "report_docx": report_exports["docx"],
+            "report_pdf": report_exports["pdf"],
+            "report_export_manifest": report_exports["manifest"],
             "reviewer": str(reviewer_path),
         },
     }
@@ -77,6 +79,8 @@ def build_submission_bundle(
             Path(report_exports["md"]),
             Path(report_exports["html"]),
             Path(report_exports["docx"]),
+            Path(report_exports["pdf"]),
+            Path(report_exports["manifest"]),
             reviewer_path,
             audit_path,
         ):
@@ -103,6 +107,8 @@ def build_submission_bundle(
             "report": report_exports["md"],
             "report_html": report_exports["html"],
             "report_docx": report_exports["docx"],
+            "report_pdf": report_exports["pdf"],
+            "report_export_manifest": report_exports["manifest"],
             "reviewer": str(reviewer_path),
             "audit": str(audit_path),
             "archive": str(zip_path),
