@@ -49,6 +49,8 @@ class WindowsArtifactFixture:
     srum_csv: Path
     mft_csv: Path
     usn_jsonl: Path
+    windows_search_csv: Path
+    windows_edb: Path
 
 
 def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
@@ -87,6 +89,8 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     srum_csv = root / "analysis" / "srum.csv"
     mft_csv = root / "analysis" / "mft.csv"
     usn_jsonl = root / "analysis" / "usn.jsonl"
+    windows_search_csv = root / "analysis" / "windows-search-index.csv"
+    windows_edb = root / "ProgramData" / "Microsoft" / "Search" / "Data" / "Applications" / "Windows" / "Windows.edb"
 
     _write_chromium_history(
         chrome_history,
@@ -105,6 +109,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     _write_prefetch_fixture(prefetch_file)
     _write_srum_fixture(srum_csv)
     _write_filesystem_fixtures(mft_csv, usn_jsonl)
+    _write_windows_search_fixture(windows_search_csv, windows_edb)
 
     return WindowsArtifactFixture(
         root=root,
@@ -122,6 +127,8 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         srum_csv=srum_csv,
         mft_csv=mft_csv,
         usn_jsonl=usn_jsonl,
+        windows_search_csv=windows_search_csv,
+        windows_edb=windows_edb,
     )
 
 
@@ -375,6 +382,17 @@ def _write_filesystem_fixtures(mft_csv: Path, usn_jsonl: Path) -> None:
         '{"FRN":"42","ParentFRN":"5","Name":"deleted.txt","Reason":"FILE_DELETE","Timestamp":"2024-04-01T04:06:07Z"}\n',
         encoding="utf-8",
     )
+
+
+def _write_windows_search_fixture(csv_path: Path, edb_path: Path) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    csv_path.write_text(
+        "DocID,System.ItemPathDisplay,System.FileName,System.Title,System.Search.Contents,System.DateModified,System.Size\n"
+        '7,C:\\Users\\alice\\Documents\\Incident Notes.docx,Incident Notes.docx,Incident Notes,"encoded powershell investigation notes",2024-04-01T08:09:10Z,12345\n',
+        encoding="utf-8",
+    )
+    edb_path.parent.mkdir(parents=True, exist_ok=True)
+    edb_path.write_bytes(b"fixture windows search edb")
 
 
 def _to_chrome_time(value: datetime) -> int:

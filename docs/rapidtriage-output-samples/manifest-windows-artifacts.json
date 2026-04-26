@@ -743,6 +743,104 @@
       ]
     },
     {
+      "name": "windows-search-index",
+      "description": "Windows Search index EDB inventory and CSV/JSON export imports",
+      "target_platform": "windows",
+      "supported": true,
+      "artifacts": [
+        {
+          "provider": "windows-search-index",
+          "artifact_type": "windows-search-edb-file",
+          "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+          "supported": false,
+          "details": {
+            "parser": "windows-search-edb-inventory",
+            "parser_version": "windows-search-index-import-v1",
+            "coverage_status": "detected",
+            "reportability": "inventory-only",
+            "source_path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+            "source_format": "edb",
+            "source_hashes": {
+              "sha256": "a9a209f53f1525135d35eb951d743f7931df271e7e0c9c2f39d3dead3adb6eee"
+            },
+            "size": 25,
+            "modified_at": 1709618830.0,
+            "recommended_parsers": [
+              "WinSearchDBAnalyzer",
+              "ESEDatabaseView",
+              "libesedb/esedbexport"
+            ],
+            "note": "Windows.edb is inventoried directly; export CSV/JSON rows with a trusted ESE/Search parser for normalized searchable entries."
+          }
+        },
+        {
+          "provider": "windows-search-index",
+          "artifact_type": "windows-search-index-entry",
+          "path": "<ROOT>/analysis/windows-search-index.csv",
+          "supported": true,
+          "details": {
+            "parser": "windows-search-index-import",
+            "parser_version": "windows-search-index-import-v1",
+            "coverage_status": "mapped",
+            "reportability": "triage",
+            "source_path": "<ROOT>/analysis/windows-search-index.csv",
+            "source_format": "csv",
+            "source_hashes": {
+              "sha256": "13a3a3181d5d8859b9d506e6ed73ad23220683c060edab43ec41df69f03bccdb"
+            },
+            "source_index": 0,
+            "entry_id": "7",
+            "item_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+            "file_name": "Case Notes.docx",
+            "extension": ".docx",
+            "url": "",
+            "title": "Case Notes",
+            "author": "",
+            "content_snippet": "rapid forensic case notes",
+            "created_at": "",
+            "modified_at": "2024-03-05T06:07:08+00:00",
+            "accessed_at": "",
+            "size": "2048",
+            "store": "",
+            "raw": {
+              "DocID": "7",
+              "System.ItemPathDisplay": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+              "System.FileName": "Case Notes.docx",
+              "System.Title": "Case Notes",
+              "System.Search.Contents": "rapid forensic case notes",
+              "System.DateModified": "2024-03-05T06:07:08Z",
+              "System.Size": "2048"
+            },
+            "raw_preview": "{\"DocID\": \"7\", \"System.DateModified\": \"2024-03-05T06:07:08Z\", \"System.FileName\": \"Case Notes.docx\", \"System.ItemPathDisplay\": \"C:\\\\Users\\\\alice\\\\Documents\\\\Case Notes.docx\", \"System.Search.Contents\": \"rapid forensic case notes\", \"System.Size\": \"2048\", \"System.Title\": \"Case Notes\"}"
+          }
+        },
+        {
+          "provider": "windows-search-index",
+          "artifact_type": "windows-search-index-summary",
+          "path": "<ROOT>",
+          "supported": true,
+          "details": {
+            "parser": "windows-search-index-summary",
+            "parser_version": "windows-search-index-import-v1",
+            "coverage_status": "summarized",
+            "reportability": "triage",
+            "source_path": "<ROOT>",
+            "entry_count": 1,
+            "inventory_count": 1,
+            "source_files": [
+              "<ROOT>/analysis/windows-search-index.csv"
+            ],
+            "extension_counts": [
+              {
+                "value": ".docx",
+                "count": 1
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "windows-shellbags",
       "description": "Windows Shellbags from Registry .reg exports",
       "target_platform": "windows",

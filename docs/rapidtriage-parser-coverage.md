@@ -19,6 +19,7 @@
 | Defender/Firewall/WER/Task Scheduler | Partial | Fixture-backed inventory for Defender MPLog, Windows Firewall W3C logs, WER reports, and Task Scheduler XML. |
 | Prefetch | Partial+ | `.pf` inventory with executable hints, SCCA header detection, version hints, and header executable-name extraction where available; full binary run-count parsing remains planned. Execution-related registry export and PowerShell history imports are available through `windows-execution`, with a grouped execution summary for review pivots. |
 | SRUM | Import baseline | SRUM CSV/JSON/JSONL/NDJSON exports can be normalized into app resource and network usage rows; direct `SRUDB.dat` ESE parsing remains planned. |
+| Windows Search EDB | Import baseline | `Windows.edb` is inventoried with hashes and export-tool guidance; CSV/JSON/JSONL exports are normalized into searchable index entries with path, title, URL, extension, timestamps, and content snippets. |
 | Jump Lists/LNK | Partial+ | LNK header/string parsing and embedded path extraction implemented; Jump Lists are inventoried with OLE/custom hints and embedded path extraction, while full destination stream parsing remains planned. |
 | USN Journal | Import baseline | USN CSV/JSON/JSONL exports are normalized with FRN/parent/reason/timestamp fields; native `$J` parsing remains planned. |
 | macOS user/browser/quarantine | Implemented baseline | User home inventory, Safari/Chromium/Firefox history imports, LaunchServices quarantine events, and LaunchAgent plist inventory are available through `macos-system`. |

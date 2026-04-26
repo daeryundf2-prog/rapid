@@ -219,6 +219,29 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(usn[0]["details"]["reason"], "FILE_DELETE")
             self.assertEqual(usn[0]["details"]["source_path"], str(fixture.usn_jsonl.resolve()))
 
+    def test_windows_search_index_collector_imports_exports_and_inventories_edb(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            fixture = build_windows_artifact_fixture(root)
+            output = root / "search-index.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-search-index", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            artifacts = payload["artifacts"]
+            entries = [item for item in artifacts if item["artifact_type"] == "windows-search-index-entry"]
+            edb_files = [item for item in artifacts if item["artifact_type"] == "windows-search-edb-file"]
+            summary = next(item for item in artifacts if item["artifact_type"] == "windows-search-index-summary")
+
+            self.assertEqual(entries[0]["details"]["entry_id"], "7")
+            self.assertEqual(entries[0]["details"]["file_name"], "Incident Notes.docx")
+            self.assertEqual(entries[0]["details"]["extension"], ".docx")
+            self.assertIn("encoded powershell", entries[0]["details"]["content_snippet"])
+            self.assertEqual(entries[0]["details"]["source_path"], str(fixture.windows_search_csv.resolve()))
+            self.assertEqual(edb_files[0]["details"]["source_path"], str(fixture.windows_edb.resolve()))
+            self.assertEqual(summary["details"]["entry_count"], 1)
+            self.assertEqual(summary["details"]["inventory_count"], 1)
+            self.assertIn({"value": ".docx", "count": 1}, summary["details"]["extension_counts"])
+
 
 if __name__ == "__main__":
     unittest.main()

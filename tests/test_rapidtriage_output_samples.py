@@ -68,10 +68,22 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
             datetime(2024, 3, 5, 6, 7, 8, tzinfo=timezone.utc),
         )
     )
+    search_csv = root / "analysis" / "windows-search-index.csv"
+    search_csv.parent.mkdir(parents=True, exist_ok=True)
+    search_csv.write_text(
+        "DocID,System.ItemPathDisplay,System.FileName,System.Title,System.Search.Contents,System.DateModified,System.Size\n"
+        '7,C:\\Users\\alice\\Documents\\Case Notes.docx,Case Notes.docx,Case Notes,"rapid forensic case notes",2024-03-05T06:07:08Z,2048\n',
+        encoding="utf-8",
+    )
+    search_edb = root / "ProgramData" / "Microsoft" / "Search" / "Data" / "Applications" / "Windows" / "Windows.edb"
+    search_edb.parent.mkdir(parents=True, exist_ok=True)
+    search_edb.write_bytes(b"sample windows search edb")
     set_mtime(
         lnk_path,
         datetime(2024, 3, 5, 6, 7, 8, tzinfo=timezone.utc),
     )
+    set_mtime(search_csv, datetime(2024, 3, 5, 6, 7, 9, tzinfo=timezone.utc))
+    set_mtime(search_edb, datetime(2024, 3, 5, 6, 7, 10, tzinfo=timezone.utc))
     set_mtime(
         root
         / "Users"

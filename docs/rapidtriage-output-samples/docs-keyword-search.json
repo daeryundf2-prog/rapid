@@ -161,6 +161,13 @@
         "artifacts": []
       },
       {
+        "name": "windows-search-index",
+        "description": "Windows Search index EDB inventory and CSV/JSON export imports",
+        "target_platform": "windows",
+        "supported": true,
+        "artifacts": []
+      },
+      {
         "name": "windows-shellbags",
         "description": "Windows Shellbags from Registry .reg exports",
         "target_platform": "windows",
