@@ -468,6 +468,17 @@ function renderCaseDbPanel(payload) {
             <option value="rejected">Rejected</option>
           </select>
         </label>
+        <label>Review
+          <select name="review_status">
+            <option value="">All review marks</option>
+            <option value="unreviewed">Unreviewed</option>
+            <option value="relevant">Relevant</option>
+            <option value="needs-review">Needs review</option>
+            <option value="excluded">Excluded</option>
+            <option value="not-relevant">Not relevant</option>
+          </select>
+        </label>
+        <label>Save search as <input name="save_as" placeholder="Credential hits, PowerShell triage..." /></label>
         <button id="caseDbSearchButton" type="submit">Search Case DB</button>
       </form>
       <section id="caseDbResult" class="viewer-panel">
@@ -1090,6 +1101,7 @@ async function saveCaseReport(event) {
   const form = event.currentTarget;
   const status = form.querySelector("#caseReportStatus");
   const request = {
+    template: form.elements.template?.value || "legal-handoff",
     title: form.elements.title?.value || null,
     case_number: form.elements.case_number?.value || null,
     investigator: form.elements.investigator?.value || null,
@@ -1259,6 +1271,15 @@ function renderCaseReportPanel(summary, casePayload) {
       <p>Creates rapidtriage-case-report.md from case metadata, reviewed evidence, analyst notes, and the submission hash manifest.</p>
       <form id="caseReportForm" class="report-form">
         <div class="report-grid">
+          <label>
+            Template
+            <select name="template">
+              <option value="legal-handoff">Legal handoff</option>
+              <option value="executive-summary">Executive summary</option>
+              <option value="technical-appendix">Technical appendix</option>
+              <option value="hash-only">Hash-only appendix</option>
+            </select>
+          </label>
           <label>
             Report title
             <input name="title" value="${escapeHtml(casePayload.title || "Digital forensic analysis report")}" />
@@ -1626,10 +1647,12 @@ function renderCompareTray() {
         </div>
         <div class="detail-actions">
           <span class="status-pill">${items.length}/${COMPARE_LIMIT}</span>
+          <button class="secondary-button" type="button" data-open-compare-diff ${items.length >= 2 ? "" : "disabled"}>Text diff A/B</button>
           <button class="secondary-button" type="button" data-clear-compare ${items.length ? "" : "disabled"}>Clear</button>
         </div>
       </div>
       ${items.length ? renderCompareItems(primary, items.slice(2)) : '<p class="empty-state">검색 결과나 뷰어에서 “Pin compare”를 눌러두면 탭을 오가도 자료가 여기 남습니다.</p>'}
+      <section id="compareDiffPanel"></section>
     </section>
   `;
 }
@@ -1704,6 +1727,11 @@ function bindCompareActions() {
     clearButton.dataset.compareBound = "1";
     clearButton.addEventListener("click", clearCompareItems);
   }
+  const diffButton = detailPanel.querySelector("[data-open-compare-diff]");
+  if (diffButton && !diffButton.dataset.compareBound) {
+    diffButton.dataset.compareBound = "1";
+    diffButton.addEventListener("click", openCompareDiff);
+  }
   for (const button of detailPanel.querySelectorAll("[data-remove-compare-path]")) {
     if (button.dataset.compareBound) continue;
     button.dataset.compareBound = "1";
@@ -1716,6 +1744,55 @@ function bindCompareActions() {
       await previewCompareItem(button.dataset.previewComparePath);
     });
   }
+}
+
+async function openCompareDiff() {
+  const panel = detailPanel.querySelector("#compareDiffPanel");
+  const [left, right] = getCompareItems();
+  if (!panel || !left?.path || !right?.path) return;
+  panel.innerHTML = '<p class="empty-state">Loading A/B text previews...</p>';
+  try {
+    const [leftPayload, rightPayload] = await Promise.all([
+      api(`/api/runs/${selectedRunId}/source-preview?path=${encodeURIComponent(left.path)}`),
+      api(`/api/runs/${selectedRunId}/source-preview?path=${encodeURIComponent(right.path)}`),
+    ]);
+    panel.innerHTML = renderCompareDiff(leftPayload, rightPayload);
+  } catch (error) {
+    panel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function renderCompareDiff(left, right) {
+  if (left.preview_type !== "text" || right.preview_type !== "text") {
+    return '<p class="empty-state">Text diff is available only when both pinned items have text previews.</p>';
+  }
+  const leftLines = String(left.text || "").split(/\r?\n/);
+  const rightLines = String(right.text || "").split(/\r?\n/);
+  const leftSet = new Set(leftLines);
+  const rightSet = new Set(rightLines);
+  const onlyLeft = leftLines.filter((line) => line.trim() && !rightSet.has(line)).slice(0, 80);
+  const onlyRight = rightLines.filter((line) => line.trim() && !leftSet.has(line)).slice(0, 80);
+  return `
+    <section class="compare-diff">
+      <div class="review-group-header">
+        <div>
+          <p class="eyebrow">text diff</p>
+          <h3>${escapeHtml(left.name)} vs ${escapeHtml(right.name)}</h3>
+        </div>
+        <span class="status-pill">${onlyLeft.length + onlyRight.length} differences</span>
+      </div>
+      <div class="compare-grid">
+        <article class="compare-slot">
+          <strong>Only in A</strong>
+          <pre class="viewer-text">${escapeHtml(onlyLeft.join("\n") || "No unique text in first preview.")}</pre>
+        </article>
+        <article class="compare-slot">
+          <strong>Only in B</strong>
+          <pre class="viewer-text">${escapeHtml(onlyRight.join("\n") || "No unique text in second preview.")}</pre>
+        </article>
+      </div>
+    </section>
+  `;
 }
 
 function bindCopyButtons() {
@@ -1807,13 +1884,17 @@ function bindCaseDbPanel() {
         .map((item) => item.trim())
         .filter(Boolean);
       const source = String(searchData.get("source") || "");
+      const reviewStatus = String(searchData.get("review_status") || "");
       const verificationStatus = String(searchData.get("verification_status") || "");
+      const saveAs = String(searchData.get("save_as") || "").trim();
       const request = {
         database: String(importData.get("database") || ""),
         case_id: String(importData.get("case_id") || ""),
         keywords,
         sources: source ? [source] : null,
+        review_status: reviewStatus || null,
         verification_status: verificationStatus || null,
+        save_as: saveAs || null,
         limit: 100,
       };
       button.disabled = true;
@@ -1822,6 +1903,7 @@ function bindCaseDbPanel() {
         const payload = await api("/api/case-db/search", { method: "POST", body: JSON.stringify(request) });
         output.innerHTML = renderCaseDbSearchResult(payload);
         bindCaseDbReviewButtons(request.database, request.case_id);
+        bindCaseDbBatchButtons(request.database, request.case_id);
       } catch (error) {
         output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
       } finally {
@@ -1847,22 +1929,46 @@ function renderCaseDbImportResult(payload) {
 
 function renderCaseDbSearchResult(payload) {
   const rows = payload.matches || [];
+  const saved = payload.saved_search;
   if (!rows.length) {
-    return `<p class="empty-state">No Case DB matches found.</p>`;
+    return `
+      ${saved ? `<p class="help-text">Saved search: ${escapeHtml(saved.name)} (${escapeHtml(saved.citation_id)})</p>` : ""}
+      <p class="empty-state">No Case DB matches found.</p>
+    `;
   }
   return `
+    ${saved ? `<p class="help-text">Saved search: ${escapeHtml(saved.name)} (${escapeHtml(saved.citation_id)})</p>` : ""}
     <div class="metric-grid">
       ${metric("DB matches", payload.summary?.match_count)}
       ${metric("Sources", Object.keys(payload.summary?.source_counts || {}).length)}
       ${metric("Keywords", (payload.keywords || []).length)}
     </div>
+    <section class="review-selection-tray">
+      <div class="review-group-header">
+        <div>
+          <p class="eyebrow">batch review</p>
+          <h3>Mark repetitive results together</h3>
+        </div>
+        <div class="detail-actions">
+          <button class="secondary-button" type="button" data-case-db-batch="verify">Verify selected</button>
+          <button class="secondary-button" type="button" data-case-db-batch="reject">Reject selected</button>
+        </div>
+      </div>
+      <p class="help-text">Select rows that are clearly related, then apply the same review status in one action.</p>
+      <span id="caseDbBatchStatus" class="review-save-status"></span>
+    </section>
     <table class="data-table">
-      <thead><tr><th>Citation</th><th>Source</th><th>Item</th><th>Review</th><th></th></tr></thead>
+      <thead><tr><th>Select</th><th>Citation</th><th>Source</th><th>Item</th><th>Review</th><th></th></tr></thead>
       <tbody>
         ${rows.map((match) => {
           const review = match.review || {};
+          const targetPayload = {
+            target_type: match.target_type,
+            target_id: match.target_id,
+          };
           return `
             <tr data-filter="${rowText(match)}">
+              <td><input type="checkbox" data-case-db-target="${escapeHtml(JSON.stringify(targetPayload))}" /></td>
               <td><strong>${escapeHtml(match.citation_id || "")}</strong><span>${escapeHtml(match.target_type || "")}:${escapeHtml(match.target_id || "")}</span></td>
               <td>${escapeHtml(match.source || "")}<span>${escapeHtml(match.kind || "")}</span></td>
               <td><strong>${escapeHtml(match.title || "")}</strong><span>${escapeHtml(match.preview || match.path || "")}</span></td>
@@ -1910,6 +2016,50 @@ function bindCaseDbReviewButtons(database, caseId) {
       } catch (error) {
         button.textContent = "Failed";
         button.title = error.message;
+      }
+    });
+  }
+}
+
+function bindCaseDbBatchButtons(database, caseId) {
+  for (const button of detailPanel.querySelectorAll("[data-case-db-batch]")) {
+    button.addEventListener("click", async () => {
+      const action = button.dataset.caseDbBatch;
+      const targets = Array.from(detailPanel.querySelectorAll("[data-case-db-target]:checked"))
+        .map((input) => JSON.parse(input.dataset.caseDbTarget || "{}"))
+        .filter((item) => item.target_type && item.target_id);
+      const status = detailPanel.querySelector("#caseDbBatchStatus");
+      if (!targets.length) {
+        if (status) status.textContent = "Select at least one result first.";
+        return;
+      }
+      const payload = action === "reject"
+        ? {
+            status: "excluded",
+            verification_status: "rejected",
+            include_in_report: false,
+            tags: ["batch", "excluded"],
+            note: "Batch rejected from Case DB result list.",
+          }
+        : {
+            status: "relevant",
+            verification_status: "source_opened",
+            include_in_report: true,
+            tags: ["batch", "report"],
+            note: "Batch verified from Case DB result list.",
+          };
+      button.disabled = true;
+      if (status) status.textContent = `Updating ${targets.length} result(s)...`;
+      try {
+        const result = await api("/api/case-db/review-batch", {
+          method: "POST",
+          body: JSON.stringify({ database, case_id: caseId, targets, reviewer: "web-ui", ...payload }),
+        });
+        if (status) status.textContent = `Updated ${result.updated_count || targets.length} result(s). Re-run search to refresh review badges.`;
+      } catch (error) {
+        if (status) status.textContent = `Failed: ${error.message}`;
+      } finally {
+        button.disabled = false;
       }
     });
   }

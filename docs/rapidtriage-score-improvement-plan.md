@@ -4,11 +4,11 @@ This plan is scored from a real analyst/user perspective, not from a feature-cou
 
 ## Current Score
 
-Estimated current score: 70/100.
+Estimated current score: 75/100.
 
 Why:
 
-- The tool now has a usable local web UI, sample case, doctor check, evidence preflight, processing plan preview, whole-case search, source viewer, review board, compare tray, hashes, report draft, SQLite Case DB alpha, Windows quickstart, and packaging tests.
+- The tool now has a usable local web UI, sample case, doctor check, evidence preflight, processing plan preview, whole-case search, source viewer, review board, compare tray with text diff, hashes, report templates, SQLite Case DB saved searches/batch review, Windows quickstart, and packaging tests.
 - It is useful for folder-based triage and light forensic review.
 - It is not yet comparable to AXIOM/WISDOM for direct evidence ingestion, deep Windows artifact coverage, validated parsers, large-case indexing, portable reviewer workflows, or commercial trust.
 
@@ -66,17 +66,17 @@ Goal: make search/review/report strong enough for daily internal use.
 Tasks:
 
 - Move normal web workflow from JSON scans to Case DB by default after a run.
-- Add persistent saved searches, keyword packs, and recent search history per case.
-- Add review status filters everywhere: unreviewed, relevant, not relevant, needs follow-up, report candidate, verified, rejected.
-- Add batch review actions for repetitive results.
-- Add side-by-side diff for text/log evidence, not just compare cards.
-- Add report template selector: executive summary, technical appendix, legal handoff, hash-only appendix.
+- Add persistent saved searches, keyword packs, and recent search history per case. Status: Case DB saved searches are implemented for CLI/API/web searches.
+- Add review status filters everywhere: unreviewed, relevant, not relevant, needs follow-up, report candidate, verified, rejected. Status: Case DB search now filters by review status and verification status.
+- Add batch review actions for repetitive results. Status: Case DB API and web panel now support batch verify/reject for selected search results.
+- Add side-by-side diff for text/log evidence, not just compare cards. Status: compare tray now supports A/B text diff for pinned text previews.
+- Add report template selector: executive summary, technical appendix, legal handoff, hash-only appendix. Status: web/API case report generation now accepts these templates.
 
 Acceptance criteria:
 
 - Search returns first page quickly on a 100k-file synthetic case.
-- Analyst can search, preview, mark, verify, and generate a focused report without returning to raw JSON.
-- Report contains only selected/reviewed evidence by default.
+- Analyst can search, preview, mark, verify, and generate a focused report without returning to raw JSON. Status: partially implemented; JSON remains available, but core saved-search and batch review loops are now UI-backed.
+- Report contains only selected/reviewed evidence by default. Status: existing report-candidate default is preserved; template selector controls presentation.
 
 ## Plan To Reach 80
 

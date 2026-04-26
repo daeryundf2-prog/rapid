@@ -68,6 +68,7 @@ class BookmarkCreateRequest(BaseModel):
 
 
 class CaseReportCreateRequest(BaseModel):
+    template: str = "legal-handoff"
     title: Optional[str] = None
     case_number: Optional[str] = None
     investigator: Optional[str] = None
@@ -92,7 +93,9 @@ class CaseDbSearchRequest(BaseModel):
     keywords: list[str] = Field(..., min_length=1)
     limit: int = Field(100, ge=1, le=1000)
     sources: Optional[list[str]] = None
+    review_status: Optional[str] = None
     verification_status: Optional[str] = None
+    save_as: Optional[str] = None
 
 
 class CaseDbReviewRequest(BaseModel):
@@ -106,6 +109,35 @@ class CaseDbReviewRequest(BaseModel):
     note: str = ""
     reviewer: str = ""
     include_in_report: bool = False
+
+
+class CaseDbReviewBatchRequest(BaseModel):
+    database: str = Field(..., min_length=1)
+    case_id: str = Field(..., min_length=1)
+    targets: list[dict[str, str]] = Field(..., min_length=1)
+    status: str = "unreviewed"
+    verification_status: str = "unverified"
+    tags: Optional[list[str]] = None
+    note: str = ""
+    reviewer: str = ""
+    include_in_report: bool = False
+
+
+class CaseDbSavedSearchRequest(BaseModel):
+    database: str = Field(..., min_length=1)
+    case_id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+    keywords: list[str] = Field(..., min_length=1)
+    limit: int = Field(100, ge=1, le=1000)
+    sources: Optional[list[str]] = None
+    review_status: Optional[str] = None
+    verification_status: Optional[str] = None
+    created_by: str = ""
+
+
+class CaseDbSavedSearchListRequest(BaseModel):
+    database: str = Field(..., min_length=1)
+    case_id: str = Field(..., min_length=1)
 
 
 class CaseCatalogAddRunRequest(BaseModel):
@@ -191,13 +223,26 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     def search_case_db(request: CaseDbSearchRequest) -> Dict[str, object]:
         try:
             database = open_case_database(Path(request.database))
-            return database.search_case(
+            payload = database.search_case(
                 case_id=request.case_id,
                 keywords=request.keywords,
                 limit=request.limit,
                 sources=request.sources,
+                review_status=request.review_status,
                 verification_status=request.verification_status,
             )
+            if request.save_as:
+                payload["saved_search"] = database.save_search(
+                    case_id=request.case_id,
+                    name=request.save_as,
+                    keywords=request.keywords,
+                    limit=request.limit,
+                    sources=request.sources,
+                    review_status=request.review_status,
+                    verification_status=request.verification_status,
+                    created_by="web-ui",
+                )
+            return payload
         except CaseDatabaseError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -216,6 +261,53 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 reviewer=request.reviewer,
                 include_in_report=request.include_in_report,
             )
+        except CaseDatabaseError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @api.post("/api/case-db/review-batch")
+    def mark_case_db_reviews_batch(request: CaseDbReviewBatchRequest) -> Dict[str, object]:
+        try:
+            database = open_case_database(Path(request.database))
+            return database.mark_reviews_batch(
+                case_id=request.case_id,
+                targets=request.targets,
+                status=request.status,
+                verification_status=request.verification_status,
+                tags=request.tags or [],
+                note=request.note,
+                reviewer=request.reviewer,
+                include_in_report=request.include_in_report,
+            )
+        except CaseDatabaseError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @api.post("/api/case-db/saved-searches")
+    def save_case_db_search(request: CaseDbSavedSearchRequest) -> Dict[str, object]:
+        try:
+            database = open_case_database(Path(request.database))
+            return database.save_search(
+                case_id=request.case_id,
+                name=request.name,
+                keywords=request.keywords,
+                limit=request.limit,
+                sources=request.sources,
+                review_status=request.review_status,
+                verification_status=request.verification_status,
+                created_by=request.created_by,
+            )
+        except CaseDatabaseError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @api.post("/api/case-db/saved-searches/list")
+    def list_case_db_saved_searches(request: CaseDbSavedSearchListRequest) -> Dict[str, object]:
+        try:
+            database = open_case_database(Path(request.database))
+            return {
+                "command": "case-db.saved-searches",
+                "database": str(Path(request.database).expanduser().resolve()),
+                "case_id": request.case_id,
+                "saved_searches": database.list_saved_searches(request.case_id),
+            }
         except CaseDatabaseError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

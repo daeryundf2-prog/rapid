@@ -30,6 +30,15 @@ rapidtriage case-search ./case.db --case-id CASE-001 -k password --source docume
 
 Search reaches indexed document text, file metadata, artifact summaries, and timeline events. Use source filters to narrow heavy cases.
 
+For repeated review, save useful Case DB searches and filter by review state:
+
+```bash
+rapidtriage case-search ./case.db --case-id CASE-001 -k password --source documents --save-as "Credential review"
+rapidtriage case-search ./case.db --case-id CASE-001 -k password --review-status relevant --verification-status verified
+```
+
+The web Case DB panel also supports selecting repetitive results and batch-marking them as verified or rejected.
+
 ## Processing Transparency
 
 The web start screen shows a run-plan preview before processing. Use `Fast first pass` first for large evidence because it keeps extraction read-only and focuses on indexing/search. Use `Standard` when you want bounded copied evidence for review, and use `Deep` only when you intentionally want uncapped extraction.
@@ -52,6 +61,13 @@ rapidtriage case-review ./case.db \
 ```
 
 The web UI also lets you import a run into the Case DB from the summary page, search it, and mark hits as verified or rejected.
+
+When generating a case report in the web review board, choose the template that matches the audience:
+
+- `Legal handoff`: balanced narrative plus hashes.
+- `Executive summary`: shorter decision-maker framing with evidence details.
+- `Technical appendix`: includes processing warning context.
+- `Hash-only appendix`: focuses on submission evidence hashes.
 
 ## Case Catalog
 

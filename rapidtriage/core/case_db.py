@@ -21,6 +21,7 @@ CITATION_KIND_PREFIXES = {
     "event": "EVT",
     "report": "RPT",
     "review": "REV",
+    "search": "SRCH",
     "audit": "AUD",
     "job": "JOB",
     "hash": "HASH",
@@ -266,6 +267,7 @@ class CaseDatabase:
         keywords: Iterable[str],
         limit: int = 100,
         sources: Iterable[str] | None = None,
+        review_status: str | None = None,
         verification_status: str | None = None,
     ) -> dict[str, object]:
         normalized_keywords = [keyword.strip() for keyword in keywords if keyword.strip()]
@@ -285,6 +287,12 @@ class CaseDatabase:
             matches = attach_review_marks(connection, normalized_case_id, matches)
             if source_filter:
                 matches = [match for match in matches if str(match.get("source") or "") in source_filter]
+            if review_status:
+                matches = [
+                    match
+                    for match in matches
+                    if str((match.get("review") or {}).get("status") or "unreviewed") == review_status
+                ]
             if verification_status:
                 matches = [
                     match
@@ -310,6 +318,7 @@ class CaseDatabase:
             "options": {
                 "limit": limit,
                 "sources": sorted(source_filter),
+                "review_status": review_status,
                 "verification_status": verification_status,
             },
             "summary": {
@@ -319,6 +328,116 @@ class CaseDatabase:
             },
             "matches": matches,
         }
+
+    def save_search(
+        self,
+        *,
+        case_id: str,
+        name: str,
+        keywords: Iterable[str],
+        sources: Iterable[str] | None = None,
+        review_status: str | None = None,
+        verification_status: str | None = None,
+        limit: int = 100,
+        created_by: str = "",
+    ) -> dict[str, object]:
+        normalized_case_id = normalize_identifier(case_id, fallback="case")
+        normalized_keywords = [keyword.strip() for keyword in keywords if keyword.strip()]
+        if not normalized_keywords:
+            raise CaseDatabaseError("at least one keyword is required")
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise CaseDatabaseError("saved search name is required")
+        timestamp = now_iso()
+        filters = {
+            "keywords": normalized_keywords,
+            "sources": [source.strip() for source in (sources or []) if source.strip()],
+            "review_status": review_status,
+            "verification_status": verification_status,
+            "limit": limit,
+        }
+        with self.connect() as connection:
+            apply_schema(connection)
+            if connection.execute("SELECT 1 FROM case_record WHERE case_id = ?", (normalized_case_id,)).fetchone() is None:
+                raise CaseDatabaseError(f"case not found: {normalized_case_id}")
+            row = connection.execute(
+                """
+                SELECT id, citation_id, created_at FROM saved_search
+                WHERE case_id = ? AND name = ?
+                LIMIT 1
+                """,
+                (normalized_case_id, normalized_name),
+            ).fetchone()
+            if row is None:
+                citation_id = next_citation_id_for_connection(connection, normalized_case_id, "search")
+                connection.execute(
+                    """
+                    INSERT INTO saved_search (
+                        citation_id, case_id, name, keywords_json, filters_json,
+                        created_by, created_at, updated_at, last_run_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        citation_id,
+                        normalized_case_id,
+                        normalized_name,
+                        json.dumps(normalized_keywords, ensure_ascii=False),
+                        json.dumps(filters, ensure_ascii=False, sort_keys=True),
+                        created_by,
+                        timestamp,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+            else:
+                citation_id = str(row["citation_id"])
+                connection.execute(
+                    """
+                    UPDATE saved_search
+                    SET keywords_json = ?, filters_json = ?, created_by = ?,
+                        updated_at = ?, last_run_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        json.dumps(normalized_keywords, ensure_ascii=False),
+                        json.dumps(filters, ensure_ascii=False, sort_keys=True),
+                        created_by,
+                        timestamp,
+                        timestamp,
+                        row["id"],
+                    ),
+                )
+            connection.execute(
+                "UPDATE case_record SET updated_at = ? WHERE case_id = ?",
+                (timestamp, normalized_case_id),
+            )
+        return self.get_saved_search(normalized_case_id, name=normalized_name)
+
+    def list_saved_searches(self, case_id: str) -> list[dict[str, object]]:
+        normalized_case_id = normalize_identifier(case_id, fallback="case")
+        with self.connect() as connection:
+            apply_schema(connection)
+            rows = connection.execute(
+                "SELECT * FROM saved_search WHERE case_id = ? ORDER BY updated_at DESC, name ASC",
+                (normalized_case_id,),
+            ).fetchall()
+        return [saved_search_to_dict(row) for row in rows]
+
+    def get_saved_search(self, case_id: str, *, name: str) -> dict[str, object]:
+        normalized_case_id = normalize_identifier(case_id, fallback="case")
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM saved_search
+                WHERE case_id = ? AND name = ?
+                LIMIT 1
+                """,
+                (normalized_case_id, name),
+            ).fetchone()
+        if row is None:
+            raise CaseDatabaseError(f"saved search not found: {name}")
+        return saved_search_to_dict(row)
 
     def mark_review(
         self,
@@ -428,6 +547,46 @@ class CaseDatabase:
                 ),
             )
         return self.get_review_mark(normalized_case_id, target_type=target_type, target_id=target_id)
+
+    def mark_reviews_batch(
+        self,
+        *,
+        case_id: str,
+        targets: Iterable[Mapping[str, object]],
+        status: str = "unreviewed",
+        verification_status: str = "unverified",
+        tags: Iterable[str] | None = None,
+        note: str = "",
+        include_in_report: bool = False,
+        reviewer: str = "",
+    ) -> dict[str, object]:
+        marks: list[dict[str, object]] = []
+        for target in targets:
+            target_type = str(target.get("target_type") or "").strip()
+            target_id = str(target.get("target_id") or "").strip()
+            if not target_type or not target_id:
+                raise CaseDatabaseError("every batch target requires target_type and target_id")
+            marks.append(
+                self.mark_review(
+                    case_id=case_id,
+                    target_type=target_type,
+                    target_id=target_id,
+                    status=status,
+                    verification_status=verification_status,
+                    tags=tags or [],
+                    note=note,
+                    include_in_report=include_in_report,
+                    reviewer=reviewer,
+                )
+            )
+        return {
+            "command": "case-review-batch",
+            "generated_at": now_iso(),
+            "database": str(self.path),
+            "case_id": normalize_identifier(case_id, fallback="case"),
+            "updated_count": len(marks),
+            "marks": marks,
+        }
 
     def get_review_mark(self, case_id: str, *, target_type: str, target_id: str) -> dict[str, object]:
         with self.connect() as connection:
@@ -1060,6 +1219,28 @@ def review_mark_to_dict(row: sqlite3.Row) -> dict[str, object]:
     }
 
 
+def saved_search_to_dict(row: sqlite3.Row) -> dict[str, object]:
+    try:
+        keywords = json.loads(str(row["keywords_json"] or "[]"))
+    except json.JSONDecodeError:
+        keywords = []
+    try:
+        filters = json.loads(str(row["filters_json"] or "{}"))
+    except json.JSONDecodeError:
+        filters = {}
+    return {
+        "citation_id": str(row["citation_id"]),
+        "case_id": str(row["case_id"]),
+        "name": str(row["name"]),
+        "keywords": keywords if isinstance(keywords, list) else [],
+        "filters": filters if isinstance(filters, dict) else {},
+        "created_by": str(row["created_by"] or ""),
+        "created_at": str(row["created_at"]),
+        "updated_at": str(row["updated_at"]),
+        "last_run_at": str(row["last_run_at"] or ""),
+    }
+
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_info (
     key TEXT PRIMARY KEY,
@@ -1232,6 +1413,21 @@ CREATE TABLE IF NOT EXISTS review_mark (
     FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS saved_search (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    citation_id TEXT NOT NULL UNIQUE,
+    case_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    keywords_json TEXT NOT NULL DEFAULT '[]',
+    filters_json TEXT NOT NULL DEFAULT '{}',
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_run_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(case_id, name),
+    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS audit_event (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     citation_id TEXT NOT NULL UNIQUE,
@@ -1294,6 +1490,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_case_type ON artifact(case_id, artifact_
 CREATE INDEX IF NOT EXISTS idx_event_case_time ON event(case_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_indexed_document_case_source ON indexed_document(case_id, source_type);
 CREATE INDEX IF NOT EXISTS idx_review_mark_case_status ON review_mark(case_id, status, verification_status);
+CREATE INDEX IF NOT EXISTS idx_saved_search_case_name ON saved_search(case_id, name);
 CREATE INDEX IF NOT EXISTS idx_audit_event_case_time ON audit_event(case_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_report_item_case_section ON report_item(case_id, section, order_index);
 CREATE INDEX IF NOT EXISTS idx_job_case_status ON job(case_id, status);

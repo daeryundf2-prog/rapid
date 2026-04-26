@@ -13,6 +13,7 @@ def build_case_report_markdown(
     metadata = metadata or {}
     case_title = str(metadata.get("title") or case_payload.get("title") or "rapidtriage case report")
     case_id = str(metadata.get("case_number") or case_payload.get("case_id") or "")
+    template = str(metadata.get("template") or "legal-handoff")
     investigator = str(metadata.get("investigator") or "")
     organization = str(metadata.get("organization") or "")
     requester = str(metadata.get("requester") or "")
@@ -21,6 +22,8 @@ def build_case_report_markdown(
 
     lines = [
         "# 디지털 포렌식 분석 보고서",
+        "",
+        f"> Report template: `{template}`",
         "",
         "## 1. 사건 정보",
         "",
@@ -31,18 +34,39 @@ def build_case_report_markdown(
         f"- 의뢰자/의뢰기관: {requester or '미기재'}",
         f"- 생성 시각: `{submission_manifest.get('generated_at', '')}`",
         "",
-        "## 2. 분석 대상 및 범위",
-        "",
-        f"- 분석 모드: `{run_summary.get('mode', '')}`",
-        f"- 원본/분석 루트: `{run_summary.get('root', '')}`",
-        f"- 분석 범위 루트: `{run_summary.get('scan_scope_root', '')}`",
-        f"- 산출물 디렉터리: `{run_summary.get('output_dir', '')}`",
-        "",
-        scope,
-        "",
-        "## 3. 분석 절차 요약",
-        "",
     ]
+
+    if template == "hash-only":
+        return build_hash_only_report(
+            lines=lines,
+            submission_manifest=submission_manifest,
+        )
+
+    if template == "executive-summary":
+        lines.extend(
+            [
+                "## Executive summary",
+                "",
+                "This report highlights reviewed evidence selected for decision-makers. Technical hash details remain attached to each evidence item.",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "## 2. 분석 대상 및 범위",
+            "",
+            f"- 분석 모드: `{run_summary.get('mode', '')}`",
+            f"- 원본/분석 루트: `{run_summary.get('root', '')}`",
+            f"- 분석 범위 루트: `{run_summary.get('scan_scope_root', '')}`",
+            f"- 산출물 디렉터리: `{run_summary.get('output_dir', '')}`",
+            "",
+            scope,
+            "",
+            "## 3. 분석 절차 요약",
+            "",
+        ]
+    )
 
     for step in run_summary.get("steps", []):
         if not isinstance(step, Mapping):
@@ -128,4 +152,55 @@ def build_case_report_markdown(
             "",
         ]
     )
+    if template == "technical-appendix":
+        processing = run_summary.get("processing") if isinstance(run_summary.get("processing"), Mapping) else {}
+        lines.extend(
+            [
+                "## 9. Technical appendix",
+                "",
+                f"- Processing profile: `{processing.get('profile_label', '')}`",
+                f"- Processing warning count: {processing.get('warning_count', 0)}",
+                f"- Highest warning level: `{processing.get('highest_warning_level', 'none')}`",
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def build_hash_only_report(
+    *,
+    lines: list[str],
+    submission_manifest: Mapping[str, object],
+) -> str:
+    lines.extend(["## 2. 제출 증거 해시 목록", ""])
+    items = submission_manifest.get("items")
+    if isinstance(items, list) and items:
+        for index, item in enumerate(items, start=1):
+            if not isinstance(item, Mapping):
+                continue
+            evidence = item.get("evidence") if isinstance(item.get("evidence"), Mapping) else {}
+            hashes = evidence.get("hashes") if isinstance(evidence.get("hashes"), Mapping) else {}
+            lines.extend(
+                [
+                    f"### 2.{index}. {item.get('summary') or evidence.get('name') or 'Evidence'}",
+                    "",
+                    f"- 경로: `{evidence.get('path', '')}`",
+                    f"- MD5: `{hashes.get('md5', '')}`",
+                    f"- SHA1: `{hashes.get('sha1', '')}`",
+                    f"- SHA256: `{hashes.get('sha256', '')}`",
+                    "",
+                ]
+            )
+    else:
+        lines.append("- 해시 산출된 제출 증거가 없음.")
+        lines.append("")
+    skipped = submission_manifest.get("skipped")
+    lines.extend(["## 3. 해시 산출 제외 항목", ""])
+    if isinstance(skipped, list) and skipped:
+        for item in skipped:
+            if isinstance(item, Mapping):
+                lines.append(f"- `{item.get('path', '')}`: {item.get('reason', '')}")
+    else:
+        lines.append("- 없음")
+    lines.append("")
     return "\n".join(lines)

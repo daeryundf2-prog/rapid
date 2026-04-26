@@ -375,7 +375,9 @@ def build_parser() -> argparse.ArgumentParser:
     case_search.add_argument("-k", "--keyword", action="append", required=True, help="Keyword to search for")
     case_search.add_argument("--limit", type=int, default=100, help="Maximum number of combined matches")
     case_search.add_argument("--source", action="append", help="Limit to a result source such as documents, files, artifacts, or timeline")
+    case_search.add_argument("--review-status", help="Limit by analyst review status")
     case_search.add_argument("--verification-status", help="Limit by review verification status")
+    case_search.add_argument("--save-as", help="Save this keyword/filter set for reuse")
     case_search.add_argument("--output", help="Optional JSON output path")
     case_search.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
@@ -915,8 +917,20 @@ def main(argv=None) -> int:
                 keywords=args.keyword,
                 limit=args.limit,
                 sources=args.source,
+                review_status=args.review_status,
                 verification_status=args.verification_status,
             )
+            if args.save_as:
+                payload["saved_search"] = database.save_search(
+                    case_id=args.case_id,
+                    name=args.save_as,
+                    keywords=args.keyword,
+                    limit=args.limit,
+                    sources=args.source,
+                    review_status=args.review_status,
+                    verification_status=args.verification_status,
+                    created_by="cli",
+                )
         except CaseDatabaseError as exc:
             parser.error(str(exc))
         if args.output:

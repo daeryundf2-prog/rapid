@@ -293,6 +293,7 @@ class RapidTriageApiTests(unittest.TestCase):
             report_response = client.post(
                 f"/api/runs/{run_id}/case-report",
                 json={
+                    "template": "technical-appendix",
                     "title": "Incident report",
                     "case_number": "CASE-001",
                     "investigator": "Analyst A",
@@ -305,6 +306,8 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(report_response.status_code, 200, report_response.text)
             report_payload = report_response.json()
             self.assertIn("디지털 포렌식 분석 보고서", report_payload["markdown"])
+            self.assertIn("Report template: `technical-appendix`", report_payload["markdown"])
+            self.assertIn("Technical appendix", report_payload["markdown"])
             self.assertIn("CASE-001", report_payload["markdown"])
             self.assertIn(evidence["hashes"]["sha256"], report_payload["markdown"])
             self.assertTrue((output_dir / "rapidtriage-case-report.md").is_file())
@@ -402,11 +405,13 @@ class RapidTriageApiTests(unittest.TestCase):
                     "case_id": "CASE-API-DB",
                     "keywords": ["password"],
                     "sources": ["documents"],
+                    "save_as": "Password review",
                 },
             )
             self.assertEqual(search_response.status_code, 200, search_response.text)
             search_payload = search_response.json()
             self.assertGreaterEqual(search_payload["summary"]["match_count"], 1)
+            self.assertEqual(search_payload["saved_search"]["name"], "Password review")
             target = search_payload["matches"][0]
 
             review_response = client.post(
@@ -427,6 +432,38 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(review_response.status_code, 200, review_response.text)
             self.assertEqual(review_response.json()["verification_status"], "source_opened")
 
+            saved_searches_response = client.post(
+                "/api/case-db/saved-searches/list",
+                json={
+                    "database": str(db_path),
+                    "case_id": "CASE-API-DB",
+                },
+            )
+            self.assertEqual(saved_searches_response.status_code, 200, saved_searches_response.text)
+            self.assertEqual(saved_searches_response.json()["saved_searches"][0]["name"], "Password review")
+
+            batch_response = client.post(
+                "/api/case-db/review-batch",
+                json={
+                    "database": str(db_path),
+                    "case_id": "CASE-API-DB",
+                    "targets": [
+                        {
+                            "target_type": target["target_type"],
+                            "target_id": target["target_id"],
+                        }
+                    ],
+                    "status": "relevant",
+                    "verification_status": "verified",
+                    "tags": ["credential", "batch"],
+                    "note": "Batch verified.",
+                    "reviewer": "api-test",
+                    "include_in_report": True,
+                },
+            )
+            self.assertEqual(batch_response.status_code, 200, batch_response.text)
+            self.assertEqual(batch_response.json()["updated_count"], 1)
+
             filtered_response = client.post(
                 "/api/case-db/search",
                 json={
@@ -434,7 +471,8 @@ class RapidTriageApiTests(unittest.TestCase):
                     "case_id": "CASE-API-DB",
                     "keywords": ["password"],
                     "sources": ["documents"],
-                    "verification_status": "source_opened",
+                    "review_status": "relevant",
+                    "verification_status": "verified",
                 },
             )
             self.assertEqual(filtered_response.status_code, 200, filtered_response.text)

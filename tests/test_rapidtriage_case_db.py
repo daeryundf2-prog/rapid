@@ -32,6 +32,7 @@ REQUIRED_TABLES = {
     "indexed_document",
     "indexed_document_fts",
     "review_mark",
+    "saved_search",
     "audit_event",
     "report_item",
     "job",
@@ -50,7 +51,9 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
         self.assertIn("case-search", commands)
         self.assertIn("--case-id", commands["case-search"].format_help())
         self.assertIn("--source", commands["case-search"].format_help())
+        self.assertIn("--review-status", commands["case-search"].format_help())
         self.assertIn("--verification-status", commands["case-search"].format_help())
+        self.assertIn("--save-as", commands["case-search"].format_help())
         self.assertIn("case-review", commands)
         self.assertIn("--include-in-report", commands["case-review"].format_help())
         self.assertIn("evidence", commands)
@@ -74,6 +77,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 self.assertTrue(REQUIRED_TABLES.issubset(set(list_tables(connection))))
                 self.assertIn("hash_scope", table_columns(connection, "hash_record"))
                 self.assertIn("verification_status", table_columns(connection, "review_mark"))
+                self.assertIn("filters_json", table_columns(connection, "saved_search"))
                 self.assertIn("citation_id", table_columns(connection, "audit_event"))
 
     def test_create_list_and_get_case(self) -> None:
@@ -396,6 +400,10 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                         "documents",
                         "--verification-status",
                         "source_opened",
+                        "--review-status",
+                        "relevant",
+                        "--save-as",
+                        "Reviewed credentials",
                         "--json",
                     ]
                 )
@@ -405,5 +413,57 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             review_payload = json.loads(review_stdout.getvalue())
             filtered_payload = json.loads(search_stdout.getvalue())
             self.assertEqual(review_payload["status"], "relevant")
+            self.assertEqual(filtered_payload["saved_search"]["name"], "Reviewed credentials")
             self.assertGreaterEqual(filtered_payload["summary"]["match_count"], 1)
             self.assertEqual(filtered_payload["matches"][0]["review"]["verification_status"], "source_opened")
+
+    def test_saved_searches_and_batch_review_support_repeated_case_work(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            sample_payload = run_sample_workflow(root / "sample", overwrite=True, read_only=True)
+            database = open_case_database(root / "case.db")
+            database.import_run_output(Path(sample_payload["run"]["output_dir"]), case_id="CASE-75")
+
+            search_payload = database.search_case(
+                case_id="CASE-75",
+                keywords=["password"],
+                sources=["documents"],
+                limit=10,
+            )
+            targets = [
+                {"target_type": str(match["target_type"]), "target_id": str(match["target_id"])}
+                for match in search_payload["matches"][:2]
+            ]
+            saved = database.save_search(
+                case_id="CASE-75",
+                name="Credential review",
+                keywords=["password"],
+                sources=["documents"],
+                review_status="unreviewed",
+                verification_status="unverified",
+                created_by="unit-test",
+            )
+            batch = database.mark_reviews_batch(
+                case_id="CASE-75",
+                targets=targets,
+                status="relevant",
+                verification_status="source_opened",
+                tags=["credential", "batch"],
+                note="Batch reviewed.",
+                include_in_report=True,
+                reviewer="unit-test",
+            )
+            reviewed = database.search_case(
+                case_id="CASE-75",
+                keywords=["password"],
+                sources=["documents"],
+                review_status="relevant",
+                verification_status="source_opened",
+                limit=10,
+            )
+
+            self.assertTrue(saved["citation_id"].startswith("CASE-75-SRCH-"))
+            self.assertEqual(database.list_saved_searches("CASE-75")[0]["name"], "Credential review")
+            self.assertEqual(batch["updated_count"], len(targets))
+            self.assertGreaterEqual(reviewed["summary"]["match_count"], len(targets))
+            self.assertTrue(all(match["review"]["status"] == "relevant" for match in reviewed["matches"]))
