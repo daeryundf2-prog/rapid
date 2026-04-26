@@ -444,6 +444,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(wmi[0]["details"]["entry_name"], "OBJECTS.DATA")
             self.assertEqual(wmi[0]["details"]["source_path"], str(fixture.wmi_objects.resolve()))
             self.assertEqual(len(wmi[0]["details"]["source_hashes"]["sha256"]), 64)
+            self.assertEqual(wmi[0]["details"]["coverage_status"], "bounded-string-pivot")
+            self.assertIn("wmi-string:commandlineeventconsumer", wmi[0]["details"]["risk_flags"])
+            self.assertTrue(any("powershell.exe" in value.lower() for value in wmi[0]["details"]["path_candidates"]))
+            self.assertIn("https://example.test/wmi-payload", wmi[0]["details"]["url_candidates"])
 
 
 if __name__ == "__main__":

@@ -178,7 +178,7 @@ WINDOWS_TARGETS: tuple[CollectTarget, ...] = (
         "directory",
         "windows-system",
         "review",
-        "Useful for WMI persistence; dedicated parsing is planned, so preserve it for external review when present.",
+        "Useful for WMI persistence; RapidTriage extracts bounded string pivots, but preserve it for dedicated WMI parser validation.",
     ),
     CollectTarget(
         "RemoteAccess",

@@ -655,7 +655,16 @@ def _write_remote_access_fixtures(default_rdp: Path, cache_file: Path, reg_path:
 
 def _write_wmi_repository_fixture(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"fixture wmi repository objects")
+    path.write_bytes(
+        b"fixture wmi repository objects\x00"
+        + "__EventFilter".encode("utf-16le")
+        + b"\x00\x00"
+        + "CommandLineEventConsumer".encode("utf-16le")
+        + b"\x00\x00"
+        + r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -enc SQBFAFgA".encode("utf-16le")
+        + b"\x00\x00"
+        + b"https://example.test/wmi-payload"
+    )
 
 
 def _to_chrome_time(value: datetime) -> int:

@@ -140,7 +140,7 @@ Other Windows system artifacts:
 - Windows Defender `MPLog*.log` support logs, with threat/remediation/exclusion-looking lines highlighted.
 - Windows Firewall W3C logs, including blocked connection counts and sample rows.
 - Windows Error Reporting `Report.wer` files, including crashed app, module, and bucket fields.
-- WMI repository files such as `OBJECTS.DATA` are inventoried with hashes for persistence review and external parser handoff.
+- WMI repository files such as `OBJECTS.DATA` are inventoried with hashes plus bounded string pivots for permanent event consumer/filter names, suspicious commands, paths, URLs, and WMI persistence risk flags.
 - Zone.Identifier sidecar exports, including ZoneId, referrer URL, and host URL.
 
 Use:

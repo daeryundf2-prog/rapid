@@ -1397,7 +1397,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v2",
+            "parser_version": "windows-system-v3",
             "source_path": "<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
             "source_format": "text-log",
             "source_size": 199,
@@ -1419,7 +1419,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v2",
+            "parser_version": "windows-system-v3",
             "source_path": "<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
             "source_format": "w3c-log",
             "source_size": 216,
@@ -1460,7 +1460,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v2",
+            "parser_version": "windows-system-v3",
             "source_path": "<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
             "source_format": "task-xml",
             "source_size": 685,
@@ -1483,7 +1483,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v2",
+            "parser_version": "windows-system-v3",
             "source_path": "<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
             "source_format": "wer",
             "source_size": 94,
@@ -1509,7 +1509,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v2",
+            "parser_version": "windows-system-v3",
             "source_path": "<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
             "source_format": "wmi-repository",
             "source_size": 29,
@@ -1522,7 +1522,20 @@
             "source_hashes": {
               "sha256": "460fe33f8af0c81663b71e4c639af092c35bcc4b79c00e4574b1ea2a21741148"
             },
-            "note": "WMI repository file inventoried for persistence review; repository decoding is not enabled in this build."
+            "coverage_status": "bounded-string-pivot",
+            "scan_bytes": 29,
+            "extracted_string_count": 1,
+            "interesting_strings": [],
+            "path_candidates": [],
+            "url_candidates": [],
+            "risk_flags": [],
+            "risk_score": 0,
+            "recommended_parsers": [
+              "PyWMIPersistenceFinder",
+              "python-cim",
+              "Velociraptor WMI artifacts"
+            ],
+            "note": "WMI repository file inventoried with bounded string pivots for persistence review; validate findings with a dedicated WMI repository parser."
           }
         },
         {
@@ -1532,7 +1545,7 @@
           "supported": true,
           "details": {
             "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v2",
+            "parser_version": "windows-system-v3",
             "source_path": "<ROOT>/Users/alice/Downloads/report.zip.Zone.Identifier",
             "source_format": "ini-ads-export",
             "source_size": 119,

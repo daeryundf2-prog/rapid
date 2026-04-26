@@ -9,12 +9,27 @@ from ...core.audit import compute_sha256
 from ...core.models import ArtifactRecord
 from .common import isoformat_from_timestamp
 
-PARSER_VERSION = "windows-system-v2"
+PARSER_VERSION = "windows-system-v3"
 TASKS_ROOT = ("Windows", "System32", "Tasks")
 DEFENDER_SUPPORT_ROOT = ("ProgramData", "Microsoft", "Windows Defender", "Support")
 WMI_REPOSITORY_ROOT = ("Windows", "System32", "wbem", "Repository")
 WMI_REPOSITORY_NAMES = {"OBJECTS.DATA", "INDEX.BTR", "MAPPING.VER"}
 WMI_REPOSITORY_SUFFIXES = {".MAP", ".BTR", ".DATA"}
+WMI_SCAN_LIMIT = 8 * 1024 * 1024
+WMI_PERSISTENCE_TERMS = (
+    "__eventfilter",
+    "commandlineeventconsumer",
+    "activescripteventconsumer",
+    "__filtertoconsumerbinding",
+    "powershell",
+    "wmic",
+    "rundll32",
+    "regsvr32",
+    "mshta",
+    "certutil",
+)
+WINDOWS_PATH_RE = re.compile(r"(?i)(?:[a-z]:\\|\\\\|\\device\\)[^\x00\r\n\t\"'<>|]{4,260}")
+URL_RE = re.compile(r"(?i)https?://[^\s\x00\"'<>]{4,300}")
 FIREWALL_LOG_PATHS = (
     ("Windows", "System32", "LogFiles", "Firewall", "pfirewall.log"),
     ("Windows", "System32", "LogFiles", "Firewall", "pfirewall.log.old"),
@@ -167,6 +182,7 @@ def collect_wmi_repository(root: Path) -> Iterable[ArtifactRecord]:
         if path.name.upper() not in WMI_REPOSITORY_NAMES and path.suffix.upper() not in WMI_REPOSITORY_SUFFIXES:
             continue
         stat_result = path.stat()
+        pivots = wmi_repository_pivots(path)
         yield ArtifactRecord(
             provider=WindowsSystemArtifactsProvider.name,
             artifact_type="wmi-repository-file",
@@ -181,7 +197,8 @@ def collect_wmi_repository(root: Path) -> Iterable[ArtifactRecord]:
                 "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
                 "timestamp_source": "wmi_repository_modified_at",
                 "source_hashes": {"sha256": compute_sha256(path)},
-                "note": "WMI repository file inventoried for persistence review; repository decoding is not enabled in this build.",
+                **pivots,
+                "note": "WMI repository file inventoried with bounded string pivots for persistence review; validate findings with a dedicated WMI repository parser.",
             },
         )
 
@@ -280,3 +297,91 @@ def parse_key_value_file(path: Path) -> dict[str, str]:
         key, value = stripped.split("=", 1)
         fields[key.strip()] = value.strip()
     return fields
+
+
+def wmi_repository_pivots(path: Path) -> dict[str, object]:
+    blob = read_prefix(path, WMI_SCAN_LIMIT)
+    strings = unique_strings([*extract_ascii_strings(blob), *extract_utf16_strings(blob)])
+    interesting = [
+        value
+        for value in strings
+        if any(term in value.lower() for term in WMI_PERSISTENCE_TERMS)
+    ][:50]
+    path_candidates = regex_candidates(strings, WINDOWS_PATH_RE)[:50]
+    url_candidates = regex_candidates(strings, URL_RE)[:50]
+    risk_flags = [f"wmi-string:{term}" for term in WMI_PERSISTENCE_TERMS if any(term in value.lower() for value in strings)]
+    return {
+        "coverage_status": "bounded-string-pivot",
+        "scan_bytes": len(blob),
+        "extracted_string_count": len(strings),
+        "interesting_strings": interesting,
+        "path_candidates": path_candidates,
+        "url_candidates": url_candidates,
+        "risk_flags": risk_flags,
+        "risk_score": min(100, len(risk_flags) * 15),
+        "recommended_parsers": ["PyWMIPersistenceFinder", "python-cim", "Velociraptor WMI artifacts"],
+    }
+
+
+def read_prefix(path: Path, limit: int) -> bytes:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(limit)
+    except OSError:
+        return b""
+
+
+def extract_ascii_strings(blob: bytes, *, min_chars: int = 5) -> list[str]:
+    strings: list[str] = []
+    current = bytearray()
+    for byte in blob:
+        if 32 <= byte <= 126:
+            current.append(byte)
+            continue
+        if len(current) >= min_chars:
+            strings.append(current.decode("ascii", errors="ignore"))
+        current.clear()
+    if len(current) >= min_chars:
+        strings.append(current.decode("ascii", errors="ignore"))
+    return strings
+
+
+def extract_utf16_strings(blob: bytes, *, min_chars: int = 4) -> list[str]:
+    strings: list[str] = []
+    for start in (0, 1):
+        current = bytearray()
+        for index in range(start, len(blob) - 1, 2):
+            value = int.from_bytes(blob[index : index + 2], "little", signed=False)
+            if 32 <= value <= 126:
+                current.extend(blob[index : index + 2])
+                continue
+            if len(current) >= min_chars * 2:
+                strings.append(current.decode("utf-16le", errors="ignore").strip())
+            current.clear()
+        if len(current) >= min_chars * 2:
+            strings.append(current.decode("utf-16le", errors="ignore").strip())
+    return strings
+
+
+def unique_strings(values: list[str]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cleaned = " ".join(value.split()).strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        unique.append(cleaned)
+        if len(unique) >= 500:
+            break
+    return unique
+
+
+def regex_candidates(strings: list[str], pattern: re.Pattern[str]) -> list[str]:
+    candidates: list[str] = []
+    for value in strings:
+        for match in pattern.finditer(value):
+            candidate = match.group(0).rstrip(".,);]")
+            if candidate not in candidates:
+                candidates.append(candidate)
+    return candidates
