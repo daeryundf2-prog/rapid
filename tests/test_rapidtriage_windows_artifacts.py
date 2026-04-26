@@ -170,6 +170,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_evtx["details"]["record_id"], "300")
             self.assertEqual(native_evtx["details"]["timestamp"], "2024-04-01T03:04:05+00:00")
             self.assertIn("powershell -enc NativeFixture", native_evtx["details"]["extracted_strings"])
+            self.assertEqual(native_evtx["details"]["command_line"], "powershell -enc NativeFixture")
+            self.assertEqual(native_evtx["details"]["native_indicators"]["channel_hint_source"], "record-string")
+            self.assertEqual(native_evtx["details"]["evtx_record_integrity"]["declared_size_valid"], True)
+            self.assertEqual(native_evtx["details"]["evtx_record_integrity"]["trailing_size_valid"], True)
+            self.assertEqual(native_evtx["details"]["evtx_record_sequence"]["status"], "first-record")
+            self.assertEqual(len(native_evtx["details"]["evtx_record_sha256"]), 64)
+            self.assertGreaterEqual(native_evtx["details"]["parser_confidence"], 0.75)
             self.assertIn("suspicious-term:powershell -enc", native_evtx["details"]["risk_flags"])
             summary = summary_rows[0]["details"]
             self.assertEqual(summary["event_count"], 3)
@@ -180,6 +187,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn({"value": "execution", "count": 2}, summary["event_family_counts"])
             self.assertIn({"value": "powershell -enc", "count": 2}, summary["risk_term_counts"])
             self.assertIn({"value": "RT-EVTX-PS-ENCODED", "count": 1}, summary["detection_rule_counts"])
+            self.assertIn({"value": "trailing-size-valid", "count": 1}, summary["native_integrity_counts"])
+            self.assertIn({"value": "first-record", "count": 1}, summary["native_sequence_counts"])
+            self.assertIn({"value": "record-string", "count": 1}, summary["native_channel_hint_counts"])
             self.assertTrue(any(item["event_id"] == "4104" for item in summary["high_risk_events"]))
             self.assertTrue(any(item["channel"] == "Microsoft-Windows-PowerShell/Operational" for item in summary["record_sequence_gaps"]))
 
@@ -209,6 +219,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(len(native_rows), 1)
             self.assertEqual(native_rows[0]["details"]["record_id"], "777")
             self.assertEqual(native_rows[0]["details"]["source_path"], str(evtx_path.resolve()))
+            self.assertEqual(native_rows[0]["details"]["channel"], "Security")
+            self.assertEqual(native_rows[0]["details"]["command_line"], "wevtutil cl Security")
 
     def test_windows_os_account_collector_summarizes_profiles_and_reg_exports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

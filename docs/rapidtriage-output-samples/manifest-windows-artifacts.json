@@ -737,6 +737,9 @@
               }
             ],
             "risk_term_counts": [],
+            "native_integrity_counts": [],
+            "native_sequence_counts": [],
+            "native_channel_hint_counts": [],
             "detection_level_counts": [
               {
                 "value": "medium",

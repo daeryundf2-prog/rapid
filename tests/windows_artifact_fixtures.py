@@ -305,13 +305,14 @@ def datetime_to_filetime(value: datetime) -> int:
 
 def build_minimal_evtx(record_id: int, timestamp: datetime, strings: list[str]) -> bytes:
     payload = b"".join(value.encode("utf-16le") + b"\x00\x00" for value in strings)
-    size = 24 + len(payload)
+    size = 28 + len(payload)
     record = (
         b"**\x00\x00"
         + size.to_bytes(4, "little")
         + record_id.to_bytes(8, "little")
         + datetime_to_filetime(timestamp).to_bytes(8, "little")
         + payload
+        + size.to_bytes(4, "little")
     )
     header = bytearray(4096)
     header[0:8] = b"ElfFile\x00"

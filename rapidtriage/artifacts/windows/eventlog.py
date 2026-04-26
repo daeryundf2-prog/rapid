@@ -651,22 +651,37 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
         return
 
     source_hashes = file_hashes(path)
+    previous_record_id: int | None = None
     for source_index, (offset, record_blob) in enumerate(iter_evtx_record_blobs(blob)):
         record_id = read_u64(record_blob, 8)
         timestamp = filetime_to_iso(read_u64(record_blob, 16))
         payload = record_blob[EVTX_RECORD_HEADER_SIZE:]
         extracted_strings = extract_utf16le_strings(payload)
+        native_indicators = native_evtx_indicators(extracted_strings, path)
+        integrity = native_evtx_record_integrity(record_blob, offset)
+        sequence = native_evtx_sequence(record_id, previous_record_id)
+        previous_record_id = record_id or previous_record_id
         raw_preview = " ".join(extracted_strings)[:2000]
         data = {
             "evtx_parse_status": "native-binary-partial",
             "evtx_record_offset": offset,
             "evtx_record_size": len(record_blob),
+            "evtx_record_sha256": hashlib.sha256(record_blob).hexdigest(),
+            "evtx_record_integrity": integrity,
+            "evtx_record_sequence": sequence,
             "extracted_strings": extracted_strings[:MAX_NATIVE_EVTX_STRINGS],
             "extracted_string_count": len(extracted_strings),
+            "native_indicators": native_indicators,
+            "ProviderName": native_indicators.get("provider_name", ""),
+            "Channel": native_indicators.get("channel", ""),
+            "Computer": native_indicators.get("computer", ""),
+            "CommandLine": native_indicators.get("command_line", ""),
+            "SourceIp": native_indicators.get("source_ip", ""),
+            "TargetUserName": native_indicators.get("user_name", ""),
         }
-        provider_name = first_matching_string(extracted_strings, "Microsoft-Windows-")
-        channel = first_matching_string(extracted_strings, "/Operational", "Security", "System", "Application")
-        computer = first_matching_string(extracted_strings, "WIN-", ".local")
+        provider_name = str(native_indicators.get("provider_name") or "")
+        channel = str(native_indicators.get("channel") or "")
+        computer = str(native_indicators.get("computer") or "")
         details = normalize_event_details(
             parser="windows-eventlog-evtx-native",
             source_format="evtx",
@@ -682,9 +697,12 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             event_created_at=timestamp,
             data=data,
             raw_preview=raw_preview,
-            command_line=raw_preview,
+            user_name=str(native_indicators.get("user_name") or ""),
+            process_name=str(native_indicators.get("process_name") or ""),
+            command_line=str(native_indicators.get("command_line") or raw_preview),
         )
         details.update(data)
+        details["parser_confidence"] = native_evtx_confidence(details)
         yield event_record(path, "eventlog-event", details)
 
 
@@ -702,6 +720,165 @@ def iter_evtx_record_blobs(blob: bytes) -> Iterable[tuple[int, bytes]]:
         yield offset, blob[offset : offset + size]
         emitted += 1
         offset += size
+
+
+def native_evtx_record_integrity(record_blob: bytes, offset: int) -> dict[str, object]:
+    declared_size = read_u32(record_blob, 4)
+    trailing_size = read_u32(record_blob, len(record_blob) - 4) if len(record_blob) >= EVTX_RECORD_HEADER_SIZE + 4 else 0
+    trailing_size_present = trailing_size == declared_size
+    return {
+        "magic_valid": record_blob.startswith(EVTX_RECORD_MAGIC),
+        "declared_size": declared_size,
+        "actual_size": len(record_blob),
+        "declared_size_valid": declared_size == len(record_blob),
+        "trailing_size": trailing_size,
+        "trailing_size_valid": trailing_size_present,
+        "offset": offset,
+        "alignment": offset % 8,
+    }
+
+
+def native_evtx_sequence(record_id: int, previous_record_id: int | None) -> dict[str, object]:
+    if not record_id:
+        status = "missing-record-id"
+    elif previous_record_id is None:
+        status = "first-record"
+    elif record_id == previous_record_id + 1:
+        status = "contiguous"
+    elif record_id > previous_record_id + 1:
+        status = "gap"
+    elif record_id <= previous_record_id:
+        status = "non-monotonic"
+    else:
+        status = "unknown"
+    return {
+        "status": status,
+        "previous_record_id": previous_record_id or "",
+        "gap": record_id - previous_record_id - 1 if previous_record_id is not None and record_id > previous_record_id + 1 else 0,
+    }
+
+
+def native_evtx_indicators(strings: Sequence[str], path: Path) -> dict[str, object]:
+    provider = first_matching_string(strings, "Microsoft-Windows-")
+    channel = first_native_channel(strings) or channel_hint_from_path(path)
+    command = first_command_string(strings)
+    process_path = first_process_path(strings)
+    ip_addresses = sorted(set(iter_ip_addresses(strings)))
+    users = sorted(set(iter_user_candidates(strings)))
+    urls = sorted(set(iter_url_candidates(strings)))
+    paths = sorted(set(iter_path_candidates(strings)))
+    return {
+        "provider_name": provider,
+        "channel": channel,
+        "channel_hint_source": "record-string" if first_native_channel(strings) else "filename",
+        "computer": first_matching_string(strings, "WIN-", ".local"),
+        "command_line": command,
+        "process_name": process_path,
+        "source_ip": ip_addresses[0] if ip_addresses else "",
+        "ip_addresses": ip_addresses[:20],
+        "user_name": users[0] if users else "",
+        "user_candidates": users[:20],
+        "url_candidates": urls[:20],
+        "path_candidates": paths[:20],
+        "string_count": len(strings),
+    }
+
+
+def first_native_channel(strings: Sequence[str]) -> str:
+    for value in strings:
+        lowered = value.lower()
+        if "/operational" in lowered or "/admin" in lowered or "/debug" in lowered:
+            return value
+    for value in strings:
+        if value in {"Security", "System", "Application", "Setup"}:
+            return value
+    return ""
+
+
+def channel_hint_from_path(path: Path) -> str:
+    stem = path.stem
+    if not stem:
+        return ""
+    return stem.replace("%4", "/")
+
+
+def first_command_string(strings: Sequence[str]) -> str:
+    command_patterns = (
+        r"\bpowershell(?:\.exe)?\s+",
+        r"\bpwsh(?:\.exe)?\s+",
+        r"\bcmd\.exe\s+",
+        r"\bwscript(?:\.exe)?\s+",
+        r"\bcscript(?:\.exe)?\s+",
+        r"\brundll32(?:\.exe)?\s+",
+        r"\bregsvr32(?:\.exe)?\s+",
+        r"\bmshta(?:\.exe)?\s+",
+        r"\bwevtutil(?:\.exe)?\s+",
+        r"\bvssadmin(?:\.exe)?\s+",
+        r"\bwmic(?:\.exe)?\s+",
+    )
+    for value in strings:
+        lowered = value.lower()
+        if any(re.search(pattern, lowered) for pattern in command_patterns):
+            return value
+    return ""
+
+
+def first_process_path(strings: Sequence[str]) -> str:
+    for value in strings:
+        lowered = value.lower()
+        if lowered.endswith(".exe") or "\\system32\\" in lowered or "\\syswow64\\" in lowered:
+            return value
+    return ""
+
+
+def iter_ip_addresses(strings: Sequence[str]) -> Iterable[str]:
+    for value in strings:
+        for match in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", value):
+            parts = [int(part) for part in match.split(".") if part.isdigit()]
+            if len(parts) == 4 and all(0 <= part <= 255 for part in parts):
+                yield match
+
+
+def iter_user_candidates(strings: Sequence[str]) -> Iterable[str]:
+    for value in strings:
+        if re.fullmatch(r"[A-Za-z0-9._$-]{3,64}", value) and not value.lower().endswith((".exe", ".dll")):
+            if not value.lower().startswith(("microsoft-", "windows", "system32")):
+                yield value
+        domain_user = re.search(r"\b[A-Za-z0-9_.-]+\\[A-Za-z0-9._$-]{2,64}\b", value)
+        if domain_user:
+            yield domain_user.group(0)
+
+
+def iter_url_candidates(strings: Sequence[str]) -> Iterable[str]:
+    for value in strings:
+        for match in re.findall(r"https?://[^\s\"'<>]+", value):
+            yield match.rstrip(".,;)")
+
+
+def iter_path_candidates(strings: Sequence[str]) -> Iterable[str]:
+    for value in strings:
+        if re.search(r"[A-Za-z]:\\", value) or value.startswith("\\\\"):
+            yield value
+
+
+def native_evtx_confidence(details: Mapping[str, object]) -> float:
+    score = 0.55
+    if details.get("record_id"):
+        score += 0.05
+    if details.get("timestamp"):
+        score += 0.05
+    if details.get("provider_name"):
+        score += 0.05
+    if details.get("channel"):
+        score += 0.05
+    integrity = details.get("evtx_record_integrity") if isinstance(details.get("evtx_record_integrity"), Mapping) else {}
+    if integrity.get("declared_size_valid"):
+        score += 0.05
+    if integrity.get("trailing_size_valid"):
+        score += 0.05
+    if details.get("command_line") or details.get("source_ip") or details.get("user_name"):
+        score += 0.05
+    return min(0.82, round(score, 2))
 
 
 def iter_json_rows(path: Path) -> Iterable[Mapping[str, object]]:
@@ -948,8 +1125,10 @@ def build_eventlog_file_record(path: Path, *, native_record_count: int = 0) -> A
             "source_format": "evtx",
             "source_hashes": file_hashes(path),
             "size": stat_result.st_size,
+            "channel_hint": channel_hint_from_path(path),
             "native_record_count": native_record_count,
             "native_parse_status": "partial-record-scan" if native_record_count else "no-records-emitted",
+            "native_parser_scope": "record-header-string-triage",
             "recommended_parsers": ["EvtxECmd", "Hayabusa", "Chainsaw", "Velociraptor Windows.EventLogs.Evtx"],
             "note": "Binary EVTX detected. RapidTriage emits partial native record rows when record headers and UTF-16 strings are recoverable; import EvtxECmd/Hayabusa/Chainsaw/Velociraptor JSONL/CSV/XML output for full BinXML field mapping.",
         },
@@ -1110,6 +1289,9 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
     parser_status_counts: Counter[str] = Counter()
     reportability_counts: Counter[str] = Counter()
     risk_term_counts: Counter[str] = Counter()
+    native_integrity_counts: Counter[str] = Counter()
+    native_sequence_counts: Counter[str] = Counter()
+    native_channel_hint_counts: Counter[str] = Counter()
     source_paths: set[str] = set()
     timestamps: list[str] = []
     high_risk_events: list[dict[str, object]] = []
@@ -1141,6 +1323,16 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         increment_counter(process_counts, process_name)
         increment_counter(parser_status_counts, str(details.get("coverage_status") or ""))
         increment_counter(reportability_counts, str(details.get("reportability") or ""))
+        if details.get("parser") == "windows-eventlog-evtx-native":
+            integrity = details.get("evtx_record_integrity") if isinstance(details.get("evtx_record_integrity"), Mapping) else {}
+            sequence = details.get("evtx_record_sequence") if isinstance(details.get("evtx_record_sequence"), Mapping) else {}
+            native_indicators = details.get("native_indicators") if isinstance(details.get("native_indicators"), Mapping) else {}
+            increment_counter(
+                native_integrity_counts,
+                "trailing-size-valid" if integrity.get("trailing_size_valid") else "trailing-size-unverified",
+            )
+            increment_counter(native_sequence_counts, str(sequence.get("status") or "unknown"))
+            increment_counter(native_channel_hint_counts, str(native_indicators.get("channel_hint_source") or "unknown"))
         for flag in details.get("risk_flags") or []:
             text = str(flag)
             if text.startswith("suspicious-term:"):
@@ -1227,6 +1419,9 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "parser_status_counts": counter_items(parser_status_counts),
         "reportability_counts": counter_items(reportability_counts),
         "risk_term_counts": counter_items(risk_term_counts),
+        "native_integrity_counts": counter_items(native_integrity_counts),
+        "native_sequence_counts": counter_items(native_sequence_counts),
+        "native_channel_hint_counts": counter_items(native_channel_hint_counts),
         "detection_level_counts": counter_items(detection_level_counts),
         "first_event_at": timestamps[0] if timestamps else "",
         "last_event_at": timestamps[-1] if timestamps else "",
