@@ -186,6 +186,15 @@ h2 {
   margin-top: 14px;
 }
 
+.evidence-check-row {
+  display: grid;
+  gap: 8px;
+  border: 1px dashed rgba(31, 111, 104, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+  padding: 10px;
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -217,6 +226,10 @@ textarea:focus {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+.search-filter-grid {
+  align-items: end;
 }
 
 .toggle-row {
@@ -978,6 +991,43 @@ mark {
 
 .viewer-meta span {
   overflow-wrap: anywhere;
+}
+
+.source-metadata-panel {
+  margin: 10px 0;
+}
+
+.metadata-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.metadata-grid .metric b {
+  overflow-wrap: anywhere;
+  font-size: 0.95rem;
+}
+
+.hash-list {
+  display: grid;
+  gap: 6px;
+}
+
+.hash-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(244, 241, 236, 0.52);
+  padding: 8px;
+}
+
+.hash-row code {
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .viewer-text {

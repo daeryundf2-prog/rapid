@@ -188,6 +188,7 @@ rapidtriage web --host 127.0.0.1 --port 8765
 The local UI is a browser-based dashboard served by FastAPI. It supports:
 
 - Creating `run` workflows from a folder path, mounted image root, E01-derived folder, or direct `.E01` image path.
+- Checking evidence support before a run, including folders, E01/Ex01, AD1/L01/Lx01, AFF/AFF4, DD/RAW/IMG/001, ISO/DMG/WIM, VHD/VHDX/VMDK/VDI/XVA/QCOW, mobile packages, and memory dumps.
 - Showing a guided first-run workflow, safe read-only default, and remembered local form/search inputs to reduce repeated typing.
 - For direct `.E01` input, extracting the image read-only into the run output directory through `ewfmount`, `mmls`, and `tsk_recover`, then running the same triage pipeline on the extracted filesystem.
 - Persisting the local run catalog across server restarts.
@@ -200,7 +201,9 @@ The local UI is a browser-based dashboard served by FastAPI. It supports:
 - Downloading generated output files directly from the browser.
 - Filtering result tables in the browser.
 - Previewing source evidence from search results, including text/document snippets, image previews, and safe binary metadata.
+- Computing MD5, SHA1, and SHA256 for an opened source file on demand from the viewer.
 - Searching either the whole case or only the currently opened evidence file from the viewer.
+- Narrowing whole-case search by source, extension, and path fragment before opening results.
 - Using keyboard shortcuts for case search, current-file search, workspace switching, and paginated navigation.
 - Using keyword presets for common review pivots such as credentials, web activity, financial terms, and intrusion indicators.
 - Saving analyst review decisions from the viewer with `Relevant`, `Needs review`, `Not relevant`, tags, notes, and report-candidate flags in `rapidtriage-case.json`.

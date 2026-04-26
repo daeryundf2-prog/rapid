@@ -21,11 +21,17 @@ def run_unified_search(
     *,
     include_ocr: bool = True,
     limit: int = 500,
+    sources: Sequence[str] | None = None,
+    extensions: Sequence[str] | None = None,
+    path_contains: str | None = None,
 ) -> Dict[str, object]:
     summary = load_run_summary(run_summary)
     normalized = [item.strip().lower() for item in keywords if item.strip()]
     if not normalized:
         raise SearchError("at least one keyword is required")
+    normalized_sources = {item.strip().lower() for item in (sources or []) if item.strip()}
+    normalized_extensions = normalize_extensions(extensions or [])
+    normalized_path_fragment = (path_contains or "").strip().lower()
 
     outputs = summary.get("outputs")
     if not isinstance(outputs, Mapping):
@@ -40,6 +46,12 @@ def run_unified_search(
     if include_ocr:
         ocr_matches, ocr_errors = search_ocr(outputs, normalized, limit=limit)
         matches.extend(ocr_matches)
+    matches = filter_matches(
+        matches,
+        sources=normalized_sources,
+        extensions=normalized_extensions,
+        path_fragment=normalized_path_fragment,
+    )
 
     if limit:
         matches = matches[:limit]
@@ -59,6 +71,9 @@ def run_unified_search(
         "options": {
             "include_ocr": include_ocr,
             "limit": limit,
+            "sources": sorted(normalized_sources),
+            "extensions": sorted(normalized_extensions),
+            "path_contains": normalized_path_fragment,
         },
         "summary": {
             "match_count": len(matches),
@@ -277,6 +292,38 @@ def search_ocr(
 def match_keywords(text: str, keywords: Sequence[str]) -> list[str]:
     lower = text.lower()
     return [keyword for keyword in keywords if keyword in lower]
+
+
+def normalize_extensions(values: Sequence[str]) -> set[str]:
+    normalized: set[str] = set()
+    for value in values:
+        item = value.strip().lower()
+        if not item:
+            continue
+        normalized.add(item if item.startswith(".") else f".{item}")
+    return normalized
+
+
+def filter_matches(
+    matches: Sequence[Mapping[str, object]],
+    *,
+    sources: set[str],
+    extensions: set[str],
+    path_fragment: str,
+) -> list[dict[str, object]]:
+    filtered: list[dict[str, object]] = []
+    for match in matches:
+        source = str(match.get("source") or "").lower()
+        path = str(match.get("path") or "")
+        suffix = Path(path).suffix.lower()
+        if sources and source not in sources:
+            continue
+        if extensions and suffix not in extensions:
+            continue
+        if path_fragment and path_fragment not in path.lower():
+            continue
+        filtered.append(dict(match))
+    return filtered
 
 
 def read_json_output(outputs: Mapping[str, object], name: str) -> Mapping[str, object] | None:

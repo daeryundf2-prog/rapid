@@ -62,6 +62,23 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(payload["run"]["origin"], "imported")
             self.assertTrue((Path(tmp_dir) / "sample" / "run-output" / "rapidtriage-run-summary.json").is_file())
 
+    def test_evidence_identify_api_reports_extended_container_support(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source = Path(tmp_dir) / "phone-export.ad1"
+            source.write_bytes(b"fixture")
+            client = TestClient(create_app(RunJobStore()))
+
+            response = client.post("/api/evidence/identify", json={"path": str(source)})
+
+            self.assertEqual(response.status_code, 200, response.text)
+            payload = response.json()
+            self.assertEqual(payload["command"], "evidence.identify")
+            self.assertEqual(payload["result"]["adapter"], "forensic-container")
+            self.assertEqual(payload["result"]["detected_format"], "ad1")
+            self.assertEqual(payload["result"]["supported"], True)
+            self.assertEqual(payload["result"]["can_extract"], False)
+            self.assertTrue(any(".ad1" in item["suffixes"] for item in payload["formats"]))
+
     def test_create_run_waits_and_exposes_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
@@ -113,6 +130,15 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(preview_response.status_code, 200)
             self.assertEqual(preview_response.json()["preview_type"], "text")
             self.assertIn("password", preview_response.json()["text"])
+            metadata_response = client.get(
+                f"/api/runs/{run_id}/source-metadata",
+                params={"path": document_match["path"], "hash": "true"},
+            )
+            self.assertEqual(metadata_response.status_code, 200)
+            metadata_payload = metadata_response.json()
+            self.assertEqual(metadata_payload["command"], "source-metadata")
+            self.assertEqual(metadata_payload["hash_status"], "computed")
+            self.assertEqual(metadata_payload["hashes"]["sha256"], hash_file(Path(document_match["path"]), "sha256"))
             file_search_response = client.get(
                 f"/api/runs/{run_id}/source-search",
                 params={"path": document_match["path"], "keyword": "password"},
@@ -123,6 +149,23 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(file_search_payload["summary"]["match_count"], 1)
             self.assertEqual(file_search_payload["matches"][0]["keyword"], "password")
             self.assertIn("password", file_search_payload["matches"][0]["snippet"].lower())
+            filtered_search_response = client.get(
+                f"/api/runs/{run_id}/search",
+                params={
+                    "keyword": "password",
+                    "ocr": "false",
+                    "source": "documents",
+                    "extension": ".txt",
+                    "path_contains": "case-root",
+                },
+            )
+            self.assertEqual(filtered_search_response.status_code, 200)
+            filtered_search_payload = filtered_search_response.json()
+            self.assertGreaterEqual(filtered_search_payload["summary"]["match_count"], 1)
+            self.assertEqual(filtered_search_payload["options"]["sources"], ["documents"])
+            self.assertEqual(filtered_search_payload["options"]["extensions"], [".txt"])
+            self.assertTrue(all(item["source"] == "documents" for item in filtered_search_payload["matches"]))
+            self.assertTrue(all(Path(item["path"]).suffix == ".txt" for item in filtered_search_payload["matches"]))
             paged_files_response = client.get(f"/api/runs/{run_id}/files", params={"offset": 1, "limit": 2})
             self.assertEqual(paged_files_response.status_code, 200)
             paged_files = paged_files_response.json()

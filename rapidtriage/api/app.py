@@ -4,6 +4,7 @@ import json
 import mimetypes
 import os
 import re
+import datetime as dt
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 from urllib.parse import quote
@@ -20,11 +21,12 @@ from ..core.case_report import build_case_report_markdown
 from ..core.case_db import CaseDatabaseError, open_case_database
 from ..core.docs import SUPPORTED_DOC_EXTS, extract_text
 from ..core.doctor import run_doctor
+from ..core.evidence import identify_evidence, supported_evidence_formats
 from ..core.jobs import RunJobStore, RunRequest, default_job_store, is_relative_to, run_output_dir
 from ..core.run import RunModeError
 from ..core.sample_case import DEFAULT_SAMPLE_MODE, SampleCaseError, run_sample_workflow
 from ..core.search import SearchError, run_unified_search
-from ..core.submission import build_submission_manifest
+from ..core.submission import compute_hashes, build_submission_manifest
 
 
 class RunCreateRequest(BaseModel):
@@ -116,6 +118,10 @@ class CaseCatalogAddRunRequest(BaseModel):
     organization: str = ""
 
 
+class EvidenceIdentifyRequest(BaseModel):
+    path: str = Field(..., min_length=1)
+
+
 def create_app(job_store: RunJobStore | None = None, auth_token: str | None = None) -> FastAPI:
     store = job_store or default_job_store
     api = FastAPI(title="rapidtriage local API", version="0.2.0")
@@ -137,6 +143,22 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     @api.get("/api/doctor")
     def doctor() -> Dict[str, object]:
         return run_doctor(include_port_check=False)
+
+    @api.get("/api/evidence/formats")
+    def evidence_formats() -> Dict[str, object]:
+        return {"formats": supported_evidence_formats()}
+
+    @api.post("/api/evidence/identify")
+    def identify_evidence_path(request: EvidenceIdentifyRequest) -> Dict[str, object]:
+        try:
+            result = identify_evidence(Path(request.path))
+            return {
+                "command": "evidence.identify",
+                "result": result.to_dict(),
+                "formats": supported_evidence_formats(),
+            }
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/sample-case/run", status_code=201)
     def run_sample_case(request: SampleCaseRunRequest) -> Dict[str, object]:
@@ -382,14 +404,30 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         keyword: list[str] = Query(..., min_length=1),
         ocr: bool = True,
         limit: int = Query(500, ge=1, le=1000),
+        source: list[str] = Query(default=[]),
+        extension: list[str] = Query(default=[]),
+        path_contains: Optional[str] = Query(default=None),
     ) -> Dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
         try:
-            return run_unified_search(job.summary, keyword, include_ocr=ocr, limit=limit)
+            return run_unified_search(
+                job.summary,
+                keyword,
+                include_ocr=ocr,
+                limit=limit,
+                sources=source,
+                extensions=extension,
+                path_contains=path_contains,
+            )
         except SearchError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+
+    @api.get("/api/runs/{run_id}/source-metadata")
+    def source_metadata(run_id: str, path: str = Query(..., min_length=1), hash: bool = False) -> Dict[str, object]:
+        source_path = resolve_allowed_source_file(store, run_id, path)
+        return build_source_metadata(source_path, include_hashes=hash)
 
     @api.get("/api/runs/{run_id}/report", response_class=PlainTextResponse)
     def get_run_report(run_id: str) -> str:
@@ -736,6 +774,7 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
     stat = source_path.stat()
     suffix = source_path.suffix.lower()
     mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+    quoted_path = quote(str(source_path))
     payload: Dict[str, object] = {
         "path": str(source_path),
         "name": source_path.name,
@@ -743,7 +782,8 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         "size": stat.st_size,
         "modified_at": source_path.stat().st_mtime,
         "mime_type": mime_type,
-        "download_url": f"/api/runs/{run_id}/source-file?path={quote(str(source_path))}",
+        "download_url": f"/api/runs/{run_id}/source-file?path={quoted_path}",
+        "metadata_url": f"/api/runs/{run_id}/source-metadata?path={quoted_path}",
         "preview_type": "binary",
         "text": "",
         "truncated": False,
@@ -775,6 +815,31 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         payload["truncated"] = len(text) > max_chars
         payload["message"] = "Text preview is available."
     return payload
+
+
+def build_source_metadata(source_path: Path, *, include_hashes: bool) -> Dict[str, object]:
+    stat = source_path.stat()
+    mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+    payload: Dict[str, object] = {
+        "command": "source-metadata",
+        "path": str(source_path),
+        "name": source_path.name,
+        "extension": source_path.suffix.lower(),
+        "size": stat.st_size,
+        "modified_at": dt_from_epoch(stat.st_mtime),
+        "created_at": dt_from_epoch(getattr(stat, "st_birthtime", stat.st_ctime)),
+        "mime_type": mime_type,
+        "hashes": {},
+        "hash_status": "not-requested",
+    }
+    if include_hashes:
+        payload["hashes"] = compute_hashes(source_path)
+        payload["hash_status"] = "computed"
+    return payload
+
+
+def dt_from_epoch(value: float) -> str:
+    return dt.datetime.fromtimestamp(value).isoformat()
 
 
 def build_source_search(

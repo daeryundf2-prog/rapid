@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol
@@ -75,7 +77,7 @@ class EwfAdapter:
 
 class RawImageAdapter:
     name = "raw-image"
-    supported_suffixes = (".dd", ".raw", ".img")
+    supported_suffixes = (".dd", ".raw", ".img", ".001", ".000", ".0000", ".0001", ".00001", ".ima")
 
     def identify(self, source: Path) -> EvidenceAdapterResult:
         supported = source.suffix.lower() in self.supported_suffixes
@@ -88,35 +90,38 @@ class RawImageAdapter:
             can_extract=False,
             required_tools=[],
             missing_tools=[],
-            message="Raw image detected. Mount/extract support is planned; scan a mounted folder for now.",
+            message="Raw/split image detected. Mount it with OS/forensic tooling, then scan the mounted or recovered folder.",
         )
 
 
 class IsoAdapter:
     name = "iso"
-    supported_suffixes = (".iso",)
+    supported_suffixes = (".iso", ".dmg", ".wim", ".swm")
 
     def identify(self, source: Path) -> EvidenceAdapterResult:
         supported = source.suffix.lower() in self.supported_suffixes
+        suffix = source.suffix.lower().lstrip(".")
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
-            detected_format="iso",
+            detected_format=suffix or "optical-archive-image",
             supported=supported,
             can_mount=False,
             can_extract=False,
             required_tools=[],
             missing_tools=[],
-            message="ISO detected. Mount/extract support is planned; scan a mounted folder for now.",
+            message=f"{suffix.upper()} image detected. Mount/extract it first, then scan the mounted folder.",
         )
 
 
 class VirtualDiskAdapter:
     name = "virtual-disk"
-    supported_suffixes = (".vhd", ".vhdx", ".vmdk")
+    supported_suffixes = (".vhd", ".vhdx", ".vmdk", ".vdi", ".xva", ".qcow", ".qcow2")
 
     def identify(self, source: Path) -> EvidenceAdapterResult:
         supported = source.suffix.lower() in self.supported_suffixes
+        recommended_tools = recommended_virtual_disk_tools(source.suffix.lower())
+        missing = [tool for tool in recommended_tools if shutil.which(tool) is None]
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -124,9 +129,83 @@ class VirtualDiskAdapter:
             supported=supported,
             can_mount=False,
             can_extract=False,
+            required_tools=recommended_tools,
+            missing_tools=missing,
+            message=(
+                "Virtual disk detected. Use Windows Disk Management/PowerShell, qemu-nbd, or guestmount to expose it, "
+                "then scan the mounted filesystem folder."
+            ),
+        )
+
+
+class ForensicContainerAdapter:
+    name = "forensic-container"
+    supported_suffixes = (".ad1", ".l01", ".lx01", ".aff", ".aff4", ".aff4-l")
+
+    def identify(self, source: Path) -> EvidenceAdapterResult:
+        supported = source.suffix.lower() in self.supported_suffixes
+        suffix = source.suffix.lower().lstrip(".")
+        return EvidenceAdapterResult(
+            adapter=self.name,
+            source_path=str(source),
+            detected_format=suffix or "forensic-container",
+            supported=supported,
+            can_mount=False,
+            can_extract=False,
             required_tools=[],
             missing_tools=[],
-            message="Virtual disk detected. Mount/extract support is planned; scan a mounted folder for now.",
+            message=(
+                f"{suffix.upper()} forensic container detected. Direct parsing is not implemented yet; "
+                "export or mount it with the acquisition vendor/tool, then scan the resulting folder."
+            ),
+        )
+
+
+class MobilePackageAdapter:
+    name = "mobile-package"
+    supported_suffixes = (".ab", ".ufd", ".ufdx")
+
+    def identify(self, source: Path) -> EvidenceAdapterResult:
+        supported = source.suffix.lower() in self.supported_suffixes
+        suffix = source.suffix.lower().lstrip(".")
+        return EvidenceAdapterResult(
+            adapter=self.name,
+            source_path=str(source),
+            detected_format=suffix or "mobile-package",
+            supported=supported,
+            can_mount=False,
+            can_extract=False,
+            required_tools=[],
+            missing_tools=[],
+            message=(
+                f"{suffix.upper()} mobile extraction package detected. Import/parsing is planned; "
+                "for now export files/databases from Cellebrite/XRY/GrayKey/AXIOM and scan that folder."
+            ),
+        )
+
+
+class MemoryDumpAdapter:
+    name = "memory-dump"
+    supported_suffixes = (".mem", ".dmp", ".vmem", ".vmss", ".vmsn", ".hpak", ".crash")
+
+    def identify(self, source: Path) -> EvidenceAdapterResult:
+        supported = source.suffix.lower() in self.supported_suffixes
+        suffix = source.suffix.lower().lstrip(".")
+        volatility = "vol"
+        missing = [] if shutil.which(volatility) else [volatility]
+        return EvidenceAdapterResult(
+            adapter=self.name,
+            source_path=str(source),
+            detected_format=suffix or "memory-dump",
+            supported=supported,
+            can_mount=False,
+            can_extract=False,
+            required_tools=[volatility],
+            missing_tools=missing,
+            message=(
+                "Memory dump detected. RapidTriage can inventory/hash the file; deep memory analysis should be run "
+                "with Volatility/Volatility3 and imported as reports/logs."
+            ),
         )
 
 
@@ -151,9 +230,12 @@ class UnsupportedAdapter:
 ADAPTERS: tuple[EvidenceAdapter, ...] = (
     FolderAdapter(),
     EwfAdapter(),
+    ForensicContainerAdapter(),
     RawImageAdapter(),
     IsoAdapter(),
     VirtualDiskAdapter(),
+    MobilePackageAdapter(),
+    MemoryDumpAdapter(),
 )
 
 
@@ -166,3 +248,23 @@ def identify_evidence(source: Path) -> EvidenceAdapterResult:
         if suffix in adapter.supported_suffixes:
             return adapter.identify(resolved)
     return UnsupportedAdapter().identify(resolved)
+
+
+def recommended_virtual_disk_tools(suffix: str) -> list[str]:
+    if sys.platform.startswith("win"):
+        if suffix in (".vhd", ".vhdx"):
+            return ["powershell"]
+        return ["qemu-img"]
+    if suffix in (".vmdk", ".vdi", ".qcow", ".qcow2", ".xva"):
+        return ["qemu-img"]
+    return []
+
+
+def supported_evidence_formats() -> list[dict[str, object]]:
+    return [
+        {
+            "adapter": adapter.name,
+            "suffixes": list(adapter.supported_suffixes),
+        }
+        for adapter in ADAPTERS
+    ]

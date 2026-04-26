@@ -6,6 +6,8 @@ const importButton = document.querySelector("#importButton");
 const refreshButton = document.querySelector("#refreshButton");
 const sampleRunButton = document.querySelector("#sampleRunButton");
 const doctorButton = document.querySelector("#doctorButton");
+const evidenceCheckButton = document.querySelector("#evidenceCheckButton");
+const evidenceCheckStatus = document.querySelector("#evidenceCheckStatus");
 const runList = document.querySelector("#runList");
 const detailPanel = document.querySelector("#detailPanel");
 const RUN_FORM_STORAGE_KEY = "rapidtriage.runForm.v1";
@@ -585,13 +587,43 @@ function renderDocs(payload) {
 
 function renderSearch(payload = null) {
   const rows = payload?.matches || [];
-  const draft = payload ? { keywords: payload.keywords || [], ocr: payload.ocr?.enabled !== false } : getSearchDraft();
+  const draft = payload
+    ? {
+        keywords: payload.keywords || [],
+        ocr: payload.ocr?.enabled !== false,
+        source: (payload.options?.sources || [])[0] || "",
+        extension: (payload.options?.extensions || [])[0] || "",
+        path_contains: payload.options?.path_contains || "",
+      }
+    : getSearchDraft();
   const draftText = (draft.keywords || []).join(", ");
   return `
     <form id="unifiedSearchForm" class="search-form">
       <label>
         Entire case search ${kbd("Ctrl K")}
         <input id="unifiedSearchInput" value="${escapeHtml(draftText)}" placeholder="Search documents, web history, logs, OCR..." required />
+      </label>
+      <div class="field-grid search-filter-grid">
+        <label>
+          Source
+          <select id="unifiedSearchSource">
+            <option value="">All sources</option>
+            <option value="documents" ${draft.source === "documents" ? "selected" : ""}>Documents</option>
+            <option value="files" ${draft.source === "files" ? "selected" : ""}>File metadata</option>
+            <option value="web" ${draft.source === "web" ? "selected" : ""}>Web artifacts</option>
+            <option value="artifacts" ${draft.source === "artifacts" ? "selected" : ""}>Other artifacts</option>
+            <option value="timeline" ${draft.source === "timeline" ? "selected" : ""}>Timeline</option>
+            <option value="ocr" ${draft.source === "ocr" ? "selected" : ""}>OCR</option>
+          </select>
+        </label>
+        <label>
+          Extension
+          <input id="unifiedSearchExtension" value="${escapeHtml(draft.extension || "")}" placeholder=".pdf, .log, .sqlite" />
+        </label>
+      </div>
+      <label>
+        Path contains
+        <input id="unifiedSearchPath" value="${escapeHtml(draft.path_contains || "")}" placeholder="Users, Downloads, AppData..." />
       </label>
       <label class="check-label"><input id="unifiedSearchOcr" type="checkbox" ${draft.ocr === false ? "" : "checked"} /> Include OCR on image candidates</label>
       <button id="unifiedSearchButton" type="submit">Search evidence</button>
@@ -680,18 +712,24 @@ function bindSearchForm() {
     const input = detailPanel.querySelector("#unifiedSearchInput");
     const button = detailPanel.querySelector("#unifiedSearchButton");
     const includeOcr = detailPanel.querySelector("#unifiedSearchOcr")?.checked ?? true;
+    const source = detailPanel.querySelector("#unifiedSearchSource")?.value || "";
+    const extension = detailPanel.querySelector("#unifiedSearchExtension")?.value || "";
+    const pathContains = detailPanel.querySelector("#unifiedSearchPath")?.value || "";
     const keywords = String(input.value || "")
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean);
     if (!keywords.length) return;
-    setSearchDraft({ keywords, ocr: includeOcr });
+    setSearchDraft({ keywords, ocr: includeOcr, source, extension, path_contains: pathContains });
     button.disabled = true;
     button.textContent = "Searching...";
     try {
       const params = new URLSearchParams();
       for (const keyword of keywords) params.append("keyword", keyword);
       params.set("ocr", includeOcr ? "true" : "false");
+      if (source) params.append("source", source);
+      if (extension) params.append("extension", extension);
+      if (pathContains) params.set("path_contains", pathContains);
       const payload = await api(`/api/runs/${selectedRunId}/search?${params.toString()}`);
       detailPanel.querySelector("#tabBody").innerHTML = renderSearch(payload);
       bindSearchForm();
@@ -738,6 +776,7 @@ function renderEvidenceViewer(payload, reviewContext = null) {
   const openLink = `<a class="mini-link" href="${escapeHtml(payload.download_url)}" target="_blank" rel="noreferrer">Open source</a>`;
   const copyButton = `<button class="icon-action" type="button" data-copy-path="${escapeHtml(payload.path)}">Copy path</button>`;
   const pinButton = `<button class="icon-action" type="button" data-compare-item="${escapeHtml(JSON.stringify(compareItemFromPreview(payload, reviewContext)))}">Pin compare</button>`;
+  const hashButton = `<button class="icon-action" type="button" data-source-hash-path="${escapeHtml(payload.path)}">Compute hashes</button>`;
   let body = `<p class="empty-state">${escapeHtml(payload.message || "No preview available.")}</p>`;
   if (payload.preview_type === "image") {
     body = `<img class="viewer-image" src="${escapeHtml(payload.image_url)}" alt="${escapeHtml(payload.name)}" />`;
@@ -754,13 +793,16 @@ function renderEvidenceViewer(payload, reviewContext = null) {
         <p class="eyebrow">evidence viewer</p>
         <h3>${escapeHtml(payload.name)}</h3>
       </div>
-      <div class="detail-actions">${openLink}${copyButton}${pinButton}</div>
+      <div class="detail-actions">${openLink}${copyButton}${pinButton}${hashButton}</div>
     </div>
     <div class="viewer-meta">
       <span>${escapeHtml(payload.mime_type)}</span>
       <span>${formatBytes(payload.size)}</span>
       <span>${escapeHtml(payload.path)}</span>
     </div>
+    <section id="sourceMetadataPanel" class="source-metadata-panel">
+      <p class="help-text">해시는 큰 파일에서 시간이 걸릴 수 있어 필요할 때만 계산합니다.</p>
+    </section>
     ${renderFileSearchBox(payload)}
     ${renderReviewCapture(reviewContext, payload)}
     ${body}
@@ -823,6 +865,13 @@ function renderReviewCapture(reviewContext, payload) {
 function bindViewerButtons() {
   bindCopyButtons();
   bindCompareActions();
+  for (const button of detailPanel.querySelectorAll("[data-source-hash-path]")) {
+    if (button.dataset.hashBound) continue;
+    button.dataset.hashBound = "1";
+    button.addEventListener("click", async () => {
+      await loadSourceMetadata(button.dataset.sourceHashPath, button);
+    });
+  }
   const fileSearchForm = detailPanel.querySelector("#fileSearchForm");
   if (fileSearchForm) fileSearchForm.addEventListener("submit", searchCurrentFile);
   const reviewForm = detailPanel.querySelector("#viewerReviewForm");
@@ -833,6 +882,45 @@ function bindViewerButtons() {
       if (includeInput && event.target.value === "relevant") includeInput.checked = true;
     });
   }
+}
+
+async function loadSourceMetadata(path, button) {
+  const panel = detailPanel.querySelector("#sourceMetadataPanel");
+  if (!panel || !path) return;
+  button.disabled = true;
+  button.textContent = "Hashing...";
+  panel.innerHTML = '<p class="empty-state">Computing MD5/SHA1/SHA256 for this source file...</p>';
+  try {
+    const payload = await api(`/api/runs/${selectedRunId}/source-metadata?path=${encodeURIComponent(path)}&hash=true`);
+    panel.innerHTML = renderSourceMetadata(payload);
+    bindCopyButtons();
+  } catch (error) {
+    panel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Compute hashes";
+  }
+}
+
+function renderSourceMetadata(payload) {
+  const hashes = payload.hashes || {};
+  return `
+    <div class="metadata-grid">
+      ${metric("Size", formatBytes(payload.size))}
+      ${metric("Hash", escapeHtml(payload.hash_status || "unknown"))}
+      ${metric("Extension", escapeHtml(payload.extension || "(none)"))}
+      ${metric("MIME", escapeHtml(payload.mime_type || "unknown"))}
+    </div>
+    <div class="hash-list">
+      ${Object.entries(hashes).map(([name, value]) => `
+        <div class="hash-row">
+          <strong>${escapeHtml(name.toUpperCase())}</strong>
+          <code>${escapeHtml(value)}</code>
+          <button class="icon-action" type="button" data-copy-path="${escapeHtml(value)}">Copy</button>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 async function searchCurrentFile(event) {
@@ -1996,15 +2084,18 @@ function searchStorageKey() {
 }
 
 function getSearchDraft() {
-  if (!storageAvailable()) return { keywords: [], ocr: true };
+  if (!storageAvailable()) return { keywords: [], ocr: true, source: "", extension: "", path_contains: "" };
   try {
     const payload = JSON.parse(window.localStorage.getItem(searchStorageKey()) || "{}");
     return {
       keywords: Array.isArray(payload.keywords) ? payload.keywords : [],
       ocr: payload.ocr !== false,
+      source: payload.source || "",
+      extension: payload.extension || "",
+      path_contains: payload.path_contains || "",
     };
   } catch {
-    return { keywords: [], ocr: true };
+    return { keywords: [], ocr: true, source: "", extension: "", path_contains: "" };
   }
 }
 
@@ -2105,6 +2196,44 @@ doctorButton?.addEventListener("click", async () => {
     doctorButton.textContent = "Check runtime";
   }
 });
+
+evidenceCheckButton?.addEventListener("click", checkEvidenceSupport);
+
+async function checkEvidenceSupport() {
+  const root = document.querySelector("#rootInput")?.value?.trim();
+  if (!root) {
+    evidenceCheckStatus.textContent = "Enter a folder or evidence image path first.";
+    return;
+  }
+  evidenceCheckButton.disabled = true;
+  evidenceCheckButton.textContent = "Checking...";
+  evidenceCheckStatus.textContent = "Inspecting evidence adapter support...";
+  try {
+    const payload = await api("/api/evidence/identify", {
+      method: "POST",
+      body: JSON.stringify({ path: root }),
+    });
+    evidenceCheckStatus.innerHTML = renderEvidenceCheckStatus(payload.result || {});
+  } catch (error) {
+    evidenceCheckStatus.textContent = error.message;
+  } finally {
+    evidenceCheckButton.disabled = false;
+    evidenceCheckButton.textContent = "Check evidence support";
+  }
+}
+
+function renderEvidenceCheckStatus(result) {
+  const support = result.supported ? "supported" : "not supported";
+  const action = result.can_extract || result.can_mount ? "direct handling available" : "mount/export first";
+  const missing = (result.missing_tools || []).length ? ` Missing tools: ${(result.missing_tools || []).join(", ")}.` : "";
+  return `
+    <strong>${escapeHtml((result.detected_format || "unknown").toUpperCase())}</strong>
+    · ${escapeHtml(result.adapter || "adapter")}
+    · ${escapeHtml(support)}
+    · ${escapeHtml(action)}.
+    ${escapeHtml(result.message || "")}${escapeHtml(missing)}
+  `;
+}
 
 function renderDoctorPanel(payload) {
   const checks = payload.checks || [];

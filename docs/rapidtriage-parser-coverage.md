@@ -19,7 +19,11 @@
 | Jump Lists/LNK | Planned | Link and destination parsing pending. |
 | Volume Shadow Copy compare | Planned | Current-vs-snapshot deleted file delta and VSC deletion-command detection. |
 | Linux XFS | Planned | Filesystem adapter/extraction requirement for Linux server images. |
-| Virtual disks VHD/VHDX/VMDK/XVA | Partial | VHD/VHDX/VMDK detection exists; extraction and XVA support are planned. |
+| Forensic containers AD1/L01/Lx01/AFF/AFF4 | Detection | UI/API adapter detection exists; direct parsing requires vendor/tool export first. |
+| Raw/split images DD/RAW/IMG/001 | Detection | UI/API adapter detection exists; mount or recover externally, then scan the folder. |
+| Optical/archive images ISO/DMG/WIM/SWM | Detection | UI/API adapter detection exists; mount/extract externally, then scan the folder. |
+| Virtual disks VHD/VHDX/VMDK/VDI/XVA/QCOW/QCOW2 | Detection | UI/API adapter detection exists with platform tool hints; extraction/mount orchestration is planned. |
+| Memory dumps MEM/DMP/VMEM/VMSS/VMSN/HPAK | Detection | Inventory/hash detection exists; deep memory parsing remains deferred to Volatility-style tools. |
 | APK malware triage | Deferred | APK extraction/hash/YARA-style scan can precede full mobile acquisition. |
 | Memory forensics | Deferred | RAM dump parsing, BitLocker key search, and process-risk visualization are separate long-term work. |
 | Threat intelligence enrichment | Planned | Optional URL/IP/hash enrichment plugin, disabled by default. |
