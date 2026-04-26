@@ -205,7 +205,7 @@ Use image triage when a case has many screenshots, photos, or scanned documents 
 rapidtriage artifacts ./mounted-case --kind media-image --output media-images.json
 ```
 
-The collector records file hashes, dimensions, channel count, an average perceptual hash, a short similarity bucket, and whether the file should be queued for OCR. The perceptual hash is a grouping hint for fast review, not a courtroom-grade similarity conclusion by itself.
+The collector records file hashes, dimensions, channel count, an average perceptual hash, a short similarity bucket, a bounded inline PNG thumbnail preview, and whether the file should be queued for OCR. The perceptual hash is a grouping hint for fast review, not a courtroom-grade similarity conclusion by itself.
 
 ## Memory Forensics Imports
 

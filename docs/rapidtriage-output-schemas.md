@@ -185,7 +185,7 @@ Media image collector rows:
   - `media-image`
   - `media-image-unreadable`
 
-Current media image rows carry `parser`, `parser_version`, `source_path`, `source_format`, `hashes`, `width`, `height`, `channel_count`, `perceptual_hash`, `similarity_bucket`, and `ocr_candidate` under `details` when decoding succeeds.
+Current media image rows carry `parser`, `parser_version`, `source_path`, `source_format`, `hashes`, `width`, `height`, `channel_count`, `perceptual_hash`, `similarity_bucket`, `thumbnail_preview`, and `ocr_candidate` under `details` when decoding succeeds.
 
 Memory Volatility collector rows:
 

@@ -43,6 +43,14 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertEqual(details["similarity_bucket"], details["perceptual_hash"][:8])
             self.assertIn("sha256", details["hashes"])
             self.assertTrue(details["ocr_candidate"])
+            thumbnail = details["thumbnail_preview"]
+            self.assertTrue(thumbnail["available"])
+            self.assertEqual(thumbnail["strategy"], "bounded-inline-png")
+            self.assertEqual(thumbnail["format"], "png")
+            self.assertEqual(thumbnail["width"], 16)
+            self.assertEqual(thumbnail["height"], 16)
+            self.assertIn("sha256", thumbnail)
+            self.assertTrue(thumbnail["data_uri"].startswith("data:image/png;base64,"))
 
 
 def write_image_fixture(path: Path) -> None:

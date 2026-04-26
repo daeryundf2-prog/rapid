@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 from pathlib import Path
 from typing import Iterable
 
@@ -8,8 +10,10 @@ import cv2
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 
-PARSER_VERSION = "media-image-v1"
+PARSER_VERSION = "media-image-v2"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+THUMBNAIL_MAX_DIMENSION = 128
+THUMBNAIL_MAX_BYTES = 64 * 1024
 
 
 class MediaImageProvider:
@@ -64,6 +68,7 @@ def build_image_record(path: Path) -> ArtifactRecord:
                 "perceptual_hash": perceptual_hash,
                 "similarity_bucket": perceptual_hash[:8],
                 "ocr_candidate": True,
+                "thumbnail_preview": build_thumbnail_preview(image),
             }
         )
         artifact_type = "media-image"
@@ -82,6 +87,40 @@ def average_hash(image) -> str:
     mean_value = resized.mean()
     bits = "".join("1" if value >= mean_value else "0" for value in resized.flatten())
     return f"{int(bits, 2):016x}"
+
+
+def build_thumbnail_preview(image) -> dict[str, object]:
+    height, width = image.shape[:2]
+    scale = min(1.0, THUMBNAIL_MAX_DIMENSION / max(width, height))
+    thumbnail_width = max(1, int(round(width * scale)))
+    thumbnail_height = max(1, int(round(height * scale)))
+    if scale < 1.0:
+        thumbnail = cv2.resize(image, (thumbnail_width, thumbnail_height), interpolation=cv2.INTER_AREA)
+    else:
+        thumbnail = image
+    success, encoded = cv2.imencode(".png", thumbnail)
+    if not success:
+        return {
+            "strategy": "bounded-inline-png",
+            "available": False,
+            "reason": "opencv-imencode-failed",
+        }
+    data = encoded.tobytes()
+    preview: dict[str, object] = {
+        "strategy": "bounded-inline-png",
+        "available": True,
+        "format": "png",
+        "width": int(thumbnail_width),
+        "height": int(thumbnail_height),
+        "byte_size": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+    if len(data) <= THUMBNAIL_MAX_BYTES:
+        preview["data_uri"] = "data:image/png;base64," + base64.b64encode(data).decode("ascii")
+    else:
+        preview["available"] = False
+        preview["reason"] = "thumbnail-exceeds-inline-limit"
+    return preview
 
 
 def has_plausible_image_signature(path: Path) -> bool:
