@@ -41,7 +41,9 @@ SUPPORTED_DOC_EXTS = {
     ".odt",
     ".pdf",
     ".pptx",
+    ".pst",
     ".rtf",
+    ".ost",
     ".tsv",
     ".txt",
     ".xlsx",
@@ -69,6 +71,7 @@ OFFICE_OPEN_XML_EXTS = {"docx", "pptx", "xlsx"}
 OPEN_DOCUMENT_EXTS = {"odp", "ods", "odt"}
 DOCS_INDEX_TOKEN_PATTERN = re.compile(r"[\w@./:-]{2,}", flags=re.UNICODE)
 DOCS_INDEX_VERSION = 1
+BOUNDED_MAIL_CONTAINER_SCAN_LIMIT = 2 * 1024 * 1024
 
 
 def scan_document_candidates(root: Union[InputRoot, Path], limit: int = 0) -> List[DocumentCandidate]:
@@ -246,7 +249,9 @@ def extract_text(path: Path, kind: str) -> str:
     if kind == "mbox":
         return _extract_mbox_text(path)
     if kind == "msg":
-        return _extract_msg_text(path)
+        return _extract_bounded_container_text(path)
+    if kind in {"ost", "pst"}:
+        return _extract_bounded_container_text(path)
     if kind in HTML_EXTS:
         return _strip_markup(path.read_text(encoding="utf-8", errors="ignore"))
     if kind in OFFICE_OPEN_XML_EXTS:
@@ -353,10 +358,15 @@ def _extract_mbox_text(path: Path, *, message_limit: int = 25) -> str:
     return "\n\n".join(text for text in texts if text)
 
 
-def _extract_msg_text(path: Path, *, scan_limit: int = 2 * 1024 * 1024) -> str:
-    blob = path.read_bytes()[:scan_limit]
+def _extract_bounded_container_text(path: Path, *, scan_limit: int = BOUNDED_MAIL_CONTAINER_SCAN_LIMIT) -> str:
+    blob = _read_prefix(path, scan_limit)
     strings = _unique_strings([*_extract_ascii_strings(blob), *_extract_utf16_strings(blob)])
     return "\n".join(strings)
+
+
+def _read_prefix(path: Path, limit: int) -> bytes:
+    with path.open("rb") as handle:
+        return handle.read(limit)
 
 
 def _email_message_to_text(message: EmailMessage) -> str:

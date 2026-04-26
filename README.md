@@ -263,7 +263,7 @@ Schema and sample references:
 
 Implemented:
 
-- `docs` searches text/config/log/data files, EML/MBOX email, bounded Outlook MSG strings, HTML/RTF, PDF, Office OpenXML (`docx`, `xlsx`, `pptx`), and OpenDocument (`odt`, `ods`, `odp`) bodies for keywords; it can also write an AXIOM-inspired processed-text inverted index sidecar for faster post-processing keyword pivots.
+- `docs` searches text/config/log/data files, EML/MBOX email, bounded Outlook MSG/PST/OST strings, HTML/RTF, PDF, Office OpenXML (`docx`, `xlsx`, `pptx`), and OpenDocument (`odt`, `ods`, `odp`) bodies for keywords; it can also write an AXIOM-inspired processed-text inverted index sidecar for faster post-processing keyword pivots.
 - `files` performs metadata-only triage over names, paths, extensions, sizes, and mtimes, including document, archive, database, executable/script, email archive, AXIOM-aligned disk/VM/mobile image, memory dump, and vehicle export candidates.
 - `collect-plan` previews KAPE-style Windows/macOS collection targets by profile before scanning or copying evidence. It reports present/missing EventLogs, AccountUsage, BrowserHistory, EvidenceOfExecution, Persistence, RemoteAccess, FileSystemTimeline, and CloudAndSync paths without hashing the whole input root.
 - `collect-export` creates a profile-based evidence package from `collect-plan` targets. It defaults to a dry-run manifest, copies only with `--copy`, preserves source-relative paths under `OUTPUT_DIR/evidence`, records SHA256/source/destination/size/mtime, and skips broad inventory-only directories to avoid accidental whole-profile exports.
