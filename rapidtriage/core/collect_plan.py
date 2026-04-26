@@ -115,7 +115,7 @@ WINDOWS_TARGETS: tuple[CollectTarget, ...] = (
         "directory",
         "windows-prefetch",
         "scan",
-        "Prefetch inventory is a quick execution lead; full binary run-count parsing remains a future parser.",
+        "Prefetch parsing provides executable hints, best-effort run counts, last run times, and referenced path pivots.",
     ),
     CollectTarget(
         "EvidenceOfExecution",

@@ -355,10 +355,14 @@ def _write_execution_fixtures(reg_path: Path, powershell_history: Path) -> None:
 
 def _write_prefetch_fixture(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    header = bytearray(256)
+    header = bytearray(512)
     header[0:4] = (30).to_bytes(4, "little")
     header[4:8] = b"SCCA"
     header[16 : 16 + len("POWERSHELL.EXE".encode("utf-16le"))] = "POWERSHELL.EXE".encode("utf-16le")
+    header[0x80:0x88] = datetime_to_filetime(datetime(2024, 4, 1, 9, 10, 11, tzinfo=timezone.utc)).to_bytes(8, "little")
+    header[0xD0:0xD4] = (3).to_bytes(4, "little")
+    referenced_path = r"\DEVICE\HARDDISKVOLUME3\WINDOWS\SYSTEM32\WINDOWSPOWERSHELL\V1.0\POWERSHELL.EXE".encode("utf-16le")
+    header[0x120 : 0x120 + len(referenced_path)] = referenced_path
     path.write_bytes(bytes(header))
 
 

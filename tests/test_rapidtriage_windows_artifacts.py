@@ -175,16 +175,33 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("srum-network-usage", groups["powershell.exe"]["signal_types"])
             self.assertIn("suspicious-command:powershell -enc", groups["powershell.exe"]["risk_flags"])
 
+    def test_windows_prefetch_fixture_surfaces_run_count_and_last_run_time(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            build_windows_artifact_fixture(root)
+            output = root / "prefetch.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "windows-prefetch", "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            details = payload["artifacts"][0]["details"]
+
+            self.assertEqual(details["prefetch_parse_status"], "parsed-common-header")
+            self.assertEqual(details["run_count"], 3)
+            self.assertEqual(details["last_run_at"], "2024-04-01T09:10:11+00:00")
+            self.assertIn(details["last_run_at"], details["last_run_times"])
+            self.assertTrue(any("POWERSHELL.EXE" in path for path in details["referenced_paths"]))
+
     def test_windows_prefetch_collector_is_available_as_dedicated_artifacts_kind(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             output = root / "prefetch.json"
             prefetch = root / "Windows" / "Prefetch" / "POWERSHELL.EXE-12345678.pf"
             prefetch.parent.mkdir(parents=True, exist_ok=True)
-            header = bytearray(256)
+            header = bytearray(512)
             header[0:4] = (30).to_bytes(4, "little")
             header[4:8] = b"SCCA"
             header[16 : 16 + len("POWERSHELL.EXE".encode("utf-16le"))] = "POWERSHELL.EXE".encode("utf-16le")
+            header[0xD0:0xD4] = (7).to_bytes(4, "little")
             prefetch.write_bytes(bytes(header))
 
             self.assertEqual(main(["artifacts", str(root), "--kind", "windows-prefetch", "--output", str(output)]), 0)
@@ -198,6 +215,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(artifact["details"]["binary_format_detected"])
             self.assertEqual(artifact["details"]["prefetch_version"], 30)
             self.assertEqual(artifact["details"]["header_executable_name"], "POWERSHELL.EXE")
+            self.assertEqual(artifact["details"]["run_count"], 7)
             self.assertEqual(artifact["details"]["prefetch_hash"], "12345678")
             self.assertEqual(artifact["details"]["evidence_strength"], "execution-indicator")
 
