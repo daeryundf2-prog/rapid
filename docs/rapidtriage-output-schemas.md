@@ -131,6 +131,23 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - run summary metadata
 - The Markdown draft includes case metadata, analysis scope, run steps, reviewed/report-candidate counts, evidence hashes, skipped hash rows, conclusion/opinion text, and attachment references.
 
+## Artifact collector rows
+
+Android APK collector rows:
+
+- `android-apk-artifacts`
+  - `android-apk`
+
+Current Android APK rows carry `parser`, `parser_version`, `source_path`, `source_format`, `hashes`, `package`, `version_name`, `permissions`, `dangerous_permissions`, `dex_count`, `native_library_count`, `risk_flags`, and `risk_score` under `details`.
+
+Media image collector rows:
+
+- `media-image-artifacts`
+  - `media-image`
+  - `media-image-unreadable`
+
+Current media image rows carry `parser`, `parser_version`, `source_path`, `source_format`, `hashes`, `width`, `height`, `channel_count`, `perceptual_hash`, `similarity_bucket`, and `ocr_candidate` under `details` when decoding succeeds.
+
 ## Windows artifact collector rows
 
 The `manifest-windows-artifacts.json` sample also fixes the current artifact row shape for:

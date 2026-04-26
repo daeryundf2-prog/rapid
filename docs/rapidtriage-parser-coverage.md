@@ -9,6 +9,7 @@
 | Timeline merge | Implemented baseline | Files, docs, artifacts, and normalized timeline export. |
 | Case DB FTS | Implemented baseline | Documents, file metadata, artifacts, timeline, review status filters. |
 | OCR | Partial | Depends on local Tesseract and image quality. |
+| Image/media triage | Partial | Image dimensions, file hashes, perceptual average hash, similarity bucket, and OCR queue hints are implemented for common image files. |
 | Windows OS/account summary | Planned | Hostname, timezone, last boot, user/admin status, account lifecycle. |
 | Windows Event Logs | Partial | XML/JSON exports parse into normalized event rows; binary EVTX is inventoried with export guidance. |
 | Registry hives | Partial | `.reg` exports parse into key/value rows including Run keys and USB hints. |
@@ -24,7 +25,7 @@
 | Optical/archive images ISO/DMG/WIM/SWM | Detection | UI/API adapter detection exists; mount/extract externally, then scan the folder. |
 | Virtual disks VHD/VHDX/VMDK/VDI/XVA/QCOW/QCOW2 | Detection | UI/API adapter detection exists with platform tool hints; extraction/mount orchestration is planned. |
 | Memory dumps MEM/DMP/VMEM/VMSS/VMSN/HPAK | Detection | Inventory/hash detection exists; deep memory parsing remains deferred to Volatility-style tools. |
-| APK malware triage | Deferred | APK extraction/hash/YARA-style scan can precede full mobile acquisition. |
+| APK malware triage | Partial | Exported `.apk` files are inventoried with hashes, manifest metadata, permissions, dex/native-library counts, and risk flags. |
 | Memory forensics | Deferred | RAM dump parsing, BitLocker key search, and process-risk visualization are separate long-term work. |
 | Threat intelligence enrichment | Planned | Optional URL/IP/hash enrichment plugin, disabled by default. |
 | AI prompt artifacts | Planned | Browser/search/AI assistant prompt extraction when source formats are understood. |

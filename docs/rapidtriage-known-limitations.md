@@ -13,9 +13,10 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 ## Parser Coverage
 
 - Browser, recent-file, EventLog export, Registry export, ShellBags export, Prefetch inventory, Task Scheduler XML, Defender MPLog, Firewall W3C log, WER report, and Zone.Identifier sidecar artifacts are implemented first.
-- Binary EVTX, binary Prefetch run-count parsing, full Jump List/LNK destination parsing, SRUM, mobile, and cloud imports are roadmap items.
+- Binary EVTX, binary Prefetch run-count parsing, full Jump List/LNK destination parsing, SRUM, full mobile extraction imports, and cloud imports are roadmap items.
 - MFT, VSC comparison, AI prompt extraction, and deeper LotL command correlation are roadmap items.
-- APK malware triage, memory forensics, password cracking, live USB collection, and remote-agent collection are deferred until the security and validation model matures.
+- APK inventory/risk triage works on exported `.apk` files; memory forensics, password cracking, live USB collection, and remote-agent collection are deferred until the security and validation model matures.
+- Image perceptual hashes and similarity buckets are triage hints only; they do not replace full media forensics, visual similarity review, or classifier validation.
 - Parser output should be verified against source evidence before report inclusion.
 
 ## Search And OCR

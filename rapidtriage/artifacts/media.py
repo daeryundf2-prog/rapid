@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Iterable
+
+import cv2
+
+from ..core.models import ArtifactRecord
+from ..core.submission import compute_hashes
+
+PARSER_VERSION = "media-image-v1"
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+
+
+class MediaImageProvider:
+    collector_kind = "media-image"
+    name = "media-image-artifacts"
+    description = "Image inventory with dimensions, hashes, perceptual hash, OCR queue hints, and similarity buckets"
+    target_platform = "any"
+
+    def supported(self) -> bool:
+        return True
+
+    def collect(self, root: Path) -> Iterable[ArtifactRecord]:
+        for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+            if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
+                yield build_image_record(path)
+
+
+def build_image_record(path: Path) -> ArtifactRecord:
+    resolved = path.resolve()
+    stat_result = resolved.stat()
+    details: dict[str, object] = {
+        "parser": "media-image",
+        "parser_version": PARSER_VERSION,
+        "source_path": str(resolved),
+        "source_format": resolved.suffix.lower().lstrip("."),
+        "source_size": stat_result.st_size,
+        "entry_name": resolved.name,
+        "hashes": compute_hashes(resolved),
+    }
+    if not has_plausible_image_signature(resolved):
+        image = None
+    else:
+        image = cv2.imread(str(resolved), cv2.IMREAD_UNCHANGED)
+    if image is None:
+        details.update(
+            {
+                "decoded": False,
+                "ocr_candidate": True,
+                "note": "Image extension detected, but OpenCV could not decode the file.",
+            }
+        )
+        artifact_type = "media-image-unreadable"
+    else:
+        height, width = image.shape[:2]
+        perceptual_hash = average_hash(image)
+        details.update(
+            {
+                "decoded": True,
+                "width": int(width),
+                "height": int(height),
+                "channel_count": int(image.shape[2]) if len(image.shape) == 3 else 1,
+                "perceptual_hash": perceptual_hash,
+                "similarity_bucket": perceptual_hash[:8],
+                "ocr_candidate": True,
+            }
+        )
+        artifact_type = "media-image"
+    return ArtifactRecord(
+        provider=MediaImageProvider.name,
+        artifact_type=artifact_type,
+        path=str(resolved),
+        supported=True,
+        details=details,
+    )
+
+
+def average_hash(image) -> str:
+    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+    resized = cv2.resize(grayscale, (8, 8), interpolation=cv2.INTER_AREA)
+    mean_value = resized.mean()
+    bits = "".join("1" if value >= mean_value else "0" for value in resized.flatten())
+    return f"{int(bits, 2):016x}"
+
+
+def has_plausible_image_signature(path: Path) -> bool:
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(32)
+            if path.suffix.lower() in {".jpg", ".jpeg"}:
+                handle.seek(-2, 2)
+                tail = handle.read(2)
+    except OSError:
+        return False
+    suffix = path.suffix.lower()
+    if suffix in {".jpg", ".jpeg"}:
+        return header.startswith(b"\xff\xd8") and tail == b"\xff\xd9"
+    if suffix == ".png":
+        return header.startswith(b"\x89PNG\r\n\x1a\n") and header[12:16] == b"IHDR"
+    if suffix == ".bmp":
+        return header.startswith(b"BM")
+    if suffix in {".tif", ".tiff"}:
+        return header.startswith((b"II*\x00", b"MM\x00*"))
+    if suffix == ".webp":
+        return header.startswith(b"RIFF") and header[8:12] == b"WEBP"
+    return True

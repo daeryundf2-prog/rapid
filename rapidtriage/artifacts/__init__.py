@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from .android import AndroidApkProvider
 from .generic import GenericDocumentArtifactProvider
+from .media import MediaImageProvider
 from .windows.browser import WindowsBrowserArtifactsProvider
 from .windows.eventlog import WindowsEventLogProvider
 from .windows.prefetch import WindowsPrefetchProvider
@@ -15,6 +17,8 @@ from .windows.system import WindowsSystemArtifactsProvider
 def all_providers() -> List[object]:
     return [
         GenericDocumentArtifactProvider(),
+        AndroidApkProvider(),
+        MediaImageProvider(),
         WindowsBrowserArtifactsProvider(),
         WindowsRecentFilesProvider(),
         WindowsEventLogProvider(),

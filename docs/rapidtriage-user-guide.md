@@ -62,6 +62,28 @@ rapidtriage artifacts ./mounted-case --kind windows-system --output windows-syst
 rapidtriage run ./mounted-case --mode hacking --output-dir ./case-run --read-only
 ```
 
+## Android APK Triage
+
+When a mobile acquisition/export folder contains `.apk` files, RapidTriage can inventory them without performing phone acquisition itself. The APK collector records file hashes, package/version metadata when the manifest is readable, requested permissions, dangerous permissions, dex/native-library counts, certificate entries, and simple risk flags.
+
+Use:
+
+```bash
+rapidtriage artifacts ./mobile-export --kind android-apk --output android-apk.json
+```
+
+Treat the risk score as a triage aid, not a malware verdict. Confirm suspicious APKs with a dedicated mobile/malware workflow before report conclusions.
+
+## Image Similarity Triage
+
+Use image triage when a case has many screenshots, photos, or scanned documents and you need stable grouping signals before deeper review/OCR:
+
+```bash
+rapidtriage artifacts ./mounted-case --kind media-image --output media-images.json
+```
+
+The collector records file hashes, dimensions, channel count, an average perceptual hash, a short similarity bucket, and whether the file should be queued for OCR. The perceptual hash is a grouping hint for fast review, not a courtroom-grade similarity conclusion by itself.
+
 ## Review Workflow
 
 A search hit can be marked as relevant, excluded, follow-up, or report-worthy:

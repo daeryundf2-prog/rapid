@@ -33,14 +33,14 @@ RapidTriage should absorb this as a product principle:
 | OCR/translation | Korean OCR and translation-oriented review. | Partial | Keep OCR optional; evaluate Korean OCR quality separately. |
 | Linux/XFS | Strong Linux filesystem coverage including XFS. | Planned | Treat XFS as evidence adapter/filesystem extraction requirement. |
 | Virtualization | VMDK/VHD/XVA server dump support. | Detection only | Extend virtual disk adapter; add XVA detection and guidance. |
-| Mobile APK malware | Extract APKs from mobile dumps and flag suspicious apps. | Deferred | Add APK inventory/hash/YARA-style scan before full mobile acquisition. |
+| Mobile APK malware | Extract APKs from mobile dumps and flag suspicious apps. | Partial | Exported APK inventory/hash/manifest/permission/risk triage exists; full mobile acquisition and YARA-style scanning remain planned. |
 | Live/remote IR | USB live collector and agent-based remote response. | Deferred | Keep outside core desktop release until security model matures. |
 | Browser integration | Unified browser history/download viewer across Chrome/Edge/Firefox. | Partial | Normalize browser artifacts into one timeline/search surface. |
 | TI integration | Extract IP/URL and query threat intelligence APIs. | Planned | Add optional TI connector plugin contract, disabled by default. |
 | AI prompt artifacts | Extract prompts from AI/search browser artifacts. | Planned | Add parser category for AI assistants/search prompts when source formats are known. |
 | Memory forensics | RAM dump analysis, BitLocker key extraction, process risk visualization. | Deferred | Add memory parser/plugin lane; do not block disk triage workflow. |
 | LotL detection | PowerShell/WMI/local-admin command collection. | Partial | Add Windows command history, WMI, scheduled task, event log correlation rules. |
-| Deepfake/similar images | Media classification, visual similarity grouping. | Deferred | Consider after image viewer/hash workflow is stable. |
+| Deepfake/similar images | Media classification, visual similarity grouping. | Partial | Image dimensions/hash/perceptual-hash/similarity-bucket triage exists; classifier/deepfake detection remains planned. |
 | Chromebook | ChromeOS dump analysis. | Deferred | Track as separate evidence profile after Linux/browser coverage improves. |
 
 ## RapidTriage Backlog Additions
@@ -70,8 +70,8 @@ Deferred:
 - Live USB collection.
 - Remote agent collection.
 - Memory forensics/BitLocker key extraction.
-- APK malware triage.
-- Deepfake and similar-image grouping.
+- APK malware triage. Status: first-pass exported APK inventory/risk triage implemented.
+- Deepfake and similar-image grouping. Status: first-pass image perceptual hash and similarity bucket triage implemented.
 - ChromeOS specialized support.
 
 ## Design Implications

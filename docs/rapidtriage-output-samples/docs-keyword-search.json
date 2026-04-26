@@ -77,6 +77,20 @@
         ]
       },
       {
+        "name": "android-apk-artifacts",
+        "description": "Android APK inventory, hashes, manifest metadata, permissions, and triage risk flags",
+        "target_platform": "android",
+        "supported": true,
+        "artifacts": []
+      },
+      {
+        "name": "media-image-artifacts",
+        "description": "Image inventory with dimensions, hashes, perceptual hash, OCR queue hints, and similarity buckets",
+        "target_platform": "any",
+        "supported": true,
+        "artifacts": []
+      },
+      {
         "name": "windows-browser-artifacts",
         "description": "Windows browser history/download collectors backed by real profile files",
         "target_platform": "windows",
