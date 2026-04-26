@@ -122,10 +122,18 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("userassist-entry", artifact_types)
             self.assertIn("shimcache-entry", artifact_types)
             self.assertIn("powershell-history-command", artifact_types)
+            self.assertIn("windows-execution-summary", artifact_types)
             ps_rows = [item for item in artifacts if item["artifact_type"] == "powershell-history-command"]
             self.assertTrue(any("suspicious-command:powershell -enc" in row["details"]["risk_flags"] for row in ps_rows))
             self.assertTrue(any("vssadmin delete shadows" in row["details"]["command_line"] for row in ps_rows))
             self.assertEqual(ps_rows[0]["details"]["source_path"], str(fixture.powershell_history.resolve()))
+            summary = next(item for item in artifacts if item["artifact_type"] == "windows-execution-summary")
+            groups = {item["display_name"]: item for item in summary["details"]["groups"]}
+            self.assertIn("evil.exe", groups)
+            self.assertIn("powershell.exe", groups)
+            self.assertIn("bam-entry", groups["evil.exe"]["signal_types"])
+            self.assertIn("powershell-history-command", groups["powershell.exe"]["signal_types"])
+            self.assertIn("suspicious-command:powershell -enc", groups["powershell.exe"]["risk_flags"])
 
     def test_windows_filesystem_collector_imports_mft_and_usn_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

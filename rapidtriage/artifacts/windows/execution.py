@@ -46,8 +46,11 @@ class WindowsExecutionProvider:
         return True
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
-        yield from collect_execution_reg_exports(root)
-        yield from collect_powershell_history(root)
+        records = [*collect_execution_reg_exports(root), *collect_powershell_history(root)]
+        yield from records
+        summary = build_execution_summary(root, records)
+        if summary is not None:
+            yield summary
 
 
 def collect_execution_reg_exports(root: Path) -> Iterable[ArtifactRecord]:
@@ -168,6 +171,122 @@ def collect_powershell_history(root: Path) -> Iterable[ArtifactRecord]:
                     "risk_score": min(100, len(risk_flags) * 25),
                 },
             )
+
+
+def build_execution_summary(root: Path, records: Iterable[ArtifactRecord]) -> ArtifactRecord | None:
+    groups: dict[str, dict[str, object]] = {}
+    for record in records:
+        details = record.details
+        key = execution_group_key(record.artifact_type, details)
+        if not key:
+            continue
+        group = groups.setdefault(
+            key,
+            {
+                "executable_key": key,
+                "display_name": display_name_for_execution_key(key),
+                "signal_count": 0,
+                "signal_types": set(),
+                "evidence_strengths": set(),
+                "users": set(),
+                "timestamps": set(),
+                "risk_flags": set(),
+                "source_paths": set(),
+                "command_line_samples": [],
+            },
+        )
+        group["signal_count"] = int(group["signal_count"]) + 1
+        cast_set(group["signal_types"]).add(record.artifact_type)
+        if details.get("evidence_strength"):
+            cast_set(group["evidence_strengths"]).add(str(details["evidence_strength"]))
+        if details.get("user"):
+            cast_set(group["users"]).add(str(details["user"]))
+        if details.get("timestamp"):
+            cast_set(group["timestamps"]).add(str(details["timestamp"]))
+        if details.get("source_path"):
+            cast_set(group["source_paths"]).add(str(details["source_path"]))
+        for flag in details.get("risk_flags", []):
+            cast_set(group["risk_flags"]).add(str(flag))
+        command_line = str(details.get("command_line") or "")
+        samples = group["command_line_samples"]
+        if command_line and isinstance(samples, list) and command_line not in samples and len(samples) < 3:
+            samples.append(command_line)
+    if not groups:
+        return None
+
+    normalized_groups = [normalize_execution_group(group) for group in groups.values()]
+    normalized_groups.sort(key=lambda item: (-int(item["signal_count"]), str(item["display_name"]).lower()))
+    return ArtifactRecord(
+        provider=WindowsExecutionProvider.name,
+        artifact_type="windows-execution-summary",
+        path=str(root.resolve()),
+        supported=True,
+        details={
+            "parser": "windows-execution-summary",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "mapped",
+            "reportability": "triage",
+            "source_path": str(root.resolve()),
+            "group_count": len(normalized_groups),
+            "groups": normalized_groups,
+            "reporting_note": "Summary groups execution-related signals; review each source artifact before concluding proof of execution.",
+        },
+    )
+
+
+def execution_group_key(artifact_type: str, details: Mapping[str, object]) -> str:
+    executable_path = str(details.get("executable_path") or "").strip()
+    if executable_path:
+        return normalize_execution_path(executable_path)
+    command_line = str(details.get("command_line") or "").strip()
+    if command_line:
+        return normalize_command_execution_key(command_line)
+    key = str(details.get("key") or "").strip()
+    if key:
+        return normalize_execution_path(key.rsplit("\\", 1)[-1])
+    return artifact_type
+
+
+def normalize_command_execution_key(command_line: str) -> str:
+    lowered = command_line.lower()
+    if "powershell" in lowered:
+        return "powershell.exe"
+    match = re.search(r"([a-z0-9_ .:\\/-]+\.(?:exe|dll|ps1|bat|cmd|scr))", command_line, flags=re.IGNORECASE)
+    if match:
+        return normalize_execution_path(match.group(1).strip())
+    return command_line.split(maxsplit=1)[0].lower()
+
+
+def normalize_execution_path(value: str) -> str:
+    cleaned = value.strip().strip('"').replace("/", "\\")
+    display_name = display_name_for_execution_key(cleaned)
+    return (display_name or cleaned).lower()
+
+
+def display_name_for_execution_key(value: str) -> str:
+    tail = value.replace("/", "\\").rsplit("\\", 1)[-1]
+    return tail or value
+
+
+def cast_set(value: object) -> set[str]:
+    if isinstance(value, set):
+        return value
+    return set()
+
+
+def normalize_execution_group(group: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "executable_key": group["executable_key"],
+        "display_name": group["display_name"],
+        "signal_count": group["signal_count"],
+        "signal_types": sorted(cast_set(group["signal_types"])),
+        "evidence_strengths": sorted(cast_set(group["evidence_strengths"])),
+        "users": sorted(cast_set(group["users"])),
+        "timestamps": sorted(cast_set(group["timestamps"])),
+        "risk_flags": sorted(cast_set(group["risk_flags"])),
+        "source_paths": sorted(cast_set(group["source_paths"])),
+        "command_line_samples": list(group.get("command_line_samples", [])),
+    }
 
 
 def parse_reg_value(line: str) -> tuple[str, str]:
