@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, List
 
 from .android import AndroidApkProvider
+from .cloud import CloudExportProvider
 from .generic import GenericDocumentArtifactProvider
 from .media import MediaImageProvider
 from .memory import MemoryVolatilityProvider
@@ -19,6 +20,7 @@ def all_providers() -> List[object]:
     return [
         GenericDocumentArtifactProvider(),
         AndroidApkProvider(),
+        CloudExportProvider(),
         MediaImageProvider(),
         MemoryVolatilityProvider(),
         WindowsBrowserArtifactsProvider(),

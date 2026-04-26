@@ -34,6 +34,7 @@ RapidTriage should absorb this as a product principle:
 | Linux/XFS | Strong Linux filesystem coverage including XFS. | Planned | Treat XFS as evidence adapter/filesystem extraction requirement. |
 | Virtualization | VMDK/VHD/XVA server dump support. | Detection only | Extend virtual disk adapter; add XVA detection and guidance. |
 | Mobile APK malware | Extract APKs from mobile dumps and flag suspicious apps. | Partial | Exported APK inventory/hash/manifest/permission/risk triage exists; full mobile acquisition and YARA-style scanning remain planned. |
+| Cloud exports | Import cloud provider exports into the same review/search workflow. | Partial | Google Takeout-style location/activity JSON and Apple/general account JSON normalization exists; live cloud acquisition remains planned. |
 | Live/remote IR | USB live collector and agent-based remote response. | Deferred | Keep outside core desktop release until security model matures. |
 | Browser integration | Unified browser history/download viewer across Chrome/Edge/Firefox. | Partial | Normalize browser artifacts into one timeline/search surface. |
 | TI integration | Extract IP/URL and query threat intelligence APIs. | Planned | Add optional TI connector plugin contract, disabled by default. |

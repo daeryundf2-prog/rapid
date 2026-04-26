@@ -94,6 +94,16 @@ rapidtriage artifacts ./volatility-output --kind memory-volatility --output memo
 
 The importer normalizes process name, PID/PPID, command line, network endpoints, offsets, source hashes, and risk flags such as suspicious command lines, external network connections, malfind rows, and writable executable memory.
 
+## Cloud Export Imports
+
+RapidTriage can normalize cloud exports that were already lawfully exported or collected by another workflow. For Google Takeout-style folders, it recognizes Location History `Records.json` and My Activity JSON. For Apple/general account exports, it records account profile fields from JSON.
+
+```bash
+rapidtriage artifacts ./cloud-export --kind cloud-export --output cloud-artifacts.json
+```
+
+The collector records source hashes, timestamps, activity titles/products, account profile fields, location coordinates, accuracy, and risk flags such as precise location or user activity. It does not perform live cloud acquisition or API collection.
+
 ## Review Workflow
 
 A search hit can be marked as relevant, excluded, follow-up, or report-worthy:

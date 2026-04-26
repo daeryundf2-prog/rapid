@@ -47,6 +47,13 @@
       "artifacts": []
     },
     {
+      "name": "cloud-export-artifacts",
+      "description": "Cloud account export normalization for Google Takeout-style activity/location and account JSON",
+      "target_platform": "cloud",
+      "supported": true,
+      "artifacts": []
+    },
+    {
       "name": "media-image-artifacts",
       "description": "Image inventory with dimensions, hashes, perceptual hash, OCR queue hints, and similarity buckets",
       "target_platform": "any",

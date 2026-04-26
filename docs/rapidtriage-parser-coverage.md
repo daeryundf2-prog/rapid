@@ -29,7 +29,8 @@
 | Memory forensics | Partial | Volatility-style output normalization is implemented; direct RAM parsing, BitLocker key search, and process-risk visualization remain long-term work. |
 | Threat intelligence enrichment | Planned | Optional URL/IP/hash enrichment plugin, disabled by default. |
 | AI prompt artifacts | Planned | Browser/search/AI assistant prompt extraction when source formats are understood. |
-| Mobile/cloud acquisition | Deferred | Long-term domain, not current desktop triage scope. |
+| Cloud export import | Partial | Google Takeout-style location/activity JSON and Apple/general account JSON exports are normalized with source hashes. |
+| Mobile/cloud acquisition | Partial | Exported APK and cloud export imports exist; direct cloud acquisition/API collection remains deferred. |
 
 Every new parser should publish:
 

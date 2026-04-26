@@ -159,6 +159,15 @@ Memory Volatility collector rows:
 
 Current memory rows carry `parser`, `parser_version`, `source_path`, `source_plugin`, `source_index`, `source_hashes`, normalized process fields, network endpoints, `risk_flags`, `risk_score`, and the original row under `raw`.
 
+Cloud export collector rows:
+
+- `cloud-export-artifacts`
+  - `cloud-location`
+  - `cloud-activity`
+  - `cloud-account`
+
+Current cloud rows carry `parser`, `parser_version`, `source_path`, `source_index`, `source_hashes`, `service`, `event_type`, normalized timestamps, activity titles/products, account profile fields, location latitude/longitude/accuracy, `risk_flags`, and the original row under `raw`.
+
 ## Windows artifact collector rows
 
 The `manifest-windows-artifacts.json` sample also fixes the current artifact row shape for:
