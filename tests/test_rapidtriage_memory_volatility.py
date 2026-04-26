@@ -45,6 +45,37 @@ class RapidTriageMemoryVolatilityTests(unittest.TestCase):
             self.assertIn("malfind-row", malfind["details"]["risk_flags"])
             self.assertIn("writable-executable-memory", malfind["details"]["risk_flags"])
 
+    def test_memory_dump_scan_finds_bitlocker_and_network_pivots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            key = "123456-234567-345678-456789-567890-678901-789012-890123"
+            (root / "incident.raw").write_bytes(
+                b"RAM\x00"
+                + key.encode("ascii")
+                + b"\x00powershell.exe\x00https://c2.example.test/task\x00198.51.100.44"
+            )
+            (root / "Cache0000.bin").write_bytes(b"BM not a memory dump")
+            output = root / "memory-dump-artifacts.json"
+
+            exit_code = main(["artifacts", str(root), "--kind", "memory-volatility", "--output", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["artifact_count"], 1)
+            artifact = payload["artifacts"][0]
+            self.assertEqual(artifact["artifact_type"], "memory-dump-indicators")
+            details = artifact["details"]
+            self.assertIn("bitlocker-recovery-key-candidate", details["risk_flags"])
+            self.assertIn("suspicious-memory-string", details["risk_flags"])
+            self.assertIn("network-indicator", details["risk_flags"])
+            pivots = details["indicator_pivots"]
+            self.assertTrue(any(pivot["type"] == "bitlocker-recovery-key" for pivot in pivots))
+            self.assertTrue(any(pivot.get("value") == "https://c2.example.test/task" for pivot in pivots))
+            self.assertTrue(any(pivot.get("value") == "198.51.100.44" for pivot in pivots))
+            key_pivot = next(pivot for pivot in pivots if pivot["type"] == "bitlocker-recovery-key")
+            self.assertEqual(key_pivot["value_redacted"], "123456-***-890123")
+            self.assertNotIn(key, json.dumps(payload))
+
 
 def write_volatility_fixtures(root: Path) -> None:
     (root / "windows.pslist.json").write_text(

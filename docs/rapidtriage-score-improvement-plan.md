@@ -10,7 +10,7 @@ Estimated commercial-suite readiness: 68/100 versus AXIOM/WISDOM-class expectati
 
 Why:
 
-- The tool now has a usable local web UI, sample case, doctor check, evidence preflight, processing plan preview, whole-case search, source viewer, review board, compare tray with text diff, hashes, report templates, SQLite Case DB saved searches/batch review, fixture-backed Windows artifact parsers, high-value Windows system artifact coverage, exported APK triage, cloud export imports, image perceptual-hash triage, Volatility-style memory import, portable reviewer bundle, Windows quickstart, packaging tests, and a release validation package.
+- The tool now has a usable local web UI, sample case, doctor check, evidence preflight, processing plan preview, whole-case search, source viewer, review board, compare tray with text diff, hashes, report templates, SQLite Case DB saved searches/batch review, fixture-backed Windows artifact parsers, high-value Windows system artifact coverage, exported APK triage, cloud export imports, image perceptual-hash triage, Volatility-style memory import, bounded direct memory dump indicator scanning, portable reviewer bundle, Windows quickstart, packaging tests, and a release validation package.
 - It is useful for folder-based triage and light forensic review.
 - It is still not feature-equivalent to AXIOM/WISDOM for broad native evidence acquisition, binary Windows artifact depth, enterprise collaboration, signed installer infrastructure, or commercial support/legal validation. The 100/100 score means the planned open-source/internal roadmap gates are implemented and documented, with external release responsibilities made explicit.
 - The validation package now separates `internal_roadmap_score` from `commercial_readiness_score` and emits `commercial_gap_assessment` rows so the tool does not overstate readiness.
@@ -130,7 +130,7 @@ Tasks:
 - Add mobile extraction imports from Cellebrite/XRY/GrayKey/AXIOM-style exports where legally and technically feasible. Status: exported `.apk` inventory/hash/manifest/permission/risk triage is implemented; full vendor package import remains planned.
 - Add cloud export/import workflows. Status: Google Takeout-style location/activity JSON and Apple/general account JSON imports are implemented with source hashes and normalized event/account rows.
 - Add image/media triage: thumbnails, OCR queues, perceptual hash, similarity grouping, optional AI classification. Status: image hash/dimensions/perceptual-hash/similarity-bucket/OCR-queue hints plus bounded inline thumbnail previews are implemented; classifier workflows remain planned.
-- Add memory forensics integration with Volatility-style output normalization. Status: Volatility/Volatility3 JSON/JSONL process, cmdline, netscan, and malfind normalization is implemented with risk flags and source hashes.
+- Add memory forensics integration with Volatility-style output normalization. Status: Volatility/Volatility3 JSON/JSONL process, cmdline, netscan, and malfind normalization is implemented with risk flags and source hashes; bounded direct memory dumps now surface redacted BitLocker recovery-key candidates, suspicious strings, URLs, and IP pivots.
 - Add support/training/legal validation package. Status: `rapidtriage validation` generates JSON/Markdown release checks, required command evidence, required documents, known limits, and external operator-owned responsibilities.
 
 Acceptance criteria:

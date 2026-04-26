@@ -195,8 +195,9 @@ Memory Volatility collector rows:
   - `memory-network`
   - `memory-malfind`
   - `memory-artifact`
+  - `memory-dump-indicators`
 
-Current memory rows carry `parser`, `parser_version`, `source_path`, `source_plugin`, `source_index`, `source_hashes`, normalized process fields, network endpoints, `risk_flags`, `risk_score`, and the original row under `raw`.
+Current memory rows carry `parser`, `parser_version`, `source_path`, `source_plugin`, `source_index`, `source_hashes`, normalized process fields, network endpoints, `risk_flags`, `risk_score`, and the original row under `raw`. Direct memory dump indicator rows carry `coverage_status`, `source_size`, `scan_limit_bytes`, `scan_ranges`, `scan_truncated`, `indicator_pivots`, redacted BitLocker candidate hashes, and triage recommendations.
 
 Cloud export collector rows:
 

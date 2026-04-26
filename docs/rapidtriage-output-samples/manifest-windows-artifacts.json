@@ -69,7 +69,7 @@
     },
     {
       "name": "memory-volatility-artifacts",
-      "description": "Volatility/Volatility3 JSON or JSONL output normalization for process, network, and injected-code triage",
+      "description": "Volatility/Volatility3 output normalization plus bounded direct memory dump indicator scanning",
       "target_platform": "memory",
       "supported": true,
       "artifacts": []

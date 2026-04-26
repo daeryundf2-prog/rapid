@@ -209,13 +209,15 @@ The collector records file hashes, dimensions, channel count, an average percept
 
 ## Memory Forensics Imports
 
-RapidTriage does not parse raw RAM dumps directly yet, but it can import Volatility/Volatility3 JSON or JSONL output for review and search. Export plugins such as `pslist`, `cmdline`, `netscan`, or `malfind`, then point the collector at the folder:
+RapidTriage can import Volatility/Volatility3 JSON or JSONL output for review and search. Export plugins such as `pslist`, `cmdline`, `netscan`, or `malfind`, then point the collector at the folder:
 
 ```bash
 rapidtriage artifacts ./volatility-output --kind memory-volatility --output memory-artifacts.json
 ```
 
 The importer normalizes process name, PID/PPID, command line, network endpoints, offsets, source hashes, and risk flags such as suspicious command lines, external network connections, malfind rows, and writable executable memory.
+
+The same collector also performs a bounded direct scan of `.mem`, `.raw`, `.vmem`, `.vmss`, `.vmsn`, `.hpak`, `.dmp`, and memory-named `.bin` dumps. It records source hashes, scan ranges, redacted BitLocker recovery-key candidates with SHA256 verification hashes, suspicious memory strings, URLs, IPs, and risk flags without attempting full process reconstruction.
 
 ## Cloud Export Imports
 

@@ -39,7 +39,7 @@ RapidTriage should absorb this as a product principle:
 | Browser integration | Unified browser history/download viewer across Chrome/Edge/Firefox. | Partial | Normalize browser artifacts into one timeline/search surface. |
 | TI integration | Extract IP/URL and query threat intelligence APIs. | Planned | Add optional TI connector plugin contract, disabled by default. |
 | AI prompt artifacts | Extract prompts from AI/search browser artifacts. | Planned | Add parser category for AI assistants/search prompts when source formats are known. |
-| Memory forensics | RAM dump analysis, BitLocker key extraction, process risk visualization. | Partial | Volatility/Volatility3 JSON/JSONL import normalizes process/network/malfind rows; direct RAM parsing and key search remain planned. |
+| Memory forensics | RAM dump analysis, BitLocker key extraction, process risk visualization. | Partial+ | Volatility/Volatility3 JSON/JSONL import normalizes process/network/malfind rows; bounded direct `.mem`/`.raw`/`.vmem`/`.vmss`/`.vmsn`/`.hpak`/`.dmp` and memory-named `.bin` scans now surface redacted BitLocker recovery-key candidates, suspicious strings, URLs, and IP pivots; full process reconstruction remains planned. |
 | LotL detection | PowerShell/WMI/local-admin command collection. | Partial | PowerShell history, WMI repository string pivots, scheduled-task suspicious command flags, and event log rule detections exist; deeper cross-artifact LotL correlation remains planned. |
 | Deepfake/similar images | Media classification, visual similarity grouping. | Partial | Image dimensions/hash/perceptual-hash/similarity-bucket triage and bounded thumbnail previews exist; classifier/deepfake detection remains planned. |
 | Chromebook | ChromeOS dump analysis. | Deferred | Track as separate evidence profile after Linux/browser coverage improves. |
@@ -70,7 +70,7 @@ Deferred:
 - Password cracking integration.
 - Live USB collection.
 - Remote agent collection.
-- Memory forensics/BitLocker key extraction.
+- Full memory process reconstruction and validated BitLocker key extraction workflow.
 - APK malware triage. Status: first-pass exported APK inventory/risk triage implemented.
 - Deepfake and similar-image grouping. Status: first-pass image perceptual hash, similarity bucket, and bounded thumbnail preview triage implemented.
 - ChromeOS specialized support.
