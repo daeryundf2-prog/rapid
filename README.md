@@ -29,6 +29,12 @@ Windows one-command launcher:
 .\scripts\windows\start-rapidtriage.ps1
 ```
 
+macOS/Linux one-command launcher:
+
+```bash
+sh scripts/start-rapidtriage.sh
+```
+
 See [docs/rapidtriage-windows-quickstart.md](docs/rapidtriage-windows-quickstart.md) for the Windows launcher, diagnostics, and E01 fallback guidance.
 See [docs/rapidtriage-maestro-wisdom-intake.md](docs/rapidtriage-maestro-wisdom-intake.md) for the Maestro WISDOM-inspired competitive intake and follow-up parser/viewer backlog.
 See [docs/rapidtriage-user-convenience-principles.md](docs/rapidtriage-user-convenience-principles.md) for the analyst convenience rules that guide UI and workflow decisions.
