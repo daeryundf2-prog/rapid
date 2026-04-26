@@ -320,6 +320,11 @@ def datetime_to_filetime(value: datetime) -> int:
     return int((value.astimezone(timezone.utc) - CHROME_EPOCH).total_seconds() * 10_000_000)
 
 
+def filetime_reg_hex(value: datetime) -> str:
+    raw = datetime_to_filetime(value).to_bytes(8, "little")
+    return ",".join(f"{byte:02x}" for byte in raw)
+
+
 def build_minimal_evtx(record_id: int, timestamp: datetime, strings: list[str]) -> bytes:
     payload = b"".join(value.encode("utf-16le") + b"\x00\x00" for value in strings)
     size = 28 + len(payload)
@@ -440,7 +445,7 @@ def _write_user_profile_fixtures(profile_path: Path, reg_path: Path) -> None:
     )
     reg_path.parent.mkdir(parents=True, exist_ok=True)
     reg_path.write_text(
-        """Windows Registry Editor Version 5.00
+        f"""Windows Registry Editor Version 5.00
 
 [HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\ComputerName\\ComputerName]
 "ComputerName"="WIN-FIXTURE"
@@ -448,8 +453,25 @@ def _write_user_profile_fixtures(profile_path: Path, reg_path: Path) -> None:
 [HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\TimeZoneInformation]
 "TimeZoneKeyName"="Korea Standard Time"
 
+[HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Windows]
+"ShutdownTime"=hex(b):{filetime_reg_hex(datetime(2024, 4, 1, 0, 55, 1, tzinfo=timezone.utc))}
+
+[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion]
+"LastBootUpTime"="2024-04-01T01:02:03Z"
+
 [HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\S-1-5-21-1000]
 "ProfileImagePath"="C:\\Users\\alice"
+
+[HKEY_LOCAL_MACHINE\\SAM\\SAM\\Domains\\Account\\Users\\Names\\alice]
+@=dword:000003e9
+
+[HKEY_LOCAL_MACHINE\\SAM\\SAM\\Domains\\Account\\Users\\000003E9]
+"UserName"="alice"
+"AccountCreated"="2024-03-01T00:00:00Z"
+"LastLogon"=hex(b):{filetime_reg_hex(datetime(2024, 4, 1, 1, 2, 3, tzinfo=timezone.utc))}
+"PasswordLastSet"="2024-03-15T12:34:56Z"
+"UserAccountControl"=dword:00000200
+"AdminCount"=dword:00000001
 """,
         encoding="utf-16",
     )

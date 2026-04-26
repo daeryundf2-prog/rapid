@@ -248,6 +248,17 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(summaries)
             self.assertIn("WIN-FIXTURE", summaries[0]["details"]["computer_names"])
             self.assertIn("Korea Standard Time", summaries[0]["details"]["time_zones"])
+            self.assertIn("2024-04-01T01:02:03+00:00", summaries[0]["details"]["last_boot_times"])
+            self.assertIn("2024-04-01T00:55:01+00:00", summaries[0]["details"]["shutdown_times"])
+            account_hints = {
+                item["user_name"]: item
+                for item in summaries[0]["details"]["account_lifecycle_hints"]
+                if item.get("user_name")
+            }
+            self.assertEqual(account_hints["alice"]["created_at"], "2024-03-01T00:00:00+00:00")
+            self.assertEqual(account_hints["alice"]["last_logon_at"], "2024-04-01T01:02:03+00:00")
+            self.assertEqual(account_hints["alice"]["password_last_set_at"], "2024-03-15T12:34:56+00:00")
+            self.assertTrue(account_hints["alice"]["admin_hint"])
 
     def test_windows_execution_collector_maps_registry_and_powershell_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
