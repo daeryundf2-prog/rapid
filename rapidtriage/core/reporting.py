@@ -17,6 +17,7 @@ def build_run_report_context(
     outputs = summary_payload["outputs"]
     summary = summary_payload["summary"]
     steps = summary_payload["steps"]
+    processing = summary_payload.get("processing", {})
     highlights = summary_payload["highlights"]
     docs_payload = docs_payload or {}
     files_payload = files_payload or {}
@@ -57,6 +58,16 @@ def build_run_report_context(
             }
             for step in steps
         ],
+        "processing": {
+            "profile_label": processing.get("profile_label", "unknown") if isinstance(processing, Mapping) else "unknown",
+            "dry_run": processing.get("dry_run", False) if isinstance(processing, Mapping) else False,
+            "read_only": processing.get("read_only", False) if isinstance(processing, Mapping) else False,
+            "overwrite": processing.get("overwrite", False) if isinstance(processing, Mapping) else False,
+            "caps": processing.get("caps", {}) if isinstance(processing, Mapping) else {},
+            "warning_count": processing.get("warning_count", 0) if isinstance(processing, Mapping) else 0,
+            "highest_warning_level": processing.get("highest_warning_level", "none") if isinstance(processing, Mapping) else "none",
+            "warnings": list(processing.get("warnings", [])) if isinstance(processing, Mapping) and isinstance(processing.get("warnings", []), list) else [],
+        },
         "summary": {
             "document_candidate_count": summary["document_candidate_count"],
             "document_match_count": summary["document_match_count"],
@@ -124,6 +135,7 @@ def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
     overview = report_context["overview"]
     profile = report_context["profile"]
     steps = report_context["steps"]
+    processing = report_context["processing"]
     summary = report_context["summary"]
 
     lines = [
@@ -150,9 +162,34 @@ def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
         f"- File extract categories: {', '.join(profile['file_extract_categories'])}",
         f"- File scan categories: {', '.join(profile['file_scan_categories'])}",
         "",
-        "## Step outputs",
+        "## Processing transparency",
+        "",
+        f"- Profile: {processing['profile_label']}",
+        f"- Read-only: {processing['read_only']}",
+        f"- Dry run: {processing['dry_run']}",
+        f"- Overwrite extracts: {processing['overwrite']}",
+        f"- Max extract bytes: {processing['caps'].get('max_extract_size_bytes', 0)}",
+        f"- Max files: {processing['caps'].get('max_file_count', 0)}",
+        f"- Warning level: {processing['highest_warning_level']} ({processing['warning_count']} warning/notice item(s))",
+        "",
+        "### Processing warnings",
         "",
     ]
+    if processing["warnings"]:
+        for item in processing["warnings"][:20]:
+            if not isinstance(item, dict):
+                continue
+            lines.append(f"- `{item.get('step')}` [{item.get('level')}]: {item.get('message')}")
+    else:
+        lines.append("- none")
+
+    lines.extend(
+        [
+            "",
+            "## Step outputs",
+            "",
+        ]
+    )
     for step in steps:
         detail_parts = [f"{key}={value}" for key, value in step["details"].items()]
         detail_text = ", ".join(detail_parts) if detail_parts else "no metrics"

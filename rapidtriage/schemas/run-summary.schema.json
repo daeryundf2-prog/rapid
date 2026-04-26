@@ -13,6 +13,7 @@
     "safety",
     "outputs",
     "steps",
+    "processing",
     "summary",
     "highlights"
   ],
@@ -186,6 +187,83 @@
           }
         },
         "additionalProperties": true
+      }
+    },
+    "processing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_label",
+        "dry_run",
+        "read_only",
+        "overwrite",
+        "caps",
+        "step_count",
+        "warning_count",
+        "highest_warning_level",
+        "warnings"
+      ],
+      "properties": {
+        "profile_label": {
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "read_only": {
+          "type": "boolean"
+        },
+        "overwrite": {
+          "type": "boolean"
+        },
+        "caps": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_extract_size_bytes",
+            "max_file_count"
+          ],
+          "properties": {
+            "max_extract_size_bytes": {
+              "type": "integer"
+            },
+            "max_file_count": {
+              "type": "integer"
+            }
+          }
+        },
+        "step_count": {
+          "type": "integer"
+        },
+        "warning_count": {
+          "type": "integer"
+        },
+        "highest_warning_level": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "step",
+              "level",
+              "message"
+            ],
+            "properties": {
+              "step": {
+                "type": "string"
+              },
+              "level": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
       }
     },
     "summary": {

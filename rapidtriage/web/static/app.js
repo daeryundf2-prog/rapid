@@ -20,6 +20,23 @@ const SEARCH_PRESETS = [
   { label: "Money trail", keywords: ["invoice", "wire", "account", "transfer"] },
   { label: "Intrusion", keywords: ["powershell", "rundll32", "remote", "persistence"] },
 ];
+const PROCESSING_PROFILES = {
+  fast: {
+    title: "Fast first pass",
+    summary: "Indexes and classifies first, skips extraction by default, and is the safest start for large evidence.",
+    badges: ["read-only", "no extraction", "fast triage"],
+  },
+  standard: {
+    title: "Standard bounded extraction",
+    summary: "Runs the same triage plus capped extraction so reviewable copies are available without runaway output size.",
+    badges: ["bounded extraction", "512 MB cap", "1000 file cap"],
+  },
+  deep: {
+    title: "Deep uncapped extraction",
+    summary: "Removes extraction caps for deliberate deep review. Use after fast/standard tells you where to focus.",
+    badges: ["extracts matches", "no cap", "slow/heavy"],
+  },
+};
 const PAGE_SIZE = 250;
 const COMPARE_LIMIT = 6;
 const VIEW_GROUPS = [
@@ -326,6 +343,7 @@ function renderSummary(payload) {
   const outputs = payload.outputs || {};
   return `
     ${renderWorkflowGuide(summary)}
+    ${renderProcessingSummary(payload)}
     ${renderWorkspaceCards(summary)}
     <div class="metric-grid">
       ${metric("Document matches", summary.document_match_count)}
@@ -352,6 +370,65 @@ function renderSummary(payload) {
         </ul>
       </section>
     </div>
+  `;
+}
+
+function renderProcessingSummary(payload) {
+  const processing = payload.processing || {};
+  const caps = processing.caps || {};
+  const warnings = Array.isArray(processing.warnings) ? processing.warnings : [];
+  const steps = Array.isArray(payload.steps) ? payload.steps : [];
+  return `
+    <section class="processing-summary" aria-label="Processing transparency">
+      <div class="processing-summary-head">
+        <div>
+          <p class="eyebrow">processing evidence</p>
+          <h3>${escapeHtml(processing.profile_label || "Processing profile")}</h3>
+          <p>Run summary shows what was processed, skipped, capped, or empty so “completed” never hides missing work.</p>
+        </div>
+        <span class="warning-badge ${escapeHtml(processing.highest_warning_level || "none")}">
+          ${escapeHtml(processing.highest_warning_level || "none")} · ${formatNumber(processing.warning_count || 0)}
+        </span>
+      </div>
+      <div class="processing-caps">
+        <span>${processing.read_only ? "Read-only on" : "Extraction allowed"}</span>
+        <span>${processing.dry_run ? "Dry run on" : "Dry run off"}</span>
+        <span>Max extract: ${caps.max_extract_size_bytes ? formatBytes(caps.max_extract_size_bytes) : "uncapped"}</span>
+        <span>Max files: ${caps.max_file_count ? formatNumber(caps.max_file_count) : "uncapped"}</span>
+      </div>
+      ${warnings.length ? `
+        <div class="processing-warning-list">
+          ${warnings.slice(0, 8).map((item) => `
+            <div class="processing-warning ${escapeHtml(item.level || "notice")}">
+              <strong>${escapeHtml(item.step || "step")}</strong>
+              <span>${escapeHtml(item.message || "")}</span>
+            </div>
+          `).join("")}
+        </div>
+      ` : '<p class="empty-state">No processing warnings.</p>'}
+      <div class="processing-step-grid">
+        ${steps.map((step) => renderProcessingStep(step)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderProcessingStep(step) {
+  const safeStep = step || {};
+  const details = Object.entries(safeStep)
+    .filter(([key]) => !["name", "status", "output", "warning_level", "warning_messages"].includes(key))
+    .slice(0, 4)
+    .map(([key, value]) => `${key}=${typeof value === "object" ? JSON.stringify(value) : value}`)
+    .join(", ");
+  return `
+    <article class="processing-step ${escapeHtml(safeStep.warning_level || "none")}">
+      <div>
+        <strong>${escapeHtml(safeStep.name || "step")}</strong>
+        <span>${escapeHtml(safeStep.status || "unknown")}</span>
+      </div>
+      <p>${escapeHtml(details || "no metrics")}</p>
+      ${(safeStep.warning_messages || []).slice(0, 2).map((message) => `<small>${escapeHtml(message)}</small>`).join("")}
+    </article>
   `;
 }
 
@@ -2094,6 +2171,8 @@ function bindRunFormPersistence() {
   ]) {
     document.querySelector(selector)?.addEventListener("input", persistRunForm);
     document.querySelector(selector)?.addEventListener("change", persistRunForm);
+    document.querySelector(selector)?.addEventListener("input", refreshRunPlanPreview);
+    document.querySelector(selector)?.addEventListener("change", refreshRunPlanPreview);
   }
   document.querySelector("#processingProfileInput")?.addEventListener("change", applyProcessingProfile);
 }
@@ -2122,6 +2201,34 @@ function applyProcessingProfile() {
     if (maxFileCount) maxFileCount.value = "0";
   }
   persistRunForm();
+  refreshRunPlanPreview();
+}
+
+function refreshRunPlanPreview() {
+  const target = document.querySelector("#runPlanPreview");
+  if (!target) return;
+  const profileKey = document.querySelector("#processingProfileInput")?.value || "fast";
+  const profile = PROCESSING_PROFILES[profileKey] || PROCESSING_PROFILES.fast;
+  const readOnly = document.querySelector("#readOnlyInput")?.checked ?? true;
+  const dryRun = document.querySelector("#dryRunInput")?.checked ?? false;
+  const maxExtractBytes = extractLimitBytes();
+  const maxFiles = Number(document.querySelector("#maxFileCountInput")?.value || 0);
+  const mode = document.querySelector("#modeInput")?.value || "fraud";
+  const badges = [
+    ...profile.badges,
+    readOnly ? "read-only" : "extract allowed",
+    dryRun ? "dry-run" : "writes output",
+  ];
+  target.innerHTML = `
+    <p class="eyebrow">run plan preview</p>
+    <h3>${escapeHtml(profile.title)} · ${escapeHtml(titleCase(mode))}</h3>
+    <p>${escapeHtml(profile.summary)}</p>
+    <div class="processing-caps">
+      ${badges.map((badge) => `<span>${escapeHtml(badge)}</span>`).join("")}
+      <span>Max extract: ${maxExtractBytes ? formatBytes(maxExtractBytes) : "uncapped/none"}</span>
+      <span>Max files: ${Number.isFinite(maxFiles) && maxFiles > 0 ? formatNumber(maxFiles) : "uncapped/none"}</span>
+    </div>
+  `;
 }
 
 function extractLimitBytes() {
@@ -2329,6 +2436,7 @@ async function removeSelectedRun() {
 
 hydrateRunForm();
 bindRunFormPersistence();
+refreshRunPlanPreview();
 bindKeyboardShortcuts();
 checkHealth();
 loadRuns();

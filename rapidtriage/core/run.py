@@ -388,6 +388,18 @@ def build_run_summary(
     recent_candidates = summarize_file_candidates(files_payload.get("candidates", []), limit=5)
     large_candidates = summarize_large_file_candidates(files_payload.get("candidates", []), limit=5)
 
+    step_rows = build_step_rows(
+        manifest_payload=manifest_payload,
+        docs_payload=docs_payload,
+        files_payload=files_payload,
+        docs_extract_payload=docs_extract_payload,
+        files_extract_payload=files_extract_payload,
+        artifact_payloads=artifact_payloads,
+        timeline_payload=timeline_payload,
+        outputs=outputs,
+    )
+    processing_summary = build_processing_summary(step_rows, safety=safety)
+
     payload = {
         "command": "run",
         "mode": profile.mode,
@@ -408,16 +420,8 @@ def build_run_summary(
         },
         "safety": dict(safety),
         "outputs": {name: str(path) for name, path in outputs.items()},
-        "steps": build_step_rows(
-            manifest_payload=manifest_payload,
-            docs_payload=docs_payload,
-        files_payload=files_payload,
-        docs_extract_payload=docs_extract_payload,
-        files_extract_payload=files_extract_payload,
-        artifact_payloads=artifact_payloads,
-        timeline_payload=timeline_payload,
-        outputs=outputs,
-    ),
+        "steps": step_rows,
+        "processing": processing_summary,
         "summary": {
             "document_candidate_count": int(docs_payload.get("summary", {}).get("candidate_count", 0)),
             "document_match_count": int(docs_payload.get("summary", {}).get("match_count", 0)),
@@ -468,71 +472,330 @@ def build_step_rows(
     timeline_payload: Mapping[str, object],
     outputs: Mapping[str, Path],
 ) -> List[Dict[str, object]]:
+    provider_count = len(manifest_payload.get("providers", []))
+    artifact_count_by_kind = {
+        kind: int(payload.get("summary", {}).get("artifact_count", 0))
+        for kind, payload in artifact_payloads.items()
+    }
     rows: List[Dict[str, object]] = [
-        {
-            "name": "manifest",
-            "status": "completed",
-            "output": str(outputs["manifest"]),
-            "provider_count": len(manifest_payload.get("providers", [])),
-        },
-        {
-            "name": "docs",
-            "status": "completed",
-            "output": str(outputs["docs"]),
-            "candidate_count": int(docs_payload.get("summary", {}).get("candidate_count", 0)),
-            "match_count": int(docs_payload.get("summary", {}).get("match_count", 0)),
-        },
-        {
-            "name": "docs-index",
-            "status": "completed",
-            "output": str(outputs["docs_index"]),
-            "strategy": str(docs_payload.get("index", {}).get("strategy", "")),
-            "document_count": int(docs_payload.get("index", {}).get("document_count", 0)),
-            "term_count": int(docs_payload.get("index", {}).get("term_count", 0)),
-        },
-        {
-            "name": "files",
-            "status": "completed",
-            "output": str(outputs["files"]),
-            "scanned_file_count": int(files_payload.get("summary", {}).get("scanned_file_count", 0)),
-            "candidate_count": int(files_payload.get("summary", {}).get("candidate_count", 0)),
-        },
+        annotate_step(
+            {
+                "name": "manifest",
+                "status": "completed",
+                "output": str(outputs["manifest"]),
+                "provider_count": provider_count,
+            },
+            warning_level="notice" if provider_count == 0 else "none",
+            warning_messages=["No manifest providers were collected."] if provider_count == 0 else [],
+        ),
+        annotate_step(
+            {
+                "name": "docs",
+                "status": "completed",
+                "output": str(outputs["docs"]),
+                "candidate_count": int(docs_payload.get("summary", {}).get("candidate_count", 0)),
+                "match_count": int(docs_payload.get("summary", {}).get("match_count", 0)),
+            },
+            warning_level=docs_warning_level(docs_payload),
+            warning_messages=docs_warning_messages(docs_payload),
+        ),
+        annotate_step(
+            {
+                "name": "docs-index",
+                "status": "completed",
+                "output": str(outputs["docs_index"]),
+                "strategy": str(docs_payload.get("index", {}).get("strategy", "")),
+                "document_count": int(docs_payload.get("index", {}).get("document_count", 0)),
+                "term_count": int(docs_payload.get("index", {}).get("term_count", 0)),
+            },
+            warning_level=docs_index_warning_level(docs_payload),
+            warning_messages=docs_index_warning_messages(docs_payload),
+        ),
+        annotate_step(
+            {
+                "name": "files",
+                "status": "completed",
+                "output": str(outputs["files"]),
+                "scanned_file_count": int(files_payload.get("summary", {}).get("scanned_file_count", 0)),
+                "candidate_count": int(files_payload.get("summary", {}).get("candidate_count", 0)),
+            },
+            warning_level=files_warning_level(files_payload),
+            warning_messages=files_warning_messages(files_payload),
+        ),
     ]
     for kind, payload in artifact_payloads.items():
+        artifact_count = artifact_count_by_kind[kind]
         rows.append(
-            {
-                "name": f"artifacts-{kind}",
-                "status": "completed",
-                "output": str(outputs[f"artifacts_{kind}"]),
-                "artifact_count": int(payload.get("summary", {}).get("artifact_count", 0)),
-            }
+            annotate_step(
+                {
+                    "name": f"artifacts-{kind}",
+                    "status": "completed",
+                    "output": str(outputs[f"artifacts_{kind}"]),
+                    "artifact_count": artifact_count,
+                },
+                warning_level="notice" if artifact_count == 0 else "none",
+                warning_messages=[f"No {kind} artifact rows were collected."] if artifact_count == 0 else [],
+            )
         )
+    docs_extract_step = build_extract_step(
+        "docs-extract",
+        outputs["docs_extract_manifest"],
+        docs_extract_payload,
+    )
+    files_extract_step = build_extract_step(
+        "files-extract",
+        outputs["files_extract_manifest"],
+        files_extract_payload,
+    )
+    timeline_count = int(timeline_payload.get("summary", {}).get("event_count", 0))
     rows.extend(
         [
-            {
-                "name": "docs-extract",
-                "status": "completed",
-                "output": str(outputs["docs_extract_manifest"]),
-                "selected_count": int(docs_extract_payload.get("summary", {}).get("selected_count", 0)),
-                "extracted_count": int(docs_extract_payload.get("summary", {}).get("extracted_count", 0)),
-            },
-            {
-                "name": "files-extract",
-                "status": "completed",
-                "output": str(outputs["files_extract_manifest"]),
-                "selected_count": int(files_extract_payload.get("summary", {}).get("selected_count", 0)),
-                "extracted_count": int(files_extract_payload.get("summary", {}).get("extracted_count", 0)),
-            },
-            {
-                "name": "timeline",
-                "status": "completed",
-                "output": str(outputs["timeline"]),
-                "event_count": int(timeline_payload.get("summary", {}).get("event_count", 0)),
-                "report": str(outputs["timeline_report"]),
-            },
+            docs_extract_step,
+            files_extract_step,
+            annotate_step(
+                {
+                    "name": "timeline",
+                    "status": "completed",
+                    "output": str(outputs["timeline"]),
+                    "event_count": timeline_count,
+                    "report": str(outputs["timeline_report"]),
+                },
+                warning_level="notice" if timeline_count == 0 else "none",
+                warning_messages=[
+                    "No timeline events were produced. Confirm the source has supported timestamps/artifacts."
+                ]
+                if timeline_count == 0
+                else [],
+            ),
         ]
     )
     return rows
+
+
+def build_processing_summary(
+    steps: List[Dict[str, object]],
+    *,
+    safety: Mapping[str, object],
+) -> Dict[str, object]:
+    warnings: List[Dict[str, object]] = []
+    for step in steps:
+        level = str(step.get("warning_level") or "none")
+        messages = step.get("warning_messages", [])
+        if level == "none" or not isinstance(messages, list):
+            continue
+        for message in messages:
+            warnings.append(
+                {
+                    "step": str(step.get("name", "")),
+                    "level": level,
+                    "message": str(message),
+                }
+            )
+
+    max_extract_size = int(safety.get("max_extract_size_bytes") or 0)
+    max_file_count = int(safety.get("max_file_count") or 0)
+    read_only = bool(safety.get("read_only"))
+    dry_run = bool(safety.get("dry_run"))
+    profile_label = infer_processing_profile_label(
+        read_only=read_only,
+        dry_run=dry_run,
+        max_extract_size_bytes=max_extract_size,
+        max_file_count=max_file_count,
+    )
+    return {
+        "profile_label": profile_label,
+        "dry_run": dry_run,
+        "read_only": read_only,
+        "overwrite": bool(safety.get("overwrite")),
+        "caps": {
+            "max_extract_size_bytes": max_extract_size,
+            "max_file_count": max_file_count,
+        },
+        "step_count": len(steps),
+        "warning_count": len(warnings),
+        "highest_warning_level": highest_warning_level([str(item["level"]) for item in warnings]),
+        "warnings": warnings,
+    }
+
+
+def infer_processing_profile_label(
+    *,
+    read_only: bool,
+    dry_run: bool,
+    max_extract_size_bytes: int,
+    max_file_count: int,
+) -> str:
+    if dry_run:
+        return "Dry run - no extraction"
+    if read_only:
+        return "Fast first pass - read-only"
+    if max_extract_size_bytes or max_file_count:
+        return "Standard - bounded extraction"
+    return "Deep - uncapped extraction"
+
+
+def build_extract_step(name: str, output: Path, payload: Mapping[str, object]) -> Dict[str, object]:
+    summary = payload.get("summary", {})
+    selected_count = int(summary.get("selected_count", 0)) if isinstance(summary, Mapping) else 0
+    extracted_count = int(summary.get("extracted_count", 0)) if isinstance(summary, Mapping) else 0
+    skipped_count = int(summary.get("skipped_count", 0)) if isinstance(summary, Mapping) else 0
+    skip_reason_counts = count_skip_reasons(payload)
+    warning_messages = extract_warning_messages(
+        selected_count=selected_count,
+        extracted_count=extracted_count,
+        skipped_count=skipped_count,
+        skip_reason_counts=skip_reason_counts,
+    )
+    warning_level = extract_warning_level(skip_reason_counts, selected_count=selected_count, skipped_count=skipped_count)
+    status = "completed"
+    if selected_count and skipped_count and not extracted_count:
+        status = "skipped"
+    elif skipped_count:
+        status = "completed_with_warnings"
+    return annotate_step(
+        {
+            "name": name,
+            "status": status,
+            "output": str(output),
+            "selected_count": selected_count,
+            "extracted_count": extracted_count,
+            "skipped_count": skipped_count,
+            "skip_reasons": skip_reason_counts,
+        },
+        warning_level=warning_level,
+        warning_messages=warning_messages,
+    )
+
+
+def annotate_step(
+    row: Dict[str, object],
+    *,
+    warning_level: str,
+    warning_messages: List[str],
+) -> Dict[str, object]:
+    row["warning_level"] = warning_level
+    row["warning_messages"] = warning_messages
+    return row
+
+
+def docs_warning_level(payload: Mapping[str, object]) -> str:
+    summary = payload.get("summary", {})
+    candidate_count = int(summary.get("candidate_count", 0)) if isinstance(summary, Mapping) else 0
+    match_count = int(summary.get("match_count", 0)) if isinstance(summary, Mapping) else 0
+    if candidate_count == 0:
+        return "notice"
+    if match_count == 0:
+        return "notice"
+    return "none"
+
+
+def docs_warning_messages(payload: Mapping[str, object]) -> List[str]:
+    summary = payload.get("summary", {})
+    candidate_count = int(summary.get("candidate_count", 0)) if isinstance(summary, Mapping) else 0
+    match_count = int(summary.get("match_count", 0)) if isinstance(summary, Mapping) else 0
+    if candidate_count == 0:
+        return ["No supported document candidates were found."]
+    if match_count == 0:
+        return ["Documents were scanned, but no configured keywords matched."]
+    return []
+
+
+def docs_index_warning_level(payload: Mapping[str, object]) -> str:
+    index = payload.get("index", {})
+    document_count = int(index.get("document_count", 0)) if isinstance(index, Mapping) else 0
+    return "notice" if document_count == 0 else "none"
+
+
+def docs_index_warning_messages(payload: Mapping[str, object]) -> List[str]:
+    index = payload.get("index", {})
+    document_count = int(index.get("document_count", 0)) if isinstance(index, Mapping) else 0
+    if document_count == 0:
+        return ["No documents were added to the keyword index."]
+    return []
+
+
+def files_warning_level(payload: Mapping[str, object]) -> str:
+    summary = payload.get("summary", {})
+    scanned_count = int(summary.get("scanned_file_count", 0)) if isinstance(summary, Mapping) else 0
+    candidate_count = int(summary.get("candidate_count", 0)) if isinstance(summary, Mapping) else 0
+    if scanned_count == 0:
+        return "warning"
+    if candidate_count == 0:
+        return "notice"
+    return "none"
+
+
+def files_warning_messages(payload: Mapping[str, object]) -> List[str]:
+    summary = payload.get("summary", {})
+    scanned_count = int(summary.get("scanned_file_count", 0)) if isinstance(summary, Mapping) else 0
+    candidate_count = int(summary.get("candidate_count", 0)) if isinstance(summary, Mapping) else 0
+    if scanned_count == 0:
+        return ["No files were scanned. Check the evidence root or mounted-image path."]
+    if candidate_count == 0:
+        return ["Files were scanned, but no profile-matched candidates were found."]
+    return []
+
+
+def count_skip_reasons(payload: Mapping[str, object]) -> Dict[str, int]:
+    skipped = payload.get("skipped", [])
+    counts: Counter[str] = Counter()
+    if not isinstance(skipped, list):
+        return {}
+    for item in skipped:
+        if not isinstance(item, dict):
+            continue
+        reason = str(item.get("reason") or "unknown")
+        counts[reason] += 1
+    return dict(sorted(counts.items()))
+
+
+def extract_warning_level(
+    skip_reason_counts: Mapping[str, int],
+    *,
+    selected_count: int,
+    skipped_count: int,
+) -> str:
+    if not skipped_count:
+        return "notice" if selected_count == 0 else "none"
+    if any(reason in skip_reason_counts for reason in {"max-file-count", "max-extract-size", "missing"}):
+        return "warning"
+    return "notice"
+
+
+def extract_warning_messages(
+    *,
+    selected_count: int,
+    extracted_count: int,
+    skipped_count: int,
+    skip_reason_counts: Mapping[str, int],
+) -> List[str]:
+    messages: List[str] = []
+    if selected_count == 0:
+        messages.append("No items matched the extraction filters.")
+    if skipped_count and not extracted_count:
+        messages.append("Selected items were not extracted; review skip reasons before reporting.")
+    elif skipped_count:
+        messages.append("Some selected items were skipped during extraction.")
+    if "read-only" in skip_reason_counts:
+        messages.append("Extraction skipped by read-only profile.")
+    if "dry-run" in skip_reason_counts:
+        messages.append("Extraction skipped because dry run was enabled.")
+    if "max-file-count" in skip_reason_counts:
+        messages.append("Extraction capped by max file count.")
+    if "max-extract-size" in skip_reason_counts:
+        messages.append("Extraction capped by max extract size.")
+    if "missing" in skip_reason_counts:
+        messages.append("Some selected source paths were missing.")
+    if "destination-exists" in skip_reason_counts:
+        messages.append("Existing destination files were preserved; enable overwrite only when intended.")
+    return messages
+
+
+def highest_warning_level(levels: List[str]) -> str:
+    priority = {"none": 0, "notice": 1, "warning": 2, "failed": 3}
+    if not levels:
+        return "none"
+    return max(levels, key=lambda level: priority.get(level, 0))
 
 
 def resolve_scan_root(root: Path, profile: RunProfile) -> Path:

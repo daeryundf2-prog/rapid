@@ -286,6 +286,7 @@ Current run modes:
 - `profile`
 - `outputs`
 - `steps`
+- `processing`
 - `summary`
 - `highlights`
 
@@ -301,6 +302,13 @@ Current run modes:
 - `artifacts_kinds`
 
 `source` records the original input and the analysis root. For direct `.E01` input, `source.type` is `e01`, `source.source_path` points to the evidence image, and `source.analysis_root` points to the read-only extracted filesystem under the run output directory.
+
+`processing` records user-facing run evidence:
+
+- inferred profile label
+- read-only, dry-run, overwrite, and cap settings
+- warning count and highest warning level
+- per-step warning messages for empty outputs, read-only skips, capped extraction, or missing source paths
 
 `summary` contains aggregated counters for:
 
@@ -321,7 +329,7 @@ Current run modes:
 - `large_file_candidates`
 - `preferred_location_candidates`
 
-The generated `rapidtriage-run-report.md` is now a submission-oriented template with sections for case overview, key hits, `matched_rules`, `ioc_hits`, related documents, artifact summary, timeline, extract results, and optional compare findings.
+The generated `rapidtriage-run-report.md` is now a submission-oriented template with sections for case overview, processing transparency, key hits, `matched_rules`, `ioc_hits`, related documents, artifact summary, timeline, extract results, and optional compare findings.
 
 ## CLI help examples
 

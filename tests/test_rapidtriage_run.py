@@ -130,6 +130,19 @@ class RapidTriageRunTests(unittest.TestCase):
                 (output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8")
             )
             self.assertEqual(summary_payload["safety"]["read_only"], True)
+            self.assertEqual(summary_payload["processing"]["profile_label"], "Fast first pass - read-only")
+            self.assertGreaterEqual(summary_payload["processing"]["warning_count"], 1)
+
+            docs_extract_step = next(
+                step for step in summary_payload["steps"] if step["name"] == "docs-extract"
+            )
+            files_extract_step = next(
+                step for step in summary_payload["steps"] if step["name"] == "files-extract"
+            )
+            self.assertEqual(docs_extract_step["status"], "skipped")
+            self.assertEqual(files_extract_step["status"], "skipped")
+            self.assertEqual(docs_extract_step["skip_reasons"]["read-only"], docs_extract_step["skipped_count"])
+            self.assertIn("Extraction skipped by read-only profile.", docs_extract_step["warning_messages"])
 
             docs_extract_payload = json.loads(
                 (output_dir / "docs-extract" / "rapidtriage-extract-manifest.json").read_text(encoding="utf-8")

@@ -4,13 +4,13 @@ This plan is scored from a real analyst/user perspective, not from a feature-cou
 
 ## Current Score
 
-Estimated current score: 60/100.
+Estimated current score: 70/100.
 
 Why:
 
-- The tool now has a usable local web UI, sample case, doctor check, evidence preflight, whole-case search, source viewer, review board, compare tray, hashes, report draft, SQLite Case DB alpha, Windows quickstart, and packaging tests.
+- The tool now has a usable local web UI, sample case, doctor check, evidence preflight, processing plan preview, whole-case search, source viewer, review board, compare tray, hashes, report draft, SQLite Case DB alpha, Windows quickstart, and packaging tests.
 - It is useful for folder-based triage and light forensic review.
-- It is not yet comparable to AXIOM/WISDOM for direct evidence ingestion, deep Windows artifact coverage, validated parsers, large-case indexing, polished reporting, portable reviewer workflows, or commercial trust.
+- It is not yet comparable to AXIOM/WISDOM for direct evidence ingestion, deep Windows artifact coverage, validated parsers, large-case indexing, portable reviewer workflows, or commercial trust.
 
 ## Score Targets
 
@@ -47,17 +47,17 @@ Goal: avoid the biggest real-world frustration: slow or opaque processing.
 
 Tasks:
 
-- Add visible processing summary before run: selected mode, profile, expected heavy steps, caps, and skipped areas.
-- Add parser/job warning badges: completed, skipped, failed, zero rows, capped, read-only skipped.
-- Add run resume/retry behavior: same output directory should reuse completed outputs and rerun failed/skipped stages safely.
-- Add progress log view in UI with current stage and last processed path where available.
-- Add "fast first pass" as the default and make deep extraction an explicit choice.
+- Add visible processing summary before run: selected mode, profile, expected heavy steps, caps, and skipped areas. Status: implemented with a run-plan preview under the processing profile selector.
+- Add parser/job warning badges: completed, skipped, failed, zero rows, capped, read-only skipped. Status: run summary now records warning levels/messages, skip reasons, capped extraction, zero-row notices, and read-only skips.
+- Add run resume/retry behavior: same output directory should reuse completed outputs and rerun failed/skipped stages safely. Status: partially covered by overwrite-safe extraction and explicit skip reasons; full selective resume remains a 75+ hardening item.
+- Add progress log view in UI with current stage and last processed path where available. Status: active job steps are shown during running; completed run summaries now expose step-level evidence.
+- Add "fast first pass" as the default and make deep extraction an explicit choice. Status: implemented in the processing profile selector and persisted web form defaults.
 
 Acceptance criteria:
 
-- A user can tell why a run was fast, slow, empty, skipped, or incomplete.
-- Report includes what was processed, skipped, capped, and deferred.
-- No run should simply say "completed" without step-level evidence.
+- A user can tell why a run was fast, slow, empty, skipped, or incomplete. Status: implemented via `processing` warnings and per-step badges.
+- Report includes what was processed, skipped, capped, and deferred. Status: implemented in the generated Markdown processing transparency section and extract details.
+- No run should simply say "completed" without step-level evidence. Status: implemented with step metrics, warning levels, and skip reason counts.
 
 ## Plan To Reach 75
 

@@ -30,6 +30,12 @@ rapidtriage case-search ./case.db --case-id CASE-001 -k password --source docume
 
 Search reaches indexed document text, file metadata, artifact summaries, and timeline events. Use source filters to narrow heavy cases.
 
+## Processing Transparency
+
+The web start screen shows a run-plan preview before processing. Use `Fast first pass` first for large evidence because it keeps extraction read-only and focuses on indexing/search. Use `Standard` when you want bounded copied evidence for review, and use `Deep` only when you intentionally want uncapped extraction.
+
+After a run, the Summary tab and generated Markdown report include a processing transparency section. Check warning badges for zero-row parsers, read-only extraction skips, missing source paths, existing destinations, and max-file or max-size caps before treating the run as complete.
+
 ## Review Workflow
 
 A search hit can be marked as relevant, excluded, follow-up, or report-worthy:

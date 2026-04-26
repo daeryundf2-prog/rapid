@@ -762,6 +762,121 @@ mark {
   color: var(--muted);
 }
 
+.run-plan-preview,
+.processing-summary {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(178, 87, 44, 0.24);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(178, 87, 44, 0.13), transparent 34%),
+    linear-gradient(135deg, rgba(251, 247, 239, 0.96), #fff);
+  padding: 14px;
+}
+
+.run-plan-preview {
+  margin-top: -4px;
+  margin-bottom: 10px;
+}
+
+.run-plan-preview h3,
+.processing-summary h3 {
+  margin: 0;
+}
+
+.run-plan-preview p,
+.processing-summary p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.processing-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.processing-caps,
+.processing-warning-list,
+.processing-step-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.processing-caps span,
+.warning-badge {
+  border: 1px solid rgba(30, 37, 40, 0.1);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--accent);
+  padding: 6px 10px;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.warning-badge.notice,
+.processing-warning.notice,
+.processing-step.notice {
+  border-color: rgba(178, 87, 44, 0.28);
+}
+
+.warning-badge.warning,
+.processing-warning.warning,
+.processing-step.warning {
+  border-color: rgba(178, 87, 44, 0.48);
+  background: rgba(178, 87, 44, 0.08);
+}
+
+.warning-badge.none {
+  border-color: rgba(43, 118, 82, 0.28);
+  color: var(--ok);
+}
+
+.processing-warning,
+.processing-step {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.processing-warning {
+  display: grid;
+  min-width: min(260px, 100%);
+  gap: 4px;
+}
+
+.processing-warning span,
+.processing-step span,
+.processing-step small {
+  color: var(--muted);
+}
+
+.processing-step-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.processing-step {
+  display: grid;
+  gap: 6px;
+}
+
+.processing-step div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.processing-step p,
+.processing-step small {
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
 .workspace-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1228,7 +1343,8 @@ mark {
   .compare-grid,
   .shortcut-grid,
   .view-switcher,
-  .workspace-grid {
+  .workspace-grid,
+  .processing-step-grid {
     grid-template-columns: 1fr;
   }
 
