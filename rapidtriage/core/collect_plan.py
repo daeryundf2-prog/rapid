@@ -127,6 +127,24 @@ WINDOWS_TARGETS: tuple[CollectTarget, ...] = (
         "Export with a trusted parser for normalized execution rows.",
     ),
     CollectTarget(
+        "SearchIndex",
+        "Windows Search EDB",
+        "ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+        "file",
+        "windows-search-index",
+        "inventory-or-export",
+        "Preserve Windows.edb for search-index evidence; export CSV/JSON with WinSearchDBAnalyzer, ESEDatabaseView, or libesedb/esedbexport for normalized keyword-search rows.",
+    ),
+    CollectTarget(
+        "SearchIndex",
+        "Windows Search parser exports",
+        "analysis/*search*",
+        "glob",
+        "windows-search-index",
+        "import",
+        "Place Windows Search CSV, JSON, JSONL, or NDJSON exports here to index paths, titles, URLs, and content snippets.",
+    ),
+    CollectTarget(
         "Persistence",
         "Task Scheduler XML tasks",
         "Windows/System32/Tasks",
@@ -308,7 +326,7 @@ PROFILE_TARGETS: Mapping[str, tuple[CollectTarget, ...]] = {
     "intrusion": tuple(
         target
         for target in WINDOWS_TARGETS + MACOS_TARGETS
-        if target.category in {"EventLogs", "EvidenceOfExecution", "Persistence", "RemoteAccess", "AccountUsage"}
+        if target.category in {"EventLogs", "EvidenceOfExecution", "Persistence", "RemoteAccess", "AccountUsage", "SearchIndex"}
     ),
     "browser-history": tuple(
         target for target in WINDOWS_TARGETS + MACOS_TARGETS if target.category in {"BrowserHistory", "CloudAndSync"}

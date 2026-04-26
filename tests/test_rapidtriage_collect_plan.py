@@ -31,9 +31,12 @@ class RapidTriageCollectPlanTests(unittest.TestCase):
             self.assertEqual(payload["command"], "collect-plan")
             self.assertGreater(payload["summary"]["present_count"], 0)
             self.assertTrue(targets["Windows EVTX log directory"]["exists"])
+            self.assertTrue(targets["Windows Search EDB"]["exists"])
+            self.assertTrue(targets["Windows Search parser exports"]["exists"])
             self.assertTrue(targets["PowerShell PSReadLine history"]["exists"])
             self.assertEqual(targets["PowerShell PSReadLine history"]["match_count"], 1)
             self.assertEqual(targets["Windows EVTX log directory"]["artifact_kind"], "eventlog")
+            self.assertEqual(targets["Windows Search EDB"]["artifact_kind"], "windows-search-index")
             self.assertFalse((root / "rapidtriage-collect-plan.json").exists())
             self.assertEqual(
                 Path(targets["PowerShell PSReadLine history"]["matches"][0]["path"]).resolve(),
