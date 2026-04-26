@@ -31,7 +31,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn(fixture.chrome_visit.url, manifest_blob)
             self.assertIn(fixture.ai_visit.url, manifest_blob)
             self.assertIn("browser-ai-usage", manifest_blob)
+            self.assertIn("browser-ai-conversation", manifest_blob)
             self.assertIn("timeline analysis for evtx", manifest_blob)
+            self.assertIn("How do I build an EVTX forensic timeline?", manifest_blob)
             self.assertIn(fixture.edge_visit.url, manifest_blob)
             self.assertIn(PureWindowsPath(fixture.download.target_path).name, manifest_blob)
             self.assertIn(fixture.recent_shortcut.name, manifest_blob)
@@ -76,16 +78,30 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 and artifact["details"]["browser"] == "chrome"
             )
             ai_usage = next(artifact for artifact in artifacts if artifact["artifact_type"] == "browser-ai-usage")
+            ai_conversation = next(
+                artifact for artifact in artifacts if artifact["artifact_type"] == "browser-ai-conversation"
+            )
 
             self.assertEqual(chrome["details"]["history_count"], 2)
             self.assertEqual(chrome["details"]["ai_usage_count"], 1)
+            self.assertGreaterEqual(chrome["details"]["ai_conversation_candidate_count"], 2)
             self.assertIn({"value": "ai", "count": 1}, chrome["details"]["internet_category_counts"])
             self.assertEqual(ai_usage["details"]["browser"], "chrome")
             self.assertEqual(ai_usage["details"]["ai_usage_count"], 1)
+            self.assertGreaterEqual(ai_usage["details"]["ai_conversation_candidate_count"], 2)
             self.assertEqual(ai_usage["details"]["ai_usage"][0]["ai_service"], "ChatGPT")
             self.assertEqual(ai_usage["details"]["ai_usage"][0]["url"], fixture.ai_visit.url)
             self.assertEqual(ai_usage["details"]["ai_usage"][0]["prompt_hint"], "timeline analysis for evtx")
             self.assertEqual(len(ai_usage["details"]["source_hashes"]["sha256"]), 64)
+            self.assertEqual(ai_conversation["details"]["coverage_status"], "candidate")
+            self.assertGreaterEqual(ai_conversation["details"]["question_count"], 2)
+            self.assertGreaterEqual(ai_conversation["details"]["answer_count"], 2)
+            candidate_text = "\n".join(
+                row["text"] for row in ai_conversation["details"]["conversation_candidates"]
+            )
+            self.assertIn("How do I build an EVTX forensic timeline?", candidate_text)
+            self.assertIn("Correlate EventRecordID", candidate_text)
+            self.assertEqual(ai_conversation["details"]["conversation_candidates"][0]["storage_area"], "Local Storage/leveldb")
 
     def test_recent_shortcut_collector_parses_lnk_header_and_target_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -10,6 +10,7 @@ from typing import Iterable
 from ..core.models import ArtifactRecord
 from .windows.browser import (
     build_browser_artifacts,
+    build_browser_storage_only_artifacts,
     extract_chromium_history_and_downloads,
     extract_firefox_history,
     sqlite_table_exists,
@@ -100,6 +101,15 @@ def collect_macos_browsers(user_root: Path) -> Iterable[ArtifactRecord]:
                 continue
             history_path = profile_dir / "History"
             if not history_path.is_file():
+                yield from build_browser_storage_only_artifacts(
+                    provider=MacOsSystemArtifactsProvider.name,
+                    user=user_root.name,
+                    browser=browser_name,
+                    profile=profile_dir.name,
+                    profile_dir=profile_dir,
+                    parser_version=PARSER_VERSION,
+                    ai_conversation_artifact_type="macos-browser-ai-conversation",
+                )
                 continue
             history_rows, download_rows = extract_chromium_history_and_downloads(history_path)
             if history_rows or download_rows:
@@ -142,6 +152,7 @@ def browser_records(
         parser="macos-browser-history",
         parser_version=PARSER_VERSION,
         ai_artifact_type="macos-browser-ai-usage",
+        ai_conversation_artifact_type="macos-browser-ai-conversation",
     )
 
 

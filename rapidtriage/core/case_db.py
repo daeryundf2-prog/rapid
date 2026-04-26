@@ -1279,6 +1279,9 @@ def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "download_count",
         "internet_usage_count",
         "ai_usage_count",
+        "ai_conversation_candidate_count",
+        "question_count",
+        "answer_count",
         "ai_service",
         "domain",
         "query_hint",
@@ -1319,14 +1322,14 @@ def artifact_index_text(row: Mapping[str, object]) -> str:
 
 
 def artifact_nested_preview(details: Mapping[str, object]) -> str:
-    for key in ("ai_usage", "internet_usage", "downloads", "history"):
+    for key in ("conversation_candidates", "ai_conversation_candidates", "ai_usage", "internet_usage", "downloads", "history"):
         rows = details.get(key)
         if not isinstance(rows, list):
             continue
         for row in rows:
             if not isinstance(row, Mapping):
                 continue
-            for value_key in ("ai_service", "query_hint", "prompt_hint", "source_url", "url", "target_path", "title", "domain"):
+            for value_key in ("text", "ai_service", "query_hint", "prompt_hint", "source_url", "url", "target_path", "title", "domain"):
                 value = row.get(value_key)
                 if value:
                     return str(value)

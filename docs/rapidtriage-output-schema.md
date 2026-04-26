@@ -102,13 +102,17 @@ Browser artifact `details` include the raw `history`/`downloads` rows plus norma
 
 - `internet_usage_count`
 - `ai_usage_count`
+- `ai_conversation_candidate_count`
 - `internet_category_counts`
 - `top_domains`
 - `internet_usage[]` rows with `url`, `domain`, `category`, `visit_count`, and `last_visited_at`
 - `ai_usage[]` rows with `ai_service`, `url`, `domain`, `title`, `query_hint`, `prompt_hint`, `confidence`, and `last_visited_at`
+- `ai_conversation_candidates[]` preview rows recovered from browser storage when available
 - `source_path` and `source_hashes` for the browser database
 
 When AI service visits are detected, the browser collector also emits `browser-ai-usage` on Windows or `macos-browser-ai-usage` on macOS. These rows are review-oriented evidence that a browser visited an AI service; they do not claim complete prompt recovery unless the prompt appears in URL parameters, titles, cache, or another parsed source.
+
+When browser storage contains recoverable AI-like message snippets, the collector emits `browser-ai-conversation` or `macos-browser-ai-conversation`. These rows include `conversation_candidates[]` with `direction` (`question`, `answer`, or `context`), `role`, `text`, `ai_service`, `storage_area`, source path, and confidence. Treat them as review candidates because browser caches and LevelDB fragments may be partial or stale.
 
 ## `docs` JSON
 

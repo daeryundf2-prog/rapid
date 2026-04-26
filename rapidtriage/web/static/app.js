@@ -653,6 +653,10 @@ function artifactPreviewText(artifact) {
     const hint = firstAi?.query_hint || firstAi?.prompt_hint || firstAi?.title || firstAi?.url || "";
     return [service, hint].filter(Boolean).join(" · ");
   }
+  if (details.ai_conversation_candidate_count) {
+    const firstConversation = Array.isArray(details.conversation_candidates) ? details.conversation_candidates[0] : null;
+    return ["AI conversation", firstConversation?.text || `${details.ai_conversation_candidate_count} candidate(s)`].filter(Boolean).join(" · ");
+  }
   for (const key of ["command_line", "script_block_text", "file_path", "executable_path", "ai_service", "domain", "source_url", "target_path", "entry_name", "service_name", "process_name"]) {
     if (details[key]) return String(details[key]);
   }
@@ -663,9 +667,11 @@ function renderArtifactDetails(artifact) {
   if (!artifact.details) return "";
   const eventLogCard = renderEventLogArtifactCard(artifact);
   const aiUsageCard = renderAiUsageArtifactCard(artifact);
+  const aiConversationCard = renderAiConversationArtifactCard(artifact);
   return `
     ${eventLogCard}
     ${aiUsageCard}
+    ${aiConversationCard}
     <details class="match-details">
       <summary>Inspect artifact details</summary>
       <pre>${escapeHtml(JSON.stringify(artifact.details, null, 2))}</pre>
@@ -734,6 +740,36 @@ function renderAiUsageArtifactCard(artifact) {
         ${topRows.map((row) => `
           <dt>${escapeHtml(row.ai_service || "AI")}</dt>
           <dd>${escapeHtml([row.last_visited_at, row.query_hint || row.prompt_hint || row.title || row.url].filter(Boolean).join(" · "))}</dd>
+        `).join("")}
+      </dl>
+    </section>
+  `;
+}
+
+function renderAiConversationArtifactCard(artifact) {
+  const details = artifact.details || {};
+  if (!["browser-ai-conversation", "macos-browser-ai-conversation"].includes(artifact.artifact_type)) return "";
+  const rows = Array.isArray(details.conversation_candidates) ? details.conversation_candidates : [];
+  if (!rows.length) return "";
+  const chips = [
+    details.browser,
+    details.profile,
+    details.user ? `user ${details.user}` : "",
+    `${details.question_count || 0} question(s)`,
+    `${details.answer_count || 0} answer(s)`,
+    details.coverage_status || "",
+  ].filter(Boolean);
+  return `
+    <section class="eventlog-card">
+      <div class="eventlog-card-header">
+        <strong>AI Conversation Candidates</strong>
+        <span>${escapeHtml(details.triage_recommendation || "Recovered browser-storage snippets that need raw-source verification.")}</span>
+      </div>
+      <div class="eventlog-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>
+      <dl class="eventlog-fields">
+        ${rows.slice(0, 6).map((row) => `
+          <dt>${escapeHtml([row.ai_service, row.direction || row.role].filter(Boolean).join(" · "))}</dt>
+          <dd>${escapeHtml(row.text || "")}<br><small>${escapeHtml(row.storage_area || row.source_path || "")}</small></dd>
         `).join("")}
       </dl>
     </section>

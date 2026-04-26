@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
@@ -22,6 +24,9 @@ CHROMIUM_BROWSER_ROOTS: Tuple[Tuple[str, Sequence[str]], ...] = (
 FIREFOX_PROFILE_ROOT = ("AppData", "Roaming", "Mozilla", "Firefox", "Profiles")
 PARSER_VERSION = "windows-browser-v2"
 MAX_USAGE_ROWS = 500
+MAX_AI_STORAGE_FILES = 80
+MAX_AI_STORAGE_FILE_BYTES = 5 * 1024 * 1024
+MAX_AI_CONVERSATION_ROWS = 200
 
 AI_SERVICE_DOMAINS: Tuple[Tuple[str, str], ...] = (
     ("chatgpt.com", "ChatGPT"),
@@ -51,6 +56,14 @@ SEARCH_HOST_HINTS = ("google.", "bing.com", "duckduckgo.com", "naver.com", "daum
 EMAIL_HOST_HINTS = ("mail.google.com", "outlook.live.com", "outlook.office.com", "mail.naver.com", "mail.daum.net")
 SOCIAL_HOST_HINTS = ("facebook.com", "instagram.com", "x.com", "twitter.com", "threads.net", "linkedin.com")
 CLOUD_HOST_HINTS = ("drive.google.com", "onedrive.live.com", "dropbox.com", "icloud.com", "box.com")
+AI_STORAGE_DIRS: Tuple[Tuple[str, ...], ...] = (
+    ("Local Storage", "leveldb"),
+    ("Session Storage",),
+    ("IndexedDB",),
+    ("Cache", "Cache_Data"),
+    ("Cache",),
+)
+AI_STORAGE_SUFFIXES = {".log", ".ldb", ".sqlite", ".sqlite3", ".db", ".json", ".txt"}
 
 
 class WindowsBrowserArtifactsProvider:
@@ -74,6 +87,13 @@ class WindowsBrowserArtifactsProvider:
                         continue
                     history_path = profile_dir / "History"
                     if not history_path.is_file():
+                        yield from build_browser_storage_only_artifacts(
+                            provider=self.name,
+                            user=user_name,
+                            browser=browser_name,
+                            profile=profile_dir.name,
+                            profile_dir=profile_dir,
+                        )
                         continue
                     history_rows, download_rows = extract_chromium_history_and_downloads(history_path)
                     if not history_rows and not download_rows:
@@ -113,6 +133,33 @@ class WindowsBrowserArtifactsProvider:
                 )
 
 
+def build_browser_storage_only_artifacts(
+    *,
+    provider: str,
+    user: str,
+    browser: str,
+    profile: str,
+    profile_dir: Path,
+    parser_version: str = PARSER_VERSION,
+    ai_conversation_artifact_type: str = "browser-ai-conversation",
+) -> List[ArtifactRecord]:
+    conversation_rows = extract_ai_conversation_candidates(profile_dir)
+    if not conversation_rows:
+        return []
+    return [
+        build_ai_conversation_record(
+            provider=provider,
+            artifact_type=ai_conversation_artifact_type,
+            user=user,
+            browser=browser,
+            profile=profile,
+            profile_dir=profile_dir,
+            conversation_rows=conversation_rows,
+            parser_version=parser_version,
+        )
+    ]
+
+
 def build_browser_artifacts(
     *,
     provider: str,
@@ -126,9 +173,12 @@ def build_browser_artifacts(
     parser: str | None = None,
     parser_version: str = PARSER_VERSION,
     ai_artifact_type: str = "browser-ai-usage",
+    ai_conversation_artifact_type: str = "browser-ai-conversation",
 ) -> List[ArtifactRecord]:
     usage_rows = summarize_internet_usage(history_rows)
     ai_rows = extract_ai_usage(history_rows)
+    profile_dir = source_path.parent
+    conversation_rows = extract_ai_conversation_candidates(profile_dir)
     source_hashes = file_hashes(source_path)
     base_details = {
         "parser": parser or "browser-history",
@@ -144,12 +194,14 @@ def build_browser_artifacts(
         "download_count": len(download_rows),
         "internet_usage_count": len(usage_rows),
         "ai_usage_count": len(ai_rows),
+        "ai_conversation_candidate_count": len(conversation_rows),
         "internet_category_counts": count_field(usage_rows, "category"),
         "top_domains": count_field(usage_rows, "domain", limit=20),
         "history": history_rows,
         "downloads": download_rows,
         "internet_usage": usage_rows,
         "ai_usage": ai_rows,
+        "ai_conversation_candidates": conversation_rows[:25],
     }
     records = [
         ArtifactRecord(
@@ -179,10 +231,12 @@ def build_browser_artifacts(
                     "browser": browser,
                     "profile": profile,
                     "ai_usage_count": len(ai_rows),
+                    "ai_conversation_candidate_count": len(conversation_rows),
                     "ai_service_counts": count_field(ai_rows, "ai_service"),
                     "first_seen_at": seen[0] if seen else None,
                     "last_seen_at": seen[-1] if seen else None,
                     "ai_usage": ai_rows,
+                    "ai_conversation_candidates": conversation_rows[:25],
                     "risk_flags": ["ai-service-usage"],
                     "triage_recommendation": (
                         "Browser history proves visits to AI services only. Review page titles, URL query hints, "
@@ -191,7 +245,247 @@ def build_browser_artifacts(
                 },
             )
         )
+    if conversation_rows:
+        records.append(
+            build_ai_conversation_record(
+                provider=provider,
+                artifact_type=ai_conversation_artifact_type,
+                user=user,
+                browser=browser,
+                profile=profile,
+                profile_dir=profile_dir,
+                conversation_rows=conversation_rows,
+                parser_version=parser_version,
+            )
+        )
     return records
+
+
+def build_ai_conversation_record(
+    *,
+    provider: str,
+    artifact_type: str,
+    user: str,
+    browser: str,
+    profile: str,
+    profile_dir: Path,
+    conversation_rows: List[Dict[str, object]],
+    parser_version: str,
+) -> ArtifactRecord:
+    return ArtifactRecord(
+        provider=provider,
+        artifact_type=artifact_type,
+        path=str(profile_dir.resolve()),
+        supported=True,
+        details={
+            "parser": "browser-ai-conversation-storage",
+            "parser_version": parser_version,
+            "coverage_status": "candidate",
+            "reportability": "review",
+            "source_path": str(profile_dir.resolve()),
+            "user": user,
+            "browser": browser,
+            "profile": profile,
+            "ai_conversation_candidate_count": len(conversation_rows),
+            "question_count": sum(1 for row in conversation_rows if row.get("direction") == "question"),
+            "answer_count": sum(1 for row in conversation_rows if row.get("direction") == "answer"),
+            "ai_service_counts": count_field(conversation_rows, "ai_service"),
+            "conversation_candidates": conversation_rows,
+            "risk_flags": ["ai-conversation-storage-candidate"],
+            "triage_recommendation": (
+                "Review these recovered browser-storage snippets against the raw source files. "
+                "They are conversation candidates, not a guaranteed complete AI transcript."
+            ),
+        },
+    )
+
+
+def extract_ai_conversation_candidates(profile_dir: Path) -> List[Dict[str, object]]:
+    rows: List[Dict[str, object]] = []
+    for source in iter_ai_storage_files(profile_dir):
+        if len(rows) >= MAX_AI_CONVERSATION_ROWS:
+            break
+        try:
+            data = source.read_bytes()[:MAX_AI_STORAGE_FILE_BYTES]
+        except OSError:
+            continue
+        text = decode_storage_blob(data)
+        if not text:
+            continue
+        service = detect_ai_service(text, "")
+        if not service and not likely_ai_storage_text(text):
+            continue
+        service = service or infer_ai_service_from_path(source)
+        fragments = extract_ai_text_fragments(text)
+        if not fragments:
+            continue
+        source_hash = hashlib.sha256(data).hexdigest()
+        for fragment in fragments:
+            if len(rows) >= MAX_AI_CONVERSATION_ROWS:
+                break
+            rows.append(
+                {
+                    "ai_service": service or "AI service",
+                    "direction": fragment["direction"],
+                    "role": fragment["role"],
+                    "text": fragment["text"],
+                    "confidence": fragment["confidence"],
+                    "storage_area": storage_area(profile_dir, source),
+                    "source_path": str(source.resolve()),
+                    "source_sha256": source_hash,
+                    "evidence_note": "Recovered from browser storage; verify with the raw storage file before reporting as a transcript.",
+                }
+            )
+    return deduplicate_conversation_rows(rows)
+
+
+def iter_ai_storage_files(profile_dir: Path) -> Iterable[Path]:
+    seen: set[Path] = set()
+    yielded = 0
+    for relative in AI_STORAGE_DIRS:
+        root = profile_dir.joinpath(*relative)
+        if not root.exists():
+            continue
+        candidates = [root] if root.is_file() else sorted(root.rglob("*"), key=lambda item: str(item).lower())
+        for candidate in candidates:
+            if yielded >= MAX_AI_STORAGE_FILES:
+                return
+            if not candidate.is_file() or candidate in seen:
+                continue
+            if candidate.suffix.lower() not in AI_STORAGE_SUFFIXES and candidate.name.lower() not in {"data_0", "data_1", "index"}:
+                continue
+            try:
+                if candidate.stat().st_size <= 0:
+                    continue
+            except OSError:
+                continue
+            seen.add(candidate)
+            yielded += 1
+            yield candidate
+
+
+def decode_storage_blob(data: bytes) -> str:
+    if not data:
+        return ""
+    decoded = data.decode("utf-8", errors="ignore")
+    printable = re.sub(r"[^\x09\x0a\x0d\x20-\x7e\u00a0-\uffff]+", " ", decoded)
+    return printable[:MAX_AI_STORAGE_FILE_BYTES]
+
+
+def likely_ai_storage_text(text: str) -> bool:
+    lowered = text.lower()
+    if any(domain in lowered for domain, _service in AI_SERVICE_DOMAINS):
+        return True
+    return any(token in lowered for token in ("chatgpt", "claude", "gemini", "perplexity", "assistant", '"role"', '"content"'))
+
+
+def infer_ai_service_from_path(path: Path) -> str:
+    lowered = str(path).lower()
+    for domain, service in AI_SERVICE_DOMAINS:
+        if domain in lowered:
+            return service
+    return ""
+
+
+def extract_ai_text_fragments(text: str) -> List[Dict[str, object]]:
+    fragments: List[Dict[str, object]] = []
+    fragments.extend(extract_json_role_content_fragments(text))
+    fragments.extend(extract_named_prompt_answer_fragments(text))
+    return fragments
+
+
+def extract_json_role_content_fragments(text: str) -> List[Dict[str, object]]:
+    fragments: List[Dict[str, object]] = []
+    patterns = (
+        r'"role"\s*:\s*"(?P<role>user|assistant|system)"[\s\S]{0,800}?"content"\s*:\s*"(?P<content>(?:\\.|[^"\\]){2,4000})"',
+        r'"content"\s*:\s*"(?P<content>(?:\\.|[^"\\]){2,4000})"[\s\S]{0,800}?"role"\s*:\s*"(?P<role>user|assistant|system)"',
+        r'"author"\s*:\s*\{[\s\S]{0,400}?"role"\s*:\s*"(?P<role>user|assistant|system)"[\s\S]{0,1200}?"text"\s*:\s*"(?P<content>(?:\\.|[^"\\]){2,4000})"',
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            role = match.group("role").lower()
+            content = clean_recovered_text(match.group("content"))
+            if not useful_conversation_text(content):
+                continue
+            fragments.append(
+                {
+                    "role": role,
+                    "direction": role_to_direction(role),
+                    "text": content,
+                    "confidence": 0.82 if role in {"user", "assistant"} else 0.65,
+                }
+            )
+    return fragments
+
+
+def extract_named_prompt_answer_fragments(text: str) -> List[Dict[str, object]]:
+    fragments: List[Dict[str, object]] = []
+    key_roles = {
+        "prompt": ("user", "question"),
+        "question": ("user", "question"),
+        "query": ("user", "question"),
+        "answer": ("assistant", "answer"),
+        "response": ("assistant", "answer"),
+        "completion": ("assistant", "answer"),
+    }
+    pattern = r'"(?P<key>prompt|question|query|answer|response|completion)"\s*:\s*"(?P<content>(?:\\.|[^"\\]){4,3000})"'
+    for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+        key = match.group("key").lower()
+        role, direction = key_roles[key]
+        content = clean_recovered_text(match.group("content"))
+        if not useful_conversation_text(content):
+            continue
+        fragments.append({"role": role, "direction": direction, "text": content, "confidence": 0.72})
+    return fragments
+
+
+def role_to_direction(role: str) -> str:
+    if role == "user":
+        return "question"
+    if role == "assistant":
+        return "answer"
+    return "context"
+
+
+def clean_recovered_text(value: str) -> str:
+    try:
+        decoded = json.loads(f'"{value}"')
+    except json.JSONDecodeError:
+        decoded = value
+    normalized = re.sub(r"\s+", " ", str(decoded)).strip()
+    return normalized[:1500]
+
+
+def useful_conversation_text(value: str) -> bool:
+    if len(value) < 4:
+        return False
+    lowered = value.lower()
+    if lowered in {"null", "true", "false", "undefined"}:
+        return False
+    return any(character.isalpha() for character in value)
+
+
+def storage_area(profile_dir: Path, source: Path) -> str:
+    try:
+        relative = source.relative_to(profile_dir)
+    except ValueError:
+        return source.parent.name
+    parts = relative.parts
+    if len(parts) >= 2 and parts[0] in {"Local Storage", "Cache"}:
+        return "/".join(parts[:2])
+    return parts[0] if parts else source.parent.name
+
+
+def deduplicate_conversation_rows(rows: Sequence[Mapping[str, object]]) -> List[Dict[str, object]]:
+    deduped: List[Dict[str, object]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in rows:
+        key = (str(row.get("ai_service") or ""), str(row.get("direction") or ""), str(row.get("text") or "")[:240])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(dict(row))
+    return deduped
 
 
 def summarize_internet_usage(history_rows: Sequence[Mapping[str, object]]) -> List[Dict[str, object]]:

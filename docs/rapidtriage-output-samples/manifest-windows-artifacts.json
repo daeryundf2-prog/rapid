@@ -103,6 +103,7 @@
             "download_count": 0,
             "internet_usage_count": 1,
             "ai_usage_count": 0,
+            "ai_conversation_candidate_count": 0,
             "internet_category_counts": [
               {
                 "value": "download",
@@ -137,7 +138,8 @@
                 "query_hint": ""
               }
             ],
-            "ai_usage": []
+            "ai_usage": [],
+            "ai_conversation_candidates": []
           }
         },
         {
@@ -163,6 +165,7 @@
             "download_count": 1,
             "internet_usage_count": 2,
             "ai_usage_count": 0,
+            "ai_conversation_candidate_count": 0,
             "internet_category_counts": [
               {
                 "value": "download",
@@ -232,7 +235,8 @@
                 "query_hint": ""
               }
             ],
-            "ai_usage": []
+            "ai_usage": [],
+            "ai_conversation_candidates": []
           }
         },
         {
@@ -258,6 +262,7 @@
             "download_count": 1,
             "internet_usage_count": 1,
             "ai_usage_count": 0,
+            "ai_conversation_candidate_count": 0,
             "internet_category_counts": [
               {
                 "value": "web",
@@ -302,7 +307,8 @@
                 "query_hint": ""
               }
             ],
-            "ai_usage": []
+            "ai_usage": [],
+            "ai_conversation_candidates": []
           }
         }
       ]

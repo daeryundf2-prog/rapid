@@ -37,6 +37,7 @@ class WindowsArtifactFixture:
     root: Path
     chrome_visit: ChromiumVisit
     ai_visit: ChromiumVisit
+    ai_storage_log: Path
     edge_visit: ChromiumVisit
     download: ChromiumDownload
     recent_shortcut: RecentShortcut
@@ -86,6 +87,20 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     )
 
     chrome_history = root / "Users" / "alice" / "AppData" / "Local" / "Google" / "Chrome" / "User Data" / "Default" / "History"
+    ai_storage_log = (
+        root
+        / "Users"
+        / "alice"
+        / "AppData"
+        / "Local"
+        / "Google"
+        / "Chrome"
+        / "User Data"
+        / "Default"
+        / "Local Storage"
+        / "leveldb"
+        / "000003.log"
+    )
     edge_history = root / "Users" / "alice" / "AppData" / "Local" / "Microsoft" / "Edge" / "User Data" / "Default" / "History"
     recent_dir = root / "Users" / "alice" / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Recent"
     logs_dir = root / "Windows" / "System32" / "winevt" / "Logs"
@@ -111,6 +126,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         visits=[chrome_visit, ai_visit],
         downloads=[],
     )
+    _write_ai_storage_fixture(ai_storage_log)
     _write_chromium_history(
         edge_history,
         visits=[edge_visit],
@@ -131,6 +147,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         root=root,
         chrome_visit=chrome_visit,
         ai_visit=ai_visit,
+        ai_storage_log=ai_storage_log,
         edge_visit=edge_visit,
         download=download,
         recent_shortcut=recent_shortcut,
@@ -239,6 +256,16 @@ def _write_chromium_history(
         conn.commit()
     finally:
         conn.close()
+
+
+def _write_ai_storage_fixture(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(
+        b"\x00chatgpt.com\x00"
+        b'{"role":"user","content":"How do I build an EVTX forensic timeline?"}\n'
+        b'{"role":"assistant","content":"Correlate EventRecordID, TimeCreated, channel, user, source IP, and process fields."}\n'
+        b'{"prompt":"Find AI usage in browser artifacts","answer":"Check History plus Local Storage, IndexedDB, Session Storage, and Cache."}\n'
+    )
 
 
 def _write_recent_shortcuts(path: Path, shortcuts: list[RecentShortcut]) -> None:

@@ -5,7 +5,7 @@
 | File metadata | Implemented | Names, paths, extensions, sizes, modified time, categories. |
 | KAPE-style collect planning/export | Implemented baseline | `collect-plan` profiles preview present/missing Windows/macOS collection targets before heavy scanning or copying. `collect-export` can build a bounded source-relative export package with SHA256 copy logs. |
 | Document text | Implemented | Text/log/config/data, PDF, Office OpenXML, OpenDocument where dependencies support extraction. |
-| Browser history/downloads | Implemented baseline+ | Chrome, Edge, Brave, Firefox local profiles; history/download fixture coverage; internet usage summaries, top-domain/category pivots, source hashes, and browser-derived AI service usage detections are normalized for Windows and macOS. |
+| Browser history/downloads | Implemented baseline+ | Chrome, Edge, Brave, Firefox local profiles; history/download fixture coverage; internet usage summaries, top-domain/category pivots, source hashes, browser-derived AI service usage detections, and browser-storage AI conversation candidates are normalized for Windows and macOS. |
 | Recent files | Implemented baseline | Recent shortcuts parse Shell Link header/string fields for target path, working directory, arguments, timestamps, flags, hashes, and embedded path pivots; Jump Lists are inventoried with embedded path extraction. |
 | Timeline merge | Implemented baseline | Files, docs, artifacts, and normalized timeline export. |
 | Case DB FTS | Implemented baseline | Documents and artifact metadata are indexed with SQLite FTS5; file metadata, timeline rows, review status filters, verification filters, and promoted artifact metadata filters are supported. |
@@ -34,7 +34,7 @@
 | APK malware triage | Partial | Exported `.apk` files are inventoried with hashes, manifest metadata, permissions, dex/native-library counts, and risk flags. |
 | Memory forensics | Partial | Volatility-style output normalization is implemented; direct RAM parsing, BitLocker key search, and process-risk visualization remain long-term work. |
 | Threat intelligence enrichment | Planned | Optional URL/IP/hash enrichment plugin, disabled by default. |
-| AI prompt artifacts | Partial | Browser history now detects common AI service visits such as ChatGPT, Claude, Gemini, Perplexity, Copilot, Poe, Hugging Face Chat, Grok, You.com, Phind, Mistral, DeepSeek, Meta AI, Character.AI, and Notion AI. URL query/title hints are captured when present, but full prompt recovery still requires cache/app/cloud-specific parsers. |
+| AI prompt artifacts | Partial+ | Browser history detects common AI service visits such as ChatGPT, Claude, Gemini, Perplexity, Copilot, Poe, Hugging Face Chat, Grok, You.com, Phind, Mistral, DeepSeek, Meta AI, Character.AI, and Notion AI. Browser Local Storage, Session Storage, IndexedDB, and Cache files are scanned for role/content, prompt, question, answer, response, and completion snippets as review-only conversation candidates; full transcript completeness still requires service-specific validation. |
 | Cloud export import | Partial | Google Takeout-style location/activity JSON and Apple/general account JSON exports are normalized with source hashes. |
 | Mobile/cloud acquisition | Partial | Exported APK and cloud export imports exist; direct cloud acquisition/API collection remains deferred. |
 
