@@ -96,7 +96,7 @@ OS/account workflow:
 
 - User profile directories are inventoried.
 - `.reg` exports can provide computer name, timezone, ProfileList SID, and admin-group hints.
-- `windows-registry` also summarizes Run-key persistence values, suspicious command/value hints, and USBSTOR device metadata from `.reg` exports.
+- `windows-registry` summarizes Run-key persistence values, suspicious command/value hints, and USBSTOR device metadata from `.reg` exports. It also inventories native hive candidates such as `NTUSER.DAT`, `UsrClass.dat`, `SYSTEM`, and `SOFTWARE` with source hashes, `regf` header fields, sequence/dirty hints, last-write timestamp, and bounded string pivots for search/review.
 
 Use:
 

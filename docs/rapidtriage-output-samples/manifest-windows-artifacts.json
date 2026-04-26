@@ -798,7 +798,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "reg-export-v2",
+            "parser_version": "registry-normalized-v3",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
@@ -831,7 +831,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "reg-export-v2",
+            "parser_version": "registry-normalized-v3",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/rdp.reg",
@@ -862,7 +862,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "reg-export-v2",
+            "parser_version": "registry-normalized-v3",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/software.reg",
@@ -905,12 +905,15 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-summary",
-            "parser_version": "reg-export-v2",
+            "parser_version": "registry-normalized-v3",
             "coverage_status": "summarized",
             "reportability": "triage",
             "source_path": "<ROOT>",
             "source_format": "summary",
+            "record_count": 4,
             "key_count": 4,
+            "hive_file_count": 0,
+            "hive_string_row_count": 0,
             "source_files": [
               "<ROOT>/Users/alice/NTUSER-shellbags.reg",
               "<ROOT>/Windows/System32/config/rdp.reg",
@@ -930,6 +933,12 @@
                 "count": 1
               }
             ],
+            "source_format_counts": [
+              {
+                "value": "reg",
+                "count": 4
+              }
+            ],
             "hive_counts": [
               {
                 "value": "HKEY_CURRENT_USER",
@@ -940,6 +949,8 @@
                 "count": 2
               }
             ],
+            "hive_files": [],
+            "hive_string_hits": [],
             "persistence_entries": [
               {
                 "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
@@ -973,7 +984,7 @@
               }
             ],
             "summary_notes": [
-              "Registry rows are based on .reg exports; deleted-key recovery requires a hive-aware parser.",
+              "Registry hive rows use native regf header and bounded string scanning; full cell traversal and deleted-key recovery require a dedicated hive parser.",
               "Run-key command hints are triage pivots, not proof that a program executed."
             ]
           }
@@ -985,7 +996,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "reg-export-v2",
+            "parser_version": "registry-normalized-v3",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/software.reg",
@@ -1209,7 +1220,7 @@
           "supported": true,
           "details": {
             "parser": "windows-shellbags-reg-export",
-            "parser_version": "reg-export-v2",
+            "parser_version": "registry-normalized-v3",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",

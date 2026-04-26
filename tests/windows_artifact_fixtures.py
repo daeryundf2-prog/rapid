@@ -319,6 +319,23 @@ def build_minimal_evtx(record_id: int, timestamp: datetime, strings: list[str]) 
     return bytes(header) + record
 
 
+def build_minimal_registry_hive(timestamp: datetime, embedded_name: str, strings: list[str]) -> bytes:
+    header = bytearray(4096)
+    header[0:4] = b"regf"
+    header[4:8] = (7).to_bytes(4, "little")
+    header[8:12] = (7).to_bytes(4, "little")
+    header[12:20] = datetime_to_filetime(timestamp).to_bytes(8, "little")
+    header[20:24] = (1).to_bytes(4, "little")
+    header[24:28] = (5).to_bytes(4, "little")
+    header[36:40] = (32).to_bytes(4, "little")
+    header[40:44] = (4096).to_bytes(4, "little")
+    header[44:48] = (1).to_bytes(4, "little")
+    header[48:112] = embedded_name.encode("utf-16le")[:64]
+    header[508:512] = (0x12345678).to_bytes(4, "little")
+    payload = b"".join(value.encode("utf-16le") + b"\x00\x00" for value in strings)
+    return bytes(header) + payload
+
+
 def _write_eventlog_fixtures(xml_path: Path, hayabusa_path: Path, evtx_path: Path) -> None:
     xml_path.parent.mkdir(parents=True, exist_ok=True)
     xml_path.write_text(
@@ -384,10 +401,26 @@ def _write_eventlog_fixtures(xml_path: Path, hayabusa_path: Path, evtx_path: Pat
 
 def _write_user_profile_fixtures(profile_path: Path, reg_path: Path) -> None:
     profile_path.mkdir(parents=True, exist_ok=True)
-    (profile_path / "NTUSER.DAT").write_bytes(b"fixture ntuser")
+    (profile_path / "NTUSER.DAT").write_bytes(
+        build_minimal_registry_hive(
+            datetime(2024, 4, 1, 4, 5, 6, tzinfo=timezone.utc),
+            "NTUSER.DAT",
+            [
+                r"Software\Microsoft\Windows\CurrentVersion\Run",
+                r"C:\Users\alice\AppData\Roaming\SecurityUpdater.exe",
+                "https://example.test/payload",
+            ],
+        )
+    )
     usrclass = profile_path / "AppData" / "Local" / "Microsoft" / "Windows" / "UsrClass.dat"
     usrclass.parent.mkdir(parents=True, exist_ok=True)
-    usrclass.write_bytes(b"fixture usrclass")
+    usrclass.write_bytes(
+        build_minimal_registry_hive(
+            datetime(2024, 4, 1, 5, 6, 7, tzinfo=timezone.utc),
+            "UsrClass.dat",
+            [r"Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\BagMRU"],
+        )
+    )
     reg_path.parent.mkdir(parents=True, exist_ok=True)
     reg_path.write_text(
         """Windows Registry Editor Version 5.00
