@@ -55,8 +55,17 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             registry_types = {artifact["artifact_type"] for artifact in registry_provider["artifacts"]}
             self.assertIn("registry-run-key", registry_types)
             self.assertIn("registry-usb", registry_types)
+            self.assertIn("registry-summary", registry_types)
             run_key = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-run-key")
             self.assertIn("SecurityUpdater", run_key["details"]["values"])
+            self.assertEqual(run_key["details"]["persistence_values"][0]["value_name"], "SecurityUpdater")
+            self.assertIn("suspicious-value:appdata", run_key["details"]["risk_flags"])
+            usb_key = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-usb")
+            self.assertEqual(usb_key["details"]["usb_device"]["serial_hint"], "1234567890")
+            summary = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-summary")
+            self.assertEqual(summary["details"]["key_count"], 3)
+            self.assertEqual(summary["details"]["persistence_entries"][0]["value_name"], "SecurityUpdater")
+            self.assertEqual(summary["details"]["usb_devices"][0]["friendly_name"], "Test USB Device")
 
             shellbags_provider = providers["windows-shellbags"]
             self.assertEqual(shellbags_provider["artifacts"][0]["artifact_type"], "shellbag-key")

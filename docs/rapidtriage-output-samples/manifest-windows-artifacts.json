@@ -405,16 +405,29 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "reg-export-v1",
+            "parser_version": "reg-export-v2",
+            "coverage_status": "mapped",
+            "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
             "source_format": "reg",
+            "source_hashes": {
+              "sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4"
+            },
             "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
             "hive_hint": "HKEY_CURRENT_USER",
             "value_count": 2,
+            "value_names": [
+              "0",
+              "NodeSlot"
+            ],
             "values": {
               "0": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
               "NodeSlot": "dword:00000001"
             },
+            "persistence_values": [],
+            "usb_device": {},
+            "risk_flags": [],
+            "risk_score": 0,
             "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]"
           }
         },
@@ -425,16 +438,119 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "reg-export-v1",
+            "parser_version": "reg-export-v2",
+            "coverage_status": "mapped",
+            "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/software.reg",
             "source_format": "reg",
+            "source_hashes": {
+              "sha256": "bdd4195a9ef353c5742507127c1d80ed88b28e24a7038f5797582bb5258ba764"
+            },
             "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
             "hive_hint": "HKEY_LOCAL_MACHINE",
             "value_count": 1,
+            "value_names": [
+              "SecurityUpdater"
+            ],
             "values": {
               "SecurityUpdater": "\"C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe\""
             },
+            "persistence_values": [
+              {
+                "value_name": "SecurityUpdater",
+                "command": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                "executable_hint": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                "risk_flags": [
+                  "suspicious-value:appdata"
+                ]
+              }
+            ],
+            "usb_device": {},
+            "risk_flags": [
+              "persistence-key",
+              "suspicious-value:appdata"
+            ],
+            "risk_score": 70,
             "raw_preview": "[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run]"
+          }
+        },
+        {
+          "provider": "windows-registry",
+          "artifact_type": "registry-summary",
+          "path": "<ROOT>",
+          "supported": true,
+          "details": {
+            "parser": "windows-registry-summary",
+            "parser_version": "reg-export-v2",
+            "coverage_status": "summarized",
+            "reportability": "triage",
+            "source_path": "<ROOT>",
+            "source_format": "summary",
+            "key_count": 3,
+            "source_files": [
+              "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+              "<ROOT>/Windows/System32/config/software.reg"
+            ],
+            "artifact_type_counts": [
+              {
+                "value": "registry-key",
+                "count": 1
+              },
+              {
+                "value": "registry-run-key",
+                "count": 1
+              },
+              {
+                "value": "registry-usb",
+                "count": 1
+              }
+            ],
+            "hive_counts": [
+              {
+                "value": "HKEY_LOCAL_MACHINE",
+                "count": 2
+              },
+              {
+                "value": "HKEY_CURRENT_USER",
+                "count": 1
+              }
+            ],
+            "persistence_entries": [
+              {
+                "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                "value_name": "SecurityUpdater",
+                "command": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                "executable_hint": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                "risk_flags": [
+                  "suspicious-value:appdata"
+                ]
+              }
+            ],
+            "usb_devices": [
+              {
+                "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890",
+                "device_class": "Disk&Ven_Test&Prod_USB&Rev_1.00",
+                "serial_hint": "1234567890",
+                "friendly_name": "Test USB Device",
+                "parent_id_prefix": ""
+              }
+            ],
+            "suspicious_entries": [
+              {
+                "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                "artifact_type": "registry-run-key",
+                "risk_flags": [
+                  "persistence-key",
+                  "suspicious-value:appdata"
+                ],
+                "risk_score": 70,
+                "source_path": "<ROOT>/Windows/System32/config/software.reg"
+              }
+            ],
+            "summary_notes": [
+              "Registry rows are based on .reg exports; deleted-key recovery requires a hive-aware parser.",
+              "Run-key command hints are triage pivots, not proof that a program executed."
+            ]
           }
         },
         {
@@ -444,15 +560,32 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "reg-export-v1",
+            "parser_version": "reg-export-v2",
+            "coverage_status": "mapped",
+            "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/software.reg",
             "source_format": "reg",
+            "source_hashes": {
+              "sha256": "bdd4195a9ef353c5742507127c1d80ed88b28e24a7038f5797582bb5258ba764"
+            },
             "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890",
             "hive_hint": "HKEY_LOCAL_MACHINE",
             "value_count": 1,
+            "value_names": [
+              "FriendlyName"
+            ],
             "values": {
               "FriendlyName": "\"Test USB Device\""
             },
+            "persistence_values": [],
+            "usb_device": {
+              "device_class": "Disk&Ven_Test&Prod_USB&Rev_1.00",
+              "serial_hint": "1234567890",
+              "friendly_name": "Test USB Device",
+              "parent_id_prefix": ""
+            },
+            "risk_flags": [],
+            "risk_score": 0,
             "raw_preview": "[HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890]"
           }
         }
@@ -471,16 +604,29 @@
           "supported": true,
           "details": {
             "parser": "windows-shellbags-reg-export",
-            "parser_version": "reg-export-v1",
+            "parser_version": "reg-export-v2",
+            "coverage_status": "mapped",
+            "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
             "source_format": "reg",
+            "source_hashes": {
+              "sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4"
+            },
             "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
             "hive_hint": "HKEY_CURRENT_USER",
             "value_count": 2,
+            "value_names": [
+              "0",
+              "NodeSlot"
+            ],
             "values": {
               "0": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
               "NodeSlot": "dword:00000001"
             },
+            "persistence_values": [],
+            "usb_device": {},
+            "risk_flags": [],
+            "risk_score": 0,
             "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]"
           }
         }

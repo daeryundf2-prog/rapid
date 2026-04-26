@@ -13,7 +13,7 @@
 | Image/media triage | Partial | Image dimensions, file hashes, perceptual average hash, similarity bucket, and OCR queue hints are implemented for common image files. |
 | Windows OS/account summary | Implemented baseline | User profile inventory plus `.reg` export hints for computer name, timezone, ProfileList SIDs, and admin-group hints. Last boot and full account lifecycle remain planned. |
 | Windows Event Logs | Partial+ | XML/JSON/JSONL/CSV exports from EVTX-oriented tools parse into normalized event/detection rows with hashes, categories, risk flags, reportability status, high-risk summary pivots, and EventRecordID gap hints; binary EVTX is inventoried with external-parser guidance. |
-| Registry hives | Partial | `.reg` exports parse into key/value rows including Run keys and USB hints. |
+| Registry hives | Partial+ | `.reg` exports parse into key/value rows including Run keys, suspicious persistence value hints, USBSTOR device metadata, and registry summary pivots. |
 | MFT | Import baseline | MFT CSV/JSON/JSONL exports are normalized with record number, path, timestamps, and deleted hints; native `$MFT` parsing remains planned. |
 | Zone.Identifier ADS | Partial | Exported `:Zone.Identifier`/`.Zone.Identifier` sidecar files parse ZoneId, referrer URL, and host URL. |
 | Defender/Firewall/WER/Task Scheduler | Partial | Fixture-backed inventory for Defender MPLog, Windows Firewall W3C logs, WER reports, and Task Scheduler XML. |

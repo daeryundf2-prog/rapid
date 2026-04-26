@@ -95,11 +95,13 @@ OS/account workflow:
 
 - User profile directories are inventoried.
 - `.reg` exports can provide computer name, timezone, ProfileList SID, and admin-group hints.
+- `windows-registry` also summarizes Run-key persistence values, suspicious command/value hints, and USBSTOR device metadata from `.reg` exports.
 
 Use:
 
 ```bash
 rapidtriage artifacts ./mounted-case --kind windows-os-account --output os-account.json
+rapidtriage artifacts ./registry-exports --kind windows-registry --output registry.json
 ```
 
 Execution and filesystem workflow:
