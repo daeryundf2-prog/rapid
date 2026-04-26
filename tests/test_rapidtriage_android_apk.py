@@ -41,8 +41,13 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertIn("android.permission.SEND_SMS", details["dangerous_permissions"])
             self.assertIn("dangerous-permissions", details["risk_flags"])
             self.assertIn("native-code", details["risk_flags"])
+            self.assertIn("suspicious-code-strings", details["risk_flags"])
+            self.assertIn("network-indicators", details["risk_flags"])
             self.assertEqual(details["dex_count"], 2)
             self.assertEqual(details["native_library_count"], 1)
+            self.assertTrue(any(item["value"] == "DexClassLoader" for item in details["string_pivots"]))
+            self.assertTrue(any(item["value"] == "https://c2.example.test/payload" for item in details["string_pivots"]))
+            self.assertTrue(any(item["value"] == "10.0.0.66" for item in details["string_pivots"]))
             self.assertIn("sha256", details["hashes"])
             self.assertGreater(details["risk_score"], 0)
 
@@ -62,7 +67,14 @@ def write_apk_fixture(path: Path) -> None:
 """
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("AndroidManifest.xml", manifest)
-        archive.writestr("classes.dex", b"dex\n035\x00")
+        archive.writestr(
+            "classes.dex",
+            b"dex\n035\x00"
+            b"Ldalvik/system/DexClassLoader;"
+            b"Runtime.getRuntime"
+            b"https://c2.example.test/payload\x00"
+            b"10.0.0.66",
+        )
         archive.writestr("classes2.dex", b"dex\n035\x00")
         archive.writestr("lib/arm64-v8a/libpayload.so", b"\x7fELF")
         archive.writestr("META-INF/CERT.RSA", b"certificate")

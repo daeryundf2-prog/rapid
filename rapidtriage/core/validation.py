@@ -154,7 +154,7 @@ def build_commercial_gap_assessment() -> list[dict[str, object]]:
         {
             "area": "mobile-cloud-memory-depth",
             "severity": "high",
-            "current_status": "APK triage, cloud export imports, and Volatility-style output imports exist; direct acquisition and deep native analysis are not implemented.",
+            "current_status": "APK triage includes permissions, dex/native inventory, and bounded string/URL/IP pivots; cloud export imports and Volatility-style output imports exist; direct acquisition and deep native analysis are not implemented.",
             "needed_for_commercial_parity": "Vendor package importers, app database parsers, direct cloud/API acquisition workflows, raw memory analysis, BitLocker key search, and malware process scoring.",
             "operator_workaround": "Use Cellebrite/XRY/GrayKey/AXIOM/cloud provider exports and Volatility outputs, then import the resulting folder/files.",
         },

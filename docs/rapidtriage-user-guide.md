@@ -187,7 +187,7 @@ rapidtriage run ./mounted-mac --mode hacking --output-dir ./case-run --read-only
 
 ## Android APK Triage
 
-When a mobile acquisition/export folder contains `.apk` files, RapidTriage can inventory them without performing phone acquisition itself. The APK collector records file hashes, package/version metadata when the manifest is readable, requested permissions, dangerous permissions, dex/native-library counts, certificate entries, and simple risk flags.
+When a mobile acquisition/export folder contains `.apk` files, RapidTriage can inventory them without performing phone acquisition itself. The APK collector records file hashes, package/version metadata when the manifest is readable, requested permissions, dangerous permissions, dex/native-library counts, certificate entries, bounded dex/native string pivots, URL/IP indicators, and simple risk flags.
 
 Use:
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -8,8 +9,24 @@ from typing import Iterable
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 
-PARSER_VERSION = "android-apk-v1"
+PARSER_VERSION = "android-apk-v2"
 ANDROID_NAMESPACE = "{http://schemas.android.com/apk/res/android}"
+APK_STRING_SCAN_LIMIT = 1024 * 1024
+APK_SUSPICIOUS_STRING_TERMS = (
+    "DexClassLoader",
+    "PathClassLoader",
+    "Runtime.getRuntime",
+    "ProcessBuilder",
+    "su",
+    "chmod",
+    "pm install",
+    "content://sms",
+    "content://contacts",
+    "AccessibilityService",
+    "BIND_ACCESSIBILITY_SERVICE",
+)
+URL_RE = re.compile(rb"https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{4,300}")
+IP_RE = re.compile(rb"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 DANGEROUS_PERMISSION_KEYWORDS = (
     "ACCESS_FINE_LOCATION",
     "ACCESS_BACKGROUND_LOCATION",
@@ -89,12 +106,14 @@ def parse_apk_zip(archive: zipfile.ZipFile) -> dict[str, object]:
     certificate_entries = sorted(name for name in names if name.startswith("META-INF/") and name.upper().endswith((".RSA", ".DSA", ".EC")))
     manifest = parse_manifest(archive)
     permissions = sorted(manifest.get("permissions", []))
+    string_pivots = scan_apk_string_pivots(archive, [*dex_entries, *native_libraries])
     risk_flags = build_risk_flags(
         permissions=permissions,
         dex_entries=dex_entries,
         native_libraries=native_libraries,
         certificate_entries=certificate_entries,
         manifest_format=str(manifest.get("manifest_format", "")),
+        string_pivots=string_pivots,
     )
     return {
         "valid_zip": True,
@@ -106,8 +125,9 @@ def parse_apk_zip(archive: zipfile.ZipFile) -> dict[str, object]:
         "certificate_entries": certificate_entries[:10],
         "permissions": permissions,
         "dangerous_permissions": dangerous_permissions(permissions),
+        "string_pivots": string_pivots,
         "risk_flags": risk_flags,
-        "risk_score": score_risk(risk_flags, permissions, native_libraries, dex_entries),
+        "risk_score": score_risk(risk_flags, permissions, native_libraries, dex_entries, string_pivots),
         **manifest,
     }
 
@@ -197,6 +217,7 @@ def build_risk_flags(
     native_libraries: list[str],
     certificate_entries: list[str],
     manifest_format: str,
+    string_pivots: list[dict[str, str]],
 ) -> list[str]:
     flags: list[str] = []
     dangerous = dangerous_permissions(permissions)
@@ -216,7 +237,54 @@ def build_risk_flags(
         flags.append("missing-certificate-entry")
     if manifest_format != "xml":
         flags.append("manifest-not-decoded")
+    pivot_types = {item["type"] for item in string_pivots}
+    if "suspicious-string" in pivot_types:
+        flags.append("suspicious-code-strings")
+    if "url" in pivot_types or "ip" in pivot_types:
+        flags.append("network-indicators")
     return flags
+
+
+def scan_apk_string_pivots(archive: zipfile.ZipFile, entries: list[str]) -> list[dict[str, str]]:
+    pivots: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for entry in entries[:50]:
+        try:
+            blob = archive.read(entry)[:APK_STRING_SCAN_LIMIT]
+        except (KeyError, OSError, zipfile.BadZipFile):
+            continue
+        text = blob.decode("latin-1", errors="ignore")
+        for term in APK_SUSPICIOUS_STRING_TERMS:
+            if term.lower() in text.lower():
+                add_pivot(pivots, seen, entry, "suspicious-string", term)
+        for match in URL_RE.finditer(blob):
+            add_pivot(pivots, seen, entry, "url", match.group(0).decode("latin-1", errors="ignore"))
+        for match in IP_RE.finditer(blob):
+            value = match.group(0).decode("ascii", errors="ignore")
+            if valid_ipv4(value):
+                add_pivot(pivots, seen, entry, "ip", value)
+        if len(pivots) >= 50:
+            break
+    return pivots[:50]
+
+
+def add_pivot(
+    pivots: list[dict[str, str]],
+    seen: set[tuple[str, str, str]],
+    entry: str,
+    pivot_type: str,
+    value: str,
+) -> None:
+    key = (entry, pivot_type, value)
+    if key in seen:
+        return
+    seen.add(key)
+    pivots.append({"entry": entry, "type": pivot_type, "value": value})
+
+
+def valid_ipv4(value: str) -> bool:
+    parts = value.split(".")
+    return len(parts) == 4 and all(part.isdigit() and 0 <= int(part) <= 255 for part in parts)
 
 
 def score_risk(
@@ -224,6 +292,7 @@ def score_risk(
     permissions: list[str],
     native_libraries: list[str],
     dex_entries: list[str],
+    string_pivots: list[dict[str, str]],
 ) -> int:
     score = len(dangerous_permissions(permissions)) * 8
     score += len(risk_flags) * 7
@@ -231,4 +300,5 @@ def score_risk(
         score += 10
     if len(dex_entries) > 1:
         score += 8
+    score += min(20, len(string_pivots) * 3)
     return min(score, 100)

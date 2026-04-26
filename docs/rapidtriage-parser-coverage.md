@@ -31,7 +31,7 @@
 | Optical/archive images ISO/DMG/WIM/SWM | Detection | UI/API adapter detection exists; mount/extract externally, then scan the folder. |
 | Virtual disks VHD/VHDX/VMDK/VDI/XVA/QCOW/QCOW2 | Detection | UI/API adapter detection exists with platform tool hints; extraction/mount orchestration is planned. |
 | Memory dumps MEM/DMP/VMEM/VMSS/VMSN/HPAK | Detection + import | Memory dump detection exists; Volatility/Volatility3 JSON/JSONL outputs can be imported as process, network, cmdline, and malfind artifacts. |
-| APK malware triage | Partial | Exported `.apk` files are inventoried with hashes, manifest metadata, permissions, dex/native-library counts, and risk flags. |
+| APK malware triage | Partial+ | Exported `.apk` files are inventoried with hashes, manifest metadata, permissions, dex/native-library counts, bounded suspicious string pivots, URL/IP indicators, and risk flags. |
 | Memory forensics | Partial | Volatility-style output normalization is implemented; direct RAM parsing, BitLocker key search, and process-risk visualization remain long-term work. |
 | Threat intelligence enrichment | Planned | Optional URL/IP/hash enrichment plugin, disabled by default. |
 | AI prompt artifacts | Partial+ | Browser history detects common AI service visits such as ChatGPT, Claude, Gemini, Perplexity, Copilot, Poe, Hugging Face Chat, Grok, You.com, Phind, Mistral, DeepSeek, Meta AI, Character.AI, and Notion AI. Browser Local Storage, Session Storage, IndexedDB, and Cache files are scanned for role/content, prompt, question, answer, response, and completion snippets as review-only conversation candidates; full transcript completeness still requires service-specific validation. |
