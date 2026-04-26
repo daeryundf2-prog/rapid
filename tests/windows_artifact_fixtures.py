@@ -642,7 +642,15 @@ def _write_remote_access_fixtures(default_rdp: Path, cache_file: Path, reg_path:
         encoding="utf-8",
     )
     cache_file.parent.mkdir(parents=True, exist_ok=True)
-    cache_file.write_bytes(b"fixture rdp cache")
+    cache_file.write_bytes(
+        b"fixture rdp cache"
+        + b"\x89PNG\r\n\x1a\n"
+        + b"\x00\x00\x00\rIHDR"
+        + (320).to_bytes(4, "big")
+        + (200).to_bytes(4, "big")
+        + b"\x08\x02\x00\x00\x00"
+        + b"\x00\x00\x00\x00"
+    )
     reg_path.parent.mkdir(parents=True, exist_ok=True)
     reg_path.write_text(
         """Windows Registry Editor Version 5.00

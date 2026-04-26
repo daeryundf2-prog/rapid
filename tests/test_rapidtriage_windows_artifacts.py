@@ -427,6 +427,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(config["details"]["gateway_hostname"], "rd-gateway.example")
             self.assertEqual(config["details"]["source_path"], str(fixture.default_rdp.resolve()))
             self.assertEqual(cache["details"]["source_path"], str(fixture.rdp_cache_file.resolve()))
+            self.assertEqual(cache["details"]["cache_parse_status"], "image-signature-pivots")
+            self.assertEqual(cache["details"]["thumbnail_candidate_count"], 1)
+            self.assertEqual(cache["details"]["thumbnail_candidates"][0]["type"], "png")
+            self.assertEqual(cache["details"]["thumbnail_candidates"][0]["width"], 320)
+            self.assertEqual(cache["details"]["thumbnail_candidates"][0]["height"], 200)
             self.assertTrue(any(item["details"]["destination"] == "10.0.0.50" for item in destinations))
             self.assertTrue(any(item["details"]["destination"] == "rdp-target.example" for item in destinations))
 

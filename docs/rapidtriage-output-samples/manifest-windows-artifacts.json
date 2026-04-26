@@ -1100,7 +1100,7 @@
           "supported": true,
           "details": {
             "parser": "windows-remote-access",
-            "parser_version": "windows-remote-access-v1",
+            "parser_version": "windows-remote-access-v2",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
@@ -1111,10 +1111,13 @@
             "user": "alice",
             "entry_name": "Cache0000.bin",
             "size": 16,
+            "cache_parse_status": "image-signature-pivots",
+            "thumbnail_candidate_count": 0,
+            "thumbnail_candidates": [],
             "modified_at": "2024-03-05T06:07:12+00:00",
             "timestamp": "2024-03-05T06:07:12+00:00",
             "timestamp_source": "rdp_cache_modified_at",
-            "note": "RDP cache file inventoried for remote-access review; thumbnail decoding is not enabled in this build."
+            "note": "RDP cache file inventoried with bounded image signature pivots for remote-access thumbnail review; validate important screenshots with a dedicated RDP cache decoder."
           }
         },
         {
@@ -1124,7 +1127,7 @@
           "supported": true,
           "details": {
             "parser": "windows-remote-access",
-            "parser_version": "windows-remote-access-v1",
+            "parser_version": "windows-remote-access-v2",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/Documents/Default.rdp",
@@ -1154,7 +1157,7 @@
           "supported": true,
           "details": {
             "parser": "windows-remote-access",
-            "parser_version": "windows-remote-access-v1",
+            "parser_version": "windows-remote-access-v2",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/rdp.reg",

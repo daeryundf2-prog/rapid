@@ -113,7 +113,7 @@ Recent/LNK workflow:
 Remote access workflow:
 
 - `windows-remote-access` extracts RDP connection files, including full address, username hint, gateway host, and modified time.
-- Terminal Server Client cache files are inventoried with hashes and timestamps so analysts can preserve and review RDP thumbnail/cache evidence.
+- Terminal Server Client cache files are inventoried with hashes, timestamps, and bounded PNG/JPEG/BMP/DIB thumbnail signature pivots so analysts can preserve and review RDP thumbnail/cache evidence without forcing heavy decoding up front.
 - Exported Terminal Server Client registry keys are normalized into `rdp-destination` rows for quick destination pivots.
 
 Execution and filesystem workflow:

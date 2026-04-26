@@ -8,9 +8,15 @@ from ...core.audit import compute_sha256
 from ...core.models import ArtifactRecord
 from .common import isoformat_from_timestamp, iter_windows_user_homes
 
-PARSER_VERSION = "windows-remote-access-v1"
+PARSER_VERSION = "windows-remote-access-v2"
 RDP_CACHE_ROOT = ("AppData", "Local", "Microsoft", "Terminal Server Client", "Cache")
 RDP_DESTINATION_RE = re.compile(r"(?i)\\terminal server client\\(?:default|servers)\\(?P<destination>[^\\\]\"]+)")
+RDP_CACHE_SCAN_LIMIT = 4 * 1024 * 1024
+IMAGE_SIGNATURES = (
+    ("png", b"\x89PNG\r\n\x1a\n"),
+    ("jpeg", b"\xff\xd8\xff"),
+    ("bmp", b"BM"),
+)
 
 
 class WindowsRemoteAccessProvider:
@@ -65,6 +71,7 @@ def collect_rdp_cache_files(root: Path) -> Iterable[ArtifactRecord]:
             continue
         for path in sorted((item for item in cache_root.rglob("*") if item.is_file()), key=lambda item: str(item).lower()):
             stat_result = path.stat()
+            thumbnail_candidates = scan_thumbnail_candidates(path)
             yield ArtifactRecord(
                 provider=WindowsRemoteAccessProvider.name,
                 artifact_type="rdp-cache-file",
@@ -75,10 +82,13 @@ def collect_rdp_cache_files(root: Path) -> Iterable[ArtifactRecord]:
                     "user": user_root.name,
                     "entry_name": path.name,
                     "size": stat_result.st_size,
+                    "cache_parse_status": "image-signature-pivots",
+                    "thumbnail_candidate_count": len(thumbnail_candidates),
+                    "thumbnail_candidates": thumbnail_candidates,
                     "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
                     "timestamp": isoformat_from_timestamp(stat_result.st_mtime),
                     "timestamp_source": "rdp_cache_modified_at",
-                    "note": "RDP cache file inventoried for remote-access review; thumbnail decoding is not enabled in this build.",
+                    "note": "RDP cache file inventoried with bounded image signature pivots for remote-access thumbnail review; validate important screenshots with a dedicated RDP cache decoder.",
                 },
             )
 
@@ -122,6 +132,74 @@ def read_text(path: Path) -> str:
         return ""
     encoding = "utf-16" if data.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8"
     return data.decode(encoding, errors="replace")
+
+
+def scan_thumbnail_candidates(path: Path, *, scan_limit: int = RDP_CACHE_SCAN_LIMIT) -> list[dict[str, object]]:
+    try:
+        with path.open("rb") as handle:
+            blob = handle.read(scan_limit)
+    except OSError:
+        return []
+    candidates: list[dict[str, object]] = []
+    for image_type, signature in IMAGE_SIGNATURES:
+        start = 0
+        while True:
+            offset = blob.find(signature, start)
+            if offset < 0:
+                break
+            candidate = {"type": image_type, "offset": offset, "signature": signature.hex()}
+            candidate.update(image_dimensions(blob, image_type, offset))
+            candidates.append(candidate)
+            if len(candidates) >= 20:
+                return candidates
+            start = offset + max(1, len(signature))
+    candidates.extend(scan_dib_candidates(blob, existing_offsets={int(item["offset"]) for item in candidates}))
+    return candidates[:20]
+
+
+def image_dimensions(blob: bytes, image_type: str, offset: int) -> dict[str, int]:
+    if image_type == "png" and len(blob) >= offset + 24:
+        return {
+            "width": int.from_bytes(blob[offset + 16 : offset + 20], "big", signed=False),
+            "height": int.from_bytes(blob[offset + 20 : offset + 24], "big", signed=False),
+        }
+    if image_type == "bmp" and len(blob) >= offset + 26:
+        return {
+            "width": int.from_bytes(blob[offset + 18 : offset + 22], "little", signed=True),
+            "height": int.from_bytes(blob[offset + 22 : offset + 26], "little", signed=True),
+        }
+    return {}
+
+
+def scan_dib_candidates(blob: bytes, *, existing_offsets: set[int]) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for offset in range(0, max(0, len(blob) - 16), 4):
+        if offset in existing_offsets:
+            continue
+        header_size = int.from_bytes(blob[offset : offset + 4], "little", signed=False)
+        if header_size not in {40, 108, 124}:
+            continue
+        width = int.from_bytes(blob[offset + 4 : offset + 8], "little", signed=True)
+        height = int.from_bytes(blob[offset + 8 : offset + 12], "little", signed=True)
+        planes = int.from_bytes(blob[offset + 12 : offset + 14], "little", signed=False)
+        bits_per_pixel = int.from_bytes(blob[offset + 14 : offset + 16], "little", signed=False)
+        if planes != 1 or bits_per_pixel not in {1, 4, 8, 16, 24, 32}:
+            continue
+        if not (0 < abs(width) <= 10000 and 0 < abs(height) <= 10000):
+            continue
+        candidates.append(
+            {
+                "type": "dib",
+                "offset": offset,
+                "signature": f"dib-header-{header_size}",
+                "width": width,
+                "height": height,
+                "bits_per_pixel": bits_per_pixel,
+            }
+        )
+        if len(candidates) >= 20:
+            break
+    return candidates
 
 
 def source_details(path: Path, source_format: str) -> dict[str, object]:
