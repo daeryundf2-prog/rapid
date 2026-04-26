@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from .case import load_case_payload
-from .case_report import build_case_report_markdown
+from .case_report import build_case_report_markdown, write_case_report_exports
 from .docs import write_result
 from .submission import build_submission_manifest, compute_hashes
 
@@ -53,7 +53,7 @@ def build_submission_bundle(
         submission_manifest=manifest,
         metadata={"title": title or case_payload.get("title") or "RapidTriage submission bundle"},
     )
-    report_path.write_text(report_markdown, encoding="utf-8")
+    report_exports = write_case_report_exports(report_markdown, report_path)
     reviewer_path.write_text(render_reviewer_html(manifest, selected, report_markdown), encoding="utf-8")
     audit = {
         "command": "bundle",
@@ -63,13 +63,23 @@ def build_submission_bundle(
         "outputs": {
             "manifest": str(manifest_path),
             "selected_evidence": str(selected_path),
-            "report": str(report_path),
+            "report": report_exports["md"],
+            "report_html": report_exports["html"],
+            "report_docx": report_exports["docx"],
             "reviewer": str(reviewer_path),
         },
     }
     write_result(audit, audit_path)
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in (manifest_path, selected_path, report_path, reviewer_path, audit_path):
+        for path in (
+            manifest_path,
+            selected_path,
+            Path(report_exports["md"]),
+            Path(report_exports["html"]),
+            Path(report_exports["docx"]),
+            reviewer_path,
+            audit_path,
+        ):
             archive.write(path, path.name)
     integrity = compute_hashes(zip_path)
     bundle_manifest = {
@@ -90,7 +100,9 @@ def build_submission_bundle(
         "outputs": {
             "manifest": str(manifest_path),
             "selected_evidence": str(selected_path),
-            "report": str(report_path),
+            "report": report_exports["md"],
+            "report_html": report_exports["html"],
+            "report_docx": report_exports["docx"],
             "reviewer": str(reviewer_path),
             "audit": str(audit_path),
             "archive": str(zip_path),

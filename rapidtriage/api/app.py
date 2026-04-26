@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from ..core.audit import audit_path_for, write_audit_record
 from ..core.case import CaseBookmarkError, create_or_update_case_payload, load_case_payload, save_case_payload
 from ..core.case_catalog import CaseCatalog, CaseCatalogError, default_case_catalog_path
-from ..core.case_report import build_case_report_markdown
+from ..core.case_report import build_case_report_markdown, case_report_export_paths, write_case_report_exports
 from ..core.case_db import CaseDatabaseError, open_case_database
 from ..core.collect_plan import CollectPlanError, build_collect_plan, supported_collect_profiles
 from ..core.docs import SUPPORTED_DOC_EXTS, extract_text
@@ -588,11 +588,11 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     def create_case_report(run_id: str, request: CaseReportCreateRequest) -> Dict[str, object]:
         report_path = default_case_report_path(store, run_id)
         markdown = build_run_case_report(store, run_id, request)
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(markdown, encoding="utf-8")
+        exports = write_case_report_exports(markdown, report_path)
         write_case_report_audit(store, run_id, report_path, request)
         return {
             "report_path": str(report_path),
+            "exports": exports,
             "audit": str(audit_path_for(report_path)),
             "markdown": markdown,
         }
@@ -602,10 +602,27 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         request = CaseReportCreateRequest()
         report_path = default_case_report_path(store, run_id)
         markdown = build_run_case_report(store, run_id, request)
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(markdown, encoding="utf-8")
+        write_case_report_exports(markdown, report_path)
         write_case_report_audit(store, run_id, report_path, request)
         return FileResponse(report_path, filename=report_path.name, media_type="text/markdown")
+
+    @api.get("/api/runs/{run_id}/case-report/file/{format_name}")
+    def download_case_report_format(run_id: str, format_name: str) -> FileResponse:
+        normalized = format_name.lower()
+        if normalized not in {"md", "html", "docx"}:
+            raise HTTPException(status_code=404, detail="unsupported case report format")
+        request = CaseReportCreateRequest()
+        report_path = default_case_report_path(store, run_id)
+        markdown = build_run_case_report(store, run_id, request)
+        write_case_report_exports(markdown, report_path)
+        write_case_report_audit(store, run_id, report_path, request)
+        path = case_report_export_paths(report_path)[normalized]
+        media_types = {
+            "md": "text/markdown",
+            "html": "text/html",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+        return FileResponse(path, filename=path.name, media_type=media_types[normalized])
 
     @api.post("/api/runs/{run_id}/bookmarks")
     def create_run_bookmark(run_id: str, request: BookmarkCreateRequest) -> Dict[str, object]:
@@ -890,12 +907,17 @@ def write_case_report_audit(
 ) -> None:
     case_path = default_case_path(store, run_id)
     manifest_path = default_submission_manifest_path(store, run_id)
+    exports = case_report_export_paths(report_path)
     write_audit_record(
         audit_path_for(report_path),
         command="case-report",
         options=model_to_dict(request),
         input_files=[("case-json", case_path), ("submission-manifest", manifest_path)],
-        output_files=[("case-report", report_path)],
+        output_files=[
+            ("case-report", exports["md"]),
+            ("case-report-html", exports["html"]),
+            ("case-report-docx", exports["docx"]),
+        ],
     )
 
 

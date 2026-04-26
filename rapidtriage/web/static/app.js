@@ -1296,8 +1296,13 @@ async function saveCaseReport(event) {
       method: "POST",
       body: JSON.stringify(request),
     });
-    const url = `/api/runs/${encodeURIComponent(selectedRunId)}/case-report/file`;
-    status.innerHTML = `Saved <a class="mini-link" href="${url}" target="_blank" rel="noreferrer">Download report</a>`;
+    const baseUrl = `/api/runs/${encodeURIComponent(selectedRunId)}/case-report/file`;
+    status.innerHTML = [
+      "Saved",
+      `<a class="mini-link" href="${baseUrl}" target="_blank" rel="noreferrer">Markdown</a>`,
+      `<a class="mini-link" href="${baseUrl}/html" target="_blank" rel="noreferrer">HTML</a>`,
+      `<a class="mini-link" href="${baseUrl}/docx" target="_blank" rel="noreferrer">DOCX</a>`,
+    ].join(" ");
     if (payload.report_path) {
       status.insertAdjacentHTML("beforeend", ` <span>${escapeHtml(payload.report_path)}</span>`);
     }

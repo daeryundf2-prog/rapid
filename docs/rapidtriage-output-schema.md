@@ -256,9 +256,9 @@ Each `items[]` row preserves bookmark/review context plus an `evidence` object c
 
 Rows are skipped when the source path is unavailable, missing, outside the run evidence roots, or exceeds the configured item cap.
 
-## `case-report` Markdown
+## `case-report` exports
 
-The web API can generate `rapidtriage-case-report.md` from `rapidtriage-case.json` and `rapidtriage-submission-manifest.json`.
+The web API can generate `rapidtriage-case-report.md`, `rapidtriage-case-report.html`, and `rapidtriage-case-report.docx` from `rapidtriage-case.json` and `rapidtriage-submission-manifest.json`.
 
 The report draft includes:
 
@@ -270,6 +270,8 @@ The report draft includes:
 - skipped hash rows and reasons
 - conclusion/opinion text
 - attachment list for case JSON, hash manifest, audit sidecars, and run report
+
+The HTML export is intended for browser review and printing. The DOCX export is a dependency-free OpenXML handoff draft for analyst/legal editing. Both are generated from the same Markdown source and should be verified against the source evidence and hash manifest before submission.
 
 ## `artifacts` JSON
 

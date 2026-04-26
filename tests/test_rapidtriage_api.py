@@ -4,6 +4,7 @@ import hashlib
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -332,12 +333,25 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("Technical appendix", report_payload["markdown"])
             self.assertIn("CASE-001", report_payload["markdown"])
             self.assertIn(evidence["hashes"]["sha256"], report_payload["markdown"])
+            self.assertIn("html", report_payload["exports"])
+            self.assertIn("docx", report_payload["exports"])
             self.assertTrue((output_dir / "rapidtriage-case-report.md").is_file())
+            self.assertTrue((output_dir / "rapidtriage-case-report.html").is_file())
+            self.assertTrue((output_dir / "rapidtriage-case-report.docx").is_file())
             self.assertTrue((output_dir / "rapidtriage-case-report.audit.md").is_file())
+            self.assertIn("case-report-docx", (output_dir / "rapidtriage-case-report.audit.md").read_text(encoding="utf-8"))
+            with zipfile.ZipFile(output_dir / "rapidtriage-case-report.docx") as report_docx:
+                self.assertIn("word/document.xml", report_docx.namelist())
 
             report_file_response = client.get(f"/api/runs/{run_id}/case-report/file")
             self.assertEqual(report_file_response.status_code, 200)
             self.assertIn("디지털 포렌식 분석 보고서", report_file_response.text)
+            html_report_response = client.get(f"/api/runs/{run_id}/case-report/file/html")
+            self.assertEqual(html_report_response.status_code, 200)
+            self.assertIn("<h1>디지털 포렌식 분석 보고서</h1>", html_report_response.text)
+            docx_report_response = client.get(f"/api/runs/{run_id}/case-report/file/docx")
+            self.assertEqual(docx_report_response.status_code, 200)
+            self.assertGreater(len(docx_report_response.content), 500)
 
     def test_run_catalog_persists_and_imports_existing_output_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -5,6 +5,7 @@ import io
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
@@ -128,10 +129,19 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertTrue((bundle_dir / "rapidtriage-submission-manifest.json").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-selected-evidence.json").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-case-report.md").is_file())
+            self.assertTrue((bundle_dir / "rapidtriage-case-report.html").is_file())
+            self.assertTrue((bundle_dir / "rapidtriage-case-report.docx").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-reviewer.html").is_file())
             self.assertIn("Reviewer Bundle", (bundle_dir / "rapidtriage-reviewer.html").read_text(encoding="utf-8"))
+            with zipfile.ZipFile(bundle_dir / "rapidtriage-case-report.docx") as report_docx:
+                self.assertIn("word/document.xml", report_docx.namelist())
+            with zipfile.ZipFile(payload["archive"]) as bundle_zip:
+                self.assertIn("rapidtriage-case-report.html", bundle_zip.namelist())
+                self.assertIn("rapidtriage-case-report.docx", bundle_zip.namelist())
             self.assertTrue(Path(payload["archive"]).is_file())
             self.assertIn("sha256", payload["archive_hashes"])
+            self.assertIn("report_html", payload["outputs"])
+            self.assertIn("report_docx", payload["outputs"])
             self.assertIn("reviewer", payload["outputs"])
 
     def test_plugins_command_lists_builtins_and_validates_external_manifest(self) -> None:

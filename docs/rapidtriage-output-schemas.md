@@ -162,12 +162,12 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 
 ### `case-report`
 
-- Output: `rapidtriage-case-report.md`
+- Output: `rapidtriage-case-report.md`, `rapidtriage-case-report.html`, `rapidtriage-case-report.docx`
 - Built from:
   - `rapidtriage-case.json`
   - `rapidtriage-submission-manifest.json`
   - run summary metadata
-- The Markdown draft includes case metadata, analysis scope, run steps, reviewed/report-candidate counts, evidence hashes, skipped hash rows, conclusion/opinion text, and attachment references.
+- The report draft includes case metadata, analysis scope, run steps, reviewed/report-candidate counts, evidence hashes, skipped hash rows, conclusion/opinion text, and attachment references. HTML supports quick browser review/printing; DOCX supports portable analyst/legal editing.
 
 ## Artifact collector rows
 
