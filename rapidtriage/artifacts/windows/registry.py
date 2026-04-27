@@ -131,6 +131,8 @@ def collect_registry_hive(path: Path) -> Iterable[ArtifactRecord]:
         yield build_registry_hive_strings_record(path, strings, metadata, source_hashes)
     for candidate in iter_registry_cell_candidates(scan_blob):
         yield build_registry_hive_cell_record(path, candidate, metadata, source_hashes)
+        if candidate.get("allocation_status") == "free-or-deleted-candidate":
+            yield build_registry_deleted_cell_record(path, candidate, metadata, source_hashes)
 
 
 def parse_registry_hive_header(header: bytes) -> dict[str, object]:
@@ -285,6 +287,51 @@ def build_registry_hive_cell_record(
     )
 
 
+def build_registry_deleted_cell_record(
+    path: Path,
+    candidate: Mapping[str, object],
+    metadata: Mapping[str, object],
+    source_hashes: Mapping[str, str],
+) -> ArtifactRecord:
+    name = str(candidate.get("name") or "")
+    risk_flags = registry_cell_risk_flags(candidate)
+    return ArtifactRecord(
+        provider=WindowsRegistryProvider.name,
+        artifact_type="registry-deleted-cell-candidate",
+        path=str(path.resolve()),
+        supported=bool(metadata.get("regf_valid")),
+        details={
+            "parser": "windows-registry-hive-deleted-cell-recovery",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "native-deleted-cell-candidate",
+            "reportability": "review",
+            "source_path": str(path.resolve()),
+            "source_format": "registry-hive",
+            "source_hashes": dict(source_hashes),
+            "hive_name": path.name,
+            "hive_hint": hive_hint_from_path(path),
+            "parser_confidence": 0.5 if metadata.get("regf_valid") else 0.2,
+            "evidence_strength": "registry-deleted-cell-candidate",
+            "validation_required": True,
+            "validation_guidance": "Positive-size hive cells can represent free space that still contains old nk/vk structures; validate with a dedicated registry parser before final testimony.",
+            "cell_kind": candidate.get("cell_kind", ""),
+            "cell_signature": candidate.get("cell_signature", ""),
+            "cell_offset": candidate.get("cell_offset", 0),
+            "cell_size": candidate.get("cell_size", 0),
+            "allocation_status": candidate.get("allocation_status", ""),
+            "name": name,
+            "name_encoding": candidate.get("name_encoding", ""),
+            "last_written_at": candidate.get("last_written_at", ""),
+            "value_type": candidate.get("value_type", ""),
+            "value_data_size": candidate.get("value_data_size", 0),
+            "value_data_offset": candidate.get("value_data_offset", 0),
+            "risk_flags": risk_flags,
+            "risk_score": min(100, 40 + len(risk_flags) * 20),
+            "raw_preview": f"deleted/free {candidate.get('cell_kind', 'cell')} {name}".strip(),
+        },
+    )
+
+
 def build_registry_record(
     path: Path,
     key: str,
@@ -340,6 +387,7 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
     hive_files: list[dict[str, object]] = []
     hive_string_hits: list[dict[str, object]] = []
     hive_cell_hits: list[dict[str, object]] = []
+    deleted_cell_candidates: list[dict[str, object]] = []
 
     for record in records:
         details = record.details
@@ -383,6 +431,21 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
             }
             if cell_hit["name"] or cell_hit["risk_flags"] or cell_hit["allocation_status"] == "free-or-deleted-candidate":
                 hive_cell_hits.append(cell_hit)
+        if record.artifact_type == "registry-deleted-cell-candidate":
+            deleted_cell_candidates.append(
+                {
+                    "source_path": details.get("source_path", record.path),
+                    "hive_hint": details.get("hive_hint", ""),
+                    "cell_kind": details.get("cell_kind", ""),
+                    "cell_offset": details.get("cell_offset", 0),
+                    "name": details.get("name", ""),
+                    "last_written_at": details.get("last_written_at", ""),
+                    "value_type": details.get("value_type", ""),
+                    "risk_flags": list(details.get("risk_flags") or []),
+                    "risk_score": details.get("risk_score", 0),
+                    "validation_required": details.get("validation_required", True),
+                }
+            )
         for item in details.get("persistence_values") or []:
             if isinstance(item, Mapping):
                 persistence_entries.append({"key": details.get("key", ""), **dict(item)})
@@ -412,6 +475,7 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "hive_file_count": sum(1 for record in records if record.artifact_type == "registry-hive"),
         "hive_string_row_count": sum(1 for record in records if record.artifact_type == "registry-hive-strings"),
         "hive_cell_row_count": sum(1 for record in records if record.artifact_type == "registry-hive-cell"),
+        "deleted_cell_candidate_count": sum(1 for record in records if record.artifact_type == "registry-deleted-cell-candidate"),
         "source_files": sorted(source_paths),
         "artifact_type_counts": counter_items(artifact_type_counts),
         "source_format_counts": counter_items(source_format_counts),
@@ -423,6 +487,11 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
             key=lambda item: int(item.get("risk_score") or 0),
             reverse=True,
         )[:100],
+        "deleted_cell_candidates": sorted(
+            deleted_cell_candidates,
+            key=lambda item: int(item.get("risk_score") or 0),
+            reverse=True,
+        )[:100],
         "persistence_entries": persistence_entries[:100],
         "usb_devices": usb_devices[:100],
         "suspicious_entries": sorted(
@@ -431,7 +500,7 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
             reverse=True,
         )[:100],
         "summary_notes": [
-            "Registry hive rows use native regf header parsing, bounded string scanning, and bounded nk/vk cell candidate scanning; full key-tree reconstruction and deleted-value recovery require validation with a dedicated hive parser.",
+            "Registry hive rows use native regf header parsing, bounded string scanning, bounded nk/vk cell candidate scanning, and separate deleted/free cell candidate rows; full key-tree reconstruction and deleted-value testimony require validation with a dedicated hive parser.",
             "Run-key command hints are triage pivots, not proof that a program executed.",
         ],
     }
