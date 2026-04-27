@@ -79,7 +79,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(second["schema_version"], SCHEMA_VERSION)
             self.assertTrue(REQUIRED_TABLES.issubset(set(second["tables"])))
 
-            with sqlite3.connect(db_path) as connection:
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
                 connection.row_factory = sqlite3.Row
                 self.assertTrue(REQUIRED_TABLES.issubset(set(list_tables(connection))))
                 self.assertIn("hash_scope", table_columns(connection, "hash_record"))
@@ -158,7 +158,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             )
 
             self.assertEqual(citation, "CASE-001-AUD-000001")
-            with sqlite3.connect(db_path) as connection:
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
                 connection.row_factory = sqlite3.Row
                 row = connection.execute("SELECT * FROM audit_event WHERE citation_id = ?", (citation,)).fetchone()
                 self.assertIsNotNone(row)
@@ -215,7 +215,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertGreaterEqual(import_payload["summary"]["artifact_count"], 1)
             self.assertGreaterEqual(import_payload["summary"]["event_count"], 1)
 
-            with sqlite3.connect(db_path) as connection:
+            with contextlib.closing(sqlite3.connect(db_path)) as connection:
                 counts = {
                     table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                     for table in ("case_record", "evidence_source", "file_record", "indexed_document", "artifact", "event", "audit_event")
