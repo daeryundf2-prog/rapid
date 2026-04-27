@@ -290,10 +290,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("powershell-history-command", artifact_types)
             self.assertIn("srum-network-usage", artifact_types)
             self.assertIn("srum-database-file", artifact_types)
+            self.assertIn("srum-database-pivot", artifact_types)
             self.assertIn("windows-execution-summary", artifact_types)
             ps_rows = [item for item in artifacts if item["artifact_type"] == "powershell-history-command"]
             srum_rows = [item for item in artifacts if item["artifact_type"] == "srum-network-usage"]
             srum_database_rows = [item for item in artifacts if item["artifact_type"] == "srum-database-file"]
+            srum_pivots = [item for item in artifacts if item["artifact_type"] == "srum-database-pivot"]
             self.assertTrue(any("suspicious-command:powershell -enc" in row["details"]["risk_flags"] for row in ps_rows))
             self.assertTrue(any("vssadmin delete shadows" in row["details"]["command_line"] for row in ps_rows))
             self.assertEqual(ps_rows[0]["details"]["source_path"], str(fixture.powershell_history.resolve()))
@@ -303,6 +305,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(srum_database_rows[0]["details"]["source_path"], str(fixture.srum_db.resolve()))
             self.assertTrue(srum_database_rows[0]["details"]["ese_header"]["signature_valid"])
             self.assertTrue(any("powershell.exe" in value.lower() for value in srum_database_rows[0]["details"]["path_candidates"]))
+            self.assertTrue(any(item["details"]["app_id"] == "powershell.exe" for item in srum_pivots))
+            self.assertTrue(any(item["details"]["url"] == "https://download.example/tools/installer.exe" for item in srum_pivots))
+            self.assertTrue(all(item["details"]["validation_required"] for item in srum_pivots))
             summary = next(item for item in artifacts if item["artifact_type"] == "windows-execution-summary")
             groups = {item["display_name"]: item for item in summary["details"]["groups"]}
             self.assertIn("evil.exe", groups)
@@ -310,6 +315,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("bam-entry", groups["evil.exe"]["signal_types"])
             self.assertIn("powershell-history-command", groups["powershell.exe"]["signal_types"])
             self.assertIn("srum-network-usage", groups["powershell.exe"]["signal_types"])
+            self.assertIn("srum-database-pivot", groups["powershell.exe"]["signal_types"])
             self.assertIn("suspicious-command:powershell -enc", groups["powershell.exe"]["risk_flags"])
 
     def test_windows_prefetch_fixture_surfaces_run_count_and_last_run_time(self) -> None:

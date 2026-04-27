@@ -14,7 +14,7 @@ from .common import iter_windows_user_homes
 from .ese import build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
 
-PARSER_VERSION = "windows-execution-v3"
+PARSER_VERSION = "windows-execution-v4"
 REGISTRY_EXPORT_EXT = ".reg"
 SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 POWERSHELL_HISTORY = ("AppData", "Roaming", "Microsoft", "Windows", "PowerShell", "PSReadLine", "ConsoleHost_history.txt")
@@ -198,7 +198,9 @@ def collect_srum_dat_inventory(root: Path) -> Iterable[ArtifactRecord]:
     seen: set[Path] = set()
     canonical_path = root / "Windows" / "System32" / "sru" / "SRUDB.dat"
     if canonical_path.is_file():
-        yield build_srum_database_inventory_record(canonical_path)
+        inventory = build_srum_database_inventory_record(canonical_path)
+        yield inventory
+        yield from build_srum_database_pivot_records(canonical_path, inventory.details)
         seen.add(canonical_path.resolve())
     for path in sorted(root.rglob("SRUDB.dat"), key=lambda item: str(item).lower()):
         if not path.is_file():
@@ -206,7 +208,9 @@ def collect_srum_dat_inventory(root: Path) -> Iterable[ArtifactRecord]:
         resolved = path.resolve()
         if resolved in seen:
             continue
-        yield build_srum_database_inventory_record(path)
+        inventory = build_srum_database_inventory_record(path)
+        yield inventory
+        yield from build_srum_database_pivot_records(path, inventory.details)
         seen.add(resolved)
 
 
@@ -237,6 +241,59 @@ def build_srum_database_inventory_record(path: Path) -> ArtifactRecord:
             "note": "SRUDB.dat is inventoried directly with bounded ESE header/string pivots; use a dedicated SRUM parser for full table decoding and timeline-grade rows.",
         },
     )
+
+
+def build_srum_database_pivot_records(path: Path, inventory_details: Mapping[str, object]) -> Iterable[ArtifactRecord]:
+    source_hashes = file_hashes(path)
+    candidates: list[tuple[str, str]] = []
+    for value in inventory_details.get("path_candidates") or []:
+        candidates.append(("path", str(value)))
+    for value in inventory_details.get("url_candidates") or []:
+        candidates.append(("url", str(value)))
+    for value in inventory_details.get("suspicious_strings") or []:
+        candidates.append(("string", str(value)))
+
+    seen: set[tuple[str, str]] = set()
+    for index, (candidate_kind, candidate_value) in enumerate(candidates):
+        key = (candidate_kind, candidate_value)
+        if key in seen:
+            continue
+        seen.add(key)
+        executable_path = executable_path_from_candidate(candidate_value)
+        url = candidate_value if candidate_kind == "url" else first_url(candidate_value)
+        risk_flags = [f"srum-pivot:{term}" for term in SUSPICIOUS_COMMAND_TERMS if term.split()[0] in candidate_value.lower()]
+        if url:
+            risk_flags.append("srum-network-url-pivot")
+        yield ArtifactRecord(
+            provider=WindowsExecutionProvider.name,
+            artifact_type="srum-database-pivot",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-srum-ese-string-pivot",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "native-ese-string-pivot",
+                "reportability": "triage",
+                "source_path": str(path.resolve()),
+                "source_format": "ese-srum",
+                "source_hashes": source_hashes,
+                "source_index": index,
+                "candidate_kind": candidate_kind,
+                "candidate_value": candidate_value,
+                "app_id": display_name_for_execution_key(executable_path) if executable_path else "",
+                "executable_path": executable_path,
+                "url": url,
+                "timestamp": "",
+                "timestamp_source": "not_available_native_string_pivot",
+                "parser_confidence": 0.4,
+                "evidence_strength": "application-resource-usage-string-pivot",
+                "validation_required": True,
+                "validation_guidance": "SRUDB.dat native string pivots identify apps/URLs present in the database; validate row timestamps and counters with SrumECmd or another dedicated SRUM parser.",
+                "risk_flags": sorted(set(risk_flags)),
+                "risk_score": min(100, len(set(risk_flags)) * 20),
+                "raw_preview": candidate_value[:2000],
+            },
+        )
 
 
 def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> ArtifactRecord:
@@ -376,6 +433,20 @@ def normalize_execution_path(value: str) -> str:
 def display_name_for_execution_key(value: str) -> str:
     tail = value.replace("/", "\\").rsplit("\\", 1)[-1]
     return tail or value
+
+
+def executable_path_from_candidate(value: str) -> str:
+    match = re.search(r"(?i)([a-z]:\\[^\x00\r\n\t\"'<>|]{1,240}\.(?:exe|dll|ps1|bat|cmd|scr))", value)
+    if match:
+        return match.group(1)
+    if re.fullmatch(r"(?i)[\w .-]+\.(?:exe|dll|ps1|bat|cmd|scr)", value.strip()):
+        return value.strip()
+    return ""
+
+
+def first_url(value: str) -> str:
+    match = re.search(r"(?i)https?://[^\s\x00\"'<>]{4,300}", value)
+    return match.group(0).rstrip(".,);]") if match else ""
 
 
 def cast_set(value: object) -> set[str]:
