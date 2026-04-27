@@ -123,6 +123,13 @@
         "artifacts": []
       },
       {
+        "name": "mobile-export-artifacts",
+        "description": "Cellebrite/XRY/GrayKey/AXIOM-style mobile export CSV/JSON normalization",
+        "target_platform": "mobile",
+        "supported": true,
+        "artifacts": []
+      },
+      {
         "name": "windows-browser-artifacts",
         "description": "Windows browser history/download collectors backed by real profile files",
         "target_platform": "windows",

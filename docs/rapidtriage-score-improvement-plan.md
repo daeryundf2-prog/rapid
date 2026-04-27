@@ -127,7 +127,7 @@ Tasks:
 
 - Build broad parser library and validation corpus.
 - Add enterprise case management, multi-user review, role permissions, and collaboration audit trail.
-- Add mobile extraction imports from Cellebrite/XRY/GrayKey/AXIOM-style exports where legally and technically feasible. Status: exported `.apk` inventory/hash/manifest/permission/risk triage is implemented; full vendor package import remains planned.
+- Add mobile extraction imports from Cellebrite/XRY/GrayKey/AXIOM-style exports where legally and technically feasible. Status: exported `.apk` inventory/hash/manifest/permission/risk triage is implemented, and CSV/JSON/JSONL mobile export folders are normalized into message, contact, call, app, file, and source-summary pivots with source hashes; full proprietary vendor package decryption/import remains planned.
 - Add cloud export/import workflows. Status: Google Takeout-style location/activity JSON and Apple/general account JSON imports are implemented with source hashes and normalized event/account rows.
 - Add image/media triage: thumbnails, OCR queues, perceptual hash, similarity grouping, optional AI classification. Status: image hash/dimensions/perceptual-hash/similarity-bucket/OCR-queue hints plus bounded inline thumbnail previews are implemented; classifier workflows remain planned.
 - Add memory forensics integration with Volatility-style output normalization. Status: Volatility/Volatility3 JSON/JSONL process, cmdline, netscan, and malfind normalization is implemented with risk flags and source hashes; bounded direct memory dumps now surface redacted BitLocker recovery-key candidates, suspicious strings, URLs, and IP pivots.

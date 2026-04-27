@@ -4,7 +4,7 @@
 
 RapidTriage is currently strongest when you give it a mounted folder, exported folder, or ordinary filesystem path. It can also run direct extraction for E01/Ex01, raw/split images, ISO/DMG/WIM/SWM, and common qemu-convertible virtual disks when the required external tools are installed. On Windows, the most reliable image workflow is still WSL2 extraction or mounting/exporting the image first, then scanning the mounted folder.
 
-For AD1, AFF/AFF4, XVA, mobile packages, and memory dumps, use `Check evidence support` or `rapidtriage evidence` first. If RapidTriage says the source must be mounted/exported, do that with your trusted forensic workflow and select the resulting folder. For raw/split, archive, and virtual-disk inputs, the same support check shows whether Sleuth Kit, 7-Zip/bsdtar, or qemu-img are available for direct extraction.
+For AD1, AFF/AFF4, XVA, proprietary mobile packages, and memory dumps, use `Check evidence support` or `rapidtriage evidence` first. If RapidTriage says the source must be mounted/exported, do that with your trusted forensic workflow and select the resulting folder. For raw/split, archive, and virtual-disk inputs, the same support check shows whether Sleuth Kit, 7-Zip/bsdtar, or qemu-img are available for direct extraction. For mobile cases, RapidTriage can now import already-exported Cellebrite/XRY/GrayKey/AXIOM-style CSV/JSON folders.
 
 Use:
 
@@ -223,6 +223,16 @@ rapidtriage artifacts ./mobile-export --kind android-apk --output android-apk.js
 ```
 
 Treat the risk score as a triage aid, not a malware verdict. Confirm suspicious APKs with a dedicated mobile/malware workflow before report conclusions.
+
+## Mobile Export Imports
+
+Use this when a trusted mobile tool has already produced export folders or reports. RapidTriage scans CSV/JSON/JSONL files and normalizes common Cellebrite, XRY, GrayKey, and AXIOM-style rows into messages, contacts, calls, installed apps, file listings, and per-source summary rows:
+
+```bash
+rapidtriage artifacts ./mobile-export --kind mobile-export --output mobile-artifacts.json
+```
+
+The collector records source hashes, source tool hints, row indexes, normalized timestamps, participants, message text and text hash, contact/call fields, app package/version fields, file hashes/paths, and risk flags such as OTP/password text, AI-service app/conversation references, privacy/evasion apps, and structured data files. It imports vendor exports; it does not decrypt proprietary acquisition packages or replace the original mobile forensic tool validation.
 
 ## Image Similarity Triage
 

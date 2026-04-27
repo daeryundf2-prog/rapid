@@ -228,6 +228,18 @@ Android APK collector rows:
 
 Current Android APK rows carry `parser`, `parser_version`, `source_path`, `source_format`, `hashes`, `package`, `version_name`, `permissions`, `dangerous_permissions`, `dex_count`, `native_library_count`, `risk_flags`, and `risk_score` under `details`.
 
+Mobile export collector rows:
+
+- `mobile-export-artifacts`
+  - `mobile-message`
+  - `mobile-contact`
+  - `mobile-call`
+  - `mobile-app`
+  - `mobile-file`
+  - `mobile-export-source`
+
+Current mobile export rows carry `parser`, `parser_version`, `source_path`, `source_format`, `source_tool`, `source_index`, `source_hashes`, normalized timestamps, message participants/text/text hash, contact/call fields, app package/version fields, file path/hash fields, `risk_flags`, and the original normalized row under `raw`.
+
 Media image collector rows:
 
 - `media-image-artifacts`

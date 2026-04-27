@@ -9,6 +9,7 @@ from .linux import LinuxSystemArtifactsProvider
 from .macos import MacOsSystemArtifactsProvider
 from .media import MediaImageProvider
 from .memory import MemoryVolatilityProvider
+from .mobile import MobileExportProvider
 from .windows.browser import WindowsBrowserArtifactsProvider
 from .windows.eventlog import WindowsEventLogProvider
 from .windows.execution import WindowsExecutionProvider
@@ -32,6 +33,7 @@ def all_providers() -> List[object]:
         MacOsSystemArtifactsProvider(),
         MediaImageProvider(),
         MemoryVolatilityProvider(),
+        MobileExportProvider(),
         WindowsBrowserArtifactsProvider(),
         WindowsRecentFilesProvider(),
         WindowsOsAccountProvider(),
