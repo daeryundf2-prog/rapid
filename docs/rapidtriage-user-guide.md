@@ -242,7 +242,7 @@ Use image triage when a case has many screenshots, photos, or scanned documents 
 rapidtriage artifacts ./mounted-case --kind media-image --output media-images.json
 ```
 
-The collector records file hashes, dimensions, channel count, an average perceptual hash, a short similarity bucket, a bounded inline PNG thumbnail preview, and whether the file should be queued for OCR. If a sidecar such as `image.png.ocr.txt`, `image.ocr.txt`, or `image.txt` exists, it records sidecar hashes, bounded OCR text, Korean/English language hints, and whether translation review is required. The perceptual hash and visual classification fields are grouping hints for fast review, not courtroom-grade similarity, deepfake, or classifier conclusions by themselves.
+The collector records file hashes, dimensions, channel count, an average perceptual hash, a short similarity bucket, a bounded inline PNG thumbnail preview, and whether the file should be queued for OCR. The perceptual hash avoids optional NumPy aggregate helpers so image grouping remains more tolerant of mixed OpenCV/NumPy installs; thumbnail generation is isolated so a preview failure does not abort artifact collection. If a sidecar such as `image.png.ocr.txt`, `image.ocr.txt`, or `image.txt` exists, it records sidecar hashes, bounded OCR text, Korean/English language hints, and whether translation review is required. The perceptual hash and visual classification fields are grouping hints for fast review, not courtroom-grade similarity, deepfake, or classifier conclusions by themselves.
 
 ## Memory Forensics Imports
 

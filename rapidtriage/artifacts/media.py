@@ -77,7 +77,7 @@ def build_image_record(path: Path) -> ArtifactRecord:
                 "similarity_bucket": perceptual_hash[:8],
                 "ocr_candidate": True,
                 "visual_classification": classify_image(width=int(width), height=int(height), channel_count=int(image.shape[2]) if len(image.shape) == 3 else 1),
-                "thumbnail_preview": build_thumbnail_preview(image),
+                "thumbnail_preview": safe_thumbnail_preview(image),
             }
         )
         artifact_type = "media-image"
@@ -207,9 +207,41 @@ def ocr_quality_metrics(value: str) -> dict[str, object]:
 def average_hash(image) -> str:
     grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
     resized = cv2.resize(grayscale, (8, 8), interpolation=cv2.INTER_AREA)
-    mean_value = resized.mean()
-    bits = "".join("1" if value >= mean_value else "0" for value in resized.flatten())
+    values = matrix_values(resized)
+    mean_value = sum(values) / max(len(values), 1)
+    bits = "".join("1" if value >= mean_value else "0" for value in values)
     return f"{int(bits, 2):016x}"
+
+
+def matrix_values(image) -> list[int]:
+    try:
+        matrix = image.tolist()
+    except Exception:
+        matrix = [[image[y][x] for x in range(8)] for y in range(8)]
+    return [normalized_pixel_value(value) for row in matrix for value in ensure_sequence(row)]
+
+
+def ensure_sequence(value) -> list[object]:
+    return value if isinstance(value, list) else [value]
+
+
+def normalized_pixel_value(value) -> int:
+    if isinstance(value, list):
+        channel_values = [normalized_pixel_value(channel) for channel in value]
+        return int(sum(channel_values) / max(len(channel_values), 1))
+    return int(value)
+
+
+def safe_thumbnail_preview(image) -> dict[str, object]:
+    try:
+        return build_thumbnail_preview(image)
+    except Exception as exc:
+        return {
+            "strategy": "bounded-inline-png",
+            "available": False,
+            "reason": "opencv-thumbnail-failed",
+            "error": str(exc),
+        }
 
 
 def build_thumbnail_preview(image) -> dict[str, object]:

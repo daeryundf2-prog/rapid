@@ -4,9 +4,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
+from rapidtriage.artifacts.media import average_hash
 from rapidtriage.cli import build_parser, main
 
 
@@ -63,6 +65,14 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertIn("sha256", thumbnail)
             self.assertTrue(thumbnail["data_uri"].startswith("data:image/png;base64,"))
 
+    def test_average_hash_does_not_require_numpy_mean_or_flatten(self) -> None:
+        image = FakeMatrix()
+
+        with patch("rapidtriage.artifacts.media.cv2.resize", return_value=FakeMatrix()):
+            perceptual_hash = average_hash(image)
+
+        self.assertEqual(len(perceptual_hash), 16)
+
 
 def write_image_fixture(path: Path) -> None:
     image = Image.new("RGB", (16, 16), "black")
@@ -70,6 +80,19 @@ def write_image_fixture(path: Path) -> None:
         for y in range(16):
             image.putpixel((x, y), (255, 255, 255))
     image.save(path)
+
+
+class FakeMatrix:
+    shape = (8, 8)
+
+    def tolist(self) -> list[list[int]]:
+        return [[255 if x < 4 else 0 for x in range(8)] for _ in range(8)]
+
+    def mean(self) -> float:
+        raise AssertionError("average_hash should not require numpy mean()")
+
+    def flatten(self) -> list[int]:
+        raise AssertionError("average_hash should not require numpy flatten()")
 
 
 if __name__ == "__main__":
