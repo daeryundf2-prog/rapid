@@ -49,7 +49,7 @@ RapidTriage should absorb this as a product principle:
 High priority:
 
 - Add processing profiles: `fast`, `standard`, `deep`, where `fast` avoids full carving/OCR-heavy indexing.
-- Add Windows account/OS parser: hostname, timezone, last boot, users, admin membership, created/deleted/login times. Status: hostname/timezone/profile/admin hints plus exported last boot/shutdown and account created/last-logon/password/admin/disabled hints are normalized; full SAM binary traversal remains later.
+- Add Windows account/OS parser: hostname, timezone, last boot, users, admin membership, created/deleted/login times. Status: hostname/timezone/profile/admin hints plus exported last boot/shutdown and account created/last-logon/password/admin/disabled hints are normalized; native SAM account-name/RID key candidate rows are exposed with validation guidance; full SAM F/V attribute decoding remains later.
 - Add unified browser normalized model for history, downloads, cookies metadata where legally appropriate, and AI prompt artifacts.
 - Add Zone.Identifier ADS parser for downloaded-file provenance. Status: sidecar/export parsing implemented.
 - Add EVTX parser contract with event semantic tags and typed parameters.

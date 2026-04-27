@@ -7,10 +7,13 @@ from pathlib import Path
 from typing import Iterable
 
 from ...core.models import ArtifactRecord
+from .registry import MAX_HIVE_CELL_SCAN_BYTES, iter_registry_cell_candidates, parse_registry_hive_header
 
-PARSER_VERSION = "windows-os-account-v2"
+PARSER_VERSION = "windows-os-account-v3"
 USER_PROFILE_ROOT = "Users"
 REGISTRY_EXPORT_EXT = ".reg"
+SAM_HIVE_NAME = "SAM"
+SAM_BUILTIN_KEY_NAMES = {"SAM", "Domains", "Account", "Users", "Names", "Builtin", "Aliases", "Groups"}
 ACCOUNT_HINT_KEYS = (
     "Microsoft\\Windows NT\\CurrentVersion\\ProfileList",
     "Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
@@ -35,6 +38,7 @@ class WindowsOsAccountProvider:
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         yield from collect_user_profiles(root)
         yield from collect_registry_export_hints(root)
+        yield from collect_sam_hive_candidates(root)
 
 
 def collect_user_profiles(root: Path) -> Iterable[ArtifactRecord]:
@@ -111,6 +115,141 @@ def collect_registry_export_hints(root: Path) -> Iterable[ArtifactRecord]:
             supported=True,
             details=details,
         )
+
+
+def collect_sam_hive_candidates(root: Path) -> Iterable[ArtifactRecord]:
+    for path in candidate_sam_hive_paths(root):
+        try:
+            stat_result = path.stat()
+            with path.open("rb") as handle:
+                header = handle.read(4096)
+                handle.seek(0)
+                scan_blob = handle.read(min(stat_result.st_size, MAX_HIVE_CELL_SCAN_BYTES))
+        except OSError:
+            continue
+        metadata = parse_registry_hive_header(header)
+        if not metadata.get("regf_valid"):
+            continue
+        cell_candidates = [
+            item
+            for item in iter_registry_cell_candidates(scan_blob)
+            if item.get("cell_kind") == "key-node" and is_sam_account_key_name(str(item.get("name") or ""))
+        ]
+        rid_candidates = [item for item in cell_candidates if is_rid_key_name(str(item.get("name") or ""))]
+        source_hashes = file_hashes(path)
+        for candidate in cell_candidates:
+            details = sam_account_candidate_details(path, candidate, rid_candidates, metadata, source_hashes)
+            yield ArtifactRecord(
+                provider=WindowsOsAccountProvider.name,
+                artifact_type="windows-sam-account-candidate",
+                path=str(path.resolve()),
+                supported=True,
+                details=details,
+            )
+
+
+def candidate_sam_hive_paths(root: Path) -> Iterable[Path]:
+    seen: set[Path] = set()
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.name.upper() != SAM_HIVE_NAME:
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        yield path
+
+
+def sam_account_candidate_details(
+    path: Path,
+    candidate: dict[str, object],
+    rid_candidates: list[dict[str, object]],
+    metadata: dict[str, object],
+    source_hashes: dict[str, str],
+) -> dict[str, object]:
+    name = str(candidate.get("name") or "")
+    rid_hex = name.upper() if is_rid_key_name(name) else ""
+    nearby_rid = nearest_rid_candidate(candidate, rid_candidates) if not rid_hex else None
+    if nearby_rid is not None:
+        rid_hex = str(nearby_rid.get("name") or "").upper()
+    user_name = "" if is_rid_key_name(name) else name
+    risk_flags = sam_account_risk_flags(user_name, rid_hex, candidate)
+    return {
+        "parser": "windows-sam-hive-native-account-scan",
+        "parser_version": PARSER_VERSION,
+        "coverage_status": "native-sam-key-candidate",
+        "reportability": "triage",
+        "source_path": str(path.resolve()),
+        "source_format": "registry-hive-sam",
+        "source_hashes": dict(source_hashes),
+        "hive_name": path.name,
+        "regf_valid": bool(metadata.get("regf_valid")),
+        "hive_last_written_at": metadata.get("last_written_at", ""),
+        "candidate_role": "rid-key" if is_rid_key_name(name) else "account-name-key",
+        "user_name_candidate": user_name,
+        "account_type_hint": account_type_hint(user_name) if user_name else "",
+        "rid_hex": rid_hex,
+        "rid_decimal": rid_decimal(rid_hex),
+        "nearby_rid_cell_offset": nearby_rid.get("cell_offset", 0) if nearby_rid is not None else 0,
+        "cell_offset": candidate.get("cell_offset", 0),
+        "cell_size": candidate.get("cell_size", 0),
+        "allocation_status": candidate.get("allocation_status", ""),
+        "last_written_at": candidate.get("last_written_at", ""),
+        "parser_confidence": 0.55 if user_name and rid_hex else 0.45,
+        "evidence_strength": "sam-hive-key-candidate",
+        "validation_required": True,
+        "validation_guidance": "Native SAM rows identify account-name/RID key candidates only; validate full F/V account attributes with a dedicated SAM parser before final testimony.",
+        "risk_flags": risk_flags,
+        "risk_score": min(100, len(risk_flags) * 20 + (20 if user_name.lower() in {"administrator", "admin"} else 0)),
+        "raw_preview": " ".join(part for part in [user_name, rid_hex] if part),
+    }
+
+
+def is_sam_account_key_name(name: str) -> bool:
+    if not name or name in SAM_BUILTIN_KEY_NAMES:
+        return False
+    if len(name) > 128:
+        return False
+    if is_rid_key_name(name):
+        return True
+    return bool(re.fullmatch(r"[A-Za-z0-9._$ -]{1,128}", name))
+
+
+def is_rid_key_name(name: str) -> bool:
+    return bool(re.fullmatch(r"[0-9A-Fa-f]{8}", name))
+
+
+def nearest_rid_candidate(candidate: dict[str, object], rid_candidates: list[dict[str, object]]) -> dict[str, object] | None:
+    if not rid_candidates:
+        return None
+    candidate_offset = int(candidate.get("cell_offset") or 0)
+    nearest = min(rid_candidates, key=lambda item: abs(int(item.get("cell_offset") or 0) - candidate_offset))
+    if abs(int(nearest.get("cell_offset") or 0) - candidate_offset) <= 4096:
+        return nearest
+    return None
+
+
+def rid_decimal(rid_hex: str) -> int:
+    if not rid_hex:
+        return 0
+    try:
+        return int(rid_hex, 16)
+    except ValueError:
+        return 0
+
+
+def sam_account_risk_flags(user_name: str, rid_hex: str, candidate: dict[str, object]) -> list[str]:
+    flags: list[str] = []
+    lowered = user_name.lower()
+    if lowered in {"administrator", "admin"} or rid_hex.upper() == "000001F4":
+        flags.append("built-in-administrator-candidate")
+    if lowered == "guest" or rid_hex.upper() == "000001F5":
+        flags.append("guest-account-candidate")
+    if user_name.endswith("$"):
+        flags.append("machine-account-candidate")
+    if candidate.get("allocation_status") == "free-or-deleted-candidate":
+        flags.append("deleted-or-free-sam-key-candidate")
+    return sorted(set(flags))
 
 
 def parse_registry_hints(text: str) -> dict[str, object]:

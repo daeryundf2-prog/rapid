@@ -245,6 +245,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             artifacts = payload["artifacts"]
             profiles = [item for item in artifacts if item["artifact_type"] == "windows-user-profile"]
             summaries = [item for item in artifacts if item["artifact_type"] == "windows-os-account-summary"]
+            sam_candidates = [item for item in artifacts if item["artifact_type"] == "windows-sam-account-candidate"]
 
             self.assertTrue(profiles)
             self.assertEqual(profiles[0]["details"]["user_name"], "alice")
@@ -264,6 +265,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(account_hints["alice"]["last_logon_at"], "2024-04-01T01:02:03+00:00")
             self.assertEqual(account_hints["alice"]["password_last_set_at"], "2024-03-15T12:34:56+00:00")
             self.assertTrue(account_hints["alice"]["admin_hint"])
+            self.assertTrue(sam_candidates)
+            alice_sam = next(item for item in sam_candidates if item["details"]["user_name_candidate"] == "alice")
+            self.assertEqual(alice_sam["details"]["candidate_role"], "account-name-key")
+            self.assertEqual(alice_sam["details"]["rid_hex"], "000003E9")
+            self.assertEqual(alice_sam["details"]["rid_decimal"], 1001)
+            self.assertTrue(alice_sam["details"]["validation_required"])
+            self.assertEqual(len(alice_sam["details"]["source_hashes"]["sha256"]), 64)
 
     def test_windows_execution_collector_maps_registry_and_powershell_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

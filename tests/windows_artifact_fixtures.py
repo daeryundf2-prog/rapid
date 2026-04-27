@@ -497,6 +497,16 @@ def _write_user_profile_fixtures(profile_path: Path, reg_path: Path) -> None:
         )
     )
     reg_path.parent.mkdir(parents=True, exist_ok=True)
+    sam_path = reg_path.with_name("SAM")
+    sam_path.write_bytes(
+        build_minimal_registry_hive(
+            datetime(2024, 4, 1, 6, 7, 8, tzinfo=timezone.utc),
+            "SAM",
+            [r"SAM\Domains\Account\Users\Names\alice"],
+        )
+        + build_registry_nk_cell("alice", datetime(2024, 3, 1, 0, 0, 0, tzinfo=timezone.utc), allocated=True)
+        + build_registry_nk_cell("000003E9", datetime(2024, 3, 1, 0, 0, 1, tzinfo=timezone.utc), allocated=True)
+    )
     reg_path.write_text(
         f"""Windows Registry Editor Version 5.00
 
