@@ -79,6 +79,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             registry_provider = providers["windows-registry"]
             registry_types = {artifact["artifact_type"] for artifact in registry_provider["artifacts"]}
             self.assertIn("registry-hive", registry_types)
+            self.assertIn("registry-hive-cell", registry_types)
             self.assertIn("registry-hive-strings", registry_types)
             self.assertIn("registry-run-key", registry_types)
             self.assertIn("registry-usb", registry_types)
@@ -94,6 +95,12 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             )
             self.assertIn("hive-pivot:currentversion\\run", hive_strings["details"]["risk_flags"])
             self.assertIn(r"C:\Users\alice\AppData\Roaming\SecurityUpdater.exe", hive_strings["details"]["path_candidates"])
+            hive_cells = [artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-hive-cell"]
+            self.assertGreaterEqual(len(hive_cells), 4)
+            self.assertTrue(any(artifact["details"]["cell_kind"] == "key-node" for artifact in hive_cells))
+            updater_value = next(artifact for artifact in hive_cells if artifact["details"]["name"] == "SecurityUpdater")
+            self.assertEqual(updater_value["details"]["allocation_status"], "free-or-deleted-candidate")
+            self.assertIn("deleted-or-free-cell-candidate", updater_value["details"]["risk_flags"])
             run_key = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-run-key")
             self.assertIn("SecurityUpdater", run_key["details"]["values"])
             self.assertEqual(run_key["details"]["persistence_values"][0]["value_name"], "SecurityUpdater")
@@ -104,9 +111,11 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(summary["details"]["key_count"], 3)
             self.assertEqual(summary["details"]["hive_file_count"], 2)
             self.assertEqual(summary["details"]["hive_string_row_count"], 2)
+            self.assertGreaterEqual(summary["details"]["hive_cell_row_count"], 4)
             self.assertEqual(summary["details"]["persistence_entries"][0]["value_name"], "SecurityUpdater")
             self.assertEqual(summary["details"]["usb_devices"][0]["friendly_name"], "Test USB Device")
             self.assertTrue(summary["details"]["hive_string_hits"])
+            self.assertTrue(summary["details"]["hive_cell_hits"])
 
             shellbags_provider = providers["windows-shellbags"]
             self.assertEqual(shellbags_provider["artifacts"][0]["artifact_type"], "shellbag-key")

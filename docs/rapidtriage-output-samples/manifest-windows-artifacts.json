@@ -981,6 +981,7 @@
             "key_count": 4,
             "hive_file_count": 0,
             "hive_string_row_count": 0,
+            "hive_cell_row_count": 0,
             "source_files": [
               "<ROOT>/Users/alice/NTUSER-shellbags.reg",
               "<ROOT>/Windows/System32/config/rdp.reg",
@@ -1018,6 +1019,7 @@
             ],
             "hive_files": [],
             "hive_string_hits": [],
+            "hive_cell_hits": [],
             "persistence_entries": [
               {
                 "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
@@ -1051,7 +1053,7 @@
               }
             ],
             "summary_notes": [
-              "Registry hive rows use native regf header and bounded string scanning; full cell traversal and deleted-key recovery require a dedicated hive parser.",
+              "Registry hive rows use native regf header parsing, bounded string scanning, and bounded nk/vk cell candidate scanning; full key-tree reconstruction and deleted-value recovery require validation with a dedicated hive parser.",
               "Run-key command hints are triage pivots, not proof that a program executed."
             ]
           }

@@ -364,8 +364,51 @@ def build_minimal_registry_hive(timestamp: datetime, embedded_name: str, strings
     header[44:48] = (1).to_bytes(4, "little")
     header[48:112] = embedded_name.encode("utf-16le")[:64]
     header[508:512] = (0x12345678).to_bytes(4, "little")
-    payload = b"".join(value.encode("utf-16le") + b"\x00\x00" for value in strings)
+    cell_payload = b"".join(
+        [
+            build_registry_nk_cell(
+                "Run" if any("Run" in value for value in strings) else embedded_name,
+                timestamp,
+                allocated=True,
+            ),
+            build_registry_vk_cell(
+                "SecurityUpdater" if any("SecurityUpdater" in value for value in strings) else "SampleValue",
+                allocated=False,
+            ),
+        ]
+    )
+    payload = cell_payload + b"".join(value.encode("utf-16le") + b"\x00\x00" for value in strings)
     return bytes(header) + payload
+
+
+def build_registry_nk_cell(name: str, timestamp: datetime, *, allocated: bool) -> bytes:
+    name_bytes = name.encode("latin-1", errors="ignore")
+    body = bytearray(0x4C + len(name_bytes))
+    body[0:2] = b"nk"
+    body[2:4] = (0x0020).to_bytes(2, "little")
+    body[4:12] = datetime_to_filetime(timestamp).to_bytes(8, "little")
+    body[0x48:0x4A] = len(name_bytes).to_bytes(2, "little")
+    body[0x4C : 0x4C + len(name_bytes)] = name_bytes
+    return _registry_cell(bytes(body), allocated=allocated)
+
+
+def build_registry_vk_cell(name: str, *, allocated: bool) -> bytes:
+    name_bytes = name.encode("latin-1", errors="ignore")
+    body = bytearray(20 + len(name_bytes))
+    body[0:2] = b"vk"
+    body[2:4] = len(name_bytes).to_bytes(2, "little")
+    body[4:8] = (4).to_bytes(4, "little")
+    body[8:12] = (0).to_bytes(4, "little")
+    body[12:16] = (1).to_bytes(4, "little")
+    body[16:18] = (1).to_bytes(2, "little")
+    body[20 : 20 + len(name_bytes)] = name_bytes
+    return _registry_cell(bytes(body), allocated=allocated)
+
+
+def _registry_cell(body: bytes, *, allocated: bool) -> bytes:
+    cell_size = len(body) + 4
+    signed_size = -cell_size if allocated else cell_size
+    return signed_size.to_bytes(4, "little", signed=True) + body
 
 
 def _write_eventlog_fixtures(xml_path: Path, hayabusa_path: Path, evtx_path: Path) -> None:
