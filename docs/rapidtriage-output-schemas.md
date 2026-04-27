@@ -269,6 +269,14 @@ Cloud export collector rows:
 
 Current cloud rows carry `parser`, `parser_version`, `source_path`, `source_index`, `source_hashes`, `service`, `event_type`, normalized timestamps, activity titles/products, account profile fields, location latitude/longitude/accuracy, `risk_flags`, and the original row under `raw`.
 
+### `cloud-collect`
+
+- Output: `rapidtriage-cloud-collect.json` or `rapidtriage-cloud-collect.dry-run.json`
+- Sidecar audit: `rapidtriage-cloud-collect.audit.json`
+- Response folder: `responses/`
+
+Current cloud API collection manifests carry `command`, `generated_at`, `manifest_path`, `manifest_sha256`, `output_dir`, `responses_dir`, `summary`, `requests`, `skipped`, and `import_guidance`. Request rows carry `name`, `service`, `method`, `url`, `url_sha256`, redacted request headers, response status/content type/path/size/SHA256, truncation status, timestamps, and error fields when a request fails. Bearer tokens and API keys are redacted from saved metadata.
+
 ## Windows artifact collector rows
 
 The `manifest-windows-artifacts.json` sample also fixes the current artifact row shape for:

@@ -33,6 +33,13 @@ from .core.collect_plan import (
     run_collect_export,
     supported_collect_profiles,
 )
+from .core.cloud_api import (
+    DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES,
+    DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
+    DEFAULT_CLOUD_BEARER_TOKEN_ENV,
+    CloudApiCollectionError,
+    run_cloud_api_collection,
+)
 from .core.compare import CompareError, compare_paths
 from .core.docs import build_manifest, run_docs_search, write_result
 from .core.doctor import format_doctor_text, run_doctor
@@ -115,6 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
               rapidtriage extract rapidtriage-files.json ./extract-out --dry-run --max-file-count 100
               rapidtriage artifacts . --kind browser --output rapidtriage-artifacts-browser.json
+              rapidtriage cloud-collect ./cloud-api-manifest.json --output-dir ./cloud-api-raw
               rapidtriage timeline . --output rapidtriage-timeline.json --report rapidtriage-timeline-report.md
               rapidtriage case ./incident-case.json --source rapidtriage-timeline.json --pointer /events/0 --tag suspicious
               rapidtriage manifest /Volumes/case-mount --input-kind mounted-image
@@ -199,6 +207,42 @@ def build_parser() -> argparse.ArgumentParser:
     artifacts.add_argument("--kind", required=True, choices=sorted(SUPPORTED_ARTIFACT_KINDS), help="Artifact collector kind")
     artifacts.add_argument("--output", help="JSON output path (default: ./rapidtriage-artifacts-KIND.json)")
     add_rules_argument(artifacts)
+
+    cloud_collect = sub.add_parser(
+        "cloud-collect",
+        help="Collect authorized cloud API JSON responses from a request manifest",
+        description="Collect authorized cloud API JSON responses from a request manifest",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage cloud-collect ./cloud-api-manifest.json --output-dir ./cloud-api-raw
+              RAPIDTRIAGE_CLOUD_BEARER_TOKEN=... rapidtriage cloud-collect ./manifest.json --output-dir ./cloud-api-raw
+              rapidtriage artifacts ./cloud-api-raw/responses --kind cloud-export --output cloud-artifacts.json
+            """
+        ),
+    )
+    cloud_collect.add_argument("manifest", help="JSON manifest describing authorized API requests")
+    cloud_collect.add_argument("--output-dir", required=True, help="Directory for raw responses and collection manifest")
+    cloud_collect.add_argument(
+        "--bearer-token-env",
+        default=DEFAULT_CLOUD_BEARER_TOKEN_ENV,
+        help=f"Environment variable containing a Bearer token (default: {DEFAULT_CLOUD_BEARER_TOKEN_ENV})",
+    )
+    cloud_collect.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
+        help=f"Per-request timeout in seconds (default: {DEFAULT_CLOUD_API_TIMEOUT_SECONDS})",
+    )
+    cloud_collect.add_argument(
+        "--max-response-bytes",
+        type=int,
+        default=DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES,
+        help="Maximum bytes to keep per response before marking it truncated",
+    )
+    cloud_collect.add_argument("--allow-insecure-http", action="store_true", help="Allow non-local HTTP URLs")
+    cloud_collect.add_argument("--dry-run", action="store_true", help="Validate and summarize requests without sending them")
 
     files = sub.add_parser(
         "files",
@@ -939,6 +983,45 @@ def main(argv=None) -> int:
         print(f"Saved case JSON: {case_path}")
         print(f"Saved audit JSON: {audit_output}")
         print(f"Bookmarks: {payload['summary']['bookmark_count']}")
+        return 0
+
+    if args.command == "cloud-collect":
+        manifest_path = Path(args.manifest).expanduser().resolve()
+        output_dir = Path(args.output_dir).expanduser().resolve()
+        try:
+            payload = run_cloud_api_collection(
+                manifest_path,
+                output_dir=output_dir,
+                bearer_token_env=args.bearer_token_env,
+                timeout_seconds=args.timeout_seconds,
+                max_response_bytes=args.max_response_bytes,
+                allow_insecure_http=args.allow_insecure_http,
+                dry_run=args.dry_run,
+            )
+        except CloudApiCollectionError as exc:
+            parser.error(str(exc))
+        output = Path(str(payload["output"]))
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="cloud-collect",
+            options={
+                "output_dir": str(output_dir),
+                "bearer_token_env": args.bearer_token_env,
+                "timeout_seconds": args.timeout_seconds,
+                "max_response_bytes": args.max_response_bytes,
+                "allow_insecure_http": args.allow_insecure_http,
+                "dry_run": args.dry_run,
+            },
+            input_files=[("cloud-api-manifest", manifest_path)],
+            output_files=[("cloud-collect-json", output)],
+        )
+        print(f"Saved cloud collection JSON: {output}")
+        print(f"Saved audit JSON: {audit_output}")
+        print(
+            f"Requests: {payload['summary']['request_count']}  "
+            f"Collected: {payload['summary']['collected_count']}  Errors: {payload['summary']['error_count']}"
+        )
         return 0
 
     if args.command == "timeline":

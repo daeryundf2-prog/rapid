@@ -266,6 +266,34 @@ rapidtriage artifacts ./cloud-export --kind cloud-export --output cloud-artifact
 
 The collector records source hashes, timestamps, activity titles/products, account profile fields, location coordinates, accuracy, and risk flags such as precise location or user activity. It does not perform live cloud acquisition or API collection.
 
+## Authorized Cloud API Collection
+
+When you already have lawful API authorization, `cloud-collect` can fetch selected JSON endpoints from a request manifest, save raw responses, hash each response, and write a collection/audit record without storing the Bearer token in output files.
+
+Example manifest:
+
+```json
+{
+  "requests": [
+    {
+      "name": "google-activity",
+      "service": "google",
+      "url": "https://example.com/api/activity",
+      "bearer_token_env": "RAPIDTRIAGE_CLOUD_BEARER_TOKEN"
+    }
+  ]
+}
+```
+
+Use:
+
+```bash
+RAPIDTRIAGE_CLOUD_BEARER_TOKEN=... rapidtriage cloud-collect ./cloud-api-manifest.json --output-dir ./cloud-api-raw
+rapidtriage artifacts ./cloud-api-raw/responses --kind cloud-export --output cloud-artifacts.json
+```
+
+By default, non-local plain HTTP is refused, only `GET` and `POST` are supported, and responses are capped by `--max-response-bytes`. Treat the API manifest, authorization basis, and original provider records as part of the case documentation.
+
 ## Review Workflow
 
 A search hit can be marked as relevant, excluded, follow-up, or report-worthy:
