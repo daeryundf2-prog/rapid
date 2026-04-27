@@ -167,9 +167,9 @@ PY
 fi
 
 if [ "$SKIP_WEB" -eq 0 ]; then
-  checked_python "Summarizing smoke outputs" "$REPO_ROOT/scripts/summarize-smoke.py" "$SMOKE_DIR"
+  checked_python "Summarizing smoke outputs" "$REPO_ROOT/scripts/summarize-smoke.py" "$SMOKE_DIR" --platform macos-linux
 else
-  checked_python "Summarizing smoke outputs" "$REPO_ROOT/scripts/summarize-smoke.py" "$SMOKE_DIR" --allow-missing-web
+  checked_python "Summarizing smoke outputs" "$REPO_ROOT/scripts/summarize-smoke.py" "$SMOKE_DIR" --platform macos-linux --allow-missing-web
 fi
 
 step "macOS/Linux smoke test completed"

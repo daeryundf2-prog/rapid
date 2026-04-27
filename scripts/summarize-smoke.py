@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,11 +14,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("smoke_dir", help="Smoke output directory")
     parser.add_argument("--output", default="", help="JSON summary output path")
     parser.add_argument("--markdown", default="", help="Markdown summary output path")
+    parser.add_argument("--platform", default="", help="Smoke platform label, for example windows or macos-linux")
     parser.add_argument("--allow-missing-web", action="store_true", help="Treat a missing web-index.html as skipped")
     args = parser.parse_args(argv)
 
     smoke_dir = Path(args.smoke_dir).resolve()
-    summary = build_summary(smoke_dir, allow_missing_web=args.allow_missing_web)
+    summary = build_summary(smoke_dir, platform_label=args.platform, allow_missing_web=args.allow_missing_web)
 
     output_path = Path(args.output).resolve() if args.output else smoke_dir / "smoke-summary.json"
     markdown_path = Path(args.markdown).resolve() if args.markdown else smoke_dir / "smoke-summary.md"
@@ -29,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if summary["passed"] else 1
 
 
-def build_summary(smoke_dir: Path, *, allow_missing_web: bool = False) -> dict[str, Any]:
+def build_summary(smoke_dir: Path, *, platform_label: str = "", allow_missing_web: bool = False) -> dict[str, Any]:
     checks = [
         check_doctor(smoke_dir),
         check_sample(smoke_dir),
@@ -43,6 +45,8 @@ def build_summary(smoke_dir: Path, *, allow_missing_web: bool = False) -> dict[s
         "command": "smoke-summary",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "smoke_dir": str(smoke_dir),
+        "platform": normalize_platform_label(platform_label) or infer_platform_label(smoke_dir),
+        "python_platform": platform.platform(),
         "passed": all(item["status"] in {"pass", "skip"} for item in checks),
         "checks": checks,
     }
@@ -101,6 +105,29 @@ def check(name: str, passed: bool, detail: str) -> dict[str, str]:
     return {"name": name, "status": "pass" if passed else "fail", "detail": detail}
 
 
+def infer_platform_label(smoke_dir: Path) -> str:
+    lower_name = smoke_dir.name.lower()
+    if "windows" in lower_name or lower_name.startswith("win"):
+        return "windows"
+    if "macos" in lower_name or "linux" in lower_name or "darwin" in lower_name:
+        return "macos-linux"
+    system = platform.system().lower()
+    if system == "windows":
+        return "windows"
+    if system in {"darwin", "linux"}:
+        return "macos-linux"
+    return system or "unknown"
+
+
+def normalize_platform_label(value: str) -> str:
+    cleaned = value.strip().lower().replace("_", "-")
+    if cleaned in {"win", "windows-latest"}:
+        return "windows"
+    if cleaned in {"macos", "mac", "darwin", "linux", "ubuntu", "ubuntu-latest", "macos-latest"}:
+        return "macos-linux"
+    return cleaned
+
+
 def read_json(path: Path) -> Any:
     if not path.is_file():
         return None
@@ -112,6 +139,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "# RapidTriage Smoke Summary",
         "",
         f"- Smoke directory: `{summary['smoke_dir']}`",
+        f"- Platform: `{summary['platform']}`",
         f"- Result: {'PASS' if summary['passed'] else 'FAIL'}",
         f"- Generated: `{summary['generated_at']}`",
         "",

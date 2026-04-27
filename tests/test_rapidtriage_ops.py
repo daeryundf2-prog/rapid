@@ -280,6 +280,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             summary = json.loads((smoke_dir / "smoke-summary.json").read_text(encoding="utf-8"))
             self.assertTrue(summary["passed"])
+            self.assertIn(summary["platform"], {"macos-linux", "windows"})
             self.assertTrue((smoke_dir / "smoke-summary.md").is_file())
 
     def test_release_evidence_script_reports_pass_for_complete_evidence(self) -> None:
@@ -335,6 +336,8 @@ class RapidTriageOpsTests(unittest.TestCase):
                     str(benchmark_dir),
                     "--smoke-dir",
                     str(smoke_dir),
+                    "--require-smoke-platform",
+                    "windows",
                     "--output-dir",
                     str(evidence_dir),
                 ],
@@ -347,8 +350,89 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             report = json.loads((evidence_dir / "release-evidence-report.json").read_text(encoding="utf-8"))
             self.assertTrue(report["passed"])
+            self.assertEqual(report["release_gate"], "pass")
+            self.assertEqual(report["inputs"]["required_smoke_platforms"], ["windows"])
             self.assertEqual(report["summary"]["fail"], 0)
+            check_ids = {item["id"] for item in report["checks"]}
+            self.assertIn("smoke-platform-windows", check_ids)
             self.assertTrue((evidence_dir / "release-evidence-report.md").is_file())
+
+    def test_release_evidence_script_reports_missing_required_smoke_platform(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            repo = Path(__file__).resolve().parent.parent
+            release_dir = root / "release"
+            validation_dir = root / "validation"
+            benchmark_dir = root / "benchmark"
+            smoke_dir = root / "smoke-windows"
+            evidence_dir = root / "release-evidence"
+
+            release = subprocess.run(
+                ["python", "scripts/build-release.py", "--output-dir", str(release_dir), "--skip-build"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(release.returncode, 0, release.stderr)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                validation_exit = main(["validation", "--output-dir", str(validation_dir), "--json"])
+                benchmark_exit = main(
+                    [
+                        "benchmark",
+                        "--output-dir",
+                        str(benchmark_dir),
+                        "--file-count",
+                        "3",
+                        "--search-iterations",
+                        "1",
+                        "--overwrite",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(validation_exit, 0)
+            self.assertEqual(benchmark_exit, 0)
+
+            smoke_dir.mkdir()
+            (smoke_dir / "smoke-summary.json").write_text(
+                json.dumps({"passed": True, "platform": "windows", "checks": []}),
+                encoding="utf-8",
+            )
+            (smoke_dir / "smoke-summary.md").write_text("# PASS\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python",
+                    "scripts/verify-release-evidence.py",
+                    "--release-dir",
+                    str(release_dir),
+                    "--validation-dir",
+                    str(validation_dir),
+                    "--benchmark-dir",
+                    str(benchmark_dir),
+                    "--smoke-dir",
+                    str(smoke_dir),
+                    "--require-smoke-platform",
+                    "windows",
+                    "--require-smoke-platform",
+                    "macos-linux",
+                    "--output-dir",
+                    str(evidence_dir),
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            report = json.loads((evidence_dir / "release-evidence-report.json").read_text(encoding="utf-8"))
+            self.assertFalse(report["passed"])
+            self.assertEqual(report["release_gate"], "fail")
+            failed = {item["id"]: item for item in report["checks"] if item["status"] == "fail"}
+            self.assertIn("smoke-platform-macos-linux", failed)
+            self.assertTrue(any("macos-linux" in action for action in report["next_actions"]))
 
 
 if __name__ == "__main__":

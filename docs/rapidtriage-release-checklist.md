@@ -13,8 +13,9 @@
 - On macOS/Linux, run `sh scripts/smoke-test-rapidtriage.sh`.
 - Run `python scripts/build-release.py --output-dir release` and attach `SHA256SUMS` plus `dependency-inventory.txt`.
 - Run `python scripts/build-release.py --output-dir release --verify`.
-- Run `python scripts/verify-release-evidence.py --release-dir release --validation-dir release-validation --benchmark-dir release-benchmark --smoke-dir rapidtriage-windows-smoke --smoke-dir rapidtriage-macos-linux-smoke`.
+- Run `python scripts/verify-release-evidence.py --release-dir release --validation-dir release-validation --benchmark-dir release-benchmark --smoke-dir rapidtriage-windows-smoke --smoke-dir rapidtriage-macos-linux-smoke --require-smoke-platform windows --require-smoke-platform macos-linux`.
 - Attach `release-manifest.json`, `smoke-summary.json`, and `smoke-summary.md` for each smoke-tested platform.
+- If `release-evidence-report.md` fails, resolve its Next Actions before distributing the build.
 - Run the Windows/macOS usability checklist in `docs/rapidtriage-fresh-machine-smoke-test.md` before calling the release analyst-ready.
 - Attach SHA256 checksums, dependency inventory/SBOM, and signing/notarization verification output for every distributed artifact.
 - Attach independent validation notes for parser corpus, large-case performance, and legal/report wording review.

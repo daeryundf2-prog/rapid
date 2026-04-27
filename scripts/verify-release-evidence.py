@@ -16,6 +16,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--benchmark-dir", default="release-benchmark", help="Directory containing benchmark output")
     parser.add_argument("--smoke-dir", action="append", default=[], help="Smoke output directory; repeat per platform")
     parser.add_argument("--minimum-smoke-count", type=int, default=1, help="Minimum required passing smoke summaries")
+    parser.add_argument(
+        "--require-smoke-platform",
+        action="append",
+        default=[],
+        help="Required passing smoke platform label; repeat for windows, macos-linux, or custom labels",
+    )
     parser.add_argument("--output-dir", default="release-evidence", help="Directory for evidence verification report")
     args = parser.parse_args(argv)
 
@@ -23,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     validation_dir = Path(args.validation_dir).expanduser().resolve()
     benchmark_dir = Path(args.benchmark_dir).expanduser().resolve()
     smoke_dirs = [Path(value).expanduser().resolve() for value in args.smoke_dir]
+    required_smoke_platforms = [normalize_platform_label(value) for value in args.require_smoke_platform if value.strip()]
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -30,21 +37,31 @@ def main(argv: list[str] | None = None) -> int:
     checks.extend(check_release_artifacts(release_dir))
     checks.extend(check_validation_package(validation_dir))
     checks.extend(check_benchmark_output(benchmark_dir))
-    checks.extend(check_smoke_outputs(smoke_dirs, minimum_smoke_count=args.minimum_smoke_count))
+    checks.extend(
+        check_smoke_outputs(
+            smoke_dirs,
+            minimum_smoke_count=args.minimum_smoke_count,
+            required_platforms=required_smoke_platforms,
+        )
+    )
+    passed = all(item["status"] in {"pass", "skip"} for item in checks if item.get("required", True))
 
     payload = {
         "command": "verify-release-evidence",
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "passed": all(item["status"] in {"pass", "skip"} for item in checks if item.get("required", True)),
+        "passed": passed,
+        "release_gate": "pass" if passed else "fail",
         "inputs": {
             "release_dir": str(release_dir),
             "validation_dir": str(validation_dir),
             "benchmark_dir": str(benchmark_dir),
             "smoke_dirs": [str(path) for path in smoke_dirs],
             "minimum_smoke_count": args.minimum_smoke_count,
+            "required_smoke_platforms": required_smoke_platforms,
         },
         "checks": checks,
         "summary": build_summary(checks),
+        "next_actions": build_next_actions(checks),
     }
 
     json_path = output_dir / "release-evidence-report.json"
@@ -117,9 +134,15 @@ def check_benchmark_output(benchmark_dir: Path) -> list[dict[str, Any]]:
     return checks
 
 
-def check_smoke_outputs(smoke_dirs: list[Path], *, minimum_smoke_count: int) -> list[dict[str, Any]]:
+def check_smoke_outputs(
+    smoke_dirs: list[Path],
+    *,
+    minimum_smoke_count: int,
+    required_platforms: list[str],
+) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     passing = 0
+    passing_platforms: set[str] = set()
     for index, smoke_dir in enumerate(smoke_dirs, start=1):
         label = smoke_dir.name or f"smoke-{index}"
         json_path = smoke_dir / "smoke-summary.json"
@@ -129,9 +152,18 @@ def check_smoke_outputs(smoke_dirs: list[Path], *, minimum_smoke_count: int) -> 
         checks.append(check_path(f"smoke-{label}-markdown", markdown_path))
         payload = read_json(json_path)
         passed = bool(payload.get("passed")) if isinstance(payload, dict) else False
+        platform_label = infer_smoke_platform(smoke_dir, payload)
         if passed:
             passing += 1
-        checks.append(make_check(f"smoke-{label}-status", passed, f"passed={passed}", path=json_path))
+            passing_platforms.add(platform_label)
+        checks.append(
+            make_check(
+                f"smoke-{label}-status",
+                passed,
+                f"passed={passed}, platform={platform_label}",
+                path=json_path,
+            )
+        )
 
     checks.append(
         make_check(
@@ -140,6 +172,14 @@ def check_smoke_outputs(smoke_dirs: list[Path], *, minimum_smoke_count: int) -> 
             f"passing={passing}, required={minimum_smoke_count}",
         )
     )
+    for platform_label in required_platforms:
+        checks.append(
+            make_check(
+                f"smoke-platform-{platform_label}",
+                platform_label in passing_platforms,
+                f"passing_platforms={sorted(passing_platforms)}, required={platform_label}",
+            )
+        )
     return checks
 
 
@@ -204,6 +244,7 @@ def make_check(check_id: str, passed: bool, detail: str, *, path: Path | None = 
         "detail": detail,
         "path": str(path) if path is not None else "",
         "required": True,
+        "remediation": "" if passed else remediation_for(check_id),
     }
 
 
@@ -213,6 +254,53 @@ def build_summary(checks: list[dict[str, Any]]) -> dict[str, int]:
         status = str(item.get("status", "fail"))
         counts[status] = counts.get(status, 0) + 1
     return counts
+
+
+def build_next_actions(checks: list[dict[str, Any]]) -> list[str]:
+    actions: list[str] = []
+    seen: set[str] = set()
+    for item in checks:
+        if item.get("status") != "fail":
+            continue
+        remediation = str(item.get("remediation") or "").strip()
+        if remediation and remediation not in seen:
+            actions.append(remediation)
+            seen.add(remediation)
+    return actions
+
+
+def remediation_for(check_id: str) -> str:
+    if check_id.startswith("release-"):
+        return "Rebuild release artifacts, then run build-release.py --verify before attaching SHA256SUMS."
+    if check_id.startswith("validation-"):
+        return "Run rapidtriage validation --output-dir release-validation --overwrite and attach JSON/Markdown output."
+    if check_id.startswith("benchmark-"):
+        return "Run rapidtriage benchmark --output-dir release-benchmark --overwrite and attach JSON/Markdown output."
+    if check_id.startswith("smoke-platform-"):
+        platform_label = check_id.removeprefix("smoke-platform-")
+        return f"Run and summarize a passing smoke test for platform '{platform_label}', then pass it with --smoke-dir."
+    if check_id.startswith("smoke-"):
+        return "Run scripts/smoke-test-rapidtriage.sh or scripts/windows/smoke-test-rapidtriage.ps1 and attach smoke-summary.json/md."
+    return "Review the failed release evidence check and attach the missing or corrected artifact."
+
+
+def infer_smoke_platform(smoke_dir: Path, payload: Any) -> str:
+    if isinstance(payload, dict):
+        value = payload.get("platform")
+        if isinstance(value, str) and value.strip():
+            return normalize_platform_label(value)
+    return normalize_platform_label(smoke_dir.name)
+
+
+def normalize_platform_label(value: str) -> str:
+    cleaned = value.strip().lower().replace("_", "-")
+    if cleaned in {"win", "windows", "windows-latest"} or "windows" in cleaned:
+        return "windows"
+    if cleaned in {"mac", "macos", "macos-latest", "darwin"} or "macos" in cleaned or "darwin" in cleaned:
+        return "macos-linux"
+    if cleaned in {"linux", "ubuntu", "ubuntu-latest"} or "linux" in cleaned or "ubuntu" in cleaned:
+        return "macos-linux"
+    return cleaned or "unknown"
 
 
 def read_json(path: Path) -> Any:
@@ -235,6 +323,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Validation dir: `{payload.get('inputs', {}).get('validation_dir', '')}`",
         f"- Benchmark dir: `{payload.get('inputs', {}).get('benchmark_dir', '')}`",
         f"- Smoke dirs: `{', '.join(payload.get('inputs', {}).get('smoke_dirs', []))}`",
+        f"- Required smoke platforms: `{', '.join(payload.get('inputs', {}).get('required_smoke_platforms', []))}`",
+        f"- Release gate: `{payload.get('release_gate', '')}`",
         "",
         "| Check | Status | Detail | Path |",
         "| --- | --- | --- | --- |",
@@ -245,6 +335,11 @@ def render_markdown(payload: dict[str, Any]) -> str:
         lines.append(
             f"| {item.get('id', '')} | {item.get('status', '')} | {item.get('detail', '')} | `{item.get('path', '')}` |"
         )
+    next_actions = payload.get("next_actions") if isinstance(payload.get("next_actions"), list) else []
+    if next_actions:
+        lines.extend(["", "## Next Actions", ""])
+        for action in next_actions:
+            lines.append(f"- {action}")
     lines.append("")
     return "\n".join(lines)
 
