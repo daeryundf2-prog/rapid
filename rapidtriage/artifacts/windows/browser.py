@@ -22,7 +22,7 @@ CHROMIUM_BROWSER_ROOTS: Tuple[Tuple[str, Sequence[str]], ...] = (
     ("brave", ("AppData", "Local", "BraveSoftware", "Brave-Browser", "User Data")),
 )
 FIREFOX_PROFILE_ROOT = ("AppData", "Roaming", "Mozilla", "Firefox", "Profiles")
-PARSER_VERSION = "windows-browser-v2"
+PARSER_VERSION = "windows-browser-v3"
 MAX_USAGE_ROWS = 500
 MAX_AI_STORAGE_FILES = 80
 MAX_AI_STORAGE_FILE_BYTES = 5 * 1024 * 1024
@@ -272,6 +272,7 @@ def build_ai_conversation_record(
     conversation_rows: List[Dict[str, object]],
     parser_version: str,
 ) -> ArtifactRecord:
+    transcript = build_ai_transcript_summary(conversation_rows)
     return ArtifactRecord(
         provider=provider,
         artifact_type=artifact_type,
@@ -290,14 +291,102 @@ def build_ai_conversation_record(
             "question_count": sum(1 for row in conversation_rows if row.get("direction") == "question"),
             "answer_count": sum(1 for row in conversation_rows if row.get("direction") == "answer"),
             "ai_service_counts": count_field(conversation_rows, "ai_service"),
+            "transcript_pair_count": transcript["pair_count"],
+            "complete_pair_count": transcript["complete_pair_count"],
+            "orphan_question_count": transcript["orphan_question_count"],
+            "orphan_answer_count": transcript["orphan_answer_count"],
+            "transcript_completeness_score": transcript["completeness_score"],
+            "transcript_validation_status": transcript["validation_status"],
             "conversation_candidates": conversation_rows,
+            "transcript_pairs": transcript["pairs"],
             "risk_flags": ["ai-conversation-storage-candidate"],
             "triage_recommendation": (
                 "Review these recovered browser-storage snippets against the raw source files. "
-                "They are conversation candidates, not a guaranteed complete AI transcript."
+                "Pairs with both question and answer are stronger review pivots, but still not guaranteed complete AI transcripts."
             ),
         },
     )
+
+
+def build_ai_transcript_summary(conversation_rows: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+    pairs: List[Dict[str, object]] = []
+    pending_question: Mapping[str, object] | None = None
+    orphan_questions = 0
+    orphan_answers = 0
+    for row in conversation_rows:
+        direction = str(row.get("direction") or "")
+        if direction == "question":
+            if pending_question is not None:
+                orphan_questions += 1
+            pending_question = row
+            continue
+        if direction == "answer":
+            if pending_question is None:
+                orphan_answers += 1
+                continue
+            pairs.append(build_ai_transcript_pair(pending_question, row, len(pairs)))
+            pending_question = None
+    if pending_question is not None:
+        orphan_questions += 1
+    question_count = sum(1 for row in conversation_rows if row.get("direction") == "question")
+    answer_count = sum(1 for row in conversation_rows if row.get("direction") == "answer")
+    complete_pair_count = len(pairs)
+    denominator = max(question_count, answer_count, 1)
+    completeness_score = round(min(1.0, complete_pair_count / denominator), 3)
+    if complete_pair_count and orphan_questions == 0 and orphan_answers == 0:
+        validation_status = "paired-candidate"
+    elif complete_pair_count:
+        validation_status = "partial-paired-candidate"
+    elif conversation_rows:
+        validation_status = "unpaired-candidate"
+    else:
+        validation_status = "none"
+    return {
+        "pair_count": len(pairs),
+        "complete_pair_count": complete_pair_count,
+        "orphan_question_count": orphan_questions,
+        "orphan_answer_count": orphan_answers,
+        "completeness_score": completeness_score,
+        "validation_status": validation_status,
+        "pairs": pairs,
+    }
+
+
+def build_ai_transcript_pair(question: Mapping[str, object], answer: Mapping[str, object], index: int) -> Dict[str, object]:
+    service = str(question.get("ai_service") or answer.get("ai_service") or "AI service")
+    question_text = str(question.get("text") or "")
+    answer_text = str(answer.get("text") or "")
+    source_hashes = sorted(
+        {
+            str(value)
+            for value in (question.get("source_sha256"), answer.get("source_sha256"))
+            if value
+        }
+    )
+    source_paths = sorted(
+        {
+            str(value)
+            for value in (question.get("source_path"), answer.get("source_path"))
+            if value
+        }
+    )
+    confidence = min(float(question.get("confidence") or 0), float(answer.get("confidence") or 0))
+    pair_material = f"{service}\n{question_text}\n{answer_text}\n{','.join(source_hashes)}"
+    return {
+        "pair_id": hashlib.sha256(pair_material.encode("utf-8")).hexdigest()[:24],
+        "pair_index": index,
+        "ai_service": service,
+        "question": question_text,
+        "answer": answer_text,
+        "question_source_path": str(question.get("source_path") or ""),
+        "answer_source_path": str(answer.get("source_path") or ""),
+        "source_paths": source_paths,
+        "source_sha256s": source_hashes,
+        "same_source": bool(source_hashes) and len(source_hashes) == 1,
+        "confidence": round(confidence, 3),
+        "validation_status": "paired-candidate",
+        "evidence_note": "Question/answer pair inferred from recovered browser storage order; verify against raw source before reporting.",
+    }
 
 
 def extract_ai_conversation_candidates(profile_dir: Path) -> List[Dict[str, object]]:

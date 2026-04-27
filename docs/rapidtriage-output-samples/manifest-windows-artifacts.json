@@ -101,7 +101,7 @@
           "supported": true,
           "details": {
             "parser": "browser-history",
-            "parser_version": "windows-browser-v2",
+            "parser_version": "windows-browser-v3",
             "coverage_status": "parsed",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
@@ -163,7 +163,7 @@
           "supported": true,
           "details": {
             "parser": "browser-history",
-            "parser_version": "windows-browser-v2",
+            "parser_version": "windows-browser-v3",
             "coverage_status": "parsed",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
@@ -260,7 +260,7 @@
           "supported": true,
           "details": {
             "parser": "browser-history",
-            "parser_version": "windows-browser-v2",
+            "parser_version": "windows-browser-v3",
             "coverage_status": "parsed",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",

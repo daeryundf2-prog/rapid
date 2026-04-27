@@ -96,6 +96,16 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(ai_conversation["details"]["coverage_status"], "candidate")
             self.assertGreaterEqual(ai_conversation["details"]["question_count"], 2)
             self.assertGreaterEqual(ai_conversation["details"]["answer_count"], 2)
+            self.assertGreaterEqual(ai_conversation["details"]["complete_pair_count"], 2)
+            self.assertGreater(ai_conversation["details"]["transcript_completeness_score"], 0)
+            self.assertIn(
+                ai_conversation["details"]["transcript_validation_status"],
+                {"paired-candidate", "partial-paired-candidate"},
+            )
+            transcript_pair = ai_conversation["details"]["transcript_pairs"][0]
+            self.assertEqual(transcript_pair["ai_service"], "ChatGPT")
+            self.assertTrue(transcript_pair["same_source"])
+            self.assertEqual(transcript_pair["validation_status"], "paired-candidate")
             candidate_text = "\n".join(
                 row["text"] for row in ai_conversation["details"]["conversation_candidates"]
             )
