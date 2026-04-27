@@ -218,6 +218,10 @@ def build_recommended_commands() -> list[dict[str, str]]:
             "name": "validation-package",
             "command": "rapidtriage validation --output-dir ./release-validation --overwrite --json",
         },
+        {
+            "name": "windows-smoke-test",
+            "command": ".\\scripts\\windows\\smoke-test-rapidtriage.ps1",
+        },
     ]
 
 

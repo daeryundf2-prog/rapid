@@ -107,6 +107,26 @@ rapidtriage-sample\run-output
 
 Use this folder to test search, artifacts, timeline, review, and report workflows before using real evidence.
 
+## Release Smoke Test
+
+Before handing a Windows build to another analyst, run the automated smoke test:
+
+```powershell
+.\scripts\windows\smoke-test-rapidtriage.ps1
+```
+
+The smoke test installs the package, runs `doctor`, creates and searches the sample case, runs a small benchmark, builds the validation package, checks evidence-support guidance, and confirms the web UI returns HTTP 200. Outputs are written to:
+
+```text
+rapidtriage-windows-smoke
+```
+
+If another process is using the default smoke-test port, run:
+
+```powershell
+.\scripts\windows\smoke-test-rapidtriage.ps1 -Port 8899
+```
+
 ## Troubleshooting
 
 Run:

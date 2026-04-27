@@ -6,6 +6,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -90,6 +91,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             command_names = {item["name"] for item in payload["recommended_commands"]}
             self.assertIn("validation-package", command_names)
             self.assertIn("windows-signature-verify", command_names)
+            self.assertIn("windows-smoke-test", command_names)
 
     def test_case_catalog_adds_exports_and_imports_case(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -203,6 +205,11 @@ class RapidTriageOpsTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((output_dir / "rapidtriage-portable.zip").is_file())
+            with zipfile.ZipFile(output_dir / "rapidtriage-portable.zip") as archive:
+                names = set(archive.namelist())
+            self.assertIn("scripts/windows/start-rapidtriage.ps1", names)
+            self.assertIn("scripts/windows/smoke-test-rapidtriage.ps1", names)
+            self.assertIn("scripts/windows/smoke-test-rapidtriage.bat", names)
 
 
 if __name__ == "__main__":

@@ -29,6 +29,12 @@ Windows one-command launcher:
 .\scripts\windows\start-rapidtriage.ps1
 ```
 
+Windows release smoke test:
+
+```powershell
+.\scripts\windows\smoke-test-rapidtriage.ps1
+```
+
 macOS/Linux one-command launcher:
 
 ```bash
