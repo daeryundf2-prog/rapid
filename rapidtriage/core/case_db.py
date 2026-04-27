@@ -166,6 +166,29 @@ class CaseDatabase:
             rows = connection.execute("SELECT * FROM case_record ORDER BY updated_at DESC, case_id ASC").fetchall()
         return [case_record_from_row(row) for row in rows]
 
+    def case_storage_summary(self, case_id: str) -> dict[str, object]:
+        normalized_case_id = normalize_identifier(case_id, fallback="case")
+        with self.connect() as connection:
+            apply_schema(connection)
+            case_row = connection.execute(
+                "SELECT case_id FROM case_record WHERE case_id = ?",
+                (normalized_case_id,),
+            ).fetchone()
+            counts = {
+                "evidence_source_count": count_rows(connection, "evidence_source", normalized_case_id),
+                "file_record_count": count_rows(connection, "file_record", normalized_case_id),
+                "indexed_document_count": count_rows(connection, "indexed_document", normalized_case_id),
+                "artifact_count": count_rows(connection, "artifact", normalized_case_id),
+                "event_count": count_rows(connection, "event", normalized_case_id),
+                "review_mark_count": count_rows(connection, "review_mark", normalized_case_id),
+                "saved_search_count": count_rows(connection, "saved_search", normalized_case_id),
+            }
+        return {
+            "case_id": normalized_case_id,
+            "exists": case_row is not None,
+            "summary": counts,
+        }
+
     def next_citation_id(self, case_id: str, kind: str) -> str:
         with self.connect() as connection:
             apply_schema(connection)
@@ -1057,6 +1080,11 @@ def list_tables(connection: sqlite3.Connection) -> list[str]:
 
 def table_columns(connection: sqlite3.Connection, table_name: str) -> list[str]:
     return [str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table_name})")]
+
+
+def count_rows(connection: sqlite3.Connection, table_name: str, case_id: str) -> int:
+    row = connection.execute(f"SELECT COUNT(*) AS count FROM {table_name} WHERE case_id = ?", (case_id,)).fetchone()
+    return int(row["count"]) if row is not None else 0
 
 
 def require_tables(connection: sqlite3.Connection, table_names: Iterable[str]) -> None:

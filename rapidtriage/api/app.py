@@ -88,6 +88,12 @@ class CaseDbImportRunRequest(BaseModel):
     name: Optional[str] = None
 
 
+class RunCaseDbEnsureRequest(BaseModel):
+    database: Optional[str] = None
+    case_id: Optional[str] = None
+    name: Optional[str] = None
+
+
 class CaseDbSearchRequest(BaseModel):
     database: str = Field(..., min_length=1)
     case_id: str = Field(..., min_length=1)
@@ -238,6 +244,37 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         try:
             database = open_case_database(Path(request.database))
             return database.import_run_output(Path(request.run_output), case_id=request.case_id, case_name=request.name)
+        except (CaseDatabaseError, SearchError, OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @api.post("/api/runs/{run_id}/case-db/ensure")
+    def ensure_run_case_db(run_id: str, request: RunCaseDbEnsureRequest) -> Dict[str, object]:
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail="run is not completed")
+        output_dir = run_output_dir(job.summary)
+        database_path = Path(request.database).expanduser().resolve() if request.database else output_dir / "rapidtriage-case.db"
+        case_id = request.case_id or f"run-{run_id}"
+        case_name = request.name or f"rapidtriage run {run_id}"
+        try:
+            database = open_case_database(database_path)
+            storage = database.case_storage_summary(case_id)
+            already_imported = bool(storage["exists"]) and int(storage["summary"].get("evidence_source_count") or 0) > 0
+            import_result = None
+            if not already_imported:
+                import_result = database.import_run_output(output_dir, case_id=case_id, case_name=case_name)
+                storage = database.case_storage_summary(case_id)
+            return {
+                "command": "case-db.ensure-run",
+                "run_id": run_id,
+                "run_output": str(output_dir),
+                "database": str(database_path),
+                "case_id": case_id,
+                "case_name": case_name,
+                "imported": not already_imported,
+                "import_result": import_result,
+                "storage": storage,
+            }
         except (CaseDatabaseError, SearchError, OSError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

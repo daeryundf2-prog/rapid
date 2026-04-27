@@ -565,6 +565,71 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertGreaterEqual(filtered_payload["summary"]["match_count"], 1)
             self.assertEqual(filtered_payload["matches"][0]["review"]["status"], "relevant")
 
+    def test_run_case_db_ensure_imports_once_for_default_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            db_path = Path(tmp_dir) / "case-default.db"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+            client = TestClient(create_app(RunJobStore()))
+
+            run_response = client.post(
+                "/api/runs",
+                json={
+                    "root": str(root),
+                    "mode": "fraud",
+                    "output_dir": str(output_dir),
+                    "read_only": True,
+                    "wait": True,
+                },
+            )
+            self.assertEqual(run_response.status_code, 202, run_response.text)
+            run_id = run_response.json()["run_id"]
+
+            first_ensure = client.post(
+                f"/api/runs/{run_id}/case-db/ensure",
+                json={
+                    "database": str(db_path),
+                    "case_id": "CASE-DEFAULT-WORKFLOW",
+                    "name": "Default Case DB Workflow",
+                },
+            )
+            self.assertEqual(first_ensure.status_code, 200, first_ensure.text)
+            first_payload = first_ensure.json()
+            self.assertEqual(first_payload["command"], "case-db.ensure-run")
+            self.assertEqual(first_payload["case_id"], "CASE-DEFAULT-WORKFLOW")
+            self.assertEqual(first_payload["database"], str(db_path.resolve()))
+            self.assertEqual(first_payload["imported"], True)
+            self.assertGreaterEqual(first_payload["storage"]["summary"]["indexed_document_count"], 1)
+
+            second_ensure = client.post(
+                f"/api/runs/{run_id}/case-db/ensure",
+                json={
+                    "database": str(db_path),
+                    "case_id": "CASE-DEFAULT-WORKFLOW",
+                },
+            )
+            self.assertEqual(second_ensure.status_code, 200, second_ensure.text)
+            second_payload = second_ensure.json()
+            self.assertEqual(second_payload["imported"], False)
+            self.assertEqual(
+                second_payload["storage"]["summary"]["indexed_document_count"],
+                first_payload["storage"]["summary"]["indexed_document_count"],
+            )
+
+            search_response = client.post(
+                "/api/case-db/search",
+                json={
+                    "database": second_payload["database"],
+                    "case_id": second_payload["case_id"],
+                    "keywords": ["password"],
+                    "sources": ["documents"],
+                },
+            )
+            self.assertEqual(search_response.status_code, 200, search_response.text)
+            self.assertGreaterEqual(search_response.json()["summary"]["match_count"], 1)
+
     def test_imported_summary_cannot_expose_files_outside_output_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

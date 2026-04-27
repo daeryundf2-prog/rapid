@@ -226,6 +226,7 @@ The local UI is a browser-based dashboard served by FastAPI. It supports:
 - Computing MD5, SHA1, and SHA256 for an opened source file on demand from the viewer.
 - Searching either the whole case or only the currently opened evidence file from the viewer.
 - Narrowing whole-case search by source, extension, and path fragment before opening results.
+- Preparing a run-local SQLite Case DB automatically before DB-backed search so users do not have to manually import JSON outputs first.
 - Using keyboard shortcuts for case search, current-file search, workspace switching, and paginated navigation.
 - Using keyword presets for common review pivots such as credentials, web activity, financial terms, and intrusion indicators.
 - Saving analyst review decisions from the viewer with `Relevant`, `Needs review`, `Not relevant`, tags, notes, and report-candidate flags in `rapidtriage-case.json`.
@@ -282,7 +283,7 @@ Implemented:
 - `submission-manifest` hashes report-candidate case evidence with MD5, SHA1, and SHA256, preserves review/bookmark context, skips unavailable or out-of-scope paths, and writes an audit sidecar.
 - `case-report` writes a Korean/English-friendly Markdown report draft with case metadata, analysis scope, reviewed evidence, IOC/indicator review pivots, A/B compare review pivots, hashes, skipped hash rows, conclusion text, and audit sidecar.
 - `web` starts a local FastAPI server with a browser UI for launching runs, importing existing outputs, searching evidence, previewing source files, reviewing hits, organizing case findings, downloading generated files, and reading reports.
-- `case-db` initializes the experimental SQLite case database v1 with tables for cases, evidence sources, files, hashes, artifacts, events, indexed documents/FTS, reviews, audit events, report items, jobs, and stable citation ID sequences.
+- `case-db` initializes the SQLite case database v1 with tables for cases, evidence sources, files, hashes, artifacts, events, indexed documents/FTS, reviews, audit events, report items, jobs, and stable citation ID sequences.
 - `case-search` searches imported SQLite case databases across FTS-indexed documents, file records, artifacts, indicator pivots, and timeline events while preserving citation IDs; hits include review-priority guidance and source-reference details, and artifact/indicator hits expose reviewable source paths plus key Windows and macOS metadata for event logs, PowerShell history, MFT/USN rows, browser history, AI-service usage, quarantine events, LaunchAgents, and IOC values.
 - `case-review` stores DB-backed review/verification marks, tags, notes, reviewer names, and report-candidate flags for individual search targets.
 - `evidence` identifies folder, E01/Ex01, raw image, ISO, and virtual-disk source adapters and reports whether required external tooling is available.

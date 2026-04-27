@@ -448,14 +448,14 @@ function renderCaseDbPanel(payload) {
   const defaultCaseId = selectedRunId ? `run-${selectedRunId}` : "CASE-001";
   return `
     <section class="guidance-card case-db-panel">
-      <p class="eyebrow">Case DB alpha</p>
-      <h3>Import this run into SQLite search/review storage</h3>
-      <p>Use this to test the new DB-backed citation, FTS search, and verification marks while the original run JSON workflow remains intact.</p>
+      <p class="eyebrow">Case DB workspace</p>
+      <h3>Search and review with persistent citations</h3>
+      <p>This run is prepared automatically before Case DB search, so analysts can move from keywords to review marks without manually importing JSON first.</p>
       <form id="caseDbImportForm" class="search-form">
         <label>Database path <input name="database" value="${escapeHtml(defaultDb)}" required /></label>
         <label>Case ID <input name="case_id" value="${escapeHtml(defaultCaseId)}" required /></label>
         <label>Case name <input name="name" value="${escapeHtml(payload.mode || "rapidtriage run")}" /></label>
-        <button id="caseDbImportButton" type="submit">Import run to Case DB</button>
+        <button id="caseDbImportButton" type="submit">Prepare Case DB</button>
       </form>
       <form id="caseDbSearchForm" class="search-form">
         <label>DB keywords <input name="keywords" placeholder="password, powershell, download" required /></label>
@@ -465,6 +465,7 @@ function renderCaseDbPanel(payload) {
             <option value="documents">Documents</option>
             <option value="files">Files</option>
             <option value="artifacts">Artifacts</option>
+            <option value="indicators">Indicators</option>
             <option value="timeline">Timeline</option>
           </select>
         </label>
@@ -492,7 +493,7 @@ function renderCaseDbPanel(payload) {
         <button id="caseDbSearchButton" type="submit">Search Case DB</button>
       </form>
       <section id="caseDbResult" class="viewer-panel">
-        <p class="empty-state">Import this run, then search the Case DB here.</p>
+        <p class="empty-state">Enter keywords and search. The Case DB will be prepared automatically if needed.</p>
       </section>
     </section>
   `;
@@ -2110,20 +2111,19 @@ function bindCaseDbPanel() {
       const formData = new FormData(importForm);
       const request = {
         database: String(formData.get("database") || ""),
-        run_output: selectedRun?.summary?.output_dir || "",
         case_id: String(formData.get("case_id") || ""),
         name: String(formData.get("name") || ""),
       };
       button.disabled = true;
-      button.textContent = "Importing...";
+      button.textContent = "Preparing...";
       try {
-        const payload = await api("/api/case-db/import-run", { method: "POST", body: JSON.stringify(request) });
-        output.innerHTML = renderCaseDbImportResult(payload);
+        const payload = await ensureSelectedRunCaseDb(request);
+        output.innerHTML = renderCaseDbEnsureResult(payload);
       } catch (error) {
         output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
       } finally {
         button.disabled = false;
-        button.textContent = "Import run to Case DB";
+        button.textContent = "Prepare Case DB";
       }
     });
   }
@@ -2153,8 +2153,18 @@ function bindCaseDbPanel() {
         limit: 100,
       };
       button.disabled = true;
-      button.textContent = "Searching...";
+      button.textContent = "Preparing...";
       try {
+        const ensurePayload = await ensureSelectedRunCaseDb({
+          database: request.database,
+          case_id: request.case_id,
+          name: String(importData.get("name") || ""),
+        });
+        request.database = ensurePayload.database;
+        request.case_id = ensurePayload.case_id;
+        importForm.elements.database.value = ensurePayload.database;
+        importForm.elements.case_id.value = ensurePayload.case_id;
+        button.textContent = "Searching...";
         const payload = await api("/api/case-db/search", { method: "POST", body: JSON.stringify(request) });
         output.innerHTML = renderCaseDbSearchResult(payload);
         bindCaseDbReviewButtons(request.database, request.case_id);
@@ -2169,8 +2179,16 @@ function bindCaseDbPanel() {
   }
 }
 
-function renderCaseDbImportResult(payload) {
-  const summary = payload.summary || {};
+async function ensureSelectedRunCaseDb(request) {
+  if (!selectedRunId) throw new Error("Select a completed run first.");
+  return api(`/api/runs/${encodeURIComponent(selectedRunId)}/case-db/ensure`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+function renderCaseDbEnsureResult(payload) {
+  const summary = payload.storage?.summary || payload.import_result?.summary || {};
   return `
     <div class="metric-grid">
       ${metric("Files", summary.file_record_count)}
@@ -2178,7 +2196,7 @@ function renderCaseDbImportResult(payload) {
       ${metric("Artifacts", summary.artifact_count)}
       ${metric("Events", summary.event_count)}
     </div>
-    <p class="help-text">Imported into case ${escapeHtml(payload.case_id)}. Audit citation: ${escapeHtml(payload.audit_citation_id || "")}</p>
+    <p class="help-text">${payload.imported ? "Prepared" : "Reused"} case ${escapeHtml(payload.case_id)} at ${escapeHtml(payload.database)}.</p>
   `;
 }
 
