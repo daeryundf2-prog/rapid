@@ -186,6 +186,30 @@ class VirtualDiskAdapter:
 
     def identify(self, source: Path) -> EvidenceAdapterResult:
         supported = source.suffix.lower() in self.supported_suffixes
+        if source.suffix.lower() == ".xva":
+            return EvidenceAdapterResult(
+                adapter=self.name,
+                source_path=str(source),
+                detected_format="xva",
+                supported=supported,
+                can_mount=False,
+                can_extract=False,
+                required_tools=["XVA export/mount tooling"],
+                missing_tools=["XVA export/mount tooling"],
+                message=(
+                    "XVA virtual appliance detected. Direct XVA extraction is not implemented yet; "
+                    "export or mount the VM disk with Xen/XCP-ng tooling, then scan the resulting folder or converted disk."
+                ),
+                support_level="detected-only",
+                scan_strategy="xva-export-or-convert-first",
+                next_actions=[
+                    "Export or mount the XVA contents with XenCenter, XCP-ng Center, xe, or a trusted forensic VM workflow.",
+                    "If a VHD/VMDK/QCOW disk is produced, run RapidTriage evidence support on that disk.",
+                    "Scan the mounted/exported filesystem folder with rapidtriage run.",
+                ],
+                warnings=["Direct XVA extraction is not implemented; preserve the export/conversion log for reporting."],
+                external_validation_required=True,
+            )
         missing = missing_virtual_disk_tools(source.suffix.lower())
         ready = supported and not missing
         return EvidenceAdapterResult(

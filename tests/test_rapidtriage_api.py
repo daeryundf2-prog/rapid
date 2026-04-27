@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import tempfile
 import unittest
 import zipfile
@@ -108,6 +109,14 @@ class RapidTriageApiTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "run-out"
             root.mkdir(parents=True, exist_ok=True)
             build_run_fixture(root)
+            sqlite_path = root / "viewer.sqlite"
+            connection = sqlite3.connect(sqlite_path)
+            try:
+                connection.execute("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)")
+                connection.execute("INSERT INTO notes (body) VALUES (?)", ("password in sqlite viewer",))
+                connection.commit()
+            finally:
+                connection.close()
             client = TestClient(create_app(RunJobStore()))
 
             response = client.post(
@@ -191,6 +200,20 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(file_search_payload["summary"]["match_count"], 1)
             self.assertEqual(file_search_payload["matches"][0]["keyword"], "password")
             self.assertIn("password", file_search_payload["matches"][0]["snippet"].lower())
+            sqlite_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(sqlite_path)})
+            self.assertEqual(sqlite_preview_response.status_code, 200, sqlite_preview_response.text)
+            sqlite_preview = sqlite_preview_response.json()
+            self.assertEqual(sqlite_preview["preview_type"], "sqlite")
+            self.assertEqual(sqlite_preview["sqlite"]["tables"][0]["name"], "notes")
+            self.assertEqual(sqlite_preview["sqlite"]["tables"][0]["rows"][0]["values"]["body"], "password in sqlite viewer")
+            sqlite_search_response = client.get(
+                f"/api/runs/{run_id}/source-search",
+                params={"path": str(sqlite_path), "keyword": "password"},
+            )
+            self.assertEqual(sqlite_search_response.status_code, 200, sqlite_search_response.text)
+            sqlite_search = sqlite_search_response.json()
+            self.assertEqual(sqlite_search["summary"]["match_count"], 1)
+            self.assertEqual(sqlite_search["matches"][0]["table"], "notes")
             filtered_search_response = client.get(
                 f"/api/runs/{run_id}/search",
                 params={

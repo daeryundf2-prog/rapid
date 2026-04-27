@@ -1124,6 +1124,9 @@ function renderEvidenceViewer(payload, reviewContext = null) {
       ${payload.truncated ? '<p class="empty-state">Preview truncated for performance.</p>' : ""}
     `;
   }
+  if (payload.preview_type === "sqlite") {
+    body = renderSqlitePreview(payload.sqlite || {});
+  }
   return `
     <div class="viewer-header">
       <div>
@@ -1144,6 +1147,56 @@ function renderEvidenceViewer(payload, reviewContext = null) {
     ${renderReviewCapture(reviewContext, payload)}
     ${body}
   `;
+}
+
+function renderSqlitePreview(sqlite) {
+  const tables = sqlite.tables || [];
+  if (!tables.length) {
+    return `<p class="empty-state">${escapeHtml(sqlite.error || "No user tables were found in this SQLite database.")}</p>`;
+  }
+  return `
+    <section class="sqlite-preview">
+      <div class="file-search-summary">
+        ${metric("Tables", sqlite.table_count)}
+        ${metric("Previewed", tables.length)}
+        ${metric("Rows/table", sqlite.row_limit)}
+      </div>
+      <p class="help-text">SQLite viewer is read-only and capped for performance. Use file search above to find keywords inside text columns.</p>
+      ${tables.map((table) => `
+        <article class="viewer-panel sqlite-table-card">
+          <div class="viewer-header compact">
+            <div>
+              <p class="eyebrow">sqlite table</p>
+              <h3>${escapeHtml(table.name)}</h3>
+            </div>
+            <span class="status-pill">${escapeHtml(table.row_count ?? "unknown")} rows</span>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>${(table.columns || []).map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>
+              </thead>
+              <tbody>
+                ${(table.rows || []).map((row) => `
+                  <tr>
+                    ${(table.columns || []).map((column) => `<td>${escapeHtml(formatSqliteCell(row.values?.[column]))}</td>`).join("")}
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+          ${(table.truncated_rows || table.truncated_columns) ? '<p class="help-text">Preview capped: narrow with source search or export the table with a dedicated SQLite tool for full review.</p>' : ""}
+        </article>
+      `).join("")}
+      ${sqlite.truncated ? '<p class="help-text">Additional tables are hidden to keep the viewer responsive.</p>' : ""}
+    </section>
+  `;
+}
+
+function formatSqliteCell(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
 }
 
 function renderFileSearchBox(payload) {

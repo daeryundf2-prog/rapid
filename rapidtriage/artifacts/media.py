@@ -45,6 +45,8 @@ def build_image_record(path: Path) -> ArtifactRecord:
         "source_size": stat_result.st_size,
         "entry_name": resolved.name,
         "hashes": compute_hashes(resolved),
+        "parser_confidence": 0.72,
+        "parser_confidence_basis": "extension, file signature, bounded decoder/OCR sidecar validation",
     }
     details.update(build_ocr_and_classifier_validation(resolved))
     if not has_plausible_image_signature(resolved):
@@ -55,6 +57,7 @@ def build_image_record(path: Path) -> ArtifactRecord:
         details.update(
             {
                 "decoded": False,
+                "parser_confidence": 0.35,
                 "ocr_candidate": True,
                 "note": "Image extension detected, but OpenCV could not decode the file.",
             }
@@ -66,6 +69,7 @@ def build_image_record(path: Path) -> ArtifactRecord:
         details.update(
             {
                 "decoded": True,
+                "parser_confidence": 0.86,
                 "width": int(width),
                 "height": int(height),
                 "channel_count": int(image.shape[2]) if len(image.shape) == 3 else 1,
@@ -143,6 +147,7 @@ def load_ocr_sidecar(path: Path) -> dict[str, object]:
             "character_count": len(text),
             "contains_hangul": contains_hangul(text),
             "language_hint": language_hint_for_text(text),
+            "quality_metrics": ocr_quality_metrics(text),
             "truncated": len(text) >= OCR_SIDECAR_MAX_CHARS,
         }
     return {}
@@ -181,6 +186,22 @@ def language_hint_for_text(value: str) -> str:
     if has_latin:
         return "en"
     return "unknown"
+
+
+def ocr_quality_metrics(value: str) -> dict[str, object]:
+    hangul_count = sum(1 for character in value if contains_hangul(character))
+    latin_count = sum(1 for character in value if "a" <= character.lower() <= "z")
+    digit_count = sum(1 for character in value if character.isdigit())
+    whitespace_count = sum(1 for character in value if character.isspace())
+    return {
+        "character_count": len(value),
+        "non_whitespace_count": sum(1 for character in value if not character.isspace()),
+        "hangul_count": hangul_count,
+        "latin_count": latin_count,
+        "digit_count": digit_count,
+        "whitespace_ratio": round(whitespace_count / max(len(value), 1), 3),
+        "korean_text_present": hangul_count > 0,
+    }
 
 
 def average_hash(image) -> str:

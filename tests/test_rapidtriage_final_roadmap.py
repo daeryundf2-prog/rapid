@@ -9,6 +9,7 @@ import zipfile
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.core.normalize import normalize_artifacts
 from rapidtriage.core.sample_case import run_sample_workflow
 
 
@@ -81,6 +82,36 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertEqual(normalized_payload["case"]["case_id"], "CASE-NORMALIZED")
             self.assertGreaterEqual(normalized_payload["summary"]["file_record_count"], 1)
             self.assertIn("artifacts", normalized_payload["models"])
+
+    def test_normalize_artifacts_promotes_parser_confidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            artifacts_path = Path(tmp_dir) / "artifacts-media.json"
+            artifacts_path.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "provider": "media-image-artifacts",
+                                "artifact_type": "media-image",
+                                "path": "/case/screen.png",
+                                "details": {
+                                    "parser": "media-image",
+                                    "parser_version": "media-image-v3",
+                                    "parser_confidence": 0.86,
+                                    "entry_name": "screen.png",
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            rows = normalize_artifacts({"artifacts_media": str(artifacts_path)})
+
+            self.assertEqual(rows[0]["parser"], "media-image")
+            self.assertEqual(rows[0]["parser_version"], "media-image-v3")
+            self.assertEqual(rows[0]["confidence"], 0.86)
 
     def test_bundle_command_builds_submission_archive_with_integrity_hash(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -189,7 +220,11 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             payload = json.loads(stdout.getvalue())
             plugin_ids = {plugin["id"] for plugin in payload["plugins"]}
             self.assertIn("rapidtriage.files", plugin_ids)
+            self.assertIn("rapidtriage.local-ioc-enrichment", plugin_ids)
             self.assertIn("sample.parser", plugin_ids)
+            enrichment = next(plugin for plugin in payload["plugins"] if plugin["id"] == "rapidtriage.local-ioc-enrichment")
+            self.assertEqual(enrichment["kind"], "ti-enrichment")
+            self.assertFalse(enrichment["enabled"])
             self.assertEqual(payload["summary"]["error_count"], 0)
 
 

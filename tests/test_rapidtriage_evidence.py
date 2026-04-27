@@ -85,6 +85,21 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["support_level"], "direct-extract")
             self.assertEqual(result["scan_strategy"], "auto-convert-extract-then-scan")
 
+    def test_identifies_xva_as_export_first_virtual_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = Path(tmp_dir) / "xen-server.xva"
+            image_path.write_bytes(b"sample")
+
+            result = identify_evidence(image_path).to_dict()
+
+            self.assertEqual(result["adapter"], "virtual-disk")
+            self.assertEqual(result["detected_format"], "xva")
+            self.assertEqual(result["supported"], True)
+            self.assertEqual(result["can_extract"], False)
+            self.assertEqual(result["support_level"], "detected-only")
+            self.assertEqual(result["scan_strategy"], "xva-export-or-convert-first")
+            self.assertIn("XVA", result["message"])
+
     def test_identifies_common_image_formats_as_planned_adapters(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             expected = {

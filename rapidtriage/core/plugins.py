@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Mapping
 
 
-PLUGIN_KINDS = ("parser", "evidence-adapter", "viewer", "report-exporter")
+PLUGIN_KINDS = ("parser", "evidence-adapter", "viewer", "report-exporter", "ti-enrichment")
 
 
 class PluginError(ValueError):
@@ -45,6 +45,15 @@ def builtin_plugins() -> list[dict[str, object]]:
             "kind": "report-exporter",
             "enabled": True,
             "entrypoint": "rapidtriage.core.case_report",
+        },
+        {
+            "id": "rapidtriage.local-ioc-enrichment",
+            "name": "Local IOC enrichment contract",
+            "version": "1",
+            "kind": "ti-enrichment",
+            "enabled": False,
+            "entrypoint": "rapidtriage.core.indicators",
+            "description": "Offline URL/domain/IP/hash enrichment hook. External TI API connectors should implement this kind and remain opt-in.",
         },
     ]
 

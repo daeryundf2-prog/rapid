@@ -42,6 +42,7 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertEqual(len(details["perceptual_hash"]), 16)
             self.assertEqual(details["similarity_bucket"], details["perceptual_hash"][:8])
             self.assertIn("sha256", details["hashes"])
+            self.assertGreaterEqual(details["parser_confidence"], 0.8)
             self.assertTrue(details["ocr_candidate"])
             self.assertEqual(details["ocr_plan"]["status"], "sidecar-imported")
             self.assertEqual(details["ocr_plan"]["recommended_languages"], ["kor", "eng"])
@@ -49,6 +50,8 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertEqual(details["translation_plan"]["status"], "required-not-run")
             self.assertEqual(details["ocr_sidecar"]["language_hint"], "ko+en")
             self.assertIn("text_sha256", details["ocr_sidecar"])
+            self.assertTrue(details["ocr_sidecar"]["quality_metrics"]["korean_text_present"])
+            self.assertGreater(details["ocr_sidecar"]["quality_metrics"]["hangul_count"], 0)
             self.assertEqual(details["visual_classification"]["validation_status"], "triage-hint")
             self.assertEqual(details["classifier_validation"]["deepfake_detection_status"], "not-run")
             thumbnail = details["thumbnail_preview"]

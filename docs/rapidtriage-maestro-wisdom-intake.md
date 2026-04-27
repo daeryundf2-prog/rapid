@@ -24,20 +24,20 @@ RapidTriage should absorb this as a product principle:
 | --- | --- | --- | --- |
 | Processing strategy | Skip full carving/heavy indexing by default, run later if needed. | Partial | Keep `run` bounded by default; add queued deep processing profiles. |
 | Windows artifacts | Hundreds of categorized artifacts, OS/account metadata, last boot time, admin status. | Early | Expand normalized Windows parsers with fixture-backed coverage. |
-| Viewers | Dedicated SQL, JSON, XML, email, media, browser, and artifact viewers. | Early | Add viewer plugin registry and stronger web viewers. |
+| Viewers | Dedicated SQL, JSON, XML, email, media, browser, and artifact viewers. | Partial+ | SQLite source files now get a read-only capped web table preview and text-column keyword search; JSON/XML/email/media/browser viewers remain incremental work. |
 | Registry | Deleted key/value recovery and visual marking. | Planned | Add registry hive parser/recovery module after validation corpus exists. |
 | Event logs | Event semantic tags, recovered deleted records, parameter-level filters. | Planned | EVTX parser should emit normalized `Event` plus typed parameters. |
 | VSC | Compare current volume with Volume Shadow Copies and detect VSC deletion commands. | Planned | Add VSC import/compare workflow as Windows advanced parser work. |
 | MFT/EDB/WER/Defender/Firewall/ADS | Broad Windows forensic artifacts. | Partial | WER, Defender MPLog, Firewall W3C, Zone.Identifier sidecar, Task Scheduler XML with suspicious-action risk flags, native `$MFT` inventory, native USN record recovery, and EDB/SRUDB header/string pivots are fixture-backed; full MFT/EDB table/attribute decoding remains planned. |
 | Password cracking | Built-in password cracking workflow. | Deferred | Integrate only as optional external-tool workflow with legal warnings. |
-| OCR/translation | Korean OCR and translation-oriented review. | Partial+ | OCR remains optional, but media rows import OCR sidecars, identify Korean text hints, flag Korean language-pack needs, and mark translation-required status for review. |
+| OCR/translation | Korean OCR and translation-oriented review. | Partial+ | OCR remains optional, but media rows import OCR sidecars, identify Korean text hints, flag Korean language-pack needs, emit OCR quality metrics, and mark translation-required status for review. |
 | Linux/XFS | Strong Linux filesystem coverage including XFS. | Partial | Linux user, shell history, SSH, auth log, cron, and systemd triage exists; XFS remains an evidence adapter/filesystem extraction requirement. |
-| Virtualization | VMDK/VHD/XVA server dump support. | Detection only | Extend virtual disk adapter; add XVA detection and guidance. |
+| Virtualization | VMDK/VHD/XVA server dump support. | Detection+ | VHD/VHDX/VMDK/VDI/QCOW/QCOW2 remain qemu/Sleuth Kit extract candidates; XVA is explicitly detected as export/convert-first with Xen/XCP-ng guidance. |
 | Mobile APK malware | Extract APKs from mobile dumps and flag suspicious apps. | Partial+ | Exported APK inventory/hash/manifest/permission/risk triage plus bounded dex/native suspicious string, URL, and IP pivots exist; full mobile acquisition and YARA-style scanning remain planned. |
 | Cloud exports | Import cloud provider exports into the same review/search workflow. | Partial | Google Takeout-style location/activity JSON and Apple/general account JSON normalization exists; live cloud acquisition remains planned. |
 | Live/remote IR | USB live collector and agent-based remote response. | Deferred | Keep outside core desktop release until security model matures. |
 | Browser integration | Unified browser history/download viewer across Chrome/Edge/Firefox. | Partial | Normalize browser artifacts into one timeline/search surface. |
-| TI integration | Extract IP/URL and query threat intelligence APIs. | Partial | Completed runs emit local URL/domain/IP/hash indicator summaries with optional `--rules` IOC matching; external TI connector remains disabled/outside core by default. |
+| TI integration | Extract IP/URL and query threat intelligence APIs. | Partial+ | Completed runs emit local URL/domain/IP/hash indicator summaries with optional `--rules` IOC matching; a disabled `ti-enrichment` plugin kind now defines the opt-in external connector boundary. |
 | AI prompt artifacts | Extract prompts from AI/search browser artifacts. | Partial+ | Browser history detects common AI services, browser storage is scanned for prompt/question/answer/response snippets, and recovered question/answer rows are paired with completeness scoring and source hashes. Service-side transcript acquisition remains planned. |
 | Memory forensics | RAM dump analysis, BitLocker key extraction, process risk visualization. | Partial+ | Volatility/Volatility3 JSON/JSONL import normalizes process/network/malfind rows; bounded direct `.mem`/`.raw`/`.vmem`/`.vmss`/`.vmsn`/`.hpak`/`.dmp` and memory-named `.bin` scans now surface redacted BitLocker recovery-key candidates, suspicious strings, URLs, and IP pivots; full process reconstruction remains planned. |
 | LotL detection | PowerShell/WMI/local-admin command collection. | Partial | PowerShell history, WMI repository string pivots, scheduled-task suspicious command flags, and event log rule detections exist; deeper cross-artifact LotL correlation remains planned. |
@@ -92,8 +92,8 @@ RapidTriage should not blindly chase a "500 artifact" number. The better target 
 3. Add Zone.Identifier ADS parser.
 4. Add Windows OS/account summary parser.
 5. Add EVTX parser skeleton with fixture tests.
-6. Add SQLite viewer in the web UI.
-7. Add plugin category for TI enrichment.
-8. Add parser confidence fields to normalized artifacts.
-9. Add Korean OCR validation fixture.
-10. Add XVA suffix detection to `EvidenceAdapter`.
+6. Add SQLite viewer in the web UI. Status: read-only capped SQLite table preview and text-column source search added to the web evidence viewer.
+7. Add plugin category for TI enrichment. Status: `ti-enrichment` plugin kind and disabled local IOC enrichment contract added.
+8. Add parser confidence fields to normalized artifacts. Status: normalization now promotes parser/detail confidence into the canonical artifact confidence field, and media rows expose parser confidence.
+9. Add Korean OCR validation fixture. Status: Korean OCR sidecar fixture now asserts language hints plus OCR quality metrics such as Hangul counts.
+10. Add XVA suffix detection to `EvidenceAdapter`. Status: XVA is detected as a virtual-disk export/convert-first workflow with explicit next actions.

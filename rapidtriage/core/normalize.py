@@ -98,6 +98,7 @@ def normalize_artifacts(outputs: Mapping[str, object]) -> list[dict[str, object]
                 continue
             index += 1
             artifact_type = str(row.get("artifact_type") or str(name).removeprefix("artifacts_"))
+            details = row.get("details") if isinstance(row.get("details"), Mapping) else {}
             output.append(
                 {
                     "id": stable_id("artifact", artifact_type, index),
@@ -106,9 +107,9 @@ def normalize_artifacts(outputs: Mapping[str, object]) -> list[dict[str, object]
                     "title": artifact_type,
                     "summary": artifact_summary(row),
                     "source": str(name),
-                    "parser": str(row.get("provider") or name),
-                    "parser_version": "1",
-                    "confidence": row.get("confidence"),
+                    "parser": str(details.get("parser") or row.get("provider") or name),
+                    "parser_version": str(details.get("parser_version") or "1"),
+                    "confidence": normalized_artifact_confidence(row),
                     "data": dict(row),
                 }
             )
@@ -167,6 +168,19 @@ def artifact_summary(row: Mapping[str, object]) -> str:
         if value:
             return str(value)
     return str(row.get("artifact_type") or "artifact")
+
+
+def normalized_artifact_confidence(row: Mapping[str, object]) -> float | None:
+    if isinstance(row.get("confidence"), (int, float)):
+        return float(row["confidence"])
+    details = row.get("details") if isinstance(row.get("details"), Mapping) else {}
+    value = details.get("parser_confidence")
+    if isinstance(value, (int, float)):
+        return float(value)
+    nested_confidence = details.get("confidence")
+    if isinstance(nested_confidence, (int, float)):
+        return float(nested_confidence)
+    return None
 
 
 def stable_id(prefix: str, value: str, index: int) -> str:

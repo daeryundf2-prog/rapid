@@ -4,6 +4,8 @@ import json
 import mimetypes
 import os
 import re
+import contextlib
+import sqlite3
 import datetime as dt
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
@@ -28,6 +30,13 @@ from ..core.run import RunModeError
 from ..core.sample_case import DEFAULT_SAMPLE_MODE, SampleCaseError, run_sample_workflow
 from ..core.search import SearchError, run_unified_search
 from ..core.submission import compute_hashes, build_submission_manifest
+
+
+SQLITE_PREVIEW_EXTS = {".sqlite", ".sqlite3", ".db", ".db3"}
+SQLITE_HEADER = b"SQLite format 3\x00"
+SQLITE_PREVIEW_TABLE_LIMIT = 8
+SQLITE_PREVIEW_ROW_LIMIT = 10
+SQLITE_PREVIEW_COLUMN_LIMIT = 12
 
 
 class RunCreateRequest(BaseModel):
@@ -1020,6 +1029,9 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         payload["image_url"] = payload["download_url"]
         payload["message"] = "Image preview is available."
         return payload
+    if is_sqlite_candidate(source_path, suffix):
+        payload.update(build_sqlite_preview(source_path))
+        return payload
 
     text = ""
     if suffix in SUPPORTED_DOC_EXTS:
@@ -1041,6 +1053,112 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         payload["truncated"] = len(text) > max_chars
         payload["message"] = "Text preview is available."
     return payload
+
+
+def is_sqlite_candidate(path: Path, suffix: str | None = None) -> bool:
+    normalized_suffix = suffix if suffix is not None else path.suffix.lower()
+    if normalized_suffix not in SQLITE_PREVIEW_EXTS:
+        return False
+    try:
+        with path.open("rb") as handle:
+            return handle.read(len(SQLITE_HEADER)) == SQLITE_HEADER
+    except OSError:
+        return False
+
+
+def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
+    try:
+        with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
+            connection.row_factory = sqlite3.Row
+            tables = list_sqlite_tables(connection)
+            previews = [preview_sqlite_table(connection, table) for table in tables[:SQLITE_PREVIEW_TABLE_LIMIT]]
+    except sqlite3.DatabaseError as exc:
+        return {
+            "preview_type": "binary",
+            "message": f"SQLite preview failed: {exc}",
+            "sqlite": {"tables": [], "table_count": 0, "error": str(exc)},
+        }
+    return {
+        "preview_type": "sqlite",
+        "message": "SQLite table preview is available.",
+        "sqlite": {
+            "table_count": len(tables),
+            "tables": previews,
+            "table_limit": SQLITE_PREVIEW_TABLE_LIMIT,
+            "row_limit": SQLITE_PREVIEW_ROW_LIMIT,
+            "column_limit": SQLITE_PREVIEW_COLUMN_LIMIT,
+            "truncated": len(tables) > SQLITE_PREVIEW_TABLE_LIMIT,
+        },
+    }
+
+
+def list_sqlite_tables(connection: sqlite3.Connection) -> list[str]:
+    rows = connection.execute(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type IN ('table', 'view')
+          AND name NOT LIKE 'sqlite_%'
+        ORDER BY name
+        """
+    ).fetchall()
+    return [str(row["name"]) for row in rows]
+
+
+def preview_sqlite_table(connection: sqlite3.Connection, table: str) -> dict[str, object]:
+    quoted = quote_sqlite_identifier(table)
+    columns = [
+        str(row["name"])
+        for row in connection.execute(f"PRAGMA table_info({quoted})").fetchall()
+    ]
+    count = None
+    try:
+        count = connection.execute(f"SELECT COUNT(*) AS count FROM {quoted}").fetchone()["count"]
+    except sqlite3.DatabaseError:
+        count = None
+    selected_columns = columns[:SQLITE_PREVIEW_COLUMN_LIMIT]
+    rows: list[dict[str, object]] = []
+    if selected_columns:
+        select_clause = ", ".join(quote_sqlite_identifier(column) for column in selected_columns)
+        for index, row in enumerate(connection.execute(f"SELECT {select_clause} FROM {quoted} LIMIT ?", (SQLITE_PREVIEW_ROW_LIMIT,)), start=1):
+            rows.append(
+                {
+                    "row_number": index,
+                    "values": {column: sqlite_preview_value(row[column]) for column in selected_columns},
+                }
+            )
+    return {
+        "name": table,
+        "columns": selected_columns,
+        "column_count": len(columns),
+        "row_count": count,
+        "rows": rows,
+        "truncated_columns": len(columns) > SQLITE_PREVIEW_COLUMN_LIMIT,
+        "truncated_rows": bool(count is not None and count > SQLITE_PREVIEW_ROW_LIMIT),
+    }
+
+
+def quote_sqlite_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def sqlite_preview_value(value: object, *, max_length: int = 240) -> object:
+    if value is None or isinstance(value, (int, float)):
+        return value
+    if isinstance(value, bytes):
+        return f"<blob {len(value)} bytes sha256={compute_hashes_for_bytes(value)['sha256'][:16]}>"
+    text = str(value)
+    return text if len(text) <= max_length else text[:max_length] + "...[truncated]"
+
+
+def compute_hashes_for_bytes(value: bytes) -> dict[str, str]:
+    import hashlib
+
+    return {
+        "md5": hashlib.md5(value).hexdigest(),
+        "sha1": hashlib.sha1(value).hexdigest(),
+        "sha256": hashlib.sha256(value).hexdigest(),
+    }
 
 
 def build_source_metadata(source_path: Path, *, include_hashes: bool) -> Dict[str, object]:
@@ -1091,6 +1209,14 @@ def build_source_search(
     if mime_type.startswith("image/"):
         searchable = False
         message = "Image files are not text-searchable in the file viewer. Use OCR from the full evidence search."
+    elif is_sqlite_candidate(source_path, suffix):
+        try:
+            matches = search_sqlite_file(source_path, normalized, limit=limit, context=context)
+            truncated = len(matches) >= limit
+            message = "SQLite text search completed."
+        except sqlite3.DatabaseError as exc:
+            searchable = False
+            message = f"SQLite search failed: {exc}"
     elif suffix in SUPPORTED_DOC_EXTS:
         try:
             text = extract_text(source_path, suffix.lstrip("."))
@@ -1125,6 +1251,49 @@ def build_source_search(
         },
         "matches": matches,
     }
+
+
+def search_sqlite_file(source_path: Path, keywords: Sequence[str], *, limit: int, context: int) -> list[dict[str, object]]:
+    matches: list[dict[str, object]] = []
+    with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
+        connection.row_factory = sqlite3.Row
+        for table in list_sqlite_tables(connection):
+            if len(matches) >= limit:
+                break
+            quoted = quote_sqlite_identifier(table)
+            text_columns = [
+                str(row["name"])
+                for row in connection.execute(f"PRAGMA table_info({quoted})").fetchall()
+                if str(row["type"] or "").upper() in {"", "TEXT", "VARCHAR", "CHAR", "CLOB"}
+            ][:SQLITE_PREVIEW_COLUMN_LIMIT]
+            if not text_columns:
+                continue
+            select_clause = ", ".join(quote_sqlite_identifier(column) for column in text_columns)
+            for row_index, row in enumerate(connection.execute(f"SELECT {select_clause} FROM {quoted} LIMIT 5000"), start=1):
+                for column in text_columns:
+                    value = row[column]
+                    if value is None:
+                        continue
+                    text = str(value)
+                    lowered = text.lower()
+                    for keyword in keywords:
+                        offset = lowered.find(keyword)
+                        if offset >= 0:
+                            matches.append(
+                                {
+                                    "keyword": keyword,
+                                    "line": f"{table}:{row_index}",
+                                    "offset": offset,
+                                    "snippet": snippet_around(text, offset, len(keyword), context=context),
+                                    "table": table,
+                                    "column": column,
+                                    "row_number": row_index,
+                                }
+                            )
+                            if len(matches) >= limit:
+                                return matches
+                            break
+    return matches
 
 
 def search_text_content(text: str, keywords: Sequence[str], *, limit: int, context: int) -> list[dict[str, object]]:
