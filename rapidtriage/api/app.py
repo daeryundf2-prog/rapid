@@ -46,6 +46,7 @@ JSON_PREVIEW_ITEM_LIMIT = 50
 XML_PREVIEW_NODE_LIMIT = 80
 EMAIL_PREVIEW_MESSAGE_LIMIT = 10
 EMAIL_BODY_PREVIEW_CHARS = 4000
+SOURCE_VIEWER_VERSION = "2"
 
 
 class RunCreateRequest(BaseModel):
@@ -1080,6 +1081,9 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         "mime_type": mime_type,
         "download_url": f"/api/runs/{run_id}/source-file?path={quoted_path}",
         "metadata_url": f"/api/runs/{run_id}/source-metadata?path={quoted_path}",
+        "search_url": f"/api/runs/{run_id}/source-search?path={quoted_path}",
+        "viewer_actions": source_viewer_actions(run_id, source_path),
+        "viewer_limitations": source_viewer_limitations(source_path, suffix=suffix, mime_type=mime_type, max_chars=max_chars),
         "preview_type": "binary",
         "text": "",
         "truncated": False,
@@ -1089,7 +1093,7 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
             "strategy": "binary-fallback",
             "preview_status": "not-available",
             "parser": "rapidtriage.source-viewer",
-            "parser_version": "1",
+            "parser_version": SOURCE_VIEWER_VERSION,
         },
     }
     if mime_type.startswith("image/"):
@@ -1134,10 +1138,67 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
             "strategy": "bounded-text",
             "preview_status": "available",
             "parser": "rapidtriage.source-viewer.text",
-            "parser_version": "1",
+            "parser_version": SOURCE_VIEWER_VERSION,
             "max_chars": max_chars,
         }
     return payload
+
+
+def source_viewer_actions(run_id: str, source_path: Path) -> list[dict[str, object]]:
+    quoted_path = quote(str(source_path))
+    return [
+        {
+            "id": "download",
+            "label": "Open original source",
+            "url": f"/api/runs/{run_id}/source-file?path={quoted_path}",
+            "purpose": "Open or download the authoritative file for manual verification.",
+            "heavy": False,
+        },
+        {
+            "id": "hash",
+            "label": "Compute MD5/SHA1/SHA256",
+            "url": f"/api/runs/{run_id}/source-metadata?path={quoted_path}&hash=true",
+            "purpose": "Calculate submission-friendly hashes only when the analyst requests them.",
+            "heavy": True,
+        },
+        {
+            "id": "search-current-file",
+            "label": "Search inside this file",
+            "url": f"/api/runs/{run_id}/source-search?path={quoted_path}",
+            "purpose": "Run keyword search against the current file without re-searching the whole case.",
+            "heavy": False,
+        },
+        {
+            "id": "pin-compare",
+            "label": "Pin for A/B compare",
+            "url": None,
+            "purpose": "Keep this file available while opening another result for side-by-side review.",
+            "heavy": False,
+        },
+        {
+            "id": "save-review",
+            "label": "Save review decision",
+            "url": None,
+            "purpose": "Mark the result as relevant, rejected, needs-review, and optionally include it in reports.",
+            "heavy": False,
+        },
+    ]
+
+
+def source_viewer_limitations(source_path: Path, *, suffix: str, mime_type: str, max_chars: int) -> list[str]:
+    limitations = [
+        "Preview is read-only and may be capped to keep large cases responsive.",
+        "Use hashes and source download before relying on a preview in a final report.",
+    ]
+    if mime_type.startswith("image/"):
+        limitations.append("Image text requires OCR or OCR sidecar review; the file viewer does not OCR images inline.")
+    if is_sqlite_candidate(source_path, suffix):
+        limitations.append("SQLite previews show bounded tables/rows; use file search or a dedicated database tool for full table review.")
+    if suffix in {".json", ".jsonl", ".ndjson", ".xml"} and source_path.stat().st_size > STRUCTURED_PREVIEW_MAX_BYTES:
+        limitations.append("Structured parsing is skipped for very large JSON/XML files; use current-file search or external tooling.")
+    if source_path.stat().st_size > max_chars:
+        limitations.append(f"Inline text snippets are capped near {max_chars} characters.")
+    return limitations
 
 
 def is_sqlite_candidate(path: Path, suffix: str | None = None) -> bool:
@@ -1171,7 +1232,7 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
             "strategy": "read-only-table-preview",
             "preview_status": "available",
             "parser": "rapidtriage.source-viewer.sqlite",
-            "parser_version": "1",
+            "parser_version": SOURCE_VIEWER_VERSION,
             "table_limit": SQLITE_PREVIEW_TABLE_LIMIT,
             "row_limit": SQLITE_PREVIEW_ROW_LIMIT,
         },
@@ -1411,7 +1472,7 @@ def structured_viewer_metadata(source_format: str, strategy: str, status: str) -
         "strategy": strategy,
         "preview_status": status,
         "parser": f"rapidtriage.source-viewer.{source_format}",
-        "parser_version": "1",
+        "parser_version": SOURCE_VIEWER_VERSION,
     }
 
 

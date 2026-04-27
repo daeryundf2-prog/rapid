@@ -193,8 +193,16 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("password", source_response.text)
             preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": document_match["path"]})
             self.assertEqual(preview_response.status_code, 200)
-            self.assertEqual(preview_response.json()["preview_type"], "text")
-            self.assertIn("password", preview_response.json()["text"])
+            preview_payload = preview_response.json()
+            self.assertEqual(preview_payload["preview_type"], "text")
+            self.assertIn("password", preview_payload["text"])
+            self.assertEqual(preview_payload["viewer_metadata"]["parser_version"], "2")
+            self.assertIn("source-search", preview_payload["search_url"])
+            self.assertIn("Preview is read-only", preview_payload["viewer_limitations"][0])
+            self.assertEqual(
+                {action["id"] for action in preview_payload["viewer_actions"]},
+                {"download", "hash", "search-current-file", "pin-compare", "save-review"},
+            )
             metadata_response = client.get(
                 f"/api/runs/{run_id}/source-metadata",
                 params={"path": document_match["path"], "hash": "true"},
@@ -220,6 +228,7 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(sqlite_preview["preview_type"], "sqlite")
             self.assertEqual(sqlite_preview["sqlite"]["tables"][0]["name"], "notes")
             self.assertEqual(sqlite_preview["sqlite"]["tables"][0]["rows"][0]["values"]["body"], "password in sqlite viewer")
+            self.assertTrue(any("SQLite previews show bounded" in item for item in sqlite_preview["viewer_limitations"]))
             sqlite_search_response = client.get(
                 f"/api/runs/{run_id}/source-search",
                 params={"path": str(sqlite_path), "keyword": "password"},

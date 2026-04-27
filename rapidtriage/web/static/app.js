@@ -1252,10 +1252,62 @@ function renderEvidenceViewer(payload, reviewContext = null) {
     <section id="sourceMetadataPanel" class="source-metadata-panel">
       <p class="help-text">해시는 큰 파일에서 시간이 걸릴 수 있어 필요할 때만 계산합니다.</p>
     </section>
+    ${renderViewerActionGuide(payload)}
     ${renderViewerMetadata(payload.viewer_metadata || {})}
     ${renderFileSearchBox(payload)}
     ${renderReviewCapture(reviewContext, payload)}
     ${body}
+  `;
+}
+
+function renderViewerActionGuide(payload) {
+  const actions = payload.viewer_actions || [];
+  const limitations = payload.viewer_limitations || [];
+  if (!actions.length && !limitations.length) return "";
+  return `
+    <section class="source-metadata-panel viewer-action-guide">
+      <div>
+        <p class="eyebrow">verification guide</p>
+        <h4>Preview, verify, then review</h4>
+      </div>
+      ${actions.length ? `
+        <div class="viewer-action-grid">
+          ${actions.map((action) => renderViewerAction(action, payload)).join("")}
+        </div>
+      ` : ""}
+      ${limitations.length ? `
+        <ul class="viewer-limitations">
+          ${limitations.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderViewerAction(action, payload) {
+  const label = escapeHtml(action.label || action.id || "Action");
+  const purpose = escapeHtml(action.purpose || "");
+  const badge = action.heavy ? '<span class="status-pill warning">heavy</span>' : '<span class="status-pill">fast</span>';
+  let control = "";
+  if (action.id === "hash") {
+    control = `<button class="mini-inline-button" type="button" data-source-hash-path="${escapeHtml(payload.path)}">Run</button>`;
+  } else if (action.id === "search-current-file") {
+    control = `<span>${kbd("Ctrl F")}</span>`;
+  } else if (action.url) {
+    control = `<a class="mini-link" href="${escapeHtml(action.url)}" target="_blank" rel="noreferrer">Open</a>`;
+  } else if (action.id === "pin-compare") {
+    control = `<span>Pin compare</span>`;
+  } else if (action.id === "save-review") {
+    control = `<span>${kbd("Alt R")}</span>`;
+  }
+  return `
+    <article class="viewer-action-card">
+      <div>
+        <strong>${label}</strong>
+        <span>${purpose}</span>
+      </div>
+      <div class="viewer-action-control">${badge}${control}</div>
+    </article>
   `;
 }
 
