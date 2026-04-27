@@ -103,7 +103,7 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
                         "--tag",
                         "report",
                         "--note",
-                        "Include in final bundle.",
+                        "Include <script>alert(1)</script> in final bundle.",
                         "--include-in-report",
                     ]
                 ),
@@ -134,7 +134,18 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertTrue((bundle_dir / "rapidtriage-case-report.pdf").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-case-report.exports.json").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-reviewer.html").is_file())
-            self.assertIn("Reviewer Bundle", (bundle_dir / "rapidtriage-reviewer.html").read_text(encoding="utf-8"))
+            report_html = (bundle_dir / "rapidtriage-case-report.html").read_text(encoding="utf-8")
+            reviewer_html = (bundle_dir / "rapidtriage-reviewer.html").read_text(encoding="utf-8")
+            export_manifest = json.loads((bundle_dir / "rapidtriage-case-report.exports.json").read_text(encoding="utf-8"))
+            self.assertIn("Reviewer Bundle", reviewer_html)
+            self.assertIn("Content-Security-Policy", report_html)
+            self.assertIn("Content-Security-Policy", reviewer_html)
+            self.assertNotIn("<script>alert(1)</script>", report_html)
+            self.assertNotIn("<script>alert(1)</script>", reviewer_html)
+            self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", report_html)
+            self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", reviewer_html)
+            self.assertTrue(export_manifest["security"]["html_escaped"])
+            self.assertIn("default-src 'none'", export_manifest["security"]["content_security_policy"])
             with zipfile.ZipFile(bundle_dir / "rapidtriage-case-report.docx") as report_docx:
                 self.assertIn("word/document.xml", report_docx.namelist())
             self.assertEqual((bundle_dir / "rapidtriage-case-report.pdf").read_bytes()[:5], b"%PDF-")

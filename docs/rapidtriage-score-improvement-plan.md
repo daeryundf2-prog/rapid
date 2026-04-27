@@ -110,7 +110,7 @@ Tasks:
 - Add stronger chain-of-custody: evidence IDs, acquisition/source hash, tool versions, audit events, run profile, warnings, and report linkage. Status: run/audit/report/bundle outputs carry profiles, warnings, hashes, and source links; full acquisition hash workflow remains release-hardening work.
 - Add large-case benchmark suite: 10k, 100k, 1M synthetic records; documents/logs/browser artifacts; search latency targets. Status: benchmark command exists with synthetic/existing-root modes; published release benchmark matrix remains required.
 - Add failure recovery: checkpoint each stage, resume indexing, preserve previous outputs, and record parser exceptions.
-- Add security hardening: local-only default, auth required for remote bind, path traversal tests, report/export sanitization.
+- Add security hardening: local-only default, auth required for remote bind, path traversal tests, report/export sanitization. Status: local/remote auth guards and path checks are covered, and report/reviewer HTML exports now include CSP/no-referrer metadata plus escaping regression tests and export-manifest security flags.
 - Add release process: signed artifacts where possible, versioned schema, changelog, known limitations, benchmark results.
 
 Acceptance criteria:

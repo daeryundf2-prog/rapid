@@ -325,6 +325,12 @@ def build_case_report_export_manifest(paths: Mapping[str, Path]) -> dict[str, ob
         "command": "case-report.exports",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "formats": list(files),
+        "security": {
+            "html_escaped": True,
+            "xml_escaped": True,
+            "pdf_hex_encoded": True,
+            "content_security_policy": report_export_csp(),
+        },
         "files": files,
     }
 
@@ -393,6 +399,8 @@ def render_case_report_html(markdown: str) -> str:
             "<head>",
             '<meta charset="utf-8" />',
             '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+            '<meta name="referrer" content="no-referrer" />',
+            f'<meta http-equiv="Content-Security-Policy" content="{html.escape(report_export_csp(), quote=True)}" />',
             f"<title>{html.escape(title)}</title>",
             "<style>",
             "body{margin:0;background:#f4efe6;color:#1d2528;font:16px/1.65 'Noto Serif KR','Apple SD Gothic Neo',Georgia,serif}",
@@ -411,6 +419,10 @@ def render_case_report_html(markdown: str) -> str:
             "",
         ]
     )
+
+
+def report_export_csp() -> str:
+    return "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 
 def close_list(body: list[str], in_list: bool) -> bool:

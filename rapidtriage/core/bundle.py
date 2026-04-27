@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from .case import load_case_payload
-from .case_report import build_case_report_markdown, write_case_report_exports
+from .case_report import build_case_report_markdown, report_export_csp, write_case_report_exports
 from .docs import write_result
 from .submission import build_submission_manifest, compute_hashes
 
@@ -146,6 +146,8 @@ def render_reviewer_html(
             "<head>",
             '<meta charset="utf-8" />',
             '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+            '<meta name="referrer" content="no-referrer" />',
+            f'<meta http-equiv="Content-Security-Policy" content="{escape(report_export_csp())}" />',
             "<title>RapidTriage Reviewer Bundle</title>",
             "<style>",
             "body{font-family:Georgia,serif;margin:32px;background:#f7f2ea;color:#1f2528}",
