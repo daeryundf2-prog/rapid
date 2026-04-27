@@ -374,7 +374,7 @@ Current run modes:
 - `large_file_candidates`
 - `preferred_location_candidates`
 
-The generated `rapidtriage-run-report.md` is now a submission-oriented template with sections for case overview, processing transparency, key hits, `matched_rules`, `ioc_hits`, related documents, artifact summary, timeline, extract results, and optional compare findings.
+The generated `rapidtriage-run-report.md` is now a submission-oriented template with sections for case overview, processing transparency, key hits, `matched_rules`, `ioc_hits`, indicator pivots, related documents, artifact summary, timeline, extract results, and optional compare findings.
 
 ## CLI help examples
 

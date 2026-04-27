@@ -294,6 +294,18 @@ class RapidTriageApiTests(unittest.TestCase):
             )
 
             self.assertEqual(bookmark_response.status_code, 200, bookmark_response.text)
+            indicator_bookmark_response = client.post(
+                f"/api/runs/{run_id}/bookmarks",
+                json={
+                    "source": "indicators",
+                    "pointer": "/indicators/0",
+                    "tag": "ioc",
+                    "note": "Review this indicator pivot.",
+                    "review_status": "needs-review",
+                    "include_in_report": False,
+                },
+            )
+            self.assertEqual(indicator_bookmark_response.status_code, 200, indicator_bookmark_response.text)
             case_path = output_dir / "rapidtriage-case.json"
             self.assertTrue(case_path.is_file())
 
@@ -301,10 +313,11 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(case_response.status_code, 200)
             payload = case_response.json()
             self.assertEqual(payload["exists"], True)
-            self.assertEqual(payload["case"]["summary"]["bookmark_count"], 1)
+            self.assertEqual(payload["case"]["summary"]["bookmark_count"], 2)
             self.assertEqual(payload["case"]["summary"]["report_item_count"], 1)
             self.assertEqual(payload["case"]["summary"]["review_status_counts"]["relevant"], 1)
-            self.assertEqual(payload["case"]["summary"]["review_revision_count"], 1)
+            self.assertEqual(payload["case"]["summary"]["review_status_counts"]["needs-review"], 1)
+            self.assertEqual(payload["case"]["summary"]["review_revision_count"], 2)
             self.assertEqual(payload["case"]["bookmarks"][0]["tags"], ["review", "credential", "report"])
             self.assertEqual(payload["case"]["bookmarks"][0]["review"]["status"], "relevant")
             self.assertEqual(payload["case"]["bookmarks"][0]["review"]["include_in_report"], True)
@@ -350,6 +363,8 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("디지털 포렌식 분석 보고서", report_payload["markdown"])
             self.assertIn("Report template: `technical-appendix`", report_payload["markdown"])
             self.assertIn("Technical appendix", report_payload["markdown"])
+            self.assertIn("IOC/Indicator review pivots", report_payload["markdown"])
+            self.assertIn("Review this indicator pivot.", report_payload["markdown"])
             self.assertIn("CASE-001", report_payload["markdown"])
             self.assertIn(evidence["hashes"]["sha256"], report_payload["markdown"])
             self.assertIn("html", report_payload["exports"])

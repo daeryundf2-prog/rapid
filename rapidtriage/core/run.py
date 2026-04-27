@@ -327,6 +327,7 @@ def run_triage_mode(
             files_extract_payload=files_extract_payload,
             artifact_payloads=artifact_payloads,
             timeline_payload=timeline_payload,
+            indicators_payload=indicators_payload,
         ),
         encoding="utf-8",
     )
@@ -1016,6 +1017,7 @@ def build_markdown_report(
     files_extract_payload: Mapping[str, object] | None = None,
     artifact_payloads: Mapping[str, Mapping[str, object]] | None = None,
     timeline_payload: Mapping[str, object] | None = None,
+    indicators_payload: Mapping[str, object] | None = None,
 ) -> str:
     report_context = build_run_report_context(
         summary_payload,
@@ -1025,6 +1027,7 @@ def build_markdown_report(
         files_extract_payload=files_extract_payload,
         artifact_payloads=artifact_payloads,
         timeline_payload=timeline_payload,
+        indicators_payload=indicators_payload,
     )
     return render_run_markdown_report(report_context)
 

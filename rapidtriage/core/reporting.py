@@ -12,6 +12,7 @@ def build_run_report_context(
     files_extract_payload: Mapping[str, object] | None = None,
     artifact_payloads: Mapping[str, Mapping[str, object]] | None = None,
     timeline_payload: Mapping[str, object] | None = None,
+    indicators_payload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     profile = summary_payload["profile"]
     outputs = summary_payload["outputs"]
@@ -25,6 +26,7 @@ def build_run_report_context(
     files_extract_payload = files_extract_payload or {}
     artifact_payloads = artifact_payloads or {}
     timeline_payload = timeline_payload or {}
+    indicators_payload = indicators_payload or {}
     ordered_artifact_payloads = order_artifact_payloads(artifact_payloads, summary_payload)
 
     windows_counts = summary.get("windows_provider_artifact_counts", {})
@@ -117,6 +119,7 @@ def build_run_report_context(
             for hit in summary_payload.get("ioc_hits", [])
             if isinstance(hit, dict)
         ],
+        "indicator_summary": build_indicator_summary_rows(indicators_payload),
         "related_documents": summarize_document_hits(docs_payload.get("results", []), limit=10),
         "recent_file_candidates": list(highlights.get("recent_file_candidates", [])),
         "large_file_candidates": list(highlights.get("large_file_candidates", [])),
@@ -148,6 +151,29 @@ def order_artifact_payloads(
         if kind not in ordered:
             ordered[kind] = artifact_payloads[kind]
     return ordered
+
+
+def build_indicator_summary_rows(payload: Mapping[str, object], *, limit: int = 15) -> list[dict[str, object]]:
+    indicators = payload.get("indicators")
+    if not isinstance(indicators, list):
+        return []
+    rows: list[dict[str, object]] = []
+    for item in indicators[:limit]:
+        if not isinstance(item, Mapping):
+            continue
+        risk_flags = item.get("risk_flags")
+        matched_rules = item.get("matched_rules")
+        rows.append(
+            {
+                "type": str(item.get("type") or ""),
+                "value": str(item.get("value") or ""),
+                "count": int(item.get("count") or 0),
+                "classification": str(item.get("classification") or ""),
+                "risk_flags": [str(flag) for flag in risk_flags] if isinstance(risk_flags, list) else [],
+                "matched_rules": [str(rule) for rule in matched_rules] if isinstance(matched_rules, list) else [],
+            }
+        )
+    return rows
 
 
 def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
@@ -279,6 +305,18 @@ def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
             lines.append(
                 f"- `{hit.get('type')}` `{hit.get('value')}`"
                 f" (rule=`{hit.get('rule_id')}`, count={hit.get('count', 1)})"
+            )
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "## Indicator pivots", ""])
+    if report_context["indicator_summary"]:
+        for item in report_context["indicator_summary"]:
+            lines.append(
+                f"- `{item.get('type')}` `{item.get('value')}`"
+                f" count={item.get('count', 0)} classification=`{item.get('classification', '')}`"
+                f" flags={', '.join(str(flag) for flag in item.get('risk_flags', [])) or 'none'}"
+                f" rules={', '.join(str(rule) for rule in item.get('matched_rules', [])) or 'none'}"
             )
     else:
         lines.append("- none")

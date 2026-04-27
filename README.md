@@ -278,7 +278,7 @@ Implemented:
 - `timeline` merges `files`, `docs`, and `artifacts` JSON into chronological events and writes JSON plus markdown.
 - `case` stores bookmarks from implemented `files`, `docs`, `artifacts`, `timeline`, and `indicators` outputs, validates source schemas, and persists stable `reference`, minimal `snapshot`, analyst `review` status, tags, notes, and report-candidate markers.
 - `submission-manifest` hashes report-candidate case evidence with MD5, SHA1, and SHA256, preserves review/bookmark context, skips unavailable or out-of-scope paths, and writes an audit sidecar.
-- `case-report` writes a Korean/English-friendly Markdown report draft with case metadata, analysis scope, reviewed evidence, hashes, skipped hash rows, conclusion text, and audit sidecar.
+- `case-report` writes a Korean/English-friendly Markdown report draft with case metadata, analysis scope, reviewed evidence, IOC/indicator review pivots, hashes, skipped hash rows, conclusion text, and audit sidecar.
 - `web` starts a local FastAPI server with a browser UI for launching runs, importing existing outputs, searching evidence, previewing source files, reviewing hits, organizing case findings, downloading generated files, and reading reports.
 - `case-db` initializes the experimental SQLite case database v1 with tables for cases, evidence sources, files, hashes, artifacts, events, indexed documents/FTS, reviews, audit events, report items, jobs, and stable citation ID sequences.
 - `case-search` searches imported SQLite case databases across FTS-indexed documents, file records, artifacts, indicator pivots, and timeline events while preserving citation IDs; artifact and indicator hits expose reviewable source paths plus key Windows and macOS metadata for event logs, PowerShell history, MFT/USN rows, browser history, AI-service usage, quarantine events, LaunchAgents, and IOC values.
@@ -291,7 +291,7 @@ Implemented:
 - `normalize` converts completed run outputs into stable model collections for files, artifacts, events, and indexed documents.
 - `bundle` creates a submission folder and zip with report, selected evidence list, hash manifest, audit JSON, and bundle integrity hashes.
 - `plugins` lists built-in plugin contracts and validates external `plugin.json` manifests for parsers, evidence adapters, viewers, and report exporters.
-- `report` rendering is assembled from a normalized run-report context built from run summary, artifacts, timeline, and extract outputs.
+- `report` rendering is assembled from a normalized run-report context built from run summary, indicators, artifacts, timeline, and extract outputs.
 - `rules` and IOC lookup are implemented additively; matching metadata is appended without breaking existing output shapes.
 
 Experimental:

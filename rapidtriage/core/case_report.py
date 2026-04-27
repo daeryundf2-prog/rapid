@@ -112,6 +112,18 @@ def build_case_report_markdown(
             "",
         ]
     )
+    indicator_rows = build_case_indicator_rows(case_payload)
+    lines.extend(["### IOC/Indicator review pivots", ""])
+    if indicator_rows:
+        for item in indicator_rows:
+            lines.append(
+                f"- `{item.get('summary')}` status=`{item.get('status')}`"
+                f" report={item.get('include_in_report')} tags={item.get('tags') or '없음'}"
+                f" note={item.get('note') or '없음'}"
+            )
+    else:
+        lines.append("- 저장된 indicator 리뷰 항목 없음.")
+    lines.append("")
 
     lines.extend(["## 5. 제출 증거 및 해시값", ""])
     items = submission_manifest.get("items")
@@ -182,6 +194,32 @@ def build_case_report_markdown(
             ]
         )
     return "\n".join(lines)
+
+
+def build_case_indicator_rows(case_payload: Mapping[str, object], *, limit: int = 20) -> list[dict[str, object]]:
+    bookmarks = case_payload.get("bookmarks")
+    if not isinstance(bookmarks, list):
+        return []
+    rows: list[dict[str, object]] = []
+    for bookmark in bookmarks:
+        if not isinstance(bookmark, Mapping):
+            continue
+        reference = bookmark.get("reference") if isinstance(bookmark.get("reference"), Mapping) else {}
+        if reference.get("command") != "indicators":
+            continue
+        review = bookmark.get("review") if isinstance(bookmark.get("review"), Mapping) else {}
+        rows.append(
+            {
+                "summary": str(bookmark.get("summary") or bookmark.get("bookmark_id") or "indicator"),
+                "status": str(review.get("status") or "unreviewed"),
+                "include_in_report": bool(review.get("include_in_report")),
+                "tags": ", ".join(str(tag) for tag in bookmark.get("tags", []) if tag),
+                "note": str(bookmark.get("note") or ""),
+            }
+        )
+        if len(rows) >= limit:
+            break
+    return rows
 
 
 def build_hash_only_report(

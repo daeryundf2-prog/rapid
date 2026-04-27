@@ -292,6 +292,7 @@ class RapidTriageRunTests(unittest.TestCase):
             files_extract_payload = json.loads(files_extract_manifest_path.read_text(encoding="utf-8"))
             summary_payload: dict[str, Any] = json.loads(summary_path.read_text(encoding="utf-8"))
             timeline_payload: dict[str, Any] = json.loads(timeline_path.read_text(encoding="utf-8"))
+            indicators_payload: dict[str, Any] = json.loads(indicators_path.read_text(encoding="utf-8"))
             artifact_payloads = {
                 path.stem.removeprefix("rapidtriage-artifacts-"): json.loads(path.read_text(encoding="utf-8"))
                 for path in artifact_paths.values()
@@ -369,17 +370,20 @@ class RapidTriageRunTests(unittest.TestCase):
                 files_extract_payload=files_extract_payload,
                 artifact_payloads=artifact_payloads,
                 timeline_payload=timeline_payload,
+                indicators_payload=indicators_payload,
             )
             self.assertIn("artifact_summary", report_context)
             self.assertIn("timeline", report_context)
             self.assertIn("extracts", report_context)
             self.assertIn("compare_results", report_context)
+            self.assertIn("indicator_summary", report_context)
             self.assertEqual(render_run_markdown_report(report_context), report_text)
             self.assertIn(mode, report_text.lower())
             self.assertIn("case overview", report_text.lower())
             self.assertIn("key hits", report_text.lower())
             self.assertIn("matched rules", report_text.lower())
             self.assertIn("artifact summary", report_text.lower())
+            self.assertIn("indicator pivots", report_text.lower())
             self.assertIn("timeline", report_text.lower())
             self.assertIn("extract results", report_text.lower())
 

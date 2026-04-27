@@ -184,6 +184,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `rapidtriage-case.json`
   - `rapidtriage-submission-manifest.json`
   - run summary metadata
+- Reviewed indicator bookmarks are rendered as an IOC/Indicator review pivot section even when they are not directly hashable as standalone evidence files.
 - The report draft includes case metadata, analysis scope, run steps, reviewed/report-candidate counts, evidence hashes, skipped hash rows, conclusion/opinion text, and attachment references. HTML supports quick browser review/printing; DOCX supports portable analyst/legal editing; PDF supports quick handoff; the export manifest hashes each generated report file.
 
 ## Artifact collector rows
