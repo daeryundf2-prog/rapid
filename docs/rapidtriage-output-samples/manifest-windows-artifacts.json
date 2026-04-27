@@ -533,7 +533,7 @@
           "supported": true,
           "details": {
             "parser": "windows-eventlog-builtin-rulepack",
-            "parser_version": "eventlog-normalized-v3",
+            "parser_version": "eventlog-normalized-v4",
             "rulepack_version": "eventlog-builtin-rules-v1",
             "coverage_status": "detected-by-rule",
             "reportability": "triage",
@@ -634,7 +634,7 @@
           "supported": true,
           "details": {
             "parser": "windows-eventlog-xml",
-            "parser_version": "eventlog-normalized-v3",
+            "parser_version": "eventlog-normalized-v4",
             "coverage_status": "mapped",
             "reportability": "reportable",
             "parser_confidence": 0.9,
@@ -722,7 +722,7 @@
           "supported": true,
           "details": {
             "parser": "windows-eventlog-summary",
-            "parser_version": "eventlog-normalized-v3",
+            "parser_version": "eventlog-normalized-v4",
             "coverage_status": "summarized",
             "reportability": "triage",
             "source_path": "<ROOT>",

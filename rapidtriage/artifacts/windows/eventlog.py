@@ -13,11 +13,14 @@ from typing import Iterable, Mapping, Sequence
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v3"
+PARSER_VERSION = "eventlog-normalized-v4"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
 EVTX_FILE_SIGNATURE = b"ElfFile\x00"
+EVTX_CHUNK_SIGNATURE = b"ElfChnk\x00"
+EVTX_FILE_HEADER_SIZE = 4096
+EVTX_CHUNK_SIZE = 65536
 EVTX_RECORD_MAGIC = b"**\x00\x00"
 EVTX_RECORD_HEADER_SIZE = 24
 MAX_NATIVE_EVTX_RECORDS = 10_000
@@ -659,11 +662,14 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
         extracted_strings = extract_utf16le_strings(payload)
         native_indicators = native_evtx_indicators(extracted_strings, path)
         integrity = native_evtx_record_integrity(record_blob, offset)
+        chunk_context = native_evtx_chunk_context(blob, offset)
         sequence = native_evtx_sequence(record_id, previous_record_id)
         previous_record_id = record_id or previous_record_id
         raw_preview = " ".join(extracted_strings)[:2000]
         data = {
             "evtx_parse_status": "native-binary-partial",
+            "evtx_file_header": native_evtx_file_header(blob),
+            "evtx_chunk_context": chunk_context,
             "evtx_record_offset": offset,
             "evtx_record_size": len(record_blob),
             "evtx_record_sha256": hashlib.sha256(record_blob).hexdigest(),
@@ -678,6 +684,7 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             "CommandLine": native_indicators.get("command_line", ""),
             "SourceIp": native_indicators.get("source_ip", ""),
             "TargetUserName": native_indicators.get("user_name", ""),
+            "parameter_candidates": native_evtx_parameter_candidates(native_indicators),
         }
         provider_name = str(native_indicators.get("provider_name") or "")
         channel = str(native_indicators.get("channel") or "")
@@ -738,6 +745,36 @@ def native_evtx_record_integrity(record_blob: bytes, offset: int) -> dict[str, o
     }
 
 
+def native_evtx_file_header(blob: bytes) -> dict[str, object]:
+    return {
+        "signature_valid": blob.startswith(EVTX_FILE_SIGNATURE),
+        "header_size": EVTX_FILE_HEADER_SIZE if len(blob) >= EVTX_FILE_HEADER_SIZE else len(blob),
+        "file_size": len(blob),
+        "oldest_chunk_number": read_u64(blob, 8),
+        "current_chunk_number": read_u64(blob, 16),
+        "next_record_identifier": read_u64(blob, 24),
+        "header_flags": read_u32(blob, 120),
+    }
+
+
+def native_evtx_chunk_context(blob: bytes, record_offset: int) -> dict[str, object]:
+    if record_offset < EVTX_FILE_HEADER_SIZE:
+        chunk_offset = 0
+    else:
+        chunk_offset = EVTX_FILE_HEADER_SIZE + ((record_offset - EVTX_FILE_HEADER_SIZE) // EVTX_CHUNK_SIZE) * EVTX_CHUNK_SIZE
+    signature = blob[chunk_offset : chunk_offset + len(EVTX_CHUNK_SIGNATURE)]
+    signature_valid = signature == EVTX_CHUNK_SIGNATURE
+    return {
+        "chunk_offset": chunk_offset,
+        "chunk_signature_valid": signature_valid,
+        "record_relative_offset": record_offset - chunk_offset,
+        "first_event_record_number": read_u64(blob, chunk_offset + 8) if signature_valid else 0,
+        "last_event_record_number": read_u64(blob, chunk_offset + 16) if signature_valid else 0,
+        "first_event_record_identifier": read_u64(blob, chunk_offset + 24) if signature_valid else 0,
+        "last_event_record_identifier": read_u64(blob, chunk_offset + 32) if signature_valid else 0,
+    }
+
+
 def native_evtx_sequence(record_id: int, previous_record_id: int | None) -> dict[str, object]:
     if not record_id:
         status = "missing-record-id"
@@ -782,6 +819,28 @@ def native_evtx_indicators(strings: Sequence[str], path: Path) -> dict[str, obje
         "path_candidates": paths[:20],
         "string_count": len(strings),
     }
+
+
+def native_evtx_parameter_candidates(indicators: Mapping[str, object]) -> list[dict[str, object]]:
+    fields = (
+        ("ProviderName", indicators.get("provider_name")),
+        ("Channel", indicators.get("channel")),
+        ("Computer", indicators.get("computer")),
+        ("CommandLine", indicators.get("command_line")),
+        ("ProcessName", indicators.get("process_name")),
+        ("SourceIp", indicators.get("source_ip")),
+        ("TargetUserName", indicators.get("user_name")),
+    )
+    candidates = [
+        {"name": name, "value": str(value), "confidence": "string-pivot"}
+        for name, value in fields
+        if value
+    ]
+    for value in indicators.get("url_candidates", []) if isinstance(indicators.get("url_candidates"), list) else []:
+        candidates.append({"name": "Url", "value": str(value), "confidence": "string-pivot"})
+    for value in indicators.get("path_candidates", []) if isinstance(indicators.get("path_candidates"), list) else []:
+        candidates.append({"name": "Path", "value": str(value), "confidence": "string-pivot"})
+    return candidates[:50]
 
 
 def first_native_channel(strings: Sequence[str]) -> str:

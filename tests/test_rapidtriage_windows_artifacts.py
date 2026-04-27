@@ -181,6 +181,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_evtx["details"]["native_indicators"]["channel_hint_source"], "record-string")
             self.assertEqual(native_evtx["details"]["evtx_record_integrity"]["declared_size_valid"], True)
             self.assertEqual(native_evtx["details"]["evtx_record_integrity"]["trailing_size_valid"], True)
+            self.assertEqual(native_evtx["details"]["evtx_file_header"]["signature_valid"], True)
+            self.assertEqual(native_evtx["details"]["evtx_chunk_context"]["chunk_signature_valid"], False)
+            self.assertTrue(
+                any(item["name"] == "CommandLine" for item in native_evtx["details"]["parameter_candidates"])
+            )
             self.assertEqual(native_evtx["details"]["evtx_record_sequence"]["status"], "first-record")
             self.assertEqual(len(native_evtx["details"]["evtx_record_sha256"]), 64)
             self.assertGreaterEqual(native_evtx["details"]["parser_confidence"], 0.75)
