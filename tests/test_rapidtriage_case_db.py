@@ -371,6 +371,15 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertTrue(any(match["metadata"].get("channel_family") == "powershell" for match in eventlog_matches))
             self.assertTrue(any(match["metadata"].get("source_ip") == "10.0.0.5" for match in eventlog_matches))
             self.assertTrue(any("powershell -enc" in str(match["metadata"].get("command_line", "")).lower() for match in eventlog_matches))
+            high_priority_events = [
+                match
+                for match in eventlog_matches
+                if match["review_priority"]["level"] == "high"
+            ]
+            self.assertTrue(high_priority_events)
+            self.assertTrue(any("high-value Windows artifact" in match["review_priority"]["reasons"] for match in high_priority_events))
+            self.assertTrue(all(match["source_reference"].get("source_format") for match in eventlog_matches))
+            self.assertTrue(any(match["source_reference"].get("source_hashes", {}).get("sha256") for match in eventlog_matches))
 
             filesystem_matches = [match for match in payload["matches"] if match["kind"] in {"mft-record", "usn-record"}]
             self.assertTrue(filesystem_matches)

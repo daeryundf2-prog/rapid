@@ -1343,6 +1343,30 @@ mark {
   color: var(--ok);
 }
 
+.review-badge.priority-high {
+  border-color: rgba(153, 54, 44, 0.45);
+  background: rgba(153, 54, 44, 0.08);
+  color: #99362c;
+}
+
+.review-badge.priority-medium {
+  border-color: rgba(178, 87, 44, 0.42);
+  background: rgba(178, 87, 44, 0.08);
+  color: #9d4e2a;
+}
+
+.review-badge.priority-low {
+  border-color: rgba(31, 111, 104, 0.22);
+  color: var(--accent);
+}
+
+.source-reference {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
 .review-selection-tray,
 .review-history {
   margin-top: 12px;

@@ -351,14 +351,18 @@ class CaseDatabase:
                     for match in matches
                     if str((match.get("review") or {}).get("verification_status") or "unverified") == verification_status
                 ]
+            matches = enrich_case_search_matches(matches, normalized_keywords)
             if limit:
                 matches = matches[:limit]
 
         source_counts: dict[str, int] = {}
         keyword_counts: dict[str, int] = {keyword.lower(): 0 for keyword in normalized_keywords}
+        priority_counts: dict[str, int] = {}
         for match in matches:
             source = str(match.get("source") or "unknown")
             source_counts[source] = source_counts.get(source, 0) + 1
+            priority_level = str((match.get("review_priority") or {}).get("level") or "low")
+            priority_counts[priority_level] = priority_counts.get(priority_level, 0) + 1
             for keyword in match.get("matched_keywords", []):
                 keyword_counts[str(keyword).lower()] = keyword_counts.get(str(keyword).lower(), 0) + 1
         return {
@@ -378,6 +382,7 @@ class CaseDatabase:
                 "match_count": len(matches),
                 "source_counts": source_counts,
                 "keyword_counts": keyword_counts,
+                "priority_counts": priority_counts,
             },
             "matches": matches,
         }
@@ -1364,6 +1369,16 @@ def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "indicator_value",
         "classification",
         "count",
+        "source_hashes",
+        "record_hashes",
+        "source_path",
+        "source_format",
+        "source_index",
+        "record_offset",
+        "file_offset",
+        "raw_record_preview",
+        "extraction_method",
+        "parser_confidence",
         "matched_rules",
     )
     metadata = {key: details[key] for key in keys if details.get(key) not in (None, "", [])}
@@ -1571,6 +1586,110 @@ def attach_review_marks(
     return output
 
 
+def enrich_case_search_matches(matches: list[dict[str, object]], keywords: list[str]) -> list[dict[str, object]]:
+    enriched = []
+    for index, match in enumerate(matches):
+        copied = dict(match)
+        copied["source_reference"] = build_source_reference(copied)
+        copied["review_priority"] = build_review_priority(copied, keywords)
+        copied["_result_order"] = index
+        enriched.append(copied)
+    enriched.sort(key=case_search_priority_sort_key)
+    for match in enriched:
+        match.pop("_result_order", None)
+    return enriched
+
+
+def case_search_priority_sort_key(match: Mapping[str, object]) -> tuple[int, int]:
+    priority = match.get("review_priority") if isinstance(match.get("review_priority"), Mapping) else {}
+    score = optional_int(priority.get("score")) or 0
+    order = optional_int(match.get("_result_order")) or 0
+    return (-score, order)
+
+
+def build_source_reference(match: Mapping[str, object]) -> dict[str, object]:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), Mapping) else {}
+    source_hashes = metadata.get("source_hashes") if isinstance(metadata.get("source_hashes"), Mapping) else {}
+    record_hashes = metadata.get("record_hashes") if isinstance(metadata.get("record_hashes"), Mapping) else {}
+    reference = {
+        "citation_id": str(match.get("citation_id") or ""),
+        "target_type": str(match.get("target_type") or ""),
+        "target_id": str(match.get("target_id") or ""),
+        "path": str(metadata.get("source_path") or match.get("path") or ""),
+        "source_format": str(metadata.get("source_format") or ""),
+        "parser": str(metadata.get("parser") or ""),
+        "parser_version": str(metadata.get("parser_version") or ""),
+        "parser_confidence": metadata.get("parser_confidence"),
+        "source_index": metadata.get("source_index"),
+        "record_offset": metadata.get("record_offset") or metadata.get("file_offset"),
+        "source_hashes": dict(source_hashes),
+        "record_hashes": dict(record_hashes),
+        "evidence_strength": str(metadata.get("evidence_strength") or ""),
+        "reportability": str(metadata.get("reportability") or ""),
+        "coverage_status": str(metadata.get("coverage_status") or ""),
+    }
+    return {
+        key: value
+        for key, value in reference.items()
+        if value not in (None, "", {}, [])
+    }
+
+
+def build_review_priority(match: Mapping[str, object], keywords: list[str]) -> dict[str, object]:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), Mapping) else {}
+    source = str(match.get("source") or "")
+    kind = str(match.get("kind") or "")
+    title_preview = " ".join(str(match.get(key) or "") for key in ("title", "preview", "path")).lower()
+    score = 0
+    reasons: list[str] = []
+
+    risk_score = optional_int(metadata.get("risk_score"))
+    if risk_score:
+        score += min(100, risk_score)
+        reasons.append(f"parser risk score {risk_score}")
+    risk_flags = metadata.get("risk_flags") if isinstance(metadata.get("risk_flags"), list) else []
+    if risk_flags:
+        score += min(30, len(risk_flags) * 10)
+        reasons.append(f"{len(risk_flags)} risk flag(s)")
+    matched_rules = metadata.get("matched_rules") if isinstance(metadata.get("matched_rules"), list) else []
+    if matched_rules:
+        score += min(30, len(matched_rules) * 15)
+        reasons.append(f"{len(matched_rules)} matched rule(s)")
+    if source == "indicators":
+        score += 25
+        reasons.append("IOC/indicator pivot")
+    if source == "artifacts" and any(token in kind for token in ("eventlog", "powershell", "wmi", "prefetch", "registry-run", "rdp")):
+        score += 20
+        reasons.append("high-value Windows artifact")
+    if any(token in title_preview for token in ("password", "credential", "token", "secret", "powershell", "rundll32", "wmic", "bitlocker")):
+        score += 15
+        reasons.append("high-value keyword context")
+    if metadata.get("ai_service") or metadata.get("ai_conversation_candidate_count"):
+        score += 12
+        reasons.append("AI-service activity context")
+    if metadata.get("source_hashes") or metadata.get("record_hashes"):
+        reasons.append("hash-backed source reference")
+    if metadata.get("parser_confidence") not in (None, ""):
+        reasons.append("parser confidence available")
+
+    score = max(0, min(100, score))
+    if score >= 70:
+        level = "high"
+        recommended_action = "verify source, preserve hash context, and consider report inclusion"
+    elif score >= 35:
+        level = "medium"
+        recommended_action = "review source preview and classify relevance"
+    else:
+        level = "low"
+        recommended_action = "triage when higher-priority hits are cleared"
+    return {
+        "score": score,
+        "level": level,
+        "reasons": reasons[:6],
+        "recommended_action": recommended_action,
+    }
+
+
 def search_file_records(
     connection: sqlite3.Connection,
     case_id: str,
@@ -1579,7 +1698,7 @@ def search_file_records(
 ) -> list[dict[str, object]]:
     rows = connection.execute(
         """
-        SELECT citation_id, id, path, extension, size_bytes, modified_at
+        SELECT citation_id, id, path, extension, size_bytes, modified_at, hash_md5, hash_sha1, hash_sha256
         FROM file_record
         WHERE case_id = ?
         ORDER BY id ASC
@@ -1606,6 +1725,15 @@ def search_file_records(
                 "path": str(row["path"]),
                 "matched_keywords": hits,
                 "preview": str(row["path"]),
+                "metadata": {
+                    "size_bytes": optional_int(row["size_bytes"]),
+                    "modified_at": optional_str(row["modified_at"]),
+                    "source_hashes": {
+                        key: str(row[column])
+                        for key, column in (("md5", "hash_md5"), ("sha1", "hash_sha1"), ("sha256", "hash_sha256"))
+                        if row[column]
+                    },
+                },
             }
         )
         if limit and len(matches) >= limit:

@@ -2197,6 +2197,7 @@ function renderCaseDbSearchResult(payload) {
       ${metric("DB matches", payload.summary?.match_count)}
       ${metric("Sources", Object.keys(payload.summary?.source_counts || {}).length)}
       ${metric("Keywords", (payload.keywords || []).length)}
+      ${metric("High priority", payload.summary?.priority_counts?.high)}
     </div>
     <section class="review-selection-tray">
       <div class="review-group-header">
@@ -2213,10 +2214,11 @@ function renderCaseDbSearchResult(payload) {
       <span id="caseDbBatchStatus" class="review-save-status"></span>
     </section>
     <table class="data-table">
-      <thead><tr><th>Select</th><th>Citation</th><th>Source</th><th>Item</th><th>Review</th><th></th></tr></thead>
+      <thead><tr><th>Select</th><th>Citation</th><th>Priority</th><th>Source</th><th>Item</th><th>Review</th><th></th></tr></thead>
       <tbody>
         ${rows.map((match) => {
           const review = match.review || {};
+          const sourceRef = match.source_reference || {};
           const targetPayload = {
             target_type: match.target_type,
             target_id: match.target_id,
@@ -2225,8 +2227,9 @@ function renderCaseDbSearchResult(payload) {
             <tr data-filter="${rowText(match)}">
               <td><input type="checkbox" data-case-db-target="${escapeHtml(JSON.stringify(targetPayload))}" /></td>
               <td><strong>${escapeHtml(match.citation_id || "")}</strong><span>${escapeHtml(match.target_type || "")}:${escapeHtml(match.target_id || "")}</span></td>
+              <td>${priorityBadge(match.review_priority)}<span>${escapeHtml(match.review_priority?.recommended_action || "")}</span></td>
               <td>${escapeHtml(match.source || "")}<span>${escapeHtml(match.kind || "")}</span></td>
-              <td><strong>${escapeHtml(match.title || "")}</strong><span>${escapeHtml(match.preview || match.path || "")}</span></td>
+              <td><strong>${escapeHtml(match.title || "")}</strong><span>${escapeHtml(match.preview || match.path || "")}</span>${sourceReferenceLine(sourceRef)}</td>
               <td>${escapeHtml(review.status || "unreviewed")}<span>${escapeHtml(review.verification_status || "unverified")}</span></td>
               <td class="action-stack">
                 <button class="icon-action" type="button" data-case-db-review="${escapeHtml(JSON.stringify({
@@ -2254,6 +2257,24 @@ function renderCaseDbSearchResult(payload) {
       </tbody>
     </table>
   `;
+}
+
+function priorityBadge(priority) {
+  const level = priority?.level || "low";
+  const score = priority?.score ?? 0;
+  const reasons = Array.isArray(priority?.reasons) ? priority.reasons.join(" · ") : "";
+  return `<span class="review-badge priority-${escapeHtml(level)}" title="${escapeHtml(reasons)}">${escapeHtml(level)} ${escapeHtml(score)}</span>`;
+}
+
+function sourceReferenceLine(reference) {
+  if (!reference || !Object.keys(reference).length) return "";
+  const hash = reference.source_hashes?.sha256 || reference.record_hashes?.sha256 || "";
+  const parts = [
+    reference.parser ? `parser ${reference.parser}${reference.parser_version ? ` v${reference.parser_version}` : ""}` : "",
+    reference.source_format ? `format ${reference.source_format}` : "",
+    hash ? `sha256 ${String(hash).slice(0, 12)}...` : "",
+  ].filter(Boolean);
+  return parts.length ? `<span class="source-reference">${escapeHtml(parts.join(" · "))}</span>` : "";
 }
 
 function bindCaseDbReviewButtons(database, caseId) {

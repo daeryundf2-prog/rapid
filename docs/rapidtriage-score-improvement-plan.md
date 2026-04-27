@@ -70,7 +70,7 @@ Tasks:
 
 - Move normal web workflow from JSON scans to Case DB by default after a run.
 - Add persistent saved searches, keyword packs, and recent search history per case. Status: Case DB saved searches are implemented for CLI/API/web searches.
-- Add review status filters everywhere: unreviewed, relevant, not relevant, needs follow-up, report candidate, verified, rejected. Status: Case DB search now filters by review status and verification status.
+- Add review status filters everywhere: unreviewed, relevant, not relevant, needs follow-up, report candidate, verified, rejected. Status: Case DB search now filters by review status and verification status, and each result includes a review priority score plus a source reference for faster analyst triage.
 - Add batch review actions for repetitive results. Status: Case DB API and web panel now support batch verify/reject for selected search results.
 - Add side-by-side diff for text/log evidence, not just compare cards. Status: compare tray supports A/B text diff for pinned text previews, and `rapidtriage compare` now creates hash-backed A/B compare JSON that can be bookmarked into cases and rendered in case reports.
 - Add report template selector: executive summary, technical appendix, legal handoff, hash-only appendix. Status: web/API case report generation now accepts these templates.
@@ -78,7 +78,7 @@ Tasks:
 Acceptance criteria:
 
 - Search returns first page quickly on a 100k-file synthetic case.
-- Analyst can search, preview, mark, verify, and generate a focused report without returning to raw JSON. Status: partially implemented; JSON remains available, but core saved-search and batch review loops are now UI-backed.
+- Analyst can search, preview, mark, verify, and generate a focused report without returning to raw JSON. Status: partially implemented; JSON remains available, but core saved-search and batch review loops are now UI-backed with priority and source-reference cues.
 - Report contains only selected/reviewed evidence by default. Status: existing report-candidate default is preserved; template selector controls presentation.
 
 ## Plan To Reach 80
