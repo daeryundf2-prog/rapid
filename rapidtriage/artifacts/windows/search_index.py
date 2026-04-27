@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import re
 from collections import Counter
 from pathlib import Path, PureWindowsPath
 from typing import Iterable, Mapping, Sequence
@@ -10,7 +11,7 @@ from typing import Iterable, Mapping, Sequence
 from ...core.models import ArtifactRecord
 from .ese import build_ese_string_pivots, probe_ese_database
 
-PARSER_VERSION = "windows-search-index-import-v2"
+PARSER_VERSION = "windows-search-index-import-v3"
 SEARCH_EDB_PATH = ("ProgramData", "Microsoft", "Search", "Data", "Applications", "Windows", "Windows.edb")
 SUPPORTED_EXPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 EXPORT_HINTS = ("windows.edb", "windows-search", "searchindex", "search-index", "edbexport", "winsearch")
@@ -30,7 +31,9 @@ class WindowsSearchIndexProvider:
         seen: set[Path] = set()
         edb_path = root.joinpath(*SEARCH_EDB_PATH)
         if edb_path.is_file():
-            records.append(build_edb_inventory_record(edb_path))
+            inventory = build_edb_inventory_record(edb_path)
+            records.append(inventory)
+            records.extend(build_edb_pivot_records(edb_path, inventory.details))
             seen.add(edb_path.resolve())
 
         for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
@@ -41,7 +44,9 @@ class WindowsSearchIndexProvider:
                 continue
             lowered = str(path.relative_to(root)).lower()
             if path.name.lower() == "windows.edb":
-                records.append(build_edb_inventory_record(path))
+                inventory = build_edb_inventory_record(path)
+                records.append(inventory)
+                records.extend(build_edb_pivot_records(path, inventory.details))
                 seen.add(resolved)
                 continue
             if path.suffix.lower() not in SUPPORTED_EXPORT_SUFFIXES or not any(hint in lowered for hint in EXPORT_HINTS):
@@ -85,6 +90,67 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
             "note": "Windows.edb is inventoried directly with bounded ESE header/string pivots; export CSV/JSON rows with a trusted ESE/Search parser for full table decoding.",
         },
     )
+
+
+def build_edb_pivot_records(path: Path, inventory_details: Mapping[str, object]) -> list[ArtifactRecord]:
+    source_hashes = file_hashes(path)
+    candidates: list[tuple[str, str]] = []
+    for value in inventory_details.get("path_candidates") or []:
+        candidates.append(("path", str(value)))
+    for value in inventory_details.get("url_candidates") or []:
+        candidates.append(("url", str(value)))
+    for value in inventory_details.get("suspicious_strings") or []:
+        candidates.append(("string", str(value)))
+
+    records: list[ArtifactRecord] = []
+    seen: set[tuple[str, str]] = set()
+    for index, (candidate_kind, candidate_value) in enumerate(candidates):
+        key = (candidate_kind, candidate_value)
+        if key in seen:
+            continue
+        seen.add(key)
+        item_path = candidate_value if candidate_kind == "path" else ""
+        url = candidate_value if candidate_kind == "url" else first_url(candidate_value)
+        file_name = filename_from_path(item_path) if item_path else ""
+        risk_flags = []
+        if url:
+            risk_flags.append("search-index-url-pivot")
+        if any(term in candidate_value.lower() for term in ("powershell", "cmd.exe", "rundll32", "regsvr32", "wmic", "certutil")):
+            risk_flags.append("search-index-suspicious-text-pivot")
+        records.append(
+            ArtifactRecord(
+                provider=WindowsSearchIndexProvider.name,
+                artifact_type="windows-search-edb-pivot",
+                path=str(path.resolve()),
+                supported=True,
+                details={
+                    "parser": "windows-search-edb-string-pivot",
+                    "parser_version": PARSER_VERSION,
+                    "coverage_status": "native-ese-string-pivot",
+                    "reportability": "triage",
+                    "source_path": str(path.resolve()),
+                    "source_format": "ese-edb",
+                    "source_hashes": source_hashes,
+                    "source_index": index,
+                    "candidate_kind": candidate_kind,
+                    "candidate_value": candidate_value,
+                    "item_path": item_path,
+                    "file_name": file_name,
+                    "extension": extension_from_name(file_name or item_path),
+                    "url": url,
+                    "title": "",
+                    "content_snippet": candidate_value[:1000],
+                    "parser_confidence": 0.4,
+                    "evidence_strength": "search-index-string-pivot",
+                    "validation_required": True,
+                    "validation_guidance": "Windows.edb native string pivots identify indexed paths/URLs/text present in the database; validate full table fields and timestamps with a dedicated Windows Search EDB parser.",
+                    "risk_flags": sorted(set(risk_flags)),
+                    "risk_score": min(100, len(set(risk_flags)) * 20),
+                    "raw_preview": candidate_value[:2000],
+                },
+            )
+        )
+    return records
 
 
 def build_search_index_entry(
@@ -146,7 +212,8 @@ def build_search_index_entry(
 def build_search_index_summary(root: Path, records: Sequence[ArtifactRecord]) -> ArtifactRecord | None:
     entries = [record for record in records if record.artifact_type == "windows-search-index-entry"]
     edb_files = [record for record in records if record.artifact_type == "windows-search-edb-file"]
-    if not entries and not edb_files:
+    edb_pivots = [record for record in records if record.artifact_type == "windows-search-edb-pivot"]
+    if not entries and not edb_files and not edb_pivots:
         return None
     extension_counts: Counter[str] = Counter()
     source_files: set[str] = set()
@@ -155,6 +222,10 @@ def build_search_index_summary(root: Path, records: Sequence[ArtifactRecord]) ->
         extension = str(details.get("extension") or "")
         if extension:
             extension_counts[extension] += 1
+        source_path = str(details.get("source_path") or record.path)
+        source_files.add(source_path)
+    for record in edb_pivots:
+        details = record.details
         source_path = str(details.get("source_path") or record.path)
         source_files.add(source_path)
     edb_inventory = []
@@ -186,6 +257,7 @@ def build_search_index_summary(root: Path, records: Sequence[ArtifactRecord]) ->
             "source_path": str(root.resolve()),
             "entry_count": len(entries),
             "inventory_count": len(edb_files),
+            "edb_pivot_count": len(edb_pivots),
             "source_files": sorted(source_files),
             "extension_counts": [{"value": value, "count": count} for value, count in extension_counts.most_common(25)],
             "edb_string_hit_count": edb_string_hit_count,
@@ -254,6 +326,11 @@ def filename_from_path(value: str) -> str:
 def extension_from_name(value: str) -> str:
     suffix = PureWindowsPath(value).suffix.lower()
     return suffix if suffix else ""
+
+
+def first_url(value: str) -> str:
+    match = re.search(r"(?i)https?://[^\s\x00\"'<>]{4,300}", value)
+    return match.group(0).rstrip(".,);]") if match else ""
 
 
 def file_hashes(path: Path) -> dict[str, str]:

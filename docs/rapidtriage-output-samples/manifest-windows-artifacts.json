@@ -1196,7 +1196,7 @@
           "supported": false,
           "details": {
             "parser": "windows-search-edb-inventory",
-            "parser_version": "windows-search-index-import-v2",
+            "parser_version": "windows-search-index-import-v3",
             "coverage_status": "ese-header-string-scan",
             "reportability": "inventory-only",
             "source_path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
@@ -1242,7 +1242,7 @@
           "supported": true,
           "details": {
             "parser": "windows-search-index-import",
-            "parser_version": "windows-search-index-import-v2",
+            "parser_version": "windows-search-index-import-v3",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/analysis/windows-search-index.csv",
@@ -1283,12 +1283,13 @@
           "supported": true,
           "details": {
             "parser": "windows-search-index-summary",
-            "parser_version": "windows-search-index-import-v2",
+            "parser_version": "windows-search-index-import-v3",
             "coverage_status": "summarized",
             "reportability": "triage",
             "source_path": "<ROOT>",
             "entry_count": 1,
             "inventory_count": 1,
+            "edb_pivot_count": 0,
             "source_files": [
               "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
               "<ROOT>/analysis/windows-search-index.csv"

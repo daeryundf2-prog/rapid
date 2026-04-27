@@ -412,6 +412,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             artifacts = payload["artifacts"]
             entries = [item for item in artifacts if item["artifact_type"] == "windows-search-index-entry"]
             edb_files = [item for item in artifacts if item["artifact_type"] == "windows-search-edb-file"]
+            edb_pivots = [item for item in artifacts if item["artifact_type"] == "windows-search-edb-pivot"]
             summary = next(item for item in artifacts if item["artifact_type"] == "windows-search-index-summary")
 
             self.assertEqual(entries[0]["details"]["entry_id"], "7")
@@ -423,8 +424,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(edb_files[0]["details"]["ese_header"]["signature_valid"])
             self.assertIn("ese-string:powershell", edb_files[0]["details"]["risk_flags"])
             self.assertTrue(any("Incident Notes.docx" in value for value in edb_files[0]["details"]["path_candidates"]))
+            self.assertTrue(any(item["details"]["file_name"] == "Incident Notes.docx" for item in edb_pivots))
+            self.assertTrue(any(item["details"]["url"] == "https://example.com/browser-history" for item in edb_pivots))
+            self.assertTrue(all(item["details"]["validation_required"] for item in edb_pivots))
             self.assertEqual(summary["details"]["entry_count"], 1)
             self.assertEqual(summary["details"]["inventory_count"], 1)
+            self.assertGreaterEqual(summary["details"]["edb_pivot_count"], 2)
             self.assertGreater(summary["details"]["edb_string_hit_count"], 0)
             self.assertIn({"value": ".docx", "count": 1}, summary["details"]["extension_counts"])
 
