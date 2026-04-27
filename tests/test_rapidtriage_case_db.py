@@ -61,6 +61,8 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
         self.assertIn("--save-as", commands["case-search"].format_help())
         self.assertIn("case-review", commands)
         self.assertIn("--include-in-report", commands["case-review"].format_help())
+        self.assertIn("case-db-report", commands)
+        self.assertIn("--include-all", commands["case-db-report"].format_help())
         self.assertIn("evidence", commands)
         self.assertIn("rapidtriage case-db", parser.format_help())
         self.assertIn("rapidtriage case-search", parser.format_help())
@@ -618,3 +620,29 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(batch["updated_count"], len(targets))
             self.assertGreaterEqual(reviewed["summary"]["match_count"], len(targets))
             self.assertTrue(all(match["review"]["status"] == "relevant" for match in reviewed["matches"]))
+
+            export = database.export_reviewed_items(case_id="CASE-75")
+            self.assertEqual(export["command"], "case-db-report-export")
+            self.assertEqual(export["summary"]["exported_item_count"], len(targets))
+            self.assertTrue(all(item["review"]["include_in_report"] for item in export["items"]))
+            self.assertTrue(all(item["review_citation_id"].startswith("CASE-75-REV-") for item in export["items"]))
+            self.assertTrue(all(item["target_citation_id"].startswith("CASE-75-") for item in export["items"]))
+            self.assertTrue(all("source_reference" in item for item in export["items"]))
+
+            output_path = root / "case-db-report.json"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "case-db-report",
+                        str(root / "case.db"),
+                        "--case-id",
+                        "CASE-75",
+                        "--output",
+                        str(output_path),
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            output_payload = json.loads(output_path.read_text(encoding="utf-8"))
+            printed_payload = json.loads(stdout.getvalue())
+            self.assertEqual(output_payload["summary"], printed_payload["summary"])

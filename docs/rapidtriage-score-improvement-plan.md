@@ -70,7 +70,7 @@ Tasks:
 
 - Move normal web workflow from JSON scans to Case DB by default after a run. Status: web Case DB search now prepares a run-local SQLite DB automatically and reuses it on later searches to avoid duplicate imports.
 - Add persistent saved searches, keyword packs, and recent search history per case. Status: Case DB saved searches are implemented for CLI/API/web searches.
-- Add review status filters everywhere: unreviewed, relevant, not relevant, needs follow-up, report candidate, verified, rejected. Status: Case DB search now filters by review status and verification status, and each result includes a review priority score plus a source reference for faster analyst triage.
+- Add review status filters everywhere: unreviewed, relevant, not relevant, needs follow-up, report candidate, verified, rejected. Status: Case DB search now filters by review status and verification status, each result includes a review priority score plus a source reference for faster analyst triage, and DB-backed report candidates can be exported with review/target citations.
 - Add batch review actions for repetitive results. Status: Case DB API and web panel now support batch verify/reject for selected search results.
 - Add side-by-side diff for text/log evidence, not just compare cards. Status: compare tray supports A/B text diff for pinned text previews, and `rapidtriage compare` now creates hash-backed A/B compare JSON that can be bookmarked into cases and rendered in case reports.
 - Add report template selector: executive summary, technical appendix, legal handoff, hash-only appendix. Status: web/API case report generation now accepts these templates.
@@ -78,7 +78,7 @@ Tasks:
 Acceptance criteria:
 
 - Search returns first page quickly on a 100k-file synthetic case.
-- Analyst can search, preview, mark, verify, and generate a focused report without returning to raw JSON. Status: partially implemented; JSON remains available, but Case DB preparation, saved-search, priority, source-reference, and batch review loops are now UI-backed.
+- Analyst can search, preview, mark, verify, and generate a focused report without returning to raw JSON. Status: partially implemented; JSON remains available, but Case DB preparation, saved-search, priority, source-reference, batch review, and report-candidate export loops are now UI/API/CLI-backed.
 - Report contains only selected/reviewed evidence by default. Status: existing report-candidate default is preserved; template selector controls presentation.
 
 ## Plan To Reach 80

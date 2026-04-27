@@ -2169,6 +2169,7 @@ function bindCaseDbPanel() {
         output.innerHTML = renderCaseDbSearchResult(payload);
         bindCaseDbReviewButtons(request.database, request.case_id);
         bindCaseDbBatchButtons(request.database, request.case_id);
+        bindCaseDbReportExportButton(request.database, request.case_id);
       } catch (error) {
         output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
       } finally {
@@ -2226,6 +2227,7 @@ function renderCaseDbSearchResult(payload) {
         <div class="detail-actions">
           <button class="secondary-button" type="button" data-case-db-batch="verify">Verify selected</button>
           <button class="secondary-button" type="button" data-case-db-batch="reject">Reject selected</button>
+          <button class="secondary-button" type="button" data-case-db-export-report>Export report candidates</button>
         </div>
       </div>
       <p class="help-text">Select rows that are clearly related, then apply the same review status in one action.</p>
@@ -2293,6 +2295,28 @@ function sourceReferenceLine(reference) {
     hash ? `sha256 ${String(hash).slice(0, 12)}...` : "",
   ].filter(Boolean);
   return parts.length ? `<span class="source-reference">${escapeHtml(parts.join(" · "))}</span>` : "";
+}
+
+function bindCaseDbReportExportButton(database, caseId) {
+  const button = detailPanel.querySelector("[data-case-db-export-report]");
+  if (!button) return;
+  button.addEventListener("click", async () => {
+    const status = detailPanel.querySelector("#caseDbBatchStatus");
+    button.disabled = true;
+    button.textContent = "Exporting...";
+    try {
+      const payload = await api("/api/case-db/report-export", {
+        method: "POST",
+        body: JSON.stringify({ database, case_id: caseId, include_all: false, max_items: 500 }),
+      });
+      if (status) status.textContent = `Exported ${payload.summary?.exported_item_count || 0} report candidate(s) from Case DB.`;
+    } catch (error) {
+      if (status) status.textContent = `Failed: ${error.message}`;
+    } finally {
+      button.disabled = false;
+      button.textContent = "Export report candidates";
+    }
+  });
 }
 
 function bindCaseDbReviewButtons(database, caseId) {

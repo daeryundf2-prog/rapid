@@ -130,6 +130,13 @@ class CaseDbReviewBatchRequest(BaseModel):
     include_in_report: bool = False
 
 
+class CaseDbReportExportRequest(BaseModel):
+    database: str = Field(..., min_length=1)
+    case_id: str = Field(..., min_length=1)
+    include_all: bool = False
+    max_items: int = Field(500, ge=1, le=5000)
+
+
 class CaseDbSavedSearchRequest(BaseModel):
     database: str = Field(..., min_length=1)
     case_id: str = Field(..., min_length=1)
@@ -336,6 +343,18 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 note=request.note,
                 reviewer=request.reviewer,
                 include_in_report=request.include_in_report,
+            )
+        except CaseDatabaseError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @api.post("/api/case-db/report-export")
+    def export_case_db_report_items(request: CaseDbReportExportRequest) -> Dict[str, object]:
+        try:
+            database = open_case_database(Path(request.database))
+            return database.export_reviewed_items(
+                case_id=request.case_id,
+                include_all=request.include_all,
+                max_items=request.max_items,
             )
         except CaseDatabaseError as exc:
             raise HTTPException(status_code=400, detail=str(exc))

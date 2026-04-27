@@ -102,6 +102,7 @@ rapidtriage case-db ./rapidtriage-case.db --import-run ./rapidtriage-sample/run-
 rapidtriage case-search ./rapidtriage-case.db --case-id CASE-001 -k password --source documents
 rapidtriage case-review ./rapidtriage-case.db --case-id CASE-001 --target-type indexed_document --target-id 1 --status relevant --verification-status source_opened --include-in-report
 rapidtriage case-search ./rapidtriage-case.db --case-id CASE-001 -k password --verification-status source_opened
+rapidtriage case-db-report ./rapidtriage-case.db --case-id CASE-001 --output rapidtriage-case-db-report-candidates.json
 ```
 
 Check which evidence adapter will handle a source path:
@@ -286,6 +287,7 @@ Implemented:
 - `case-db` initializes the SQLite case database v1 with tables for cases, evidence sources, files, hashes, artifacts, events, indexed documents/FTS, reviews, audit events, report items, jobs, and stable citation ID sequences.
 - `case-search` searches imported SQLite case databases across FTS-indexed documents, file records, artifacts, indicator pivots, and timeline events while preserving citation IDs; hits include review-priority guidance and source-reference details, and artifact/indicator hits expose reviewable source paths plus key Windows and macOS metadata for event logs, PowerShell history, MFT/USN rows, browser history, AI-service usage, quarantine events, LaunchAgents, and IOC values.
 - `case-review` stores DB-backed review/verification marks, tags, notes, reviewer names, and report-candidate flags for individual search targets.
+- `case-db-report` exports DB-backed reviewed report candidates with review citations, target citations, source references, parser/hash context, and analyst review state.
 - `evidence` identifies folder, E01/Ex01, raw image, ISO, and virtual-disk source adapters and reports whether required external tooling is available.
 - `benchmark` writes JSON and Markdown benchmark results with ingest/search latency, peak memory, output size, and result counts.
 - `validation` writes JSON and Markdown release-readiness checks, required command evidence, required documents, known limits, and operator-owned external responsibilities.

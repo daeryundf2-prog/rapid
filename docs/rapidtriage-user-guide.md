@@ -266,7 +266,13 @@ rapidtriage case-review ./case.db \
   --include-in-report
 ```
 
-The web UI also lets you import a run into the Case DB from the summary page, search it, and mark hits as verified or rejected.
+The web UI prepares the run-local Case DB automatically before DB-backed search. After marking items as report candidates, export the DB-backed report-candidate handoff JSON:
+
+```bash
+rapidtriage case-db-report ./case.db --case-id CASE-001 --output case-db-report-candidates.json
+```
+
+That export keeps review citations, target citations, parser/source/hash context, and analyst review state together so report drafting does not depend on re-opening raw JSON tables.
 
 When generating a case report in the web review board, choose the template that matches the audience:
 

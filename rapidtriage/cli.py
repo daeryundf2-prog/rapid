@@ -118,6 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage case-db ./rapidtriage-case.db --create-case CASE-001 --name "Case 001"
               rapidtriage case-search ./rapidtriage-case.db --case-id CASE-001 -k password
               rapidtriage case-review ./rapidtriage-case.db --case-id CASE-001 --target-type indexed_document --target-id 1 --status relevant --verification-status source_opened
+              rapidtriage case-db-report ./rapidtriage-case.db --case-id CASE-001 --output report-candidates.json
               rapidtriage evidence ./case.E01
               rapidtriage benchmark --output-dir ./rapidtriage-benchmark --file-count 1000
               rapidtriage validation --output-dir ./rapidtriage-validation --overwrite
@@ -550,6 +551,26 @@ def build_parser() -> argparse.ArgumentParser:
     case_review.add_argument("--reviewer", default="", help="Reviewer name")
     case_review.add_argument("--include-in-report", action="store_true", help="Mark target as report candidate")
     case_review.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    case_db_report = sub.add_parser(
+        "case-db-report",
+        help="Export Case DB reviewed report candidates",
+        description="Export Case DB reviewed report candidates",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage case-db-report ./rapidtriage-case.db --case-id CASE-001 --output report-candidates.json
+              rapidtriage case-db-report ./rapidtriage-case.db --case-id CASE-001 --include-all --json
+            """
+        ),
+    )
+    case_db_report.add_argument("database", help="Path to the SQLite case database")
+    case_db_report.add_argument("--case-id", required=True, help="Case ID to export")
+    case_db_report.add_argument("--include-all", action="store_true", help="Export every reviewed item, not only report candidates")
+    case_db_report.add_argument("--max-items", type=int, default=500, help="Maximum reviewed items to export")
+    case_db_report.add_argument("--output", help="Optional JSON output path")
+    case_db_report.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     evidence = sub.add_parser(
         "evidence",
@@ -1147,6 +1168,29 @@ def main(argv=None) -> int:
             print(f"Saved review mark: {payload['citation_id']}")
             print(f"Target: {payload['target_type']}:{payload['target_id']}")
             print(f"Status: {payload['status']} / {payload['verification_status']}")
+        return 0
+
+    if args.command == "case-db-report":
+        try:
+            database = open_case_database(Path(args.database).expanduser().resolve())
+            payload = database.export_reviewed_items(
+                case_id=args.case_id,
+                include_all=args.include_all,
+                max_items=args.max_items,
+            )
+        except CaseDatabaseError as exc:
+            parser.error(str(exc))
+        if args.output:
+            write_result(payload, Path(args.output).expanduser().resolve())
+        if args.json or args.output:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Case DB report candidates: {payload['summary']['exported_item_count']}")
+            for item in payload["items"]:
+                print(
+                    f"- {item['review_citation_id']} -> {item['target_citation_id']} "
+                    f"[{item['source']}] {item.get('title') or item.get('path')}"
+                )
         return 0
 
     if args.command == "evidence":

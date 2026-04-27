@@ -694,6 +694,63 @@ class CaseDatabase:
             ).fetchall()
         return [review_mark_to_dict(row) for row in rows]
 
+    def export_reviewed_items(
+        self,
+        *,
+        case_id: str,
+        include_all: bool = False,
+        max_items: int = 500,
+    ) -> dict[str, object]:
+        normalized_case_id = normalize_identifier(case_id, fallback="case")
+        bounded_limit = max(1, min(int(max_items or 500), 5000))
+        with self.connect() as connection:
+            apply_schema(connection)
+            case = connection.execute(
+                "SELECT * FROM case_record WHERE case_id = ?",
+                (normalized_case_id,),
+            ).fetchone()
+            if case is None:
+                raise CaseDatabaseError(f"case not found: {normalized_case_id}")
+            review_rows = connection.execute(
+                """
+                SELECT *
+                FROM review_mark
+                WHERE case_id = ?
+                  AND (? OR include_in_report = 1)
+                ORDER BY include_in_report DESC, updated_at DESC, id DESC
+                LIMIT ?
+                """,
+                (normalized_case_id, 1 if include_all else 0, bounded_limit),
+            ).fetchall()
+            items = [
+                build_review_export_item(connection, normalized_case_id, review_mark_to_dict(row))
+                for row in review_rows
+            ]
+        status_counts: dict[str, int] = {}
+        verification_counts: dict[str, int] = {}
+        for item in items:
+            review = item.get("review") if isinstance(item.get("review"), Mapping) else {}
+            status = str(review.get("status") or "unreviewed")
+            verification = str(review.get("verification_status") or "unverified")
+            status_counts[status] = status_counts.get(status, 0) + 1
+            verification_counts[verification] = verification_counts.get(verification, 0) + 1
+        return {
+            "command": "case-db-report-export",
+            "generated_at": now_iso(),
+            "database": str(self.path),
+            "case": case_record_from_row(case).to_dict(),
+            "options": {
+                "include_all": include_all,
+                "max_items": bounded_limit,
+            },
+            "summary": {
+                "exported_item_count": len(items),
+                "review_status_counts": status_counts,
+                "verification_status_counts": verification_counts,
+            },
+            "items": items,
+        }
+
     def _insert_evidence_source(self, case_id: str, summary: Mapping[str, object]) -> int:
         source = summary.get("source")
         source_payload = source if isinstance(source, Mapping) else {}
@@ -1948,6 +2005,164 @@ def search_events(
         if limit and len(matches) >= limit:
             break
     return matches
+
+
+def build_review_export_item(
+    connection: sqlite3.Connection,
+    case_id: str,
+    review: Mapping[str, object],
+) -> dict[str, object]:
+    target_type = str(review.get("target_type") or "")
+    target_id = str(review.get("target_id") or "")
+    match = load_review_target_match(connection, case_id, target_type=target_type, target_id=target_id)
+    if match is None:
+        match = {
+            "source": "unknown",
+            "citation_id": "",
+            "target_type": target_type,
+            "target_id": target_id,
+            "title": f"{target_type}:{target_id}",
+            "kind": target_type,
+            "path": "",
+            "preview": "Target no longer exists in the case database.",
+            "metadata": {},
+        }
+    enriched = enrich_case_search_matches([match], [])[0]
+    return {
+        "review_citation_id": str(review.get("citation_id") or ""),
+        "target_citation_id": str(enriched.get("citation_id") or ""),
+        "target_type": target_type,
+        "target_id": target_id,
+        "source": str(enriched.get("source") or ""),
+        "kind": str(enriched.get("kind") or ""),
+        "title": str(enriched.get("title") or ""),
+        "path": str(enriched.get("path") or ""),
+        "preview": str(enriched.get("preview") or ""),
+        "review": dict(review),
+        "source_reference": enriched.get("source_reference") or {},
+        "review_priority": enriched.get("review_priority") or {},
+        "metadata": enriched.get("metadata") or {},
+    }
+
+
+def load_review_target_match(
+    connection: sqlite3.Connection,
+    case_id: str,
+    *,
+    target_type: str,
+    target_id: str,
+) -> dict[str, object] | None:
+    try:
+        numeric_id = int(target_id)
+    except ValueError:
+        return None
+    if target_type == "indexed_document":
+        row = connection.execute(
+            """
+            SELECT citation_id, id, source_type, field_name, title, body
+            FROM indexed_document
+            WHERE case_id = ? AND id = ?
+            """,
+            (case_id, numeric_id),
+        ).fetchone()
+        if row is None:
+            return None
+        body = str(row["body"] or "")
+        return {
+            "source": "documents",
+            "citation_id": str(row["citation_id"]),
+            "target_type": "indexed_document",
+            "target_id": str(row["id"]),
+            "title": str(row["title"] or "indexed document"),
+            "kind": str(row["field_name"] or row["source_type"] or ""),
+            "path": "",
+            "preview": compact_text(body, 240),
+            "metadata": {
+                "source_type": str(row["source_type"] or ""),
+                "field_name": str(row["field_name"] or ""),
+            },
+        }
+    if target_type == "file_record":
+        row = connection.execute(
+            """
+            SELECT citation_id, id, path, extension, size_bytes, modified_at, hash_md5, hash_sha1, hash_sha256
+            FROM file_record
+            WHERE case_id = ? AND id = ?
+            """,
+            (case_id, numeric_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "source": "files",
+            "citation_id": str(row["citation_id"]),
+            "target_type": "file_record",
+            "target_id": str(row["id"]),
+            "title": Path(str(row["path"])).name,
+            "kind": str(row["extension"] or ""),
+            "path": str(row["path"] or ""),
+            "preview": str(row["path"] or ""),
+            "metadata": {
+                "size_bytes": optional_int(row["size_bytes"]),
+                "modified_at": optional_str(row["modified_at"]),
+                "source_hashes": {
+                    key: str(row[column])
+                    for key, column in (("md5", "hash_md5"), ("sha1", "hash_sha1"), ("sha256", "hash_sha256"))
+                    if row[column]
+                },
+            },
+        }
+    if target_type == "artifact":
+        row = connection.execute(
+            """
+            SELECT citation_id, id, artifact_type, title, summary, data_json
+            FROM artifact
+            WHERE case_id = ? AND id = ?
+            """,
+            (case_id, numeric_id),
+        ).fetchone()
+        if row is None:
+            return None
+        artifact_row = parse_json_object(row["data_json"])
+        metadata = artifact_search_metadata(artifact_row)
+        return {
+            "source": artifact_match_source(str(row["artifact_type"])),
+            "citation_id": str(row["citation_id"]),
+            "target_type": "artifact",
+            "target_id": str(row["id"]),
+            "title": str(row["title"] or row["artifact_type"]),
+            "kind": str(row["artifact_type"]),
+            "path": artifact_source_path(artifact_row),
+            "preview": str(row["summary"] or row["artifact_type"]),
+            "metadata": metadata,
+        }
+    if target_type == "event":
+        row = connection.execute(
+            """
+            SELECT citation_id, id, event_type, timestamp, target, description, source
+            FROM event
+            WHERE case_id = ? AND id = ?
+            """,
+            (case_id, numeric_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "source": "timeline",
+            "citation_id": str(row["citation_id"]),
+            "target_type": "event",
+            "target_id": str(row["id"]),
+            "title": str(row["description"] or row["event_type"]),
+            "kind": str(row["event_type"]),
+            "timestamp": str(row["timestamp"]),
+            "path": str(row["target"] or ""),
+            "preview": str(row["description"] or row["target"] or row["event_type"]),
+            "metadata": {
+                "timestamp": str(row["timestamp"] or ""),
+                "timeline_source": str(row["source"] or ""),
+            },
+        }
+    return None
 
 
 def build_fts_query(keywords: list[str]) -> str:

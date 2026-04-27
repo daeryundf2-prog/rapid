@@ -549,6 +549,20 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(batch_response.status_code, 200, batch_response.text)
             self.assertEqual(batch_response.json()["updated_count"], 1)
 
+            export_response = client.post(
+                "/api/case-db/report-export",
+                json={
+                    "database": str(db_path),
+                    "case_id": "CASE-API-DB",
+                },
+            )
+            self.assertEqual(export_response.status_code, 200, export_response.text)
+            export_payload = export_response.json()
+            self.assertEqual(export_payload["command"], "case-db-report-export")
+            self.assertGreaterEqual(export_payload["summary"]["exported_item_count"], 1)
+            self.assertEqual(export_payload["items"][0]["review"]["include_in_report"], True)
+            self.assertIn("target_citation_id", export_payload["items"][0])
+
             filtered_response = client.post(
                 "/api/case-db/search",
                 json={
