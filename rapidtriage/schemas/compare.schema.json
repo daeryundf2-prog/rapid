@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "command",
+    "generated_at",
+    "options",
+    "inputs",
+    "summary",
+    "results"
+  ],
+  "properties": {
+    "command": {
+      "const": "compare"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "left",
+        "right"
+      ],
+      "properties": {
+        "left": {
+          "$ref": "#/$defs/input"
+        },
+        "right": {
+          "$ref": "#/$defs/input"
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "result_count",
+        "status_counts"
+      ],
+      "properties": {
+        "result_count": {
+          "type": "integer"
+        },
+        "status_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "different_field_count": {
+          "type": "integer"
+        },
+        "text_diff_included": {
+          "type": "boolean"
+        }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "comparison_id",
+          "status",
+          "timestamp",
+          "path",
+          "left_path",
+          "right_path",
+          "summary",
+          "fields",
+          "diff",
+          "left",
+          "right"
+        ],
+        "properties": {
+          "comparison_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "same",
+              "different",
+              "only-in-left",
+              "only-in-right",
+              "both-missing"
+            ]
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "left_path": {
+            "type": "string"
+          },
+          "right_path": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "diff": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "left": {
+            "$ref": "#/$defs/input"
+          },
+          "right": {
+            "$ref": "#/$defs/input"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "input": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "label",
+        "path",
+        "name",
+        "extension",
+        "exists",
+        "is_file",
+        "is_dir",
+        "size",
+        "modified_at",
+        "hashes"
+      ],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "extension": {
+          "type": "string"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "is_file": {
+          "type": "boolean"
+        },
+        "is_dir": {
+          "type": "boolean"
+        },
+        "size": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "modified_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hashes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -248,43 +248,113 @@ class RapidTriageCaseCommandTests(unittest.TestCase):
             self.assertIn('"bookmark_id": "bm-timeline-1"', show_output)
             self.assertIn('"bookmark_id": "bm-file-1"', show_output)
 
-    def test_case_command_rejects_compare_sources_until_compare_command_exists(self) -> None:
+    def test_case_command_accepts_compare_sources(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             case_json = root / "case-bookmarks.json"
             compare_json = root / "compare.json"
+            left = root / "before.txt"
+            left.write_text("before", encoding="utf-8")
 
             write_json(
                 compare_json,
                 {
                     "command": "compare",
                     "generated_at": "2024-03-03T00:00:00+00:00",
+                    "options": {
+                        "left_label": "left",
+                        "right_label": "right",
+                    },
+                    "inputs": {
+                        "left": {
+                            "label": "left",
+                            "path": str(left),
+                            "name": left.name,
+                            "extension": ".txt",
+                            "exists": True,
+                            "is_file": True,
+                            "is_dir": False,
+                            "size": 6,
+                            "modified_at": "2024-03-02T09:10:11+00:00",
+                            "hashes": {},
+                        },
+                        "right": {
+                            "label": "right",
+                            "path": str(root / "after.txt"),
+                            "name": "after.txt",
+                            "extension": ".txt",
+                            "exists": False,
+                            "is_file": False,
+                            "is_dir": False,
+                            "size": None,
+                            "modified_at": None,
+                            "hashes": {},
+                        },
+                    },
+                    "summary": {
+                        "result_count": 1,
+                        "status_counts": {"only-in-left": 1},
+                    },
                     "results": [
                         {
+                            "comparison_id": "compare-0001",
                             "timestamp": "2024-03-02T09:10:11+00:00",
-                            "path": "/cases/case-001/Users/alice/Documents/incident-notes.txt",
+                            "path": str(left),
+                            "left_path": str(left),
+                            "right_path": str(root / "after.txt"),
                             "summary": "Only present in source A",
                             "status": "only-in-left",
+                            "fields": [],
+                            "diff": {},
+                            "left": {
+                                "label": "left",
+                                "path": str(left),
+                                "name": left.name,
+                                "extension": ".txt",
+                                "exists": True,
+                                "is_file": True,
+                                "is_dir": False,
+                                "size": 6,
+                                "modified_at": "2024-03-02T09:10:11+00:00",
+                                "hashes": {},
+                            },
+                            "right": {
+                                "label": "right",
+                                "path": str(root / "after.txt"),
+                                "name": "after.txt",
+                                "extension": ".txt",
+                                "exists": False,
+                                "is_file": False,
+                                "is_dir": False,
+                                "size": None,
+                                "modified_at": None,
+                                "hashes": {},
+                            },
                         }
                     ],
                 },
             )
 
-            stderr = io.StringIO()
-            with redirect_stderr(stderr), self.assertRaises(SystemExit) as exc:
-                main(
-                    [
-                        "case",
-                        str(case_json),
-                        "--source",
-                        str(compare_json),
-                        "--pointer",
-                        "/results/0",
-                    ]
-                )
+            exit_code, output = run_cli(
+                "case",
+                str(case_json),
+                "--source",
+                str(compare_json),
+                "--pointer",
+                "/results/0",
+                "--tag",
+                "compare",
+                "--review-status",
+                "needs-review",
+            )
 
-            self.assertEqual(exc.exception.code, 2)
-            self.assertIn("bookmark source command 'compare' is not implemented yet", stderr.getvalue())
+            self.assertEqual(exit_code, 0, output)
+            payload = json.loads(case_json.read_text(encoding="utf-8"))
+            bookmark = payload["bookmarks"][0]
+            self.assertEqual(bookmark["reference"]["command"], "compare")
+            self.assertEqual(bookmark["snapshot"]["path"], str(left))
+            self.assertEqual(bookmark["snapshot"]["artifact_key"], "only-in-left")
+            self.assertEqual(payload["summary"]["source_command_counts"]["compare"], 1)
 
     def test_case_command_rejects_non_row_pointer_for_source_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

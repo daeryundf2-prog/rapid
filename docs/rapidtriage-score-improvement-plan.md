@@ -72,7 +72,7 @@ Tasks:
 - Add persistent saved searches, keyword packs, and recent search history per case. Status: Case DB saved searches are implemented for CLI/API/web searches.
 - Add review status filters everywhere: unreviewed, relevant, not relevant, needs follow-up, report candidate, verified, rejected. Status: Case DB search now filters by review status and verification status.
 - Add batch review actions for repetitive results. Status: Case DB API and web panel now support batch verify/reject for selected search results.
-- Add side-by-side diff for text/log evidence, not just compare cards. Status: compare tray now supports A/B text diff for pinned text previews.
+- Add side-by-side diff for text/log evidence, not just compare cards. Status: compare tray supports A/B text diff for pinned text previews, and `rapidtriage compare` now creates hash-backed A/B compare JSON that can be bookmarked into cases and rendered in case reports.
 - Add report template selector: executive summary, technical appendix, legal handoff, hash-only appendix. Status: web/API case report generation now accepts these templates.
 
 Acceptance criteria:

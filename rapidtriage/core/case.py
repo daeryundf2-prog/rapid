@@ -51,6 +51,7 @@ ARTIFACT_KEYS = (
     "source_url",
     "target_path",
     "tab_url",
+    "status",
 )
 REVIEW_STATUSES = ("unreviewed", "relevant", "needs-review", "not-relevant")
 
@@ -60,9 +61,6 @@ CASE_SOURCE_ROWS = {
     "artifacts": "artifacts",
     "timeline": "events",
     "indicators": "indicators",
-}
-
-EXPERIMENTAL_CASE_SOURCE_ROWS = {
     "compare": "results",
 }
 
@@ -72,6 +70,7 @@ CASE_SOURCE_SCHEMAS = {
     "artifacts": "artifacts.schema.json",
     "timeline": "timeline.schema.json",
     "indicators": "indicators.schema.json",
+    "compare": "compare.schema.json",
 }
 
 
@@ -172,11 +171,6 @@ def load_source_payload(path: Path) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise CaseBookmarkError(f"bookmark source must be a JSON object: {resolved}")
     command = str(payload.get("command") or "").strip()
-    if command in EXPERIMENTAL_CASE_SOURCE_ROWS:
-        raise CaseBookmarkError(
-            "bookmark source command 'compare' is not implemented yet; "
-            "case currently supports files, docs, artifacts, timeline, and indicators outputs"
-        )
     if command not in CASE_SOURCE_ROWS:
         supported = ", ".join(sorted(CASE_SOURCE_ROWS))
         raise CaseBookmarkError(f"unsupported bookmark source command {command!r}; expected one of: {supported}")

@@ -26,6 +26,7 @@ from .core.collect_plan import (
     run_collect_export,
     supported_collect_profiles,
 )
+from .core.compare import CompareError, compare_paths
 from .core.docs import build_manifest, run_docs_search, write_result
 from .core.doctor import format_doctor_text, run_doctor
 from .core.evidence import identify_evidence
@@ -99,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage files . --output rapidtriage-files.json
               rapidtriage collect-plan /Volumes/case-mount --profile intrusion --output rapidtriage-collect-plan.json
               rapidtriage collect-export /Volumes/case-mount ./collect-export --profile intrusion --copy
+              rapidtriage compare ./before.txt ./after.txt --output compare.json
               rapidtriage vsc-compare ./current ./vss/snapshot-1 --output vsc-delta.json
               rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
               rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
@@ -298,6 +300,31 @@ def build_parser() -> argparse.ArgumentParser:
     vsc_compare.add_argument("--case-sensitive", action="store_true", help="Compare paths case-sensitively")
     vsc_compare.add_argument("--max-records", type=int, default=10000, help="Maximum change records per snapshot (0 means unlimited)")
     vsc_compare.add_argument("--json", action="store_true", help="Print the full JSON comparison after saving it")
+
+    compare = sub.add_parser(
+        "compare",
+        help="Compare two files for A/B review with hashes and optional text diff",
+        description="Compare two files for analyst A/B review with hashes, field differences, and bounded text diffs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage compare ./before.txt ./after.txt --output compare.json
+              rapidtriage compare ./export-a.evtx.json ./export-b.evtx.json --left-label baseline --right-label suspect --json
+              rapidtriage compare ./large-a.log ./large-b.log --no-text-diff
+            """
+        ),
+    )
+    compare.add_argument("left", help="Left/source file to compare")
+    compare.add_argument("right", help="Right/target file to compare")
+    compare.add_argument("--left-label", default="left", help="Human label for the left file")
+    compare.add_argument("--right-label", default="right", help="Human label for the right file")
+    compare.add_argument("--output", default="rapidtriage-compare.json", help="JSON output path")
+    compare.add_argument("--no-hash", action="store_true", help="Skip MD5/SHA1/SHA256 hashing")
+    compare.add_argument("--no-text-diff", action="store_true", help="Skip bounded text diff preview")
+    compare.add_argument("--max-text-bytes", type=int, default=256 * 1024, help="Maximum per-file bytes for text diff preview")
+    compare.add_argument("--diff-context", type=int, default=3, help="Unified diff context lines")
+    compare.add_argument("--json", action="store_true", help="Print JSON to stdout")
 
     extract = sub.add_parser(
         "extract",
@@ -1373,6 +1400,57 @@ def main(argv=None) -> int:
             print(f"Saved indicators JSON: {output}")
             print(f"Saved audit JSON: {audit_output}")
             print(f"Indicators: {payload['summary']['indicator_count']}")
+        return 0
+
+    if args.command == "compare":
+        left = Path(args.left).expanduser().resolve()
+        right = Path(args.right).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        try:
+            payload = compare_paths(
+                left,
+                right,
+                left_label=args.left_label,
+                right_label=args.right_label,
+                hash_files=not args.no_hash,
+                include_text_diff=not args.no_text_diff,
+                max_text_bytes=args.max_text_bytes,
+                diff_context=args.diff_context,
+            )
+        except CompareError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="compare",
+            options={
+                "left": str(left),
+                "right": str(right),
+                "left_label": args.left_label,
+                "right_label": args.right_label,
+                "output": str(output),
+                "hash": not args.no_hash,
+                "text_diff": not args.no_text_diff,
+                "max_text_bytes": args.max_text_bytes,
+                "diff_context": args.diff_context,
+            },
+            input_files=[("left", left), ("right", right)],
+            output_files=[("compare-json", output)],
+            notes=[
+                "Compare output is review-oriented; preserve the original files and hashes for evidentiary submission.",
+                "Use vsc-compare for directory tree or Volume Shadow Copy comparisons.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            status_counts = summary.get("status_counts", {})
+            status_text = ", ".join(f"{key}={value}" for key, value in status_counts.items())
+            print(f"Saved compare JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(f"Results: {summary['result_count']}  Status: {status_text or 'none'}")
         return 0
 
     if args.command == "vsc-compare":

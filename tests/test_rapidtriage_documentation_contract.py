@@ -47,11 +47,11 @@ class RapidTriageDocumentationContractTests(unittest.TestCase):
         self.assertIn("Experimental:", readme)
         self.assertIn("Planned:", readme)
         self.assertIn(
-            "stores bookmarks from implemented `files`, `docs`, `artifacts`, `timeline`, and `indicators` outputs",
+            "stores bookmarks from implemented `files`, `docs`, `artifacts`, `timeline`, `indicators`, and `compare` outputs",
             readme,
         )
-        self.assertIn("`compare` is not a current producer CLI", readme)
-        self.assertIn("a dedicated `compare` producer/CLI", readme)
+        self.assertIn("`compare` compares two individual evidence/export files", readme)
+        self.assertIn("rapidtriage/schemas/compare.schema.json", readme)
 
     def test_manifest_sample_includes_windows_collectors(self) -> None:
         payload = self.load_sample("rapidtriage-manifest.sample.json")

@@ -68,6 +68,19 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `case-db --import-vsc-compare` stores each change record as `vsc-deleted-file`, `vsc-added-file`, or `vsc-modified-file` artifact rows so they can be searched, reviewed, tagged, and included in reports.
 - `case-search --metadata KEY=VALUE` can narrow artifact results by promoted metadata such as `event_id=4104`, `event_family=execution`, `channel_family=powershell`, `channel=Security`, `status=deleted`, or `snapshot_label=VSC1`.
 
+### `compare`
+
+- Output: `rapidtriage-compare.json`
+- Top-level keys:
+  - `command`
+  - `generated_at`
+  - `options`
+  - `inputs`
+  - `summary`
+  - `results`
+- Each result includes `comparison_id`, `status`, `timestamp`, `path`, `left_path`, `right_path`, `summary`, per-field differences, input descriptors, and a bounded unified text diff when both files are safe UTF-8 text under the configured byte cap.
+- `case` can bookmark `/results/<index>` rows from compare JSON, and `case-report` renders those reviewed rows under `A/B compare review pivots`.
+
 ### `docs`
 
 - Sample: `docs/rapidtriage-output-samples/docs-keyword-search.json`

@@ -1149,6 +1149,7 @@ def normalize_bookmark_source(source: str) -> str:
         "files": "files",
         "docs": "docs",
         "indicators": "indicators",
+        "compare": "compare",
     }
     if normalized in aliases:
         return aliases[normalized]

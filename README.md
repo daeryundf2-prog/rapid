@@ -258,6 +258,7 @@ Schema and sample references:
 - `run-summary`: `rapidtriage/schemas/run-summary.schema.json` + `docs/samples/rapidtriage-run-summary.sample.json`
 - `timeline`: `rapidtriage/schemas/timeline.schema.json`
 - `indicators`: `rapidtriage/schemas/indicators.schema.json`
+- `compare`: `rapidtriage/schemas/compare.schema.json`
 - `case`: `rapidtriage/schemas/case.schema.json`
 - `submission-manifest`: `rapidtriage/schemas/submission-manifest.schema.json`
 - `rule-engine`: `docs/rapidtriage-rule-engine.md` + `docs/samples/rapidtriage-rules.sample.yaml`
@@ -269,6 +270,7 @@ Implemented:
 - `collect-plan` previews KAPE-style Windows/macOS collection targets by profile before scanning or copying evidence. It reports present/missing EventLogs, AccountUsage, BrowserHistory, EvidenceOfExecution, Persistence, RemoteAccess, FileSystemTimeline, and CloudAndSync paths without hashing the whole input root.
 - `collect-export` creates a profile-based evidence package from `collect-plan` targets. It defaults to a dry-run manifest, copies only with `--copy`, preserves source-relative paths under `OUTPUT_DIR/evidence`, records SHA256/source/destination/size/mtime, and skips broad inventory-only directories to avoid accidental whole-profile exports.
 - `vsc-compare` compares a current mounted/exported tree with one or more Volume Shadow Copy snapshot folders, surfacing deleted, added, and modified file candidates with optional SHA256 confirmation.
+- `compare` compares two individual evidence/export files for A/B review, records MD5/SHA1/SHA256, field differences, and a bounded unified text diff when safe.
 - `extract` copies selected `files` or `docs` results into an output directory with overwrite guards, size/count limits, hashes, and manifest/audit output.
 - `artifacts` exposes dedicated collectors for `browser`, `recent-files`, `eventlog`, `windows-os-account`, `windows-execution`, `windows-prefetch`, `windows-filesystem`, `windows-system`, `linux-system`, `macos-system`, `android-apk`, `media-image`, `memory-volatility`, and `cloud-export`. Browser artifacts include web usage pivots, source hashes, AI-service visit detections, and review-only AI conversation candidates recovered from browser storage for common tools such as ChatGPT, Claude, Gemini, Perplexity, and Copilot; Linux artifacts include shell history, SSH, auth log, cron, and systemd pivots; macOS artifacts include TCC privacy permissions; memory artifacts include Volatility imports plus bounded direct dump scans for redacted BitLocker key candidates, suspicious strings, URLs, and IPs.
 - `indicators` summarizes URL, domain, IP, and hash indicators from completed run outputs, keeps source pointers, and can apply local `--rules` IOC matches without calling external threat-intelligence APIs.
@@ -276,9 +278,9 @@ Implemented:
 - Direct `.E01` input is supported for `run` when `ewfmount`, `mmls`, and `tsk_recover` are available; `rapidtriage-e01.json` records the extracted filesystem root and selected partition offset.
 - `search` searches a completed run across document/log text, file metadata, browser/web/AI-usage artifacts, indicator pivots, timeline rows, and optional OCR over image candidates.
 - `timeline` merges `files`, `docs`, and `artifacts` JSON into chronological events and writes JSON plus markdown.
-- `case` stores bookmarks from implemented `files`, `docs`, `artifacts`, `timeline`, and `indicators` outputs, validates source schemas, and persists stable `reference`, minimal `snapshot`, analyst `review` status, tags, notes, and report-candidate markers.
+- `case` stores bookmarks from implemented `files`, `docs`, `artifacts`, `timeline`, `indicators`, and `compare` outputs, validates source schemas, and persists stable `reference`, minimal `snapshot`, analyst `review` status, tags, notes, and report-candidate markers.
 - `submission-manifest` hashes report-candidate case evidence with MD5, SHA1, and SHA256, preserves review/bookmark context, skips unavailable or out-of-scope paths, and writes an audit sidecar.
-- `case-report` writes a Korean/English-friendly Markdown report draft with case metadata, analysis scope, reviewed evidence, IOC/indicator review pivots, hashes, skipped hash rows, conclusion text, and audit sidecar.
+- `case-report` writes a Korean/English-friendly Markdown report draft with case metadata, analysis scope, reviewed evidence, IOC/indicator review pivots, A/B compare review pivots, hashes, skipped hash rows, conclusion text, and audit sidecar.
 - `web` starts a local FastAPI server with a browser UI for launching runs, importing existing outputs, searching evidence, previewing source files, reviewing hits, organizing case findings, downloading generated files, and reading reports.
 - `case-db` initializes the experimental SQLite case database v1 with tables for cases, evidence sources, files, hashes, artifacts, events, indexed documents/FTS, reviews, audit events, report items, jobs, and stable citation ID sequences.
 - `case-search` searches imported SQLite case databases across FTS-indexed documents, file records, artifacts, indicator pivots, and timeline events while preserving citation IDs; artifact and indicator hits expose reviewable source paths plus key Windows and macOS metadata for event logs, PowerShell history, MFT/USN rows, browser history, AI-service usage, quarantine events, LaunchAgents, and IOC values.
@@ -296,13 +298,11 @@ Implemented:
 
 Experimental:
 
-- `compare` is not a current producer CLI. `case` rejects `compare` JSON sources, and `run`/report output only reserve a placeholder section for future compare findings.
-- `report` keeps an optional compare slot in markdown/context so a future compare producer can attach without reworking the template.
+- `report` keeps an optional compare slot in markdown/context so run-level compare findings can be attached by future workflows.
 
 Planned:
 
-- a dedicated `compare` producer/CLI with JSON schema and end-to-end case/report integration
-- any future case source beyond `files`, `docs`, `artifacts`, `timeline`, and `indicators`
+- any future case source beyond `files`, `docs`, `artifacts`, `timeline`, `indicators`, and `compare`
 
 ## Integrity
 
