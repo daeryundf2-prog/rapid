@@ -51,7 +51,7 @@ rapidtriage run ./mounted-case-folder --mode fraud --output-dir ./case-run --rea
 
 - Direct E01 extraction selects the first likely filesystem partition; complex multi-partition analysis should be mounted/exported externally.
 - Deep deleted-file carving is not implemented.
-- Volume Shadow Copy comparison is not implemented.
+- Volume Shadow Copy comparison is available through `rapidtriage vsc-compare` after VSC/current folders are mounted or exported; direct VSC extraction from an E01 is still external-tool/operator work.
 - Tool versions and extraction actions are recorded in run outputs/audit records, but full commercial chain-of-custody automation is still roadmap work.
 
 ## Analyst Rule

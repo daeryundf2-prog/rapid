@@ -103,6 +103,7 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertIn("--mode", run_help)
         self.assertIn("fraud", run_help)
         self.assertIn("hacking", run_help)
+        self.assertIn("--resume", run_help)
 
     def test_run_fraud_mode_writes_component_outputs_summary_and_report(self) -> None:
         self.assert_run_mode_outputs("fraud")
@@ -154,6 +155,34 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertGreaterEqual(docs_extract_payload["summary"]["skipped_count"], 1)
             self.assertEqual(files_extract_payload["summary"]["extracted_count"], 0)
             self.assertGreaterEqual(files_extract_payload["summary"]["skipped_count"], 1)
+
+    def test_run_resume_reuses_valid_stage_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)]), 0)
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir), "--resume"]), 0)
+
+            summary_payload: dict[str, Any] = json.loads(
+                (output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(summary_payload["safety"]["resume"], True)
+            self.assertIn("docs", summary_payload["safety"]["reused_outputs"])
+            self.assertIn("files", summary_payload["safety"]["reused_outputs"])
+            self.assertIn("timeline", summary_payload["safety"]["reused_outputs"])
+            self.assertGreaterEqual(summary_payload["processing"]["reused_output_count"], 5)
+
+            step_statuses = {step["name"]: step["status"] for step in summary_payload["steps"]}
+            self.assertEqual(step_statuses["docs"], "reused")
+            self.assertEqual(step_statuses["files"], "reused")
+            self.assertEqual(step_statuses["timeline"], "reused")
+
+            report_text = (output_dir / "rapidtriage-run-report.md").read_text(encoding="utf-8")
+            self.assertIn("Resume/reuse outputs: True", report_text)
+            self.assertIn("Reused outputs:", report_text)
 
     def test_search_command_finds_keyword_across_completed_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

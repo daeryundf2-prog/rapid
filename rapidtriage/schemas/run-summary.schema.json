@@ -140,7 +140,9 @@
         "read_only",
         "max_extract_size_bytes",
         "max_file_count",
-        "overwrite"
+        "overwrite",
+        "resume",
+        "reused_outputs"
       ],
       "properties": {
         "dry_run": {
@@ -157,6 +159,15 @@
         },
         "overwrite": {
           "type": "boolean"
+        },
+        "resume": {
+          "type": "boolean"
+        },
+        "reused_outputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -197,6 +208,9 @@
         "dry_run",
         "read_only",
         "overwrite",
+        "resume",
+        "reused_output_count",
+        "reused_outputs",
         "caps",
         "step_count",
         "warning_count",
@@ -215,6 +229,18 @@
         },
         "overwrite": {
           "type": "boolean"
+        },
+        "resume": {
+          "type": "boolean"
+        },
+        "reused_output_count": {
+          "type": "integer"
+        },
+        "reused_outputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "caps": {
           "type": "object",

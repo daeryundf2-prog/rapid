@@ -357,7 +357,8 @@ Current run modes:
 `processing` records user-facing run evidence:
 
 - inferred profile label
-- read-only, dry-run, overwrite, and cap settings
+- read-only, dry-run, overwrite, resume, and cap settings
+- reused output count and reused step names when `run --resume` accepts existing stage JSON
 - warning count and highest warning level
 - per-step warning messages for empty outputs, read-only skips, capped extraction, or missing source paths
 

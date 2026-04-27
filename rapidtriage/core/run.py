@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -164,6 +165,7 @@ def run_triage_mode(
     max_extract_size_bytes: int = 0,
     max_file_count: int = 0,
     overwrite: bool = False,
+    resume: bool = False,
     rule_set: RuleSet | None = None,
 ) -> Dict[str, object]:
     normalized_mode = mode.lower()
@@ -200,17 +202,43 @@ def run_triage_mode(
     if e01_result is not None:
         write_result(e01_result.to_dict(), e01_metadata_path)
 
-    manifest_payload = build_manifest(input_root, profile.keywords)
-    docs_payload = run_docs_search(scan_input_root, profile.keywords, rule_set=rule_set, index_output=docs_index_path)
+    reused_outputs: set[str] = set()
+
+    manifest_payload, reused = load_or_build_json(
+        manifest_path,
+        resume=resume,
+        required_keys=("providers",),
+        producer=lambda: build_manifest(input_root, profile.keywords),
+    )
+    if reused:
+        reused_outputs.add("manifest")
+
+    docs_payload, reused = load_or_build_json(
+        docs_path,
+        resume=resume and docs_index_path.is_file(),
+        expected_command="docs",
+        required_keys=("summary", "results"),
+        producer=lambda: run_docs_search(scan_input_root, profile.keywords, rule_set=rule_set, index_output=docs_index_path),
+    )
+    if reused:
+        reused_outputs.update({"docs", "docs-index"})
     docs_payload["manifest"] = manifest_payload
     docs_payload["scan_scope_root"] = str(scan_input_root.root_path)
 
-    files_payload = run_files_scan(
-        scan_input_root,
-        categories=profile.file_scan_categories,
-        path_contains=profile.file_scan_path_contains or None,
-        rule_set=rule_set,
+    files_payload, reused = load_or_build_json(
+        files_path,
+        resume=resume,
+        expected_command="files",
+        required_keys=("summary", "candidates"),
+        producer=lambda: run_files_scan(
+            scan_input_root,
+            categories=profile.file_scan_categories,
+            path_contains=profile.file_scan_path_contains or None,
+            rule_set=rule_set,
+        ),
     )
+    if reused:
+        reused_outputs.add("files")
     files_payload["scan_scope_root"] = str(scan_input_root.root_path)
 
     write_result(manifest_payload, manifest_path)
@@ -221,42 +249,74 @@ def run_triage_mode(
     artifact_payloads: Dict[str, Dict[str, object]] = {}
     for kind in profile.artifacts_kinds:
         artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
-        artifact_payload = run_artifact_collection(input_root, kind=kind, rule_set=rule_set)
+        artifact_payload, reused = load_or_build_json(
+            artifact_path,
+            resume=resume,
+            expected_command="artifacts",
+            required_keys=("summary", "artifacts"),
+            producer=lambda kind=kind: run_artifact_collection(input_root, kind=kind, rule_set=rule_set),
+        )
+        if reused:
+            reused_outputs.add(f"artifacts-{kind}")
         artifact_outputs[kind] = artifact_path
         artifact_payloads[kind] = artifact_payload
         write_result(artifact_payload, artifact_path)
 
-    docs_extract_payload = run_extract(
-        docs_path,
-        docs_extract_dir,
-        kinds=profile.docs_extract_kinds,
-        dry_run=dry_run,
-        read_only=read_only,
-        max_extract_size_bytes=max_extract_size_bytes,
-        max_file_count=max_file_count,
-        overwrite=overwrite,
+    docs_extract_payload, reused = load_or_build_json(
+        docs_extract_manifest,
+        resume=resume,
+        expected_command="extract",
+        required_keys=("summary", "entries", "skipped"),
+        producer=lambda: run_extract(
+            docs_path,
+            docs_extract_dir,
+            kinds=profile.docs_extract_kinds,
+            dry_run=dry_run,
+            read_only=read_only,
+            max_extract_size_bytes=max_extract_size_bytes,
+            max_file_count=max_file_count,
+            overwrite=overwrite,
+        ),
     )
-    files_extract_payload = run_extract(
-        files_path,
-        files_extract_dir,
-        categories=profile.file_extract_categories,
-        dry_run=dry_run,
-        read_only=read_only,
-        max_extract_size_bytes=max_extract_size_bytes,
-        max_file_count=max_file_count,
-        overwrite=overwrite,
+    if reused:
+        reused_outputs.add("docs-extract")
+    files_extract_payload, reused = load_or_build_json(
+        files_extract_manifest,
+        resume=resume,
+        expected_command="extract",
+        required_keys=("summary", "entries", "skipped"),
+        producer=lambda: run_extract(
+            files_path,
+            files_extract_dir,
+            categories=profile.file_extract_categories,
+            dry_run=dry_run,
+            read_only=read_only,
+            max_extract_size_bytes=max_extract_size_bytes,
+            max_file_count=max_file_count,
+            overwrite=overwrite,
+        ),
     )
+    if reused:
+        reused_outputs.add("files-extract")
     write_result(docs_extract_payload, docs_extract_manifest)
     write_result(files_extract_payload, files_extract_manifest)
 
-    timeline_payload = run_timeline(
-        root=input_root.root_path,
-        input_kind=input_root.kind,
-        files_inputs=[files_path],
-        docs_inputs=[docs_path],
-        artifacts_inputs=list(artifact_outputs.values()),
-        rule_set=rule_set,
+    timeline_payload, reused = load_or_build_json(
+        timeline_path,
+        resume=resume,
+        expected_command="timeline",
+        required_keys=("summary", "events"),
+        producer=lambda: run_timeline(
+            root=input_root.root_path,
+            input_kind=input_root.kind,
+            files_inputs=[files_path],
+            docs_inputs=[docs_path],
+            artifacts_inputs=list(artifact_outputs.values()),
+            rule_set=rule_set,
+        ),
     )
+    if reused:
+        reused_outputs.add("timeline")
     write_result(timeline_payload, timeline_path)
     timeline_report_path.write_text(build_timeline_report(timeline_payload), encoding="utf-8")
 
@@ -271,10 +331,18 @@ def run_triage_mode(
         "timeline_report": timeline_report_path,
         **{f"artifacts_{kind}": path for kind, path in artifact_outputs.items()},
     }
-    indicators_payload = build_indicator_summary(
-        {"outputs": {key: str(path) for key, path in provisional_outputs.items()}},
-        rule_set=rule_set,
+    indicators_payload, reused = load_or_build_json(
+        indicators_path,
+        resume=resume,
+        expected_command="indicators",
+        required_keys=("summary", "indicators"),
+        producer=lambda: build_indicator_summary(
+            {"outputs": {key: str(path) for key, path in provisional_outputs.items()}},
+            rule_set=rule_set,
+        ),
     )
+    if reused:
+        reused_outputs.add("indicators")
     write_result(indicators_payload, indicators_path)
 
     outputs = {
@@ -312,6 +380,8 @@ def run_triage_mode(
             "max_extract_size_bytes": max_extract_size_bytes,
             "max_file_count": max_file_count,
             "overwrite": overwrite,
+            "resume": resume,
+            "reused_outputs": sorted(reused_outputs),
         },
         rule_set=rule_set,
         source=build_run_source_record(input_root, e01_result=e01_result),
@@ -346,6 +416,8 @@ def run_triage_mode(
             "max_extract_size_bytes": max_extract_size_bytes,
             "max_file_count": max_file_count,
             "overwrite": overwrite,
+            "resume": resume,
+            "reused_outputs": sorted(reused_outputs),
             "e01_source": str(e01_result.source_path) if e01_result else None,
             "e01_extracted_root": str(e01_result.extract_dir) if e01_result else None,
         },
@@ -375,6 +447,42 @@ def run_triage_mode(
         ],
     )
     return summary_payload
+
+
+def load_or_build_json(
+    path: Path,
+    *,
+    resume: bool,
+    producer,
+    expected_command: str | None = None,
+    required_keys: Sequence[str] = (),
+) -> tuple[Dict[str, object], bool]:
+    if resume:
+        payload = load_reusable_json(path, expected_command=expected_command, required_keys=required_keys)
+        if payload is not None:
+            return payload, True
+    return producer(), False
+
+
+def load_reusable_json(
+    path: Path,
+    *,
+    expected_command: str | None,
+    required_keys: Sequence[str],
+) -> Dict[str, object] | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if expected_command is not None and payload.get("command") != expected_command:
+        return None
+    if any(key not in payload for key in required_keys):
+        return None
+    return payload
 
 
 def prepare_run_input_root(
@@ -460,6 +568,7 @@ def build_run_summary(
     recent_candidates = summarize_file_candidates(files_payload.get("candidates", []), limit=5)
     large_candidates = summarize_large_file_candidates(files_payload.get("candidates", []), limit=5)
 
+    reused_outputs = {str(item) for item in safety.get("reused_outputs", [])} if isinstance(safety.get("reused_outputs"), list) else set()
     step_rows = build_step_rows(
         manifest_payload=manifest_payload,
         docs_payload=docs_payload,
@@ -470,6 +579,7 @@ def build_run_summary(
         timeline_payload=timeline_payload,
         indicators_payload=indicators_payload,
         outputs=outputs,
+        reused_outputs=reused_outputs,
     )
     processing_summary = build_processing_summary(step_rows, safety=safety)
 
@@ -545,14 +655,17 @@ def build_step_rows(
     timeline_payload: Mapping[str, object],
     indicators_payload: Mapping[str, object],
     outputs: Mapping[str, Path],
+    reused_outputs: set[str] | None = None,
 ) -> List[Dict[str, object]]:
+    reused_outputs = reused_outputs or set()
     provider_count = len(manifest_payload.get("providers", []))
     artifact_count_by_kind = {
         kind: int(payload.get("summary", {}).get("artifact_count", 0))
         for kind, payload in artifact_payloads.items()
     }
     rows: List[Dict[str, object]] = [
-        annotate_step(
+        mark_reused_step(
+            annotate_step(
             {
                 "name": "manifest",
                 "status": "completed",
@@ -561,8 +674,11 @@ def build_step_rows(
             },
             warning_level="notice" if provider_count == 0 else "none",
             warning_messages=["No manifest providers were collected."] if provider_count == 0 else [],
+            ),
+            reused_outputs,
         ),
-        annotate_step(
+        mark_reused_step(
+            annotate_step(
             {
                 "name": "docs",
                 "status": "completed",
@@ -572,8 +688,11 @@ def build_step_rows(
             },
             warning_level=docs_warning_level(docs_payload),
             warning_messages=docs_warning_messages(docs_payload),
+            ),
+            reused_outputs,
         ),
-        annotate_step(
+        mark_reused_step(
+            annotate_step(
             {
                 "name": "docs-index",
                 "status": "completed",
@@ -584,8 +703,11 @@ def build_step_rows(
             },
             warning_level=docs_index_warning_level(docs_payload),
             warning_messages=docs_index_warning_messages(docs_payload),
+            ),
+            reused_outputs,
         ),
-        annotate_step(
+        mark_reused_step(
+            annotate_step(
             {
                 "name": "files",
                 "status": "completed",
@@ -595,12 +717,15 @@ def build_step_rows(
             },
             warning_level=files_warning_level(files_payload),
             warning_messages=files_warning_messages(files_payload),
+            ),
+            reused_outputs,
         ),
     ]
     for kind, payload in artifact_payloads.items():
         artifact_count = artifact_count_by_kind[kind]
         rows.append(
-            annotate_step(
+            mark_reused_step(
+                annotate_step(
                 {
                     "name": f"artifacts-{kind}",
                     "status": "completed",
@@ -609,6 +734,8 @@ def build_step_rows(
                 },
                 warning_level="notice" if artifact_count == 0 else "none",
                 warning_messages=[f"No {kind} artifact rows were collected."] if artifact_count == 0 else [],
+                ),
+                reused_outputs,
             )
         )
     docs_extract_step = build_extract_step(
@@ -628,7 +755,8 @@ def build_step_rows(
         [
             docs_extract_step,
             files_extract_step,
-            annotate_step(
+            mark_reused_step(
+                annotate_step(
                 {
                     "name": "timeline",
                     "status": "completed",
@@ -642,8 +770,11 @@ def build_step_rows(
                 ]
                 if timeline_count == 0
                 else [],
+                ),
+                reused_outputs,
             ),
-            annotate_step(
+            mark_reused_step(
+                annotate_step(
                 {
                     "name": "indicators",
                     "status": "completed",
@@ -657,10 +788,12 @@ def build_step_rows(
                 ]
                 if indicator_count == 0
                 else [],
+                ),
+                reused_outputs,
             ),
         ]
     )
-    return rows
+    return [mark_reused_step(row, reused_outputs) for row in rows]
 
 
 def build_processing_summary(
@@ -687,6 +820,8 @@ def build_processing_summary(
     max_file_count = int(safety.get("max_file_count") or 0)
     read_only = bool(safety.get("read_only"))
     dry_run = bool(safety.get("dry_run"))
+    resume = bool(safety.get("resume"))
+    reused_outputs = [str(item) for item in safety.get("reused_outputs", [])] if isinstance(safety.get("reused_outputs"), list) else []
     profile_label = infer_processing_profile_label(
         read_only=read_only,
         dry_run=dry_run,
@@ -698,6 +833,9 @@ def build_processing_summary(
         "dry_run": dry_run,
         "read_only": read_only,
         "overwrite": bool(safety.get("overwrite")),
+        "resume": resume,
+        "reused_output_count": len(reused_outputs),
+        "reused_outputs": reused_outputs,
         "caps": {
             "max_extract_size_bytes": max_extract_size,
             "max_file_count": max_file_count,
@@ -707,6 +845,16 @@ def build_processing_summary(
         "highest_warning_level": highest_warning_level([str(item["level"]) for item in warnings]),
         "warnings": warnings,
     }
+
+
+def mark_reused_step(row: Dict[str, object], reused_outputs: set[str]) -> Dict[str, object]:
+    name = str(row.get("name") or "")
+    if name in reused_outputs:
+        row["status"] = "reused"
+        row["reused"] = True
+    else:
+        row["reused"] = False
+    return row
 
 
 def infer_processing_profile_label(

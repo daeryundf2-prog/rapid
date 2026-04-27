@@ -52,7 +52,7 @@ Tasks:
 
 - Add visible processing summary before run: selected mode, profile, expected heavy steps, caps, and skipped areas. Status: implemented with a run-plan preview under the processing profile selector.
 - Add parser/job warning badges: completed, skipped, failed, zero rows, capped, read-only skipped. Status: run summary now records warning levels/messages, skip reasons, capped extraction, zero-row notices, and read-only skips.
-- Add run resume/retry behavior: same output directory should reuse completed outputs and rerun failed/skipped stages safely. Status: partially covered by overwrite-safe extraction and explicit skip reasons; full selective resume remains a 75+ hardening item.
+- Add run resume/retry behavior: same output directory should reuse completed outputs and rerun failed/skipped stages safely. Status: `run --resume` now reuses valid existing stage JSON outputs, reruns missing/invalid stages, and records reused steps in summary/report processing transparency.
 - Add progress log view in UI with current stage and last processed path where available. Status: active job steps are shown during running; completed run summaries now expose step-level evidence.
 - Add "fast first pass" as the default and make deep extraction an explicit choice. Status: implemented in the processing profile selector and persisted web form defaults.
 

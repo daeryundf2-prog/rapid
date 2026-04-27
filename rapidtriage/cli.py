@@ -738,6 +738,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-extract-size-bytes", type=int, default=0, help="Cap total copied bytes per extract stage (0 means unlimited)")
     run.add_argument("--max-file-count", type=int, default=0, help="Cap copied files per extract stage (0 means unlimited)")
     run.add_argument("--overwrite", action="store_true", help="Allow extract stages to overwrite existing output files")
+    run.add_argument("--resume", action="store_true", help="Reuse valid existing stage JSON outputs in OUTPUT_DIR and rerun missing or invalid stages")
     add_rules_argument(run)
 
     web = sub.add_parser(
@@ -1624,6 +1625,7 @@ def main(argv=None) -> int:
                 max_extract_size_bytes=args.max_extract_size_bytes,
                 max_file_count=args.max_file_count,
                 overwrite=args.overwrite,
+                resume=args.resume,
                 rule_set=rule_set,
             )
         except RunModeError as exc:
