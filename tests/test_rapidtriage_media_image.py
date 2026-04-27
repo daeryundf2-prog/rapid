@@ -5,8 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import cv2
-import numpy as np
+from PIL import Image
 
 from rapidtriage.cli import build_parser, main
 
@@ -63,10 +62,11 @@ class RapidTriageMediaImageTests(unittest.TestCase):
 
 
 def write_image_fixture(path: Path) -> None:
-    image = np.zeros((16, 16, 3), dtype=np.uint8)
-    image[:, :8] = (255, 255, 255)
-    if not cv2.imwrite(str(path), image):
-        raise RuntimeError(f"failed to write image fixture: {path}")
+    image = Image.new("RGB", (16, 16), "black")
+    for x in range(8):
+        for y in range(16):
+            image.putpixel((x, y), (255, 255, 255))
+    image.save(path)
 
 
 if __name__ == "__main__":

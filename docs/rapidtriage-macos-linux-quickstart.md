@@ -64,6 +64,26 @@ sh scripts/start-rapidtriage.sh --no-browser
 5. Use `Check evidence support` on real evidence before running it.
 6. Use `Fast first pass` for large cases before any deep extraction.
 
+## Release Smoke Test
+
+Before handing a macOS/Linux build to another analyst, run the automated smoke test:
+
+```bash
+sh scripts/smoke-test-rapidtriage.sh
+```
+
+The smoke test installs the package, runs `doctor`, creates and searches the sample case, runs a small benchmark, builds the validation package, checks evidence-support guidance, and confirms the web UI returns HTTP 200. Outputs are written to:
+
+```text
+rapidtriage-macos-linux-smoke
+```
+
+If another process is using the default smoke-test port, run:
+
+```bash
+sh scripts/smoke-test-rapidtriage.sh --port 8899
+```
+
 ## Evidence Input Guidance
 
 Mounted folders and exported evidence folders are the safest input.

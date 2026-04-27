@@ -222,6 +222,14 @@ def build_recommended_commands() -> list[dict[str, str]]:
             "name": "windows-smoke-test",
             "command": ".\\scripts\\windows\\smoke-test-rapidtriage.ps1",
         },
+        {
+            "name": "macos-linux-smoke-test",
+            "command": "sh scripts/smoke-test-rapidtriage.sh",
+        },
+        {
+            "name": "release-checksums",
+            "command": "python scripts/build-release.py --output-dir release",
+        },
     ]
 
 

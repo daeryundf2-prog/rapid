@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -29,18 +30,28 @@ def main(argv: list[str] | None = None) -> int:
     with zipfile.ZipFile(portable_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         add_if_exists(archive, repo / "README.md", "README.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-windows-quickstart.md", "docs/rapidtriage-windows-quickstart.md")
+        add_if_exists(archive, repo / "docs" / "rapidtriage-macos-linux-quickstart.md", "docs/rapidtriage-macos-linux-quickstart.md")
+        add_if_exists(archive, repo / "docs" / "rapidtriage-fresh-machine-smoke-test.md", "docs/rapidtriage-fresh-machine-smoke-test.md")
+        add_if_exists(archive, repo / "docs" / "rapidtriage-e01-workflow.md", "docs/rapidtriage-e01-workflow.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-user-guide.md", "docs/rapidtriage-user-guide.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-known-limitations.md", "docs/rapidtriage-known-limitations.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-parser-coverage.md", "docs/rapidtriage-parser-coverage.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-security-policy.md", "docs/rapidtriage-security-policy.md")
+        add_if_exists(archive, repo / "docs" / "rapidtriage-release-checklist.md", "docs/rapidtriage-release-checklist.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-release-notes-template.md", "docs/rapidtriage-release-notes-template.md")
+        add_if_exists(archive, repo / "scripts" / "start-rapidtriage.sh", "scripts/start-rapidtriage.sh")
+        add_if_exists(archive, repo / "scripts" / "smoke-test-rapidtriage.sh", "scripts/smoke-test-rapidtriage.sh")
         add_tree(archive, repo / "scripts" / "windows", "scripts/windows")
         archive.writestr("data/.gitkeep", "")
         archive.writestr("cases/.gitkeep", "")
         archive.writestr("logs/.gitkeep", "")
         archive.writestr("tools/.gitkeep", "")
 
+    write_dependency_inventory(output_dir)
+    write_sha256s(output_dir)
+
     print(f"Built portable zip: {portable_zip}")
+    print(f"Wrote checksums: {output_dir / 'SHA256SUMS'}")
     return 0
 
 
@@ -55,6 +66,35 @@ def add_tree(archive: zipfile.ZipFile, root: Path, arcroot: str) -> None:
     for path in sorted(root.rglob("*")):
         if path.is_file():
             archive.write(path, f"{arcroot}/{path.relative_to(root)}")
+
+
+def write_dependency_inventory(output_dir: Path) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "freeze"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    inventory = output_dir / "dependency-inventory.txt"
+    header = [
+        "# RapidTriage dependency inventory",
+        f"# Python executable: {sys.executable}",
+        f"# pip freeze exit code: {result.returncode}",
+        "",
+    ]
+    body = result.stdout if result.stdout.strip() else result.stderr
+    inventory.write_text("\n".join(header) + body, encoding="utf-8")
+
+
+def write_sha256s(output_dir: Path) -> None:
+    checksum_path = output_dir / "SHA256SUMS"
+    rows: list[str] = []
+    for path in sorted(output_dir.iterdir()):
+        if not path.is_file() or path.name == checksum_path.name:
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        rows.append(f"{digest}  {path.name}")
+    checksum_path.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
 
 
 if __name__ == "__main__":

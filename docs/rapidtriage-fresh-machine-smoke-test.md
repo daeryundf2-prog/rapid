@@ -40,14 +40,22 @@ Use this checklist before claiming a release is usable by a normal Windows/macOS
 sh scripts/start-rapidtriage.sh
 ```
 
-5. Confirm the browser opens `http://127.0.0.1:8765` or the script prints the URL.
-6. Repeat the same runtime, sample, search, viewer, review, hash, report, and evidence-support checks from the Windows section.
+5. In a second terminal, run:
+
+```bash
+sh scripts/smoke-test-rapidtriage.sh
+```
+
+6. Confirm the browser opens `http://127.0.0.1:8765` or the script prints the URL.
+7. Repeat the same runtime, sample, search, viewer, review, hash, report, and evidence-support checks from the Windows section.
+8. Attach the generated `rapidtriage-macos-linux-smoke` folder to the release evidence package.
 
 ## Pass Criteria
 
 - The app starts without manual Python package commands.
 - The sample case completes.
 - The automated smoke test completes and writes doctor, sample, search, benchmark, validation, evidence-support, and web-index outputs.
+- Windows and macOS/Linux smoke outputs are attached when both platforms are claimed.
 - The first screen tells the user what to do next.
 - Unsupported direct image formats produce clear mount/export guidance.
 - Missing OCR/E01 tools are visible as optional limitations.

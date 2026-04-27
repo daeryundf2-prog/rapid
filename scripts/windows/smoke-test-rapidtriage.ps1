@@ -3,6 +3,7 @@ param(
     [string]$HostName = "127.0.0.1",
     [int]$Port = 8877,
     [string]$OutputDir = "rapidtriage-windows-smoke",
+    [string]$VenvDir = ".rapidtriage-smoke-venv",
     [switch]$Reinstall,
     [switch]$SkipWeb
 )
@@ -11,7 +12,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+$VenvRoot = if ([System.IO.Path]::IsPathRooted($VenvDir)) { $VenvDir } else { Join-Path $RepoRoot $VenvDir }
+$VenvPython = Join-Path $VenvRoot "Scripts\python.exe"
 $SmokeDir = Join-Path $RepoRoot $OutputDir
 $WebUrl = "http://${HostName}:${Port}"
 
@@ -60,14 +62,14 @@ function Invoke-CheckedPython {
 Set-Location $RepoRoot
 New-Item -ItemType Directory -Force -Path $SmokeDir | Out-Null
 
-if ($Reinstall -and (Test-Path $VenvPython)) {
-    Write-Step "Removing existing virtual environment"
-    Remove-Item -Recurse -Force (Join-Path $RepoRoot ".venv")
+if ($Reinstall -and (Test-Path $VenvRoot)) {
+    Write-Step "Removing existing smoke-test virtual environment"
+    Remove-Item -Recurse -Force $VenvRoot
 }
 
 if (!(Test-Path $VenvPython)) {
-    Write-Step "Creating Python virtual environment"
-    $code = Invoke-SystemPython @("-m", "venv", ".venv")
+    Write-Step "Creating smoke-test Python virtual environment"
+    $code = Invoke-SystemPython @("-m", "venv", $VenvRoot)
     if ($code -ne 0) {
         exit $code
     }

@@ -92,6 +92,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("validation-package", command_names)
             self.assertIn("windows-signature-verify", command_names)
             self.assertIn("windows-smoke-test", command_names)
+            self.assertIn("macos-linux-smoke-test", command_names)
+            self.assertIn("release-checksums", command_names)
 
     def test_case_catalog_adds_exports_and_imports_case(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -205,11 +207,20 @@ class RapidTriageOpsTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((output_dir / "rapidtriage-portable.zip").is_file())
+            self.assertTrue((output_dir / "SHA256SUMS").is_file())
+            self.assertTrue((output_dir / "dependency-inventory.txt").is_file())
             with zipfile.ZipFile(output_dir / "rapidtriage-portable.zip") as archive:
                 names = set(archive.namelist())
+            self.assertIn("scripts/start-rapidtriage.sh", names)
+            self.assertIn("scripts/smoke-test-rapidtriage.sh", names)
             self.assertIn("scripts/windows/start-rapidtriage.ps1", names)
             self.assertIn("scripts/windows/smoke-test-rapidtriage.ps1", names)
             self.assertIn("scripts/windows/smoke-test-rapidtriage.bat", names)
+            self.assertIn("docs/rapidtriage-macos-linux-quickstart.md", names)
+            self.assertIn("docs/rapidtriage-fresh-machine-smoke-test.md", names)
+            checksums = (output_dir / "SHA256SUMS").read_text(encoding="utf-8")
+            self.assertIn("rapidtriage-portable.zip", checksums)
+            self.assertIn("dependency-inventory.txt", checksums)
 
 
 if __name__ == "__main__":

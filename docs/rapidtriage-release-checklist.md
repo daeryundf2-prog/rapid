@@ -10,6 +10,8 @@
 - Run `rapidtriage benchmark --output-dir ./release-benchmark --file-count 1000 --overwrite`.
 - Run `rapidtriage validation --output-dir ./release-validation --overwrite`.
 - On Windows, run `.\scripts\windows\smoke-test-rapidtriage.ps1`.
+- On macOS/Linux, run `sh scripts/smoke-test-rapidtriage.sh`.
+- Run `python scripts/build-release.py --output-dir release` and attach `SHA256SUMS` plus `dependency-inventory.txt`.
 - Run the Windows/macOS usability checklist in `docs/rapidtriage-fresh-machine-smoke-test.md` before calling the release analyst-ready.
 - Attach SHA256 checksums, dependency inventory/SBOM, and signing/notarization verification output for every distributed artifact.
 - Attach independent validation notes for parser corpus, large-case performance, and legal/report wording review.

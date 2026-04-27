@@ -3,5 +3,8 @@
 .omx/reports/
 .omx/team/
 .venv/
+.rapidtriage-smoke-venv/
+rapidtriage-windows-smoke/
+rapidtriage-macos-linux-smoke/
 __pycache__/
 *.pyc
