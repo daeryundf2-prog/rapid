@@ -185,6 +185,7 @@ On mounted or exported macOS evidence, `macos-system` collects a baseline set of
 - LaunchServices quarantine events, useful for downloaded-file provenance.
 - TCC privacy permission rows for camera, microphone, screen capture, accessibility, full-disk access, and protected folders, including risk flags for allowed high-value permissions and user-writable clients.
 - User and system LaunchAgent/LaunchDaemon plist inventory, including label, program arguments, and `RunAtLoad`.
+- Native inventory/string pivots for Unified Logs (`tracev3`/`uuidtext`), Spotlight stores, FSEvents files, and APFS snapshot hints so large macOS evidence can be searched and reviewed before dedicated macOS parser validation.
 
 Use:
 

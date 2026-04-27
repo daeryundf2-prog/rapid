@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import plistlib
+import re
 import sqlite3
 from pathlib import Path
 from typing import Iterable
@@ -17,7 +18,8 @@ from .windows.browser import (
 )
 from .windows.common import open_sqlite_snapshot
 
-PARSER_VERSION = "macos-system-v2"
+PARSER_VERSION = "macos-system-v3"
+NATIVE_SCAN_LIMIT = 8 * 1024 * 1024
 MACOS_EPOCH = dt.datetime(2001, 1, 1, tzinfo=dt.timezone.utc)
 SKIP_USERS = {"shared", "guest", "daemon", "nobody"}
 CHROMIUM_BROWSER_ROOTS = (
@@ -34,6 +36,24 @@ LAUNCH_AGENT_DIRS = (
 )
 USER_TCC_DB = ("Library", "Application Support", "com.apple.TCC", "TCC.db")
 SYSTEM_TCC_DB = ("Library", "Application Support", "com.apple.TCC", "TCC.db")
+MACOS_NATIVE_TARGETS = (
+    ("macos-unified-log-file", "macos-unified-log-native-inventory", ("private", "var", "db", "diagnostics"), {".tracev3", ".uuidtext", ".timesync"}),
+    ("macos-spotlight-store", "macos-spotlight-native-inventory", (".Spotlight-V100",), {".db", ".store", ""}),
+    ("macos-fsevents-file", "macos-fsevents-native-inventory", (".fseventsd",), {".fseventsd", ""}),
+)
+MACOS_SUSPICIOUS_TERMS = (
+    "osascript",
+    "launchagent",
+    "tcc",
+    "chmod +x",
+    "curl ",
+    "python ",
+    "zsh ",
+    "bash ",
+    "ssh ",
+)
+MACOS_PATH_RE = re.compile(r"(?i)(?:/Users/|/Applications/|/Library/|/System/|/private/)[^\x00\r\n\t\"'<>]{4,260}")
+URL_RE = re.compile(r"(?i)\bhttps?://[^\s\x00\"'<>]{4,240}")
 HIGH_VALUE_TCC_SERVICES = {
     "kTCCServiceAccessibility",
     "kTCCServiceAddressBook",
@@ -73,6 +93,7 @@ class MacOsSystemArtifactsProvider:
             yield from collect_launch_agents(user_root)
         yield from collect_tcc_permissions(root.joinpath(*SYSTEM_TCC_DB), owner="system", scope="system")
         yield from collect_system_launch_agents(root)
+        yield from collect_macos_native_inventory(root)
 
 
 def looks_like_macos_evidence(root: Path) -> bool:
@@ -440,6 +461,140 @@ def collect_launch_agent_dir(path: Path, *, owner: str) -> Iterable[ArtifactReco
                 "modified_at": path_modified_at(plist_path),
             },
         )
+
+
+def collect_macos_native_inventory(root: Path) -> Iterable[ArtifactRecord]:
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file():
+            continue
+        relative_parts = path.relative_to(root).parts
+        target = macos_native_target(relative_parts, path)
+        if target is None:
+            continue
+        artifact_type, parser_name = target
+        yield build_macos_native_record(root, path, artifact_type=artifact_type, parser_name=parser_name)
+    for snapshot_path in iter_apfs_snapshot_hints(root):
+        yield build_apfs_snapshot_hint(root, snapshot_path)
+
+
+def macos_native_target(relative_parts: tuple[str, ...], path: Path) -> tuple[str, str] | None:
+    lowered_parts = tuple(part.lower() for part in relative_parts)
+    suffix = path.suffix.lower()
+    for artifact_type, parser_name, required_parts, suffixes in MACOS_NATIVE_TARGETS:
+        required = tuple(part.lower() for part in required_parts)
+        if not contains_path_sequence(lowered_parts, required):
+            continue
+        if suffix in suffixes or path.name.lower() in suffixes:
+            return artifact_type, parser_name
+    return None
+
+
+def build_macos_native_record(root: Path, path: Path, *, artifact_type: str, parser_name: str) -> ArtifactRecord:
+    stat_result = path.stat()
+    blob = read_prefix(path, NATIVE_SCAN_LIMIT)
+    strings = extract_macos_strings(blob)
+    path_candidates = extract_unique_matches(strings, MACOS_PATH_RE)
+    url_candidates = extract_unique_matches(strings, URL_RE)
+    risk_flags = macos_native_risk_flags(strings)
+    return ArtifactRecord(
+        provider=MacOsSystemArtifactsProvider.name,
+        artifact_type=artifact_type,
+        path=str(path.resolve()),
+        supported=True,
+        details={
+            "parser": parser_name,
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "native-bounded-string-pivot",
+            "reportability": "triage",
+            "source_path": str(path.resolve()),
+            "source_relative_path": path.relative_to(root).as_posix(),
+            "source_hashes": file_hashes(path),
+            "source_format": path.suffix.lower().lstrip(".") or path.name,
+            "size": stat_result.st_size,
+            "modified_at": path_modified_at(path),
+            "scan_bytes": len(blob),
+            "extracted_string_count": len(strings),
+            "string_samples": strings[:40],
+            "path_candidates": path_candidates[:50],
+            "url_candidates": url_candidates[:50],
+            "risk_flags": risk_flags,
+            "risk_score": min(len(risk_flags) * 15, 100),
+            "validation_required": True,
+            "validation_guidance": "Native macOS rows are bounded inventory/string pivots for search and review; validate final Unified Log, Spotlight, FSEvents, and APFS snapshot claims with dedicated macOS tooling.",
+        },
+    )
+
+
+def iter_apfs_snapshot_hints(root: Path) -> Iterable[Path]:
+    hint_names = {".snapshots", "com.apple.timemachine.localsnapshots", "snapshots"}
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        lowered = path.name.lower()
+        parent_blob = str(path.parent).lower()
+        if lowered in hint_names or "localsnapshot" in lowered or "apfs" in lowered and "snapshot" in parent_blob:
+            yield path
+
+
+def build_apfs_snapshot_hint(root: Path, path: Path) -> ArtifactRecord:
+    return ArtifactRecord(
+        provider=MacOsSystemArtifactsProvider.name,
+        artifact_type="macos-apfs-snapshot-hint",
+        path=str(path.resolve()),
+        supported=True,
+        details={
+            "parser": "macos-apfs-snapshot-hint",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "filesystem-hint",
+            "reportability": "triage",
+            "source_path": str(path.resolve()),
+            "source_relative_path": path.relative_to(root).as_posix(),
+            "source_hashes": file_hashes(path) if path.is_file() else {},
+            "is_directory": path.is_dir(),
+            "modified_at": path_modified_at(path),
+            "validation_required": True,
+            "validation_guidance": "APFS snapshot hints identify exported snapshot metadata/paths only; validate snapshot mount state and provenance with diskutil/apfs tooling.",
+        },
+    )
+
+
+def contains_path_sequence(parts: tuple[str, ...], required: tuple[str, ...]) -> bool:
+    if not required:
+        return True
+    return any(parts[index : index + len(required)] == required for index in range(0, len(parts) - len(required) + 1))
+
+
+def read_prefix(path: Path, limit: int) -> bytes:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(limit)
+    except OSError:
+        return b""
+
+
+def extract_macos_strings(blob: bytes, *, min_chars: int = 4, limit: int = 250) -> list[str]:
+    strings: list[str] = []
+    for pattern, encoding in ((rb"[\x20-\x7e]{4,}", "utf-8"), (rb"(?:[\x20-\x7e]\x00){4,}", "utf-16le")):
+        for match in re.finditer(pattern, blob):
+            text = match.group(0).decode(encoding, errors="ignore").strip("\x00\r\n\t ")
+            if text and text not in strings:
+                strings.append(text)
+                if len(strings) >= limit:
+                    return strings
+    return strings
+
+
+def extract_unique_matches(strings: list[str], pattern: re.Pattern[str]) -> list[str]:
+    values: list[str] = []
+    for text in strings:
+        for match in pattern.finditer(text):
+            value = match.group(0).rstrip(".,);]")
+            if value not in values:
+                values.append(value)
+    return values
+
+
+def macos_native_risk_flags(strings: list[str]) -> list[str]:
+    blob = "\n".join(strings).lower()
+    return [f"macos-string:{term.strip()}" for term in MACOS_SUSPICIOUS_TERMS if term in blob]
 
 
 def parse_launch_agent_plist(path: Path) -> dict[str, object]:

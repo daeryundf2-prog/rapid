@@ -28,6 +28,10 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             self.assertIn("macos-quarantine-event", artifact_types)
             self.assertIn("macos-tcc-permission", artifact_types)
             self.assertIn("macos-launch-agent", artifact_types)
+            self.assertIn("macos-unified-log-file", artifact_types)
+            self.assertIn("macos-spotlight-store", artifact_types)
+            self.assertIn("macos-fsevents-file", artifact_types)
+            self.assertIn("macos-apfs-snapshot-hint", artifact_types)
 
             browser = next(item for item in payload["artifacts"] if item["artifact_type"] == "macos-browser-history-downloads")
             self.assertEqual(browser["details"]["browser"], "safari")
@@ -47,6 +51,20 @@ class RapidTriageMacOsArtifactsTests(unittest.TestCase):
             self.assertTrue(tcc["details"]["allowed"])
             self.assertIn("high-value-privacy-permission", tcc["details"]["risk_flags"])
             self.assertIn("user-writable-client-path", tcc["details"]["risk_flags"])
+
+            unified_log = next(item for item in payload["artifacts"] if item["artifact_type"] == "macos-unified-log-file")
+            self.assertIn("/Users/alice/Library/LaunchAgents/com.example.persist.plist", unified_log["details"]["path_candidates"])
+            self.assertIn("macos-string:osascript", unified_log["details"]["risk_flags"])
+            self.assertTrue(unified_log["details"]["validation_required"])
+
+            spotlight = next(item for item in payload["artifacts"] if item["artifact_type"] == "macos-spotlight-store")
+            self.assertIn("https://example.test/mac-download", spotlight["details"]["url_candidates"])
+
+            fsevents = next(item for item in payload["artifacts"] if item["artifact_type"] == "macos-fsevents-file")
+            self.assertIn("/Users/alice/Documents/mac-report.txt", fsevents["details"]["path_candidates"])
+
+            snapshot_hint = next(item for item in payload["artifacts"] if item["artifact_type"] == "macos-apfs-snapshot-hint")
+            self.assertTrue(snapshot_hint["details"]["is_directory"])
 
     def test_macos_system_collector_is_wired_into_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -92,6 +110,21 @@ def build_macos_fixture(root: Path) -> None:
                 "RunAtLoad": True,
             }
         )
+    )
+    diagnostics_dir = root / "private" / "var" / "db" / "diagnostics" / "Persist"
+    spotlight_dir = root / ".Spotlight-V100" / "Store-V2" / "ABCDEF"
+    fsevents_dir = root / ".fseventsd"
+    snapshots_dir = root / ".snapshots" / "com.apple.TimeMachine.localsnapshots" / "2024-04-01-010203"
+    for directory in (diagnostics_dir, spotlight_dir, fsevents_dir, snapshots_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    (diagnostics_dir / "system.tracev3").write_bytes(
+        b"\x00\x01/Users/alice/Library/LaunchAgents/com.example.persist.plist\x00osascript persistence\x00"
+    )
+    (spotlight_dir / "store.db").write_bytes(
+        b"\x00/Users/alice/Documents/mac-report.txt\x00https://example.test/mac-download\x00"
+    )
+    (fsevents_dir / "0000000000000001.fseventsd").write_bytes(
+        b"\x00/Users/alice/Documents/mac-report.txt\x00/Applications/Safari.app\x00"
     )
 
 
