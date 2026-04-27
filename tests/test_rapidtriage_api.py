@@ -130,14 +130,33 @@ class RapidTriageApiTests(unittest.TestCase):
             summary_response = client.get(f"/api/runs/{run_id}/summary")
             files_response = client.get(f"/api/runs/{run_id}/files")
             timeline_response = client.get(f"/api/runs/{run_id}/timeline")
+            indicators_response = client.get(f"/api/runs/{run_id}/indicators", params={"offset": 0, "limit": 5})
             search_response = client.get(f"/api/runs/{run_id}/search", params={"keyword": "password", "ocr": "false"})
 
             self.assertEqual(summary_response.status_code, 200)
             self.assertEqual(files_response.status_code, 200)
             self.assertEqual(timeline_response.status_code, 200)
+            self.assertEqual(indicators_response.status_code, 200)
             self.assertEqual(search_response.status_code, 200)
             self.assertEqual(files_response.json()["command"], "files")
             self.assertEqual(timeline_response.json()["command"], "timeline")
+            self.assertEqual(indicators_response.json()["command"], "indicators")
+            self.assertEqual(indicators_response.json()["pagination"]["collection"], "indicators")
+            self.assertGreaterEqual(indicators_response.json()["summary"]["indicator_count"], 1)
+            indicator_bookmark_response = client.post(
+                f"/api/runs/{run_id}/bookmarks",
+                json={
+                    "source": "indicators",
+                    "pointer": "/indicators/0",
+                    "tag": "ioc",
+                    "review_status": "needs-review",
+                },
+            )
+            self.assertEqual(indicator_bookmark_response.status_code, 200, indicator_bookmark_response.text)
+            self.assertEqual(
+                indicator_bookmark_response.json()["case"]["bookmarks"][0]["reference"]["command"],
+                "indicators",
+            )
             self.assertEqual(search_response.json()["command"], "search")
             self.assertGreaterEqual(search_response.json()["summary"]["match_count"], 1)
             document_match = next(

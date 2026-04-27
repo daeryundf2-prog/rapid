@@ -46,7 +46,10 @@ class RapidTriageDocumentationContractTests(unittest.TestCase):
         self.assertIn("Implemented:", readme)
         self.assertIn("Experimental:", readme)
         self.assertIn("Planned:", readme)
-        self.assertIn("stores bookmarks only from implemented `files`, `docs`, `artifacts`, and `timeline` outputs", readme)
+        self.assertIn(
+            "stores bookmarks from implemented `files`, `docs`, `artifacts`, `timeline`, and `indicators` outputs",
+            readme,
+        )
         self.assertIn("`compare` is not a current producer CLI", readme)
         self.assertIn("a dedicated `compare` producer/CLI", readme)
 

@@ -464,6 +464,15 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         payload = get_named_output(store, run_id, "timeline")
         return paginate_payload(payload, "events", offset=offset, limit=limit)
 
+    @api.get("/api/runs/{run_id}/indicators")
+    def get_run_indicators(
+        run_id: str,
+        offset: int = Query(0, ge=0),
+        limit: int = Query(0, ge=0, le=1000),
+    ) -> Dict[str, object]:
+        payload = get_named_output(store, run_id, "indicators")
+        return paginate_payload(payload, "indicators", offset=offset, limit=limit)
+
     @api.get("/api/runs/{run_id}/artifacts")
     def get_run_artifacts(
         run_id: str,
@@ -1139,6 +1148,7 @@ def normalize_bookmark_source(source: str) -> str:
         "timeline": "timeline",
         "files": "files",
         "docs": "docs",
+        "indicators": "indicators",
     }
     if normalized in aliases:
         return aliases[normalized]

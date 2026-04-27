@@ -304,6 +304,7 @@ def run_triage_mode(
         files_extract_payload=files_extract_payload,
         artifact_payloads=artifact_payloads,
         timeline_payload=timeline_payload,
+        indicators_payload=indicators_payload,
         outputs=outputs,
         safety={
             "dry_run": dry_run,
@@ -426,6 +427,7 @@ def build_run_summary(
     files_extract_payload: Mapping[str, object],
     artifact_payloads: Mapping[str, Mapping[str, object]],
     timeline_payload: Mapping[str, object],
+    indicators_payload: Mapping[str, object],
     outputs: Mapping[str, Path],
     safety: Mapping[str, object],
     rule_set: RuleSet | None = None,
@@ -465,6 +467,7 @@ def build_run_summary(
         files_extract_payload=files_extract_payload,
         artifact_payloads=artifact_payloads,
         timeline_payload=timeline_payload,
+        indicators_payload=indicators_payload,
         outputs=outputs,
     )
     processing_summary = build_processing_summary(step_rows, safety=safety)
@@ -539,6 +542,7 @@ def build_step_rows(
     files_extract_payload: Mapping[str, object],
     artifact_payloads: Mapping[str, Mapping[str, object]],
     timeline_payload: Mapping[str, object],
+    indicators_payload: Mapping[str, object],
     outputs: Mapping[str, Path],
 ) -> List[Dict[str, object]]:
     provider_count = len(manifest_payload.get("providers", []))
@@ -617,6 +621,8 @@ def build_step_rows(
         files_extract_payload,
     )
     timeline_count = int(timeline_payload.get("summary", {}).get("event_count", 0))
+    indicator_count = int(indicators_payload.get("summary", {}).get("indicator_count", 0))
+    matched_indicator_count = int(indicators_payload.get("summary", {}).get("matched_indicator_count", 0))
     rows.extend(
         [
             docs_extract_step,
@@ -634,6 +640,21 @@ def build_step_rows(
                     "No timeline events were produced. Confirm the source has supported timestamps/artifacts."
                 ]
                 if timeline_count == 0
+                else [],
+            ),
+            annotate_step(
+                {
+                    "name": "indicators",
+                    "status": "completed",
+                    "output": str(outputs["indicators"]),
+                    "indicator_count": indicator_count,
+                    "matched_indicator_count": matched_indicator_count,
+                },
+                warning_level="notice" if indicator_count == 0 else "none",
+                warning_messages=[
+                    "No URL, domain, IP, or hash indicators were summarized from the run outputs."
+                ]
+                if indicator_count == 0
                 else [],
             ),
         ]

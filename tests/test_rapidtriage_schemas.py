@@ -28,6 +28,7 @@ class RapidTriageSchemaValidationTests(unittest.TestCase):
             docs_path = root / "docs.json"
             files_path = root / "files.json"
             artifacts_path = root / "artifacts-browser.json"
+            indicators_path = root / "indicators.json"
             case_path = root / "case.json"
             extract_dir = root / "extract-out"
             extract_path = extract_dir / "rapidtriage-extract-manifest.json"
@@ -37,6 +38,11 @@ class RapidTriageSchemaValidationTests(unittest.TestCase):
             self.assertEqual(main(["docs", str(root), "-k", "fraud", "-k", "deleted", "--output", str(docs_path)]), 0)
             self.assertEqual(main(["files", str(root), "--output", str(files_path)]), 0)
             self.assertEqual(main(["artifacts", str(root), "--kind", "browser", "--output", str(artifacts_path)]), 0)
+            self.assertEqual(
+                main(["run", str(root), "--mode", "fraud", "--output-dir", str(root / "run-output")]),
+                0,
+            )
+            self.assertEqual(main(["indicators", str(root / "run-output"), "--output", str(indicators_path)]), 0)
             self.assertEqual(main(["extract", str(files_path), str(extract_dir)]), 0)
             self.assertEqual(
                 main(
@@ -66,6 +72,7 @@ class RapidTriageSchemaValidationTests(unittest.TestCase):
             validate(json.loads(docs_path.read_text(encoding="utf-8")), load_schema("docs.schema.json"))
             validate(json.loads(files_path.read_text(encoding="utf-8")), load_schema("files.schema.json"))
             validate(json.loads(artifacts_path.read_text(encoding="utf-8")), load_schema("artifacts.schema.json"))
+            validate(json.loads(indicators_path.read_text(encoding="utf-8")), load_schema("indicators.schema.json"))
             validate(json.loads(extract_path.read_text(encoding="utf-8")), load_schema("extract.schema.json"))
             validate(json.loads(case_path.read_text(encoding="utf-8")), load_schema("case.schema.json"))
 

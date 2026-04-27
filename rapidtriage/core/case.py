@@ -46,6 +46,7 @@ ARTIFACT_KEYS = (
     "artifact_id",
     "artifact_type",
     "event_type",
+    "value",
     "url",
     "source_url",
     "target_path",
@@ -58,6 +59,7 @@ CASE_SOURCE_ROWS = {
     "docs": "results",
     "artifacts": "artifacts",
     "timeline": "events",
+    "indicators": "indicators",
 }
 
 EXPERIMENTAL_CASE_SOURCE_ROWS = {
@@ -69,6 +71,7 @@ CASE_SOURCE_SCHEMAS = {
     "docs": "docs.schema.json",
     "artifacts": "artifacts.schema.json",
     "timeline": "timeline.schema.json",
+    "indicators": "indicators.schema.json",
 }
 
 
@@ -172,7 +175,7 @@ def load_source_payload(path: Path) -> dict[str, object]:
     if command in EXPERIMENTAL_CASE_SOURCE_ROWS:
         raise CaseBookmarkError(
             "bookmark source command 'compare' is not implemented yet; "
-            "case currently supports files, docs, artifacts, and timeline outputs"
+            "case currently supports files, docs, artifacts, timeline, and indicators outputs"
         )
     if command not in CASE_SOURCE_ROWS:
         supported = ", ".join(sorted(CASE_SOURCE_ROWS))
@@ -666,6 +669,10 @@ def build_bookmark_summary(item: Mapping[str, object], source_path: str | None, 
     name = item.get("name")
     if isinstance(name, str) and name:
         return name
+    indicator_value = item.get("value")
+    if isinstance(indicator_value, str) and indicator_value:
+        indicator_type = item.get("type")
+        return f"{indicator_type}: {indicator_value}" if isinstance(indicator_type, str) and indicator_type else indicator_value
     if source_path:
         return Path(source_path).name or source_path
     return f"Bookmark from {source_pointer}"

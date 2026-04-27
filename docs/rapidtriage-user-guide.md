@@ -32,6 +32,8 @@ Search reaches indexed document text, EML/MBOX/MSG email text, bounded PST/OST m
 
 `rapidtriage indicators ./case-run` creates a separate URL/domain/IP/hash pivot summary from completed run outputs. It keeps source output names and JSON pointers so an analyst can jump from an IOC to the source artifact, and `--rules iocs.yaml` can mark local IOC hits without sending evidence to an external TI service.
 
+In the web UI, open `Triage -> Indicators` after a run to review those pivots in pages, filter the visible rows, inspect source pointers, and save important indicators to the review board.
+
 For repeated review, save useful Case DB searches and filter by review state:
 
 ```bash

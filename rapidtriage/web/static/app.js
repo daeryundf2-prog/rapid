@@ -51,7 +51,7 @@ const VIEW_GROUPS = [
     id: "triage",
     label: "Triage",
     summary: "Inventory first, one bounded table at a time.",
-    tabs: ["summary", "files", "docs", "artifacts", "timeline"],
+    tabs: ["summary", "files", "docs", "artifacts", "timeline", "indicators"],
   },
   {
     id: "find",
@@ -77,6 +77,7 @@ const TAB_LABELS = {
   search: "Keyword search",
   review: "Review board",
   timeline: "Timeline",
+  indicators: "Indicators",
   artifacts: "Artifacts",
   files: "Files",
   docs: "Documents",
@@ -95,7 +96,7 @@ let selectedRun = null;
 let activeTab = "summary";
 let activeViewGroup = "triage";
 let pollTimer = null;
-const pageOffsets = { timeline: 0, artifacts: 0, files: 0, docs: 0 };
+const pageOffsets = { timeline: 0, artifacts: 0, files: 0, docs: 0, indicators: 0 };
 
 async function api(path, options = {}) {
   const token = authToken();
@@ -332,6 +333,7 @@ async function renderActiveTab() {
     if (activeTab === "summary") body.innerHTML = renderSummary(selectedRun.summary);
     if (activeTab === "search") body.innerHTML = renderSearch();
     if (activeTab === "timeline") body.innerHTML = renderTimeline(await api(pagedUrl("timeline")));
+    if (activeTab === "indicators") body.innerHTML = renderIndicators(await api(pagedUrl("indicators")));
     if (activeTab === "artifacts") body.innerHTML = renderArtifacts(await api(pagedUrl("artifacts")));
     if (activeTab === "files") body.innerHTML = renderFiles(await api(pagedUrl("files")));
     if (activeTab === "docs") body.innerHTML = renderDocs(await api(pagedUrl("docs")));
@@ -356,6 +358,7 @@ function renderSummary(payload) {
       ${metric("Document matches", summary.document_match_count)}
       ${metric("File candidates", summary.file_candidate_count)}
       ${metric("Timeline events", summary.timeline_event_count)}
+      ${metric("Indicators", payload.steps?.find((step) => step.name === "indicators")?.indicator_count || 0)}
       ${metric("Extracted files", (summary.docs_extracted_count || 0) + (summary.files_extracted_count || 0))}
     </div>
     ${renderCaseDbPanel(payload)}
@@ -598,6 +601,72 @@ function renderTimeline(payload) {
     </table>
     ${renderPaginationControls(payload.pagination, "timeline")}
   `;
+}
+
+function renderIndicators(payload) {
+  const rows = payload.indicators || [];
+  const summary = payload.summary || {};
+  const offset = payload.pagination?.offset || 0;
+  if (!rows.length) return '<p class="empty-state">No indicators were found in this run.</p>';
+  return `
+    <section class="guidance-card">
+      <div>
+        <p class="eyebrow">ioc review</p>
+        <h3>URLs, domains, IPs, and hashes found across the run</h3>
+      </div>
+      <p>Use this as a pivot list. Matched rules and risk flags are triage signals, not final attribution; verify the source rows before reporting.</p>
+      <div class="metric-grid">
+        ${metric("Indicators", summary.indicator_count)}
+        ${metric("Rule hits", summary.matched_indicator_count)}
+        ${metric("Types", Object.keys(summary.type_counts || {}).length)}
+        ${metric("Sources", Object.keys(summary.source_output_counts || {}).length)}
+      </div>
+    </section>
+    ${renderPaginationNotice(payload.pagination, "indicators")}
+    <table class="data-table">
+      <thead><tr><th>Indicator</th><th>Count</th><th>Risk / Rules</th><th>Sources</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map((indicator, index) => `
+          <tr data-filter="${rowText(indicator)}">
+            <td>
+              <strong>${escapeHtml(indicator.value)}</strong>
+              <span>${escapeHtml([indicator.type, indicator.classification].filter(Boolean).join(" · "))}</span>
+            </td>
+            <td>${formatNumber(indicator.count || 0)}</td>
+            <td>
+              ${renderChipList([...(indicator.risk_flags || []), ...(indicator.matched_rules || []).map((rule) => `rule:${rule}`)])}
+            </td>
+            <td>${renderIndicatorSources(indicator.sources || [])}</td>
+            <td>${bookmarkButton("indicators", `/indicators/${offset + index}`, indicator.value)}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+    ${renderPaginationControls(payload.pagination, "indicators")}
+  `;
+}
+
+function renderIndicatorSources(sources) {
+  if (!sources.length) return '<span class="empty-state">No source pointers.</span>';
+  return `
+    <details class="match-details">
+      <summary>${sources.length} source pointer(s)</summary>
+      <div class="dense-list">
+        ${sources.slice(0, 8).map((source) => `
+          <div class="dense-row">
+            <strong>${escapeHtml([source.output, source.pointer].filter(Boolean).join(" · "))}</strong>
+            <span>${escapeHtml([source.path || source.source_path, source.artifact_type || source.event_type || source.kind].filter(Boolean).join(" · "))}</span>
+          </div>
+        `).join("")}
+      </div>
+    </details>
+  `;
+}
+
+function renderChipList(items) {
+  const chips = Array.from(new Set((items || []).filter(Boolean)));
+  if (!chips.length) return '<span class="empty-state">No risk flags.</span>';
+  return `<div class="eventlog-chip-row">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>`;
 }
 
 function renderArtifacts(payload) {

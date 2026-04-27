@@ -215,11 +215,11 @@ The local UI is a browser-based dashboard served by FastAPI. It supports:
 - For direct `.E01` input, extracting the image read-only into the run output directory through `ewfmount`, `mmls`, and `tsk_recover`, then running the same triage pipeline on the extracted filesystem.
 - Persisting the local run catalog across server restarts.
 - Importing an existing run output directory that contains `rapidtriage-run-summary.json`.
-- Viewing run status, summaries, files, docs, artifacts, timeline events, and generated markdown reports.
+- Viewing run status, summaries, files, docs, artifacts, timeline events, indicator pivots, and generated markdown reports.
 - Displaying step-level run status for recovery/retry diagnostics.
 - Splitting the case workspace into `Triage`, `Find`, `Review`, and `Deliver` views so large cases are handled by task instead of one overloaded screen.
 - Pinning search results, viewer previews, and reviewed evidence into a persistent A/B compare tray for quick back-and-forth inspection.
-- Loading large files/docs/artifacts/timeline outputs in bounded pages instead of rendering entire result sets at once.
+- Loading large files/docs/artifacts/timeline/indicator outputs in bounded pages instead of rendering entire result sets at once.
 - Downloading generated output files directly from the browser.
 - Filtering result tables in the browser.
 - Previewing source evidence from search results, including text/document snippets, image previews, and safe binary metadata.
@@ -235,7 +235,7 @@ The local UI is a browser-based dashboard served by FastAPI. It supports:
 - Drafting `rapidtriage-case-report.md` from case metadata, reviewed evidence, analyst notes, and submission hashes.
 - Removing a run from the local web catalog without deleting evidence output files.
 
-API endpoints are served under `/api`, including health, run creation/listing/detail, run import, catalog removal, named outputs, paginated files/docs/artifacts/timeline views, downloadable output files, source previews, report text, case loading, submission hash manifest generation, case report drafting, and review/bookmark creation.
+API endpoints are served under `/api`, including health, run creation/listing/detail, run import, catalog removal, named outputs, paginated files/docs/artifacts/timeline/indicator views, downloadable output files, source previews, report text, case loading, submission hash manifest generation, case report drafting, and review/bookmark creation.
 
 The web server defaults to `127.0.0.1`. If you bind it to a non-localhost interface, use `--auth-token` unless you intentionally pass `--allow-remote-without-auth`.
 
@@ -257,6 +257,7 @@ Schema and sample references:
 - `artifacts`: `rapidtriage/schemas/artifacts.schema.json` + `docs/samples/rapidtriage-artifacts.sample.json`
 - `run-summary`: `rapidtriage/schemas/run-summary.schema.json` + `docs/samples/rapidtriage-run-summary.sample.json`
 - `timeline`: `rapidtriage/schemas/timeline.schema.json`
+- `indicators`: `rapidtriage/schemas/indicators.schema.json`
 - `case`: `rapidtriage/schemas/case.schema.json`
 - `submission-manifest`: `rapidtriage/schemas/submission-manifest.schema.json`
 - `rule-engine`: `docs/rapidtriage-rule-engine.md` + `docs/samples/rapidtriage-rules.sample.yaml`
@@ -275,7 +276,7 @@ Implemented:
 - Direct `.E01` input is supported for `run` when `ewfmount`, `mmls`, and `tsk_recover` are available; `rapidtriage-e01.json` records the extracted filesystem root and selected partition offset.
 - `search` searches a completed run across document/log text, file metadata, browser/web/AI-usage artifacts, timeline rows, and optional OCR over image candidates.
 - `timeline` merges `files`, `docs`, and `artifacts` JSON into chronological events and writes JSON plus markdown.
-- `case` stores bookmarks only from implemented `files`, `docs`, `artifacts`, and `timeline` outputs, validates source schemas, and persists stable `reference`, minimal `snapshot`, analyst `review` status, tags, notes, and report-candidate markers.
+- `case` stores bookmarks from implemented `files`, `docs`, `artifacts`, `timeline`, and `indicators` outputs, validates source schemas, and persists stable `reference`, minimal `snapshot`, analyst `review` status, tags, notes, and report-candidate markers.
 - `submission-manifest` hashes report-candidate case evidence with MD5, SHA1, and SHA256, preserves review/bookmark context, skips unavailable or out-of-scope paths, and writes an audit sidecar.
 - `case-report` writes a Korean/English-friendly Markdown report draft with case metadata, analysis scope, reviewed evidence, hashes, skipped hash rows, conclusion text, and audit sidecar.
 - `web` starts a local FastAPI server with a browser UI for launching runs, importing existing outputs, searching evidence, previewing source files, reviewing hits, organizing case findings, downloading generated files, and reading reports.
@@ -301,7 +302,7 @@ Experimental:
 Planned:
 
 - a dedicated `compare` producer/CLI with JSON schema and end-to-end case/report integration
-- any future case source beyond `files`, `docs`, `artifacts`, and `timeline`
+- any future case source beyond `files`, `docs`, `artifacts`, `timeline`, and `indicators`
 
 ## Integrity
 

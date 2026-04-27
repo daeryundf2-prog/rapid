@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "command",
+    "generated_at",
+    "run_summary",
+    "options",
+    "summary",
+    "indicators"
+  ],
+  "properties": {
+    "command": {
+      "const": "indicators"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "run_summary": {
+      "type": "string"
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_indicators",
+        "max_sources_per_indicator",
+        "rule_set"
+      ],
+      "properties": {
+        "max_indicators": {
+          "type": "integer"
+        },
+        "max_sources_per_indicator": {
+          "type": "integer"
+        },
+        "rule_set": {
+          "type": "string"
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "indicator_count",
+        "type_counts",
+        "source_output_counts",
+        "matched_rule_counts",
+        "matched_indicator_count"
+      ],
+      "properties": {
+        "indicator_count": {
+          "type": "integer"
+        },
+        "type_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "source_output_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "matched_rule_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "matched_indicator_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "indicators": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "value",
+          "count",
+          "classification",
+          "risk_flags",
+          "sources"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "url",
+              "domain",
+              "ip",
+              "md5",
+              "sha1",
+              "sha256"
+            ]
+          },
+          "value": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "classification": {
+            "type": "string"
+          },
+          "risk_flags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "matched_rules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

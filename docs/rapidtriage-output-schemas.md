@@ -137,6 +137,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 
 ### `indicators`
 
+- Schema: `rapidtriage/schemas/indicators.schema.json`
 - Output: `rapidtriage-indicators.json`
 - Top-level keys:
   - `command`
