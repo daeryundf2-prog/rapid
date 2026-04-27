@@ -254,7 +254,7 @@ rapidtriage artifacts ./volatility-output --kind memory-volatility --output memo
 
 The importer normalizes process name, PID/PPID, command line, network endpoints, offsets, source hashes, and risk flags such as suspicious command lines, external network connections, malfind rows, and writable executable memory.
 
-The same collector also performs a bounded direct scan of `.mem`, `.raw`, `.vmem`, `.vmss`, `.vmsn`, `.hpak`, `.dmp`, and memory-named `.bin` dumps. It records source hashes, scan ranges, redacted BitLocker recovery-key candidates with SHA256 verification hashes, suspicious memory strings, URLs, IPs, and risk flags without attempting full process reconstruction.
+The same collector also performs a bounded direct scan of `.mem`, `.raw`, `.vmem`, `.vmss`, `.vmsn`, `.hpak`, `.dmp`, and memory-named `.bin` dumps. It records source hashes, scan ranges, redacted BitLocker recovery-key candidates with SHA256 verification hashes and group-level checksum validation, suspicious process string candidates, suspicious memory strings, URLs, IPs, and risk flags without claiming full process reconstruction.
 
 ## Cloud Export Imports
 

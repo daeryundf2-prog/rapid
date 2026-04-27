@@ -34,6 +34,9 @@ class RapidTriageMemoryVolatilityTests(unittest.TestCase):
 
             process = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "memory-process")
             self.assertEqual(process["details"]["process_name"], "powershell.exe")
+            self.assertEqual(process["details"]["process_key"], "4242:powershell.exe")
+            self.assertEqual(process["details"]["parent_process_key"], "888")
+            self.assertIn("encoded-command", process["details"]["command_line_indicators"])
             self.assertIn("suspicious-command-line", process["details"]["risk_flags"])
             self.assertIn("sha256", process["details"]["source_hashes"])
 
@@ -48,11 +51,11 @@ class RapidTriageMemoryVolatilityTests(unittest.TestCase):
     def test_memory_dump_scan_finds_bitlocker_and_network_pivots(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            key = "123456-234567-345678-456789-567890-678901-789012-890123"
+            key = "000000-000011-000022-000033-000044-000055-000066-000077"
             (root / "incident.raw").write_bytes(
                 b"RAM\x00"
                 + key.encode("ascii")
-                + b"\x00powershell.exe\x00https://c2.example.test/task\x00198.51.100.44"
+                + b"\x00powershell.exe -ExecutionPolicy Bypass -enc SQBFAFgA\x00https://c2.example.test/task\x00198.51.100.44"
             )
             (root / "Cache0000.bin").write_bytes(b"BM not a memory dump")
             output = root / "memory-dump-artifacts.json"
@@ -65,15 +68,21 @@ class RapidTriageMemoryVolatilityTests(unittest.TestCase):
             artifact = payload["artifacts"][0]
             self.assertEqual(artifact["artifact_type"], "memory-dump-indicators")
             details = artifact["details"]
-            self.assertIn("bitlocker-recovery-key-candidate", details["risk_flags"])
+            self.assertIn("bitlocker-recovery-key-validated", details["risk_flags"])
+            self.assertIn("process-string-candidate", details["risk_flags"])
             self.assertIn("suspicious-memory-string", details["risk_flags"])
             self.assertIn("network-indicator", details["risk_flags"])
             pivots = details["indicator_pivots"]
             self.assertTrue(any(pivot["type"] == "bitlocker-recovery-key" for pivot in pivots))
+            self.assertTrue(any(pivot["type"] == "process-candidate" for pivot in pivots))
             self.assertTrue(any(pivot.get("value") == "https://c2.example.test/task" for pivot in pivots))
             self.assertTrue(any(pivot.get("value") == "198.51.100.44" for pivot in pivots))
             key_pivot = next(pivot for pivot in pivots if pivot["type"] == "bitlocker-recovery-key")
-            self.assertEqual(key_pivot["value_redacted"], "123456-***-890123")
+            self.assertEqual(key_pivot["value_redacted"], "000000-***-000077")
+            self.assertEqual(key_pivot["validation"]["status"], "valid")
+            process_pivot = next(pivot for pivot in pivots if pivot["type"] == "process-candidate")
+            self.assertEqual(process_pivot["value"]["process_name"], "powershell.exe")
+            self.assertIn("encoded-command", process_pivot["value"]["command_line_indicators"])
             self.assertNotIn(key, json.dumps(payload))
 
 

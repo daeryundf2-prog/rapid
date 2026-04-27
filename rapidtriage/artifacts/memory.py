@@ -10,7 +10,7 @@ from typing import Iterable, Mapping
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 
-PARSER_VERSION = "memory-volatility-v2"
+PARSER_VERSION = "memory-volatility-v3"
 MEMORY_OUTPUT_SUFFIXES = {".json", ".jsonl", ".ndjson"}
 MEMORY_DUMP_SUFFIXES = {".dmp", ".hpak", ".mem", ".raw", ".vmem", ".vmsn", ".vmss"}
 MEMORY_DUMP_GENERIC_SUFFIXES = {".bin"}
@@ -20,6 +20,7 @@ MEMORY_DUMP_RANGE_COUNT = 4
 MEMORY_DUMP_CHUNK_SIZE = 1024 * 1024
 MEMORY_DUMP_OVERLAP = 512
 MEMORY_DUMP_PIVOT_LIMIT = 80
+MEMORY_DUMP_PROCESS_CANDIDATE_LIMIT = 40
 PLUGIN_HINTS = (
     "pslist",
     "pstree",
@@ -64,6 +65,7 @@ URL_RE = re.compile(rb"https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{4,240}")
 URL_TEXT_RE = re.compile(r"https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{4,240}")
 IP_RE = re.compile(rb"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 IP_TEXT_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+PROCESS_NAME_TEXT_RE = re.compile(r"\b[A-Za-z0-9_.-]{1,64}\.exe\b", re.IGNORECASE)
 LOCAL_NETWORKS = tuple(
     ipaddress.ip_network(value)
     for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "::1/128")
@@ -233,11 +235,16 @@ def normalize_row(row: Mapping[str, object], *, plugin: str) -> dict[str, object
         "process_name": process_name,
         "pid": pid,
         "ppid": ppid,
+        "process_key": process_key(pid=pid, process_name=process_name),
+        "parent_process_key": process_key(pid=ppid, process_name="") if ppid else "",
         "command_line": command_line,
+        "command_line_indicators": command_line_indicators(command_line),
         "local_address": local_address,
         "foreign_address": foreign_address,
         "state": state,
         "offset": offset,
+        "reconstruction_status": "volatility-row-normalized",
+        "validation_status": "external-parser-row",
         "risk_flags": flags,
         "risk_score": score_risk(flags),
     }
@@ -302,6 +309,29 @@ def score_risk(flags: list[str]) -> int:
     return min(sum(weights.get(flag, 5) for flag in flags), 100)
 
 
+def process_key(*, pid: str, process_name: str) -> str:
+    if not pid and not process_name:
+        return ""
+    return f"{pid}:{process_name.lower()}".strip(":")
+
+
+def command_line_indicators(command_line: str) -> list[str]:
+    lowered = command_line.lower()
+    indicators: list[str] = []
+    indicator_terms = {
+        "encoded-command": ("-enc", "-encodedcommand", "frombase64string"),
+        "policy-bypass": ("bypass", "executionpolicy"),
+        "download": ("downloadstring", "invoke-webrequest", "curl ", "wget "),
+        "credential-access": ("mimikatz", "sekurlsa", "lsass", "procdump", "nanodump"),
+        "shadow-copy-tamper": ("vssadmin delete shadows", "wmic shadowcopy delete"),
+        "persistence": ("schtasks", "runonce", "startup"),
+    }
+    for name, terms in indicator_terms.items():
+        if any(term in lowered for term in terms):
+            indicators.append(name)
+    return indicators
+
+
 def build_scan_ranges(file_size: int) -> list[tuple[int, int]]:
     if file_size <= 0:
         return []
@@ -346,12 +376,92 @@ def scan_memory_dump(path: Path, scan_ranges: list[tuple[int, int]]) -> list[dic
                     data = previous_tail + chunk
                     data_offset = current_offset - len(previous_tail)
                     collect_memory_pivots(data, data_offset, pivots, seen)
+                    collect_memory_process_candidates(data, data_offset, pivots, seen)
                     previous_tail = data[-MEMORY_DUMP_OVERLAP:]
                     current_offset += len(chunk)
                     remaining -= len(chunk)
     except OSError:
         return pivots
     return pivots
+
+
+def collect_memory_process_candidates(
+    data: bytes,
+    data_offset: int,
+    pivots: list[dict[str, object]],
+    seen: set[tuple[str, str, int]],
+) -> None:
+    text = data.decode("latin-1", errors="ignore")
+    emitted = 0
+    for match in PROCESS_NAME_TEXT_RE.finditer(text):
+        if emitted >= MEMORY_DUMP_PROCESS_CANDIDATE_LIMIT or len(pivots) >= MEMORY_DUMP_PIVOT_LIMIT:
+            return
+        process_name = match.group(0)
+        start = max(0, match.start() - 96)
+        end = min(len(text), match.end() + 220)
+        context = printable_preview(text[start:end])
+        indicators = command_line_indicators(context)
+        if process_name.lower() not in SUSPICIOUS_PROCESS_NAMES and not indicators:
+            continue
+        add_memory_pivot(
+            pivots,
+            seen,
+            pivot_type="process-candidate",
+            value=json.dumps(
+                {
+                    "process_name": process_name,
+                    "command_line_preview": context,
+                    "command_line_indicators": indicators,
+                    "reconstruction_status": "bounded-string-context",
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            offset=data_offset + match.start(),
+            evidence_strength="triage",
+            sensitive=False,
+        )
+        emitted += 1
+    collect_utf16_process_candidates(data, data_offset, pivots, seen)
+
+
+def collect_utf16_process_candidates(
+    data: bytes,
+    data_offset: int,
+    pivots: list[dict[str, object]],
+    seen: set[tuple[str, str, int]],
+) -> None:
+    text = data.decode("utf-16le", errors="ignore")
+    emitted = 0
+    for match in PROCESS_NAME_TEXT_RE.finditer(text):
+        if emitted >= MEMORY_DUMP_PROCESS_CANDIDATE_LIMIT or len(pivots) >= MEMORY_DUMP_PIVOT_LIMIT:
+            return
+        process_name = match.group(0)
+        start = max(0, match.start() - 96)
+        end = min(len(text), match.end() + 220)
+        context = printable_preview(text[start:end])
+        indicators = command_line_indicators(context)
+        if process_name.lower() not in SUSPICIOUS_PROCESS_NAMES and not indicators:
+            continue
+        add_memory_pivot(
+            pivots,
+            seen,
+            pivot_type="process-candidate",
+            value=json.dumps(
+                {
+                    "process_name": process_name,
+                    "command_line_preview": context,
+                    "command_line_indicators": indicators,
+                    "reconstruction_status": "bounded-utf16-string-context",
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            offset=data_offset + (match.start() * 2),
+            evidence_strength="triage",
+            sensitive=False,
+        )
+        emitted += 1
 
 
 def collect_memory_pivots(
@@ -489,12 +599,63 @@ def add_memory_pivot(
         "offset": offset,
         "evidence_strength": evidence_strength,
     }
+    if pivot_type == "bitlocker-recovery-key":
+        validation = validate_bitlocker_recovery_key(normalized_value)
+        pivot["validation"] = validation
+        if validation["status"] != "valid":
+            pivot["evidence_strength"] = "candidate"
     if sensitive:
         pivot["value_redacted"] = redact_secret(normalized_value)
         pivot["value_sha256"] = compute_text_sha256(normalized_value)
     else:
-        pivot["value"] = normalized_value
+        pivot["value"] = decode_process_candidate_value(pivot_type, normalized_value)
     pivots.append(pivot)
+
+
+def validate_bitlocker_recovery_key(value: str) -> dict[str, object]:
+    groups = value.split("-")
+    group_rows = []
+    valid = len(groups) == 8
+    for index, group in enumerate(groups, start=1):
+        group_valid = bool(re.fullmatch(r"\d{6}", group))
+        number = int(group) if group_valid else -1
+        in_range = 0 <= number <= 720885
+        divisible_by_11 = group_valid and number % 11 == 0
+        row = {
+            "index": index,
+            "group_sha256": compute_text_sha256(group) if group_valid else "",
+            "format_valid": group_valid,
+            "in_range": in_range,
+            "divisible_by_11": divisible_by_11,
+            "status": "valid" if group_valid and in_range and divisible_by_11 else "invalid",
+        }
+        group_rows.append(row)
+        if row["status"] != "valid":
+            valid = False
+    return {
+        "status": "valid" if valid else "invalid",
+        "format": "8x6-digit-groups",
+        "valid_group_count": len([row for row in group_rows if row["status"] == "valid"]),
+        "group_count": len(groups),
+        "checks": group_rows,
+        "rule": "Each 6-digit BitLocker recovery-password group must be in 000000-720885 and divisible by 11.",
+    }
+
+
+def decode_process_candidate_value(pivot_type: str, value: str) -> object:
+    if pivot_type != "process-candidate":
+        return value
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return {"process_name": "", "command_line_preview": value}
+    return decoded if isinstance(decoded, Mapping) else value
+
+
+def printable_preview(value: str) -> str:
+    cleaned = "".join(character if character.isprintable() else " " for character in value)
+    redacted = BITLOCKER_RECOVERY_KEY_TEXT_RE.sub(lambda match: redact_secret(match.group(0)), cleaned)
+    return " ".join(redacted.split())[:320]
 
 
 def trim_indicator(value: bytes) -> bytes:
@@ -531,7 +692,16 @@ def build_memory_dump_flags(
     pivot_types = {str(pivot.get("type", "")) for pivot in pivots}
     flags: list[str] = []
     if "bitlocker-recovery-key" in pivot_types:
-        flags.append("bitlocker-recovery-key-candidate")
+        if any(
+            isinstance(pivot.get("validation"), Mapping) and pivot["validation"].get("status") == "valid"
+            for pivot in pivots
+            if pivot.get("type") == "bitlocker-recovery-key"
+        ):
+            flags.append("bitlocker-recovery-key-validated")
+        else:
+            flags.append("bitlocker-recovery-key-candidate")
+    if "process-candidate" in pivot_types:
+        flags.append("process-string-candidate")
     if "suspicious-string" in pivot_types:
         flags.append("suspicious-memory-string")
     if "url" in pivot_types or "ip" in pivot_types:
@@ -543,7 +713,9 @@ def build_memory_dump_flags(
 
 def score_memory_dump_risk(flags: list[str], pivots: list[dict[str, object]]) -> int:
     weights = {
+        "bitlocker-recovery-key-validated": 55,
         "bitlocker-recovery-key-candidate": 45,
+        "process-string-candidate": 15,
         "suspicious-memory-string": 20,
         "network-indicator": 15,
         "bounded-scan-truncated": 0,
@@ -552,8 +724,12 @@ def score_memory_dump_risk(flags: list[str], pivots: list[dict[str, object]]) ->
 
 
 def memory_dump_recommendation(flags: list[str]) -> str:
+    if "bitlocker-recovery-key-validated" in flags:
+        return "Preserve the memory dump, handle the validated redacted BitLocker recovery-key candidate as sensitive evidence, and correlate with disk encryption state."
     if "bitlocker-recovery-key-candidate" in flags:
         return "Preserve the memory dump, validate the redacted BitLocker recovery-key candidate in a controlled evidence workflow, and correlate with disk encryption state."
+    if "process-string-candidate" in flags:
+        return "Review direct process string candidates alongside Volatility process, command-line, network, and malfind output before reporting."
     if "suspicious-memory-string" in flags or "network-indicator" in flags:
         return "Review memory string pivots with Volatility process/network output before reporting."
     return "No high-value bounded memory indicators were found; run Volatility/Volatility3 for full process, handle, network, and malfind analysis."
