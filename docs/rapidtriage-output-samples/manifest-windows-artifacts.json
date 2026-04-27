@@ -333,7 +333,7 @@
           "supported": true,
           "details": {
             "parser": "windows-recent-files",
-            "parser_version": "windows-recent-files-v2",
+            "parser_version": "windows-recent-files-v3",
             "user": "alice",
             "entry_name": "5f7b5f1e01b83767.automaticDestinations-ms",
             "entry_hint": "5f7b5f1e01b83767",
@@ -346,11 +346,15 @@
             "container_hint": "custom-binary",
             "jumplist_kind": "automatic",
             "application_id_hash": "5f7b5f1e01b83767",
+            "ole_parse_status": "not-ole",
+            "ole_stream_count": 0,
+            "ole_streams": [],
             "embedded_paths": [
               "C:\\Users\\alice\\Documents\\Case Notes.docx",
               "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
             ],
             "destination_count": 1,
+            "destination_stream_count": 0,
             "destinations": [
               {
                 "index": 0,
@@ -373,7 +377,7 @@
                 ]
               }
             ],
-            "note": "Jump List destination streams are decoded when embedded Shell Link records are recoverable; otherwise embedded path extraction is provided for triage search."
+            "note": "OLE Jump List streams are traversed when recoverable; otherwise embedded Shell Link and path extraction is provided for triage search."
           }
         },
         {
@@ -383,7 +387,7 @@
           "supported": true,
           "details": {
             "parser": "windows-recent-files",
-            "parser_version": "windows-recent-files-v2",
+            "parser_version": "windows-recent-files-v3",
             "user": "alice",
             "entry_name": "9b9cdc69c1c24e2b.customDestinations-ms",
             "entry_hint": "9b9cdc69c1c24e2b",
@@ -396,11 +400,15 @@
             "container_hint": "custom-binary",
             "jumplist_kind": "custom",
             "application_id_hash": "9b9cdc69c1c24e2b",
+            "ole_parse_status": "not-ole",
+            "ole_stream_count": 0,
+            "ole_streams": [],
             "embedded_paths": [
               "C:\\Users\\alice\\Downloads\\installer.exe",
               "C:\\Users\\alice\\Downloads\\installer.exe\u0018C:\\Users\\alice\\Documents"
             ],
             "destination_count": 1,
+            "destination_stream_count": 0,
             "destinations": [
               {
                 "index": 0,
@@ -423,7 +431,7 @@
                 ]
               }
             ],
-            "note": "Jump List destination streams are decoded when embedded Shell Link records are recoverable; otherwise embedded path extraction is provided for triage search."
+            "note": "OLE Jump List streams are traversed when recoverable; otherwise embedded Shell Link and path extraction is provided for triage search."
           }
         },
         {
@@ -433,7 +441,7 @@
           "supported": true,
           "details": {
             "parser": "windows-recent-files",
-            "parser_version": "windows-recent-files-v2",
+            "parser_version": "windows-recent-files-v3",
             "user": "alice",
             "entry_name": "Case Notes.lnk",
             "entry_hint": "Case Notes",

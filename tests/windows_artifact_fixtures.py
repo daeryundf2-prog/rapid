@@ -296,8 +296,10 @@ def _write_recent_shortcuts(path: Path, shortcuts: list[RecentShortcut]) -> None
     automatic.parent.mkdir(parents=True, exist_ok=True)
     custom.parent.mkdir(parents=True, exist_ok=True)
     automatic.write_bytes(
-        b"JUMPLIST:AUTO\x00"
-        + build_minimal_lnk(r"C:\Users\alice\Documents\Incident Notes.docx", timestamp)
+        build_minimal_ole_jumplist(
+            "1",
+            build_minimal_lnk(r"C:\Users\alice\Documents\Incident Notes.docx", timestamp),
+        )
     )
     custom.write_bytes(
         b"JUMPLIST:CUSTOM\x00"
@@ -319,6 +321,71 @@ def build_minimal_lnk(target_path: str, timestamp: datetime) -> bytes:
     header[0x34:0x38] = (4096).to_bytes(4, "little")
     header[0x3C:0x40] = (1).to_bytes(4, "little")
     return bytes(header) + lnk_unicode_string(target_path) + lnk_unicode_string(r"C:\Users\alice\Documents") + lnk_unicode_string("")
+
+
+def build_minimal_ole_jumplist(stream_name: str, stream_payload: bytes) -> bytes:
+    sector_size = 512
+    header = bytearray(sector_size)
+    header[0:8] = bytes.fromhex("d0cf11e0a1b11ae1")
+    header[24:26] = (0x003E).to_bytes(2, "little")
+    header[26:28] = (0x0003).to_bytes(2, "little")
+    header[28:30] = (0xFFFE).to_bytes(2, "little")
+    header[30:32] = (9).to_bytes(2, "little")
+    header[32:34] = (6).to_bytes(2, "little")
+    header[44:48] = (1).to_bytes(4, "little")
+    header[48:52] = (1).to_bytes(4, "little")
+    header[56:60] = (4096).to_bytes(4, "little")
+    header[60:64] = (0xFFFFFFFF).to_bytes(4, "little")
+    header[64:68] = (0).to_bytes(4, "little")
+    header[68:72] = (0xFFFFFFFF).to_bytes(4, "little")
+    header[72:76] = (0).to_bytes(4, "little")
+    header[76:80] = (0).to_bytes(4, "little")
+    for offset in range(80, 512, 4):
+        header[offset : offset + 4] = (0xFFFFFFFF).to_bytes(4, "little")
+
+    stream_sector_count = max(1, (len(stream_payload) + sector_size - 1) // sector_size)
+    stream_sector_ids = list(range(2, 2 + stream_sector_count))
+    fat_entries = [0xFFFFFFFD, 0xFFFFFFFE]
+    for index, sector_id in enumerate(stream_sector_ids):
+        is_last = index == len(stream_sector_ids) - 1
+        fat_entries.append(0xFFFFFFFE if is_last else sector_id + 1)
+    fat_sector = bytearray(sector_size)
+    for index in range(sector_size // 4):
+        value = fat_entries[index] if index < len(fat_entries) else 0xFFFFFFFF
+        fat_sector[index * 4 : index * 4 + 4] = value.to_bytes(4, "little")
+
+    directory_sector = bytearray(sector_size)
+    directory_sector[0:128] = cfb_directory_entry("Root Entry", 5, child_id=1)
+    directory_sector[128:256] = cfb_directory_entry(
+        stream_name,
+        2,
+        start_sector=stream_sector_ids[0],
+        stream_size=len(stream_payload),
+    )
+    stream_bytes = stream_payload.ljust(stream_sector_count * sector_size, b"\x00")
+    return bytes(header) + bytes(fat_sector) + bytes(directory_sector) + stream_bytes
+
+
+def cfb_directory_entry(
+    name: str,
+    object_type: int,
+    *,
+    child_id: int = 0xFFFFFFFF,
+    start_sector: int = 0xFFFFFFFF,
+    stream_size: int = 0,
+) -> bytes:
+    entry = bytearray(128)
+    encoded_name = (name + "\x00").encode("utf-16le")[:64]
+    entry[: len(encoded_name)] = encoded_name
+    entry[64:66] = len(encoded_name).to_bytes(2, "little")
+    entry[66] = object_type
+    entry[67] = 1
+    entry[68:72] = (0xFFFFFFFF).to_bytes(4, "little")
+    entry[72:76] = (0xFFFFFFFF).to_bytes(4, "little")
+    entry[76:80] = child_id.to_bytes(4, "little")
+    entry[116:120] = start_sector.to_bytes(4, "little")
+    entry[120:128] = stream_size.to_bytes(8, "little")
+    return bytes(entry)
 
 
 def lnk_unicode_string(value: str) -> bytes:

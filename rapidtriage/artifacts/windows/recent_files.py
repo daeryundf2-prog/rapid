@@ -11,8 +11,10 @@ from ...core.models import ArtifactRecord
 from .common import isoformat_from_timestamp, iter_windows_user_homes
 
 RECENT_ROOT = ("AppData", "Roaming", "Microsoft", "Windows", "Recent")
-PARSER_VERSION = "windows-recent-files-v2"
+PARSER_VERSION = "windows-recent-files-v3"
 MAX_JUMPLIST_EMBEDDED_LNKS = 50
+MAX_OLE_STREAMS = 128
+MAX_OLE_STREAM_BYTES = 8 * 1024 * 1024
 RECENT_PATTERNS: Tuple[Tuple[str, str, Sequence[str]], ...] = (
     ("recent-shortcut", "*.lnk", ()),
     ("jumplist-automatic", "*.automaticDestinations-ms", ("AutomaticDestinations",)),
@@ -20,6 +22,11 @@ RECENT_PATTERNS: Tuple[Tuple[str, str, Sequence[str]], ...] = (
 )
 LNK_HEADER_SIZE = 0x4C
 LNK_CLSID = bytes.fromhex("0114020000000000c000000000000046")
+CFB_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+CFB_FREESECT = 0xFFFFFFFF
+CFB_ENDOFCHAIN = 0xFFFFFFFE
+CFB_FATSECT = 0xFFFFFFFD
+CFB_DIFSECT = 0xFFFFFFFC
 LNK_FLAG_NAMES = {
     0x00000001: "HasLinkTargetIDList",
     0x00000002: "HasLinkInfo",
@@ -209,7 +216,8 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         data = path.read_bytes()
     except OSError:
         return {"jump_list_parse_status": "read-error"}
-    destinations = extract_jumplist_destinations(data)
+    ole_streams = parse_ole_compound_streams(data) if data.startswith(CFB_SIGNATURE) else []
+    destinations = extract_jumplist_destinations(data, ole_streams)
     embedded_paths = sorted(
         {
             item
@@ -221,43 +229,256 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
             if item
         }
     )
+    stream_summaries = [
+        {
+            "index": int(stream["index"]),
+            "name": str(stream["name"]),
+            "path": str(stream["path"]),
+            "size": int(stream["size"]),
+            "start_sector": int(stream["start_sector"]),
+        }
+        for stream in ole_streams[:MAX_OLE_STREAMS]
+    ]
     return {
-        "jump_list_parse_status": "parsed-embedded-lnk" if destinations else "inventory",
+        "jump_list_parse_status": "parsed-ole-stream-lnk" if ole_streams and destinations else "parsed-embedded-lnk" if destinations else "inventory",
         "container_hint": "ole-compound-file" if data.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1") else "custom-binary",
         "jumplist_kind": "automatic" if artifact_type == "jumplist-automatic" else "custom",
         "application_id_hash": path.stem.split(".", 1)[0],
+        "ole_parse_status": "parsed" if ole_streams else "not-ole" if not data.startswith(CFB_SIGNATURE) else "no-streams",
+        "ole_stream_count": len(ole_streams),
+        "ole_streams": stream_summaries,
         "embedded_paths": embedded_paths,
         "destination_count": len(destinations),
+        "destination_stream_count": len({str(destination.get("stream_path") or "") for destination in destinations if destination.get("stream_path")}),
         "destinations": destinations,
-        "note": "Jump List destination streams are decoded when embedded Shell Link records are recoverable; otherwise embedded path extraction is provided for triage search.",
+        "note": "OLE Jump List streams are traversed when recoverable; otherwise embedded Shell Link and path extraction is provided for triage search.",
     }
 
 
-def extract_jumplist_destinations(data: bytes) -> list[dict[str, object]]:
+def extract_jumplist_destinations(
+    data: bytes,
+    ole_streams: Sequence[dict[str, object]] | None = None,
+) -> list[dict[str, object]]:
     destinations: list[dict[str, object]] = []
-    for index, offset in enumerate(find_lnk_offsets(data)):
+    if ole_streams:
+        for stream in ole_streams:
+            stream_data = stream.get("data")
+            if not isinstance(stream_data, bytes):
+                continue
+            append_lnk_destinations(destinations, stream_data, stream=stream)
+            if len(destinations) >= MAX_JUMPLIST_EMBEDDED_LNKS:
+                break
+    if not ole_streams or not destinations:
+        append_lnk_destinations(destinations, data)
+    return destinations[:MAX_JUMPLIST_EMBEDDED_LNKS]
+
+
+def append_lnk_destinations(
+    destinations: list[dict[str, object]],
+    data: bytes,
+    stream: dict[str, object] | None = None,
+) -> None:
+    seen = {
+        (
+            str(destination.get("stream_path") or ""),
+            int(destination.get("lnk_offset") or 0),
+            str(destination.get("target_path") or ""),
+        )
+        for destination in destinations
+    }
+    for offset in find_lnk_offsets(data):
         metadata = parse_lnk_metadata_from_bytes(data[offset:])
         if metadata.get("lnk_parse_status") != "parsed":
             continue
         target_path = str(metadata.get("target_path") or "")
         embedded_paths = [str(value) for value in metadata.get("embedded_paths", []) if value]
-        destinations.append(
-            {
-                "index": index,
-                "lnk_offset": offset,
-                "target_path": target_path,
-                "embedded_paths": embedded_paths,
-                "target_created_at": metadata.get("target_created_at", ""),
-                "target_accessed_at": metadata.get("target_accessed_at", ""),
-                "target_modified_at": metadata.get("target_modified_at", ""),
-                "working_dir": metadata.get("working_dir", ""),
-                "command_line_arguments": metadata.get("command_line_arguments", ""),
-                "link_flag_names": metadata.get("link_flag_names", []),
-            }
-        )
+        stream_path = str(stream.get("path") or "") if stream else ""
+        dedupe_key = (stream_path, offset, target_path)
+        if dedupe_key in seen:
+            continue
+        destination = {
+            "index": len(destinations),
+            "lnk_offset": offset,
+            "target_path": target_path,
+            "embedded_paths": embedded_paths,
+            "target_created_at": metadata.get("target_created_at", ""),
+            "target_accessed_at": metadata.get("target_accessed_at", ""),
+            "target_modified_at": metadata.get("target_modified_at", ""),
+            "working_dir": metadata.get("working_dir", ""),
+            "command_line_arguments": metadata.get("command_line_arguments", ""),
+            "link_flag_names": metadata.get("link_flag_names", []),
+        }
+        if stream:
+            destination.update(
+                {
+                    "stream_name": str(stream.get("name") or ""),
+                    "stream_path": stream_path,
+                    "stream_size": int(stream.get("size") or 0),
+                    "stream_index": int(stream.get("index") or 0),
+                }
+            )
+        destinations.append(destination)
+        seen.add(dedupe_key)
         if len(destinations) >= MAX_JUMPLIST_EMBEDDED_LNKS:
             break
-    return destinations
+
+
+def parse_ole_compound_streams(data: bytes) -> list[dict[str, object]]:
+    if len(data) < 512 or not data.startswith(CFB_SIGNATURE):
+        return []
+    sector_size = 1 << read_u16(data, 0x1E)
+    mini_sector_size = 1 << read_u16(data, 0x20)
+    if sector_size not in (512, 4096) or mini_sector_size != 64:
+        return []
+    directory_start = read_u32(data, 0x30)
+    mini_cutoff_size = read_u32(data, 0x38) or 4096
+    mini_fat_start = read_u32(data, 0x3C)
+    difat_entries = [
+        read_u32(data, 0x4C + index * 4)
+        for index in range(109)
+        if read_u32(data, 0x4C + index * 4) not in (CFB_FREESECT, CFB_ENDOFCHAIN)
+    ]
+    fat = build_cfb_fat(data, sector_size, difat_entries)
+    if not fat:
+        return []
+    directory_data = read_cfb_chain(data, fat, directory_start, sector_size, MAX_OLE_STREAM_BYTES)
+    entries = parse_cfb_directory_entries(directory_data)
+    if not entries:
+        return []
+    root = next((entry for entry in entries if entry["type"] == 5), entries[0])
+    mini_fat_data = read_cfb_chain(data, fat, mini_fat_start, sector_size, MAX_OLE_STREAM_BYTES)
+    mini_fat = [read_u32(mini_fat_data, offset) for offset in range(0, len(mini_fat_data), 4)]
+    mini_stream = read_cfb_chain(data, fat, int(root["start_sector"]), sector_size, MAX_OLE_STREAM_BYTES)
+
+    streams: list[dict[str, object]] = []
+    for entry_index, path_parts in walk_cfb_directory(entries, int(root.get("child_id", CFB_ENDOFCHAIN)), ()):
+        if len(streams) >= MAX_OLE_STREAMS:
+            break
+        entry = entries[entry_index]
+        if entry["type"] != 2:
+            continue
+        size = int(entry["size"])
+        if size < mini_cutoff_size and mini_stream and mini_fat:
+            stream_data = read_cfb_mini_chain(mini_stream, mini_fat, int(entry["start_sector"]), mini_sector_size, size)
+            if not stream_data and int(entry["start_sector"]) < len(fat):
+                stream_data = read_cfb_chain(data, fat, int(entry["start_sector"]), sector_size, min(size, MAX_OLE_STREAM_BYTES))[:size]
+        else:
+            stream_data = read_cfb_chain(data, fat, int(entry["start_sector"]), sector_size, min(size, MAX_OLE_STREAM_BYTES))[:size]
+        streams.append(
+            {
+                "index": entry_index,
+                "name": str(entry["name"]),
+                "path": "/".join(path_parts),
+                "size": size,
+                "start_sector": int(entry["start_sector"]),
+                "data": stream_data,
+            }
+        )
+    return streams
+
+
+def build_cfb_fat(data: bytes, sector_size: int, fat_sector_ids: Sequence[int]) -> list[int]:
+    fat: list[int] = []
+    for sector_id in fat_sector_ids:
+        sector = cfb_sector(data, sector_size, sector_id)
+        if not sector:
+            continue
+        fat.extend(read_u32(sector, offset) for offset in range(0, len(sector), 4))
+    return fat
+
+
+def read_cfb_chain(data: bytes, fat: Sequence[int], start_sector: int, sector_size: int, limit: int) -> bytes:
+    if start_sector in (CFB_FREESECT, CFB_ENDOFCHAIN) or start_sector >= len(fat):
+        return b""
+    chunks: list[bytes] = []
+    seen: set[int] = set()
+    sector_id = start_sector
+    remaining = limit
+    while sector_id not in (CFB_FREESECT, CFB_ENDOFCHAIN) and sector_id < len(fat) and sector_id not in seen and remaining > 0:
+        seen.add(sector_id)
+        chunk = cfb_sector(data, sector_size, sector_id)
+        if not chunk:
+            break
+        chunks.append(chunk[:remaining])
+        remaining -= len(chunk)
+        sector_id = fat[sector_id]
+    return b"".join(chunks)
+
+
+def read_cfb_mini_chain(
+    mini_stream: bytes,
+    mini_fat: Sequence[int],
+    start_sector: int,
+    mini_sector_size: int,
+    size: int,
+) -> bytes:
+    if start_sector in (CFB_FREESECT, CFB_ENDOFCHAIN) or start_sector >= len(mini_fat):
+        return b""
+    chunks: list[bytes] = []
+    seen: set[int] = set()
+    sector_id = start_sector
+    while sector_id not in (CFB_FREESECT, CFB_ENDOFCHAIN) and sector_id < len(mini_fat) and sector_id not in seen:
+        seen.add(sector_id)
+        start = sector_id * mini_sector_size
+        chunks.append(mini_stream[start : start + mini_sector_size])
+        sector_id = mini_fat[sector_id]
+        if sum(len(chunk) for chunk in chunks) >= size:
+            break
+    return b"".join(chunks)[:size]
+
+
+def parse_cfb_directory_entries(directory_data: bytes) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for offset in range(0, len(directory_data), 128):
+        entry = directory_data[offset : offset + 128]
+        if len(entry) < 128:
+            break
+        name_len = read_u16(entry, 64)
+        object_type = entry[66]
+        if object_type not in (1, 2, 5) or name_len < 2:
+            continue
+        raw_name = entry[: min(64, name_len - 2)]
+        entries.append(
+            {
+                "name": decode_text(raw_name, "utf-16le"),
+                "type": object_type,
+                "left_id": read_u32(entry, 68),
+                "right_id": read_u32(entry, 72),
+                "child_id": read_u32(entry, 76),
+                "start_sector": read_u32(entry, 116),
+                "size": read_u64(entry, 120),
+            }
+        )
+    return entries
+
+
+def walk_cfb_directory(
+    entries: Sequence[dict[str, object]],
+    entry_id: int,
+    parent_path: tuple[str, ...],
+    seen: set[int] | None = None,
+) -> Iterable[tuple[int, tuple[str, ...]]]:
+    if seen is None:
+        seen = set()
+    if entry_id in (CFB_FREESECT, CFB_ENDOFCHAIN) or entry_id >= len(entries) or entry_id in seen:
+        return
+    seen.add(entry_id)
+    entry = entries[entry_id]
+    yield from walk_cfb_directory(entries, int(entry["left_id"]), parent_path, seen)
+    name = str(entry["name"])
+    current_path = (*parent_path, name)
+    yield entry_id, current_path
+    if entry["type"] == 1:
+        yield from walk_cfb_directory(entries, int(entry["child_id"]), current_path, seen)
+    yield from walk_cfb_directory(entries, int(entry["right_id"]), parent_path, seen)
+
+
+def cfb_sector(data: bytes, sector_size: int, sector_id: int) -> bytes:
+    start = 512 + sector_id * sector_size
+    end = start + sector_size
+    if sector_id < 0 or end > len(data):
+        return b""
+    return data[start:end]
 
 
 def find_lnk_offsets(data: bytes) -> Iterable[int]:

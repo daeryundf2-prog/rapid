@@ -123,9 +123,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("IsUnicode", details["link_flag_names"])
             self.assertIn("ARCHIVE", details["file_attribute_names"])
             self.assertEqual(len(details["source_hashes"]["sha256"]), 64)
-            self.assertEqual(automatic["details"]["jump_list_parse_status"], "parsed-embedded-lnk")
+            self.assertEqual(automatic["details"]["jump_list_parse_status"], "parsed-ole-stream-lnk")
+            self.assertEqual(automatic["details"]["ole_parse_status"], "parsed")
+            self.assertEqual(automatic["details"]["ole_stream_count"], 1)
             self.assertEqual(automatic["details"]["destination_count"], 1)
             self.assertEqual(automatic["details"]["destinations"][0]["target_path"], r"C:\Users\alice\Documents\Incident Notes.docx")
+            self.assertEqual(automatic["details"]["destinations"][0]["stream_path"], "1")
             self.assertIn(r"C:\Users\alice\Documents\Incident Notes.docx", automatic["details"]["embedded_paths"])
             self.assertEqual(custom["details"]["destinations"][0]["target_path"], r"C:\Users\alice\Downloads\installer.exe")
 
