@@ -42,6 +42,7 @@ def run_unified_search(
     matches.extend(search_docs(outputs, normalized, limit=limit))
     matches.extend(search_files(outputs, normalized, limit=limit))
     matches.extend(search_artifacts(outputs, normalized, limit=limit))
+    matches.extend(search_indicators(outputs, normalized, limit=limit))
     matches.extend(search_timeline(outputs, normalized, limit=limit))
     if include_ocr:
         ocr_matches, ocr_errors = search_ocr(outputs, normalized, limit=limit)
@@ -231,6 +232,40 @@ def search_timeline(outputs: Mapping[str, object], keywords: Sequence[str], *, l
                 "preview": compact_json_preview(event),
                 "pointer": f"/events/{index}",
                 "metadata": dict(event),
+            }
+        )
+        if limit and len(matches) >= limit:
+            break
+    return matches
+
+
+def search_indicators(outputs: Mapping[str, object], keywords: Sequence[str], *, limit: int) -> list[dict[str, object]]:
+    payload = read_json_output(outputs, "indicators")
+    if not payload:
+        return []
+    matches = []
+    for index, indicator in enumerate(payload.get("indicators", [])):
+        if not isinstance(indicator, Mapping):
+            continue
+        haystack = json.dumps(indicator, ensure_ascii=False, sort_keys=True)
+        matched = match_keywords(haystack, keywords)
+        if not matched:
+            continue
+        sources = indicator.get("sources")
+        first_source = sources[0] if isinstance(sources, list) and sources and isinstance(sources[0], Mapping) else {}
+        path = str(first_source.get("path") or first_source.get("source_path") or "")
+        indicator_type = str(indicator.get("type") or "indicator")
+        indicator_value = str(indicator.get("value") or "")
+        matches.append(
+            {
+                "source": "indicators",
+                "kind": indicator_type,
+                "path": path,
+                "title": f"{indicator_type}: {indicator_value}" if indicator_value else indicator_type,
+                "matched_keywords": matched,
+                "preview": compact_json_preview(indicator),
+                "pointer": f"/indicators/{index}",
+                "metadata": dict(indicator),
             }
         )
         if limit and len(matches) >= limit:

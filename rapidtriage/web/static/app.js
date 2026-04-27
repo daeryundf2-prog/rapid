@@ -946,6 +946,7 @@ function renderSearch(payload = null) {
             <option value="documents" ${draft.source === "documents" ? "selected" : ""}>Documents</option>
             <option value="files" ${draft.source === "files" ? "selected" : ""}>File metadata</option>
             <option value="web" ${draft.source === "web" ? "selected" : ""}>Web artifacts</option>
+            <option value="indicators" ${draft.source === "indicators" ? "selected" : ""}>Indicators</option>
             <option value="artifacts" ${draft.source === "artifacts" ? "selected" : ""}>Other artifacts</option>
             <option value="timeline" ${draft.source === "timeline" ? "selected" : ""}>Timeline</option>
             <option value="ocr" ${draft.source === "ocr" ? "selected" : ""}>OCR</option>

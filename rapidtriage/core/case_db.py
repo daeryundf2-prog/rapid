@@ -245,6 +245,7 @@ class CaseDatabase:
             "file_record_count": self._import_files(case_id, evidence_source_id, outputs),
             "indexed_document_count": self._import_docs(case_id, evidence_source_id, outputs),
             "artifact_count": self._import_artifacts(case_id, evidence_source_id, outputs),
+            "indicator_count": self._import_indicators(case_id, evidence_source_id, outputs),
             "event_count": self._import_timeline(case_id, evidence_source_id, outputs),
         }
         audit_id = self.add_audit_event(
@@ -870,6 +871,49 @@ class CaseDatabase:
                 count += 1
         return count
 
+    def _import_indicators(self, case_id: str, evidence_source_id: int, outputs: Mapping[str, object]) -> int:
+        payload = read_output(outputs, "indicators")
+        rows = payload.get("indicators") if isinstance(payload, Mapping) else None
+        if not isinstance(rows, list):
+            return 0
+        count = 0
+        with self.connect() as connection:
+            for index, row in enumerate(rows):
+                if not isinstance(row, Mapping):
+                    continue
+                artifact = indicator_artifact_row(row, index=index)
+                details = artifact_details(artifact)
+                title = artifact_title(artifact)
+                summary = artifact_summary(artifact)
+                cursor = connection.execute(
+                    """
+                    INSERT INTO artifact (
+                        citation_id, case_id, evidence_source_id, artifact_type, parser_name,
+                        parser_version, title, summary, data_json, confidence, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        next_citation_id_for_connection(connection, case_id, "artifact"),
+                        case_id,
+                        evidence_source_id,
+                        str(artifact.get("artifact_type") or "indicator"),
+                        str(details.get("parser") or "rapidtriage-indicators"),
+                        str(details.get("parser_version") or "1"),
+                        title,
+                        summary,
+                        json.dumps(artifact, ensure_ascii=False, sort_keys=True),
+                        None,
+                        now_iso(),
+                    ),
+                )
+                connection.execute(
+                    "INSERT INTO artifact_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
+                    (int(cursor.lastrowid), title, summary, artifact_index_text(artifact)),
+                )
+                count += 1
+        return count
+
     def _import_vsc_artifacts(self, case_id: str, evidence_source_id: int, payload: Mapping[str, object]) -> int:
         comparisons = payload.get("comparisons")
         if not isinstance(comparisons, list):
@@ -1117,6 +1161,17 @@ def artifact_details(row: Mapping[str, object]) -> Mapping[str, object]:
 
 def artifact_summary(row: Mapping[str, object]) -> str:
     details_payload = artifact_details(row)
+    indicator_value = details_payload.get("indicator_value")
+    if indicator_value:
+        return " ".join(
+            str(part)
+            for part in (
+                details_payload.get("indicator_type"),
+                indicator_value,
+                details_payload.get("classification"),
+            )
+            if part
+        )
     event_id = details_payload.get("event_id")
     if event_id:
         parts = [
@@ -1163,6 +1218,9 @@ def artifact_summary(row: Mapping[str, object]) -> str:
 def artifact_title(row: Mapping[str, object]) -> str:
     artifact_type = str(row.get("artifact_type") or "artifact")
     details = artifact_details(row)
+    indicator_value = details.get("indicator_value")
+    if indicator_value:
+        return f"{artifact_type}: {compact_text(str(indicator_value), 80)}"
     event_id = details.get("event_id")
     if event_id:
         category = details.get("event_category") or "event"
@@ -1203,6 +1261,7 @@ def artifact_source_path(row: Mapping[str, object]) -> str:
         details.get("snapshot_path"),
         details.get("target_path"),
         details.get("file_path"),
+        details.get("source_path"),
     ):
         if value:
             return str(value)
@@ -1301,6 +1360,11 @@ def artifact_search_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "program_arguments",
         "run_at_load",
         "modified_at",
+        "indicator_type",
+        "indicator_value",
+        "classification",
+        "count",
+        "matched_rules",
     )
     metadata = {key: details[key] for key in keys if details.get(key) not in (None, "", [])}
     nested = artifact_nested_preview(details)
@@ -1376,6 +1440,41 @@ def vsc_artifact_row(
         "provider": "rapidtriage-vsc-compare",
         "artifact_type": f"vsc-{status}-file",
         "path": review_path,
+        "supported": True,
+        "details": details,
+    }
+
+
+def indicator_artifact_row(row: Mapping[str, object], *, index: int) -> dict[str, object]:
+    indicator_type = str(row.get("type") or "indicator")
+    indicator_value = str(row.get("value") or "")
+    sources = row.get("sources") if isinstance(row.get("sources"), list) else []
+    first_source = sources[0] if sources and isinstance(sources[0], Mapping) else {}
+    source_path = str(first_source.get("path") or first_source.get("source_path") or "")
+    output_path = str(first_source.get("output_path") or "")
+    details = {
+        "parser": "rapidtriage-indicators",
+        "parser_version": "1",
+        "coverage_status": "run-output-summary",
+        "reportability": "triage",
+        "source_format": "rapidtriage-indicators-json",
+        "source_index": index,
+        "source_path": source_path,
+        "output_path": output_path,
+        "indicator_type": indicator_type,
+        "indicator_value": indicator_value,
+        "count": optional_int(row.get("count")) or 0,
+        "classification": str(row.get("classification") or ""),
+        "risk_flags": list(row.get("risk_flags", [])) if isinstance(row.get("risk_flags"), list) else [],
+        "matched_rules": list(row.get("matched_rules", [])) if isinstance(row.get("matched_rules"), list) else [],
+        "sources": sources,
+        "evidence_strength": "indicator-pivot",
+        "raw": dict(row),
+    }
+    return {
+        "provider": "rapidtriage-indicators",
+        "artifact_type": f"indicator-{indicator_type}",
+        "path": source_path or output_path,
         "supported": True,
         "details": details,
     }
@@ -1552,7 +1651,7 @@ def search_artifacts_scan(
         metadata = artifact_search_metadata(artifact_row)
         matches.append(
             {
-                "source": "artifacts",
+                "source": artifact_match_source(str(row["artifact_type"])),
                 "citation_id": str(row["citation_id"]),
                 "target_type": "artifact",
                 "target_id": str(row["id"]),
@@ -1567,6 +1666,10 @@ def search_artifacts_scan(
         if limit and len(matches) >= limit:
             break
     return matches
+
+
+def artifact_match_source(artifact_type: str) -> str:
+    return "indicators" if artifact_type.startswith("indicator-") else "artifacts"
 
 
 def dedupe_matches(matches: list[dict[str, object]], *, limit: int) -> list[dict[str, object]]:
@@ -1636,7 +1739,7 @@ def search_artifacts_fts(
         preview = str(row["summary"] or row["snippet"] or row["artifact_type"])
         matches.append(
             {
-                "source": "artifacts",
+                "source": artifact_match_source(str(row["artifact_type"])),
                 "citation_id": str(row["citation_id"]),
                 "target_type": "artifact",
                 "target_id": str(row["id"]),

@@ -28,9 +28,9 @@ rapidtriage case-db ./case.db --import-run ./case-run --case-id CASE-001
 rapidtriage case-search ./case.db --case-id CASE-001 -k password --source documents
 ```
 
-Search reaches indexed document text, EML/MBOX/MSG email text, bounded PST/OST mailbox strings, file metadata, artifact summaries, and timeline events. Artifact results keep reviewable source paths and high-value metadata such as event IDs, usernames, source IPs, command lines, PowerShell script blocks, MFT paths, USN reasons, macOS quarantine URLs, browser history previews, and LaunchAgent labels/programs. Use source filters to narrow heavy cases.
+Search reaches indexed document text, EML/MBOX/MSG email text, bounded PST/OST mailbox strings, file metadata, artifact summaries, indicator pivots, and timeline events. Artifact and indicator results keep reviewable source paths and high-value metadata such as event IDs, usernames, source IPs, command lines, PowerShell script blocks, MFT paths, USN reasons, macOS quarantine URLs, browser history previews, LaunchAgent labels/programs, IOC values, risk flags, and matched rules. Use source filters to narrow heavy cases.
 
-`rapidtriage indicators ./case-run` creates a separate URL/domain/IP/hash pivot summary from completed run outputs. It keeps source output names and JSON pointers so an analyst can jump from an IOC to the source artifact, and `--rules iocs.yaml` can mark local IOC hits without sending evidence to an external TI service.
+`rapidtriage indicators ./case-run` creates a separate URL/domain/IP/hash pivot summary from completed run outputs. It keeps source output names and JSON pointers so an analyst can jump from an IOC to the source artifact, and `--rules iocs.yaml` can mark local IOC hits without sending evidence to an external TI service. Completed run searches and imported Case DB searches include these pivots, so `--source indicators` can isolate IOC rows during review.
 
 In the web UI, open `Triage -> Indicators` after a run to review those pivots in pages, filter the visible rows, inspect source pointers, and save important indicators to the review board.
 

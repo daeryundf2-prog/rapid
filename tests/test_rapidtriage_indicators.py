@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.core.case_db import open_case_database
 from tests.test_rapidtriage_rule_engine import sha256_hex
 from tests.test_rapidtriage_run import build_run_fixture
 
@@ -52,6 +53,28 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             manual_payload = json.loads(output.read_text(encoding="utf-8"))
             self.assertIndicatorMatchedRule(manual_payload, "download.example", "browser-download-ioc")
             self.assertGreaterEqual(manual_payload["summary"]["indicator_count"], 3)
+
+            search_output = Path(tmp_dir) / "search.json"
+            self.assertEqual(
+                main(["search", str(output_dir), "-k", "malicious.example", "--no-ocr", "--output", str(search_output)]),
+                0,
+            )
+            search_payload = json.loads(search_output.read_text(encoding="utf-8"))
+            self.assertTrue(
+                any(match["source"] == "indicators" for match in search_payload["matches"]),
+                "unified search should include indicator pivot hits",
+            )
+
+            database = open_case_database(Path(tmp_dir) / "case.db")
+            import_payload = database.import_run_output(output_dir, case_id="CASE-IOC", case_name="IOC Case")
+            self.assertGreaterEqual(import_payload["summary"]["indicator_count"], 3)
+            case_search = database.search_case(
+                case_id="CASE-IOC",
+                keywords=["malicious.example"],
+                sources=["indicators"],
+            )
+            self.assertGreaterEqual(case_search["summary"]["match_count"], 1)
+            self.assertTrue(all(match["source"] == "indicators" for match in case_search["matches"]))
 
     def assertIndicatorPresent(self, payload: dict[str, object], indicator_type: str, value: str) -> None:
         for indicator in payload["indicators"]:
