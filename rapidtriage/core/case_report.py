@@ -151,6 +151,7 @@ def build_case_report_markdown(
             evidence = item.get("evidence") if isinstance(item.get("evidence"), Mapping) else {}
             hashes = evidence.get("hashes") if isinstance(evidence.get("hashes"), Mapping) else {}
             review = item.get("review") if isinstance(item.get("review"), Mapping) else {}
+            source_hits = extract_source_hit_notes(str(item.get("note") or ""))
             lines.extend(
                 [
                     f"### 5.{index}. {item.get('summary') or evidence.get('name') or 'Evidence'}",
@@ -163,6 +164,13 @@ def build_case_report_markdown(
                     f"- 검토 상태: `{review.get('status', '')}`",
                     f"- 태그: {', '.join(str(tag) for tag in item.get('tags', [])) or '없음'}",
                     f"- 분석자 메모: {item.get('note') or '없음'}",
+                ]
+            )
+            if source_hits:
+                lines.append("- Source-search cited hits:")
+                lines.extend(f"  - {hit}" for hit in source_hits)
+            lines.extend(
+                [
                     f"- MD5: `{hashes.get('md5', '')}`",
                     f"- SHA1: `{hashes.get('sha1', '')}`",
                     f"- SHA256: `{hashes.get('sha256', '')}`",
@@ -235,6 +243,17 @@ def template_noise_policy(template: str) -> str:
         "hash-only": "hash appendix only; omits narrative analysis and most metadata.",
     }
     return policies.get(template, policies["legal-handoff"])
+
+
+def extract_source_hit_notes(note: str) -> list[str]:
+    hits: list[str] = []
+    for line in note.splitlines():
+        cleaned = line.strip()
+        if cleaned.lower().startswith("current-file hit:"):
+            hit = re.sub(r"^current-file hit:\s*", "", cleaned, flags=re.IGNORECASE)
+            if hit:
+                hits.append(hit)
+    return hits
 
 
 def build_case_indicator_rows(case_payload: Mapping[str, object], *, limit: int = 20) -> list[dict[str, object]]:

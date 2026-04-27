@@ -2059,12 +2059,33 @@ function renderReviewCard(bookmark) {
         <span>${escapeHtml(snapshot.path || "")}</span>
       </div>
       <p>${escapeHtml(bookmark.note || "No analyst note yet.")}</p>
+      ${renderSourceHitNotes(bookmark.note || "")}
       <div class="tag-row">${(bookmark.tags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>
       <code>${escapeHtml(reference.pointer || "")}</code>
       ${renderReviewHistory(bookmark)}
       ${compareButton ? `<div class="review-actions">${compareButton}</div>` : ""}
     </article>
   `;
+}
+
+function renderSourceHitNotes(note) {
+  const hits = sourceHitNotes(note);
+  if (!hits.length) return "";
+  return `
+    <div class="source-hit-list">
+      <strong>Current-file cited hits</strong>
+      ${hits.map((hit) => `<span>${escapeHtml(hit)}</span>`).join("")}
+    </div>
+  `;
+}
+
+function sourceHitNotes(note) {
+  return String(note || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.toLowerCase().startsWith("current-file hit:"))
+    .map((line) => line.replace(/^current-file hit:\s*/i, ""))
+    .filter(Boolean);
 }
 
 function renderReviewHistory(bookmark) {

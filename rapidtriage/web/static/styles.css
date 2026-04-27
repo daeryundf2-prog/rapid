@@ -1511,6 +1511,27 @@ mark {
   font-weight: 800;
 }
 
+.source-hit-list {
+  display: grid;
+  gap: 5px;
+  border-left: 3px solid rgba(31, 111, 104, 0.45);
+  background: #f7fbfa;
+  padding: 8px 10px;
+}
+
+.source-hit-list strong {
+  color: var(--accent);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.source-hit-list span {
+  color: var(--ink);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 880px) {
   .shell {
     grid-template-columns: 1fr;

@@ -358,7 +358,7 @@ class RapidTriageApiTests(unittest.TestCase):
                     "pointer": "/candidates/0",
                     "tag": "review",
                     "tags": ["credential", "report"],
-                    "note": "Check this file.",
+                    "note": "Check this file.\n\nCurrent-file hit: credentials.txt line 3 offset 12 keyword password\nSnippet: admin password found",
                     "review_status": "relevant",
                     "include_in_report": True,
                 },
@@ -439,6 +439,8 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("Source path", report_payload["markdown"])
             self.assertIn("IOC/Indicator review pivots", report_payload["markdown"])
             self.assertIn("Review this indicator pivot.", report_payload["markdown"])
+            self.assertIn("Source-search cited hits", report_payload["markdown"])
+            self.assertIn("credentials.txt line 3 offset 12 keyword password", report_payload["markdown"])
             self.assertIn("CASE-001", report_payload["markdown"])
             self.assertIn(evidence["hashes"]["sha256"], report_payload["markdown"])
             self.assertIn("html", report_payload["exports"])
