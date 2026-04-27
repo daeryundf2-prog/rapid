@@ -1575,6 +1575,8 @@ async function searchCurrentFile(event) {
     for (const keyword of keywords) params.append("keyword", keyword);
     const payload = await api(`/api/runs/${selectedRunId}/source-search?${params.toString()}`);
     output.innerHTML = renderFileSearchResults(payload);
+    bindCopyButtons();
+    bindCompareActions();
   } catch (error) {
     output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
   } finally {
@@ -1606,11 +1608,28 @@ function renderFileSearchResults(payload) {
         <article class="dense-row">
           <strong>Line ${escapeHtml(match.line)} · ${escapeHtml(match.keyword)}</strong>
           <span>${highlightSnippet(match.snippet || "", payload.keywords || [])}</span>
+          <small>${escapeHtml(match.citation || "")}</small>
+          <div class="review-actions">
+            ${compareButton(compareItemFromFileSearchMatch(payload, match))}
+            <button class="icon-action" type="button" data-copy-path="${escapeHtml(match.citation || match.snippet || "")}">Copy citation</button>
+            <button class="icon-action" type="button" data-copy-path="${escapeHtml(match.compare_preview || match.snippet || "")}">Copy snippet</button>
+          </div>
         </article>
       `).join("")}
     </div>
     ${payload.truncated ? '<p class="help-text">Results were capped for performance. Narrow the keyword if needed.</p>' : ""}
   `;
+}
+
+function compareItemFromFileSearchMatch(payload, match) {
+  return {
+    path: payload.path || match.source_path || "",
+    title: match.citation || `${payload.name || "source"} hit`,
+    source: "source-search",
+    kind: payload.mime_type || payload.extension || "",
+    preview: match.compare_preview || match.snippet || "",
+    pointer: match.pointer || "",
+  };
 }
 
 async function saveViewerReview(event) {

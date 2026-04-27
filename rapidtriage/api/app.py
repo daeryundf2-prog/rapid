@@ -6,6 +6,7 @@ import os
 import re
 import contextlib
 import email
+import hashlib
 import sqlite3
 import datetime as dt
 from email import policy
@@ -1641,8 +1642,53 @@ def build_source_search(
             "match_count": len(matches),
             "limit": limit,
         },
-        "matches": matches,
+        "matches": enrich_source_search_matches(source_path, matches),
     }
+
+
+def enrich_source_search_matches(source_path: Path, matches: Sequence[dict[str, object]]) -> list[dict[str, object]]:
+    enriched: list[dict[str, object]] = []
+    for index, match in enumerate(matches):
+        locator = source_search_locator(match)
+        citation = source_search_citation(source_path, match, locator)
+        match_id = hashlib.sha256(f"{source_path}|{index}|{citation}|{match.get('snippet', '')}".encode("utf-8")).hexdigest()[:16]
+        item = dict(match)
+        item.update(
+            {
+                "match_id": match_id,
+                "match_index": index,
+                "pointer": f"source-search:/matches/{index}",
+                "source_path": str(source_path),
+                "source_name": source_path.name,
+                "locator": locator,
+                "citation": citation,
+                "review_hint": "Use this citation in the viewer review note, then verify source hashes before reporting.",
+                "compare_preview": f"{citation}\n{match.get('snippet', '')}",
+            }
+        )
+        enriched.append(item)
+    return enriched
+
+
+def source_search_locator(match: dict[str, object]) -> dict[str, object]:
+    locator: dict[str, object] = {
+        "line": match.get("line"),
+        "offset": match.get("offset"),
+        "keyword": match.get("keyword"),
+    }
+    for key in ("table", "column", "row_number"):
+        if key in match:
+            locator[key] = match[key]
+    return locator
+
+
+def source_search_citation(source_path: Path, match: dict[str, object], locator: dict[str, object]) -> str:
+    if locator.get("table"):
+        return (
+            f"{source_path.name} table {locator.get('table')} row {locator.get('row_number')} "
+            f"column {locator.get('column')} keyword {locator.get('keyword')}"
+        )
+    return f"{source_path.name} line {locator.get('line')} offset {locator.get('offset')} keyword {locator.get('keyword')}"
 
 
 def search_sqlite_file(source_path: Path, keywords: Sequence[str], *, limit: int, context: int) -> list[dict[str, object]]:
