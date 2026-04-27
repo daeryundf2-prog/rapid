@@ -24,7 +24,7 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - APK inventory/risk triage works on exported `.apk` files. Cellebrite/XRY/GrayKey/AXIOM-style mobile CSV/JSON/JSONL exports can be normalized into message, contact, call, app, file, and source-summary rows with source hashes. Volatility/Volatility3 JSON/JSONL memory output import and bounded direct memory dump indicator scans are supported.
 - Google Takeout-style location/activity JSON and Apple/general account JSON imports are supported. Authorized API collection from analyst-provided request manifests is supported for bounded JSON responses, but RapidTriage does not manage OAuth consent flows, provider-specific pagination semantics, or account acquisition authority.
 - Full direct memory process reconstruction, password cracking, live USB collection, and remote-agent collection are deferred until the security and validation model matures. Bounded memory scans can surface process string candidates and checksum-validated BitLocker recovery-key candidates, but Volatility/Volatility3 or equivalent validation is still required for report-grade process reconstruction.
-- Image perceptual hashes and similarity buckets are triage hints only; they do not replace full media forensics, visual similarity review, or classifier validation.
+- Image perceptual hashes, similarity buckets, OCR sidecar language hints, translation-needed markers, and rule-based visual classifications are triage hints only; they do not replace full media forensics, OCR quality validation, translation review, visual similarity review, deepfake analysis, or ML classifier validation.
 - Parser output should be verified against source evidence before report inclusion.
 
 ## Search And OCR

@@ -25,6 +25,7 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             image_path = root / "Pictures" / "screen.png"
             image_path.parent.mkdir()
             write_image_fixture(image_path)
+            (image_path.parent / "screen.ocr.txt").write_text("한글 OCR test password", encoding="utf-8")
             output = root / "media-artifacts.json"
 
             exit_code = main(["artifacts", str(root), "--kind", "media-image", "--output", str(output)])
@@ -43,6 +44,14 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertEqual(details["similarity_bucket"], details["perceptual_hash"][:8])
             self.assertIn("sha256", details["hashes"])
             self.assertTrue(details["ocr_candidate"])
+            self.assertEqual(details["ocr_plan"]["status"], "sidecar-imported")
+            self.assertEqual(details["ocr_plan"]["recommended_languages"], ["kor", "eng"])
+            self.assertTrue(details["ocr_plan"]["korean_language_pack_required"])
+            self.assertEqual(details["translation_plan"]["status"], "required-not-run")
+            self.assertEqual(details["ocr_sidecar"]["language_hint"], "ko+en")
+            self.assertIn("text_sha256", details["ocr_sidecar"])
+            self.assertEqual(details["visual_classification"]["validation_status"], "triage-hint")
+            self.assertEqual(details["classifier_validation"]["deepfake_detection_status"], "not-run")
             thumbnail = details["thumbnail_preview"]
             self.assertTrue(thumbnail["available"])
             self.assertEqual(thumbnail["strategy"], "bounded-inline-png")

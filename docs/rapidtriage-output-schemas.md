@@ -246,7 +246,7 @@ Media image collector rows:
   - `media-image`
   - `media-image-unreadable`
 
-Current media image rows carry `parser`, `parser_version`, `source_path`, `source_format`, `hashes`, `width`, `height`, `channel_count`, `perceptual_hash`, `similarity_bucket`, `thumbnail_preview`, and `ocr_candidate` under `details` when decoding succeeds.
+Current media image rows carry `parser`, `parser_version`, `source_path`, `source_format`, `hashes`, `width`, `height`, `channel_count`, `perceptual_hash`, `similarity_bucket`, `thumbnail_preview`, `ocr_candidate`, `ocr_plan`, `translation_plan`, `classifier_validation`, and rule-based `visual_classification` under `details` when decoding succeeds. If an OCR sidecar is present, `ocr_sidecar` records source path/size/SHA256, bounded text, text SHA256, language hints, Korean detection, and truncation status.
 
 Memory Volatility collector rows:
 

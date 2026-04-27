@@ -30,7 +30,7 @@ RapidTriage should absorb this as a product principle:
 | VSC | Compare current volume with Volume Shadow Copies and detect VSC deletion commands. | Planned | Add VSC import/compare workflow as Windows advanced parser work. |
 | MFT/EDB/WER/Defender/Firewall/ADS | Broad Windows forensic artifacts. | Partial | WER, Defender MPLog, Firewall W3C, Zone.Identifier sidecar, Task Scheduler XML with suspicious-action risk flags, native `$MFT` inventory, native USN record recovery, and EDB/SRUDB header/string pivots are fixture-backed; full MFT/EDB table/attribute decoding remains planned. |
 | Password cracking | Built-in password cracking workflow. | Deferred | Integrate only as optional external-tool workflow with legal warnings. |
-| OCR/translation | Korean OCR and translation-oriented review. | Partial | Keep OCR optional; evaluate Korean OCR quality separately. |
+| OCR/translation | Korean OCR and translation-oriented review. | Partial+ | OCR remains optional, but media rows import OCR sidecars, identify Korean text hints, flag Korean language-pack needs, and mark translation-required status for review. |
 | Linux/XFS | Strong Linux filesystem coverage including XFS. | Partial | Linux user, shell history, SSH, auth log, cron, and systemd triage exists; XFS remains an evidence adapter/filesystem extraction requirement. |
 | Virtualization | VMDK/VHD/XVA server dump support. | Detection only | Extend virtual disk adapter; add XVA detection and guidance. |
 | Mobile APK malware | Extract APKs from mobile dumps and flag suspicious apps. | Partial+ | Exported APK inventory/hash/manifest/permission/risk triage plus bounded dex/native suspicious string, URL, and IP pivots exist; full mobile acquisition and YARA-style scanning remain planned. |
@@ -41,7 +41,7 @@ RapidTriage should absorb this as a product principle:
 | AI prompt artifacts | Extract prompts from AI/search browser artifacts. | Partial+ | Browser history detects common AI services, browser storage is scanned for prompt/question/answer/response snippets, and recovered question/answer rows are paired with completeness scoring and source hashes. Service-side transcript acquisition remains planned. |
 | Memory forensics | RAM dump analysis, BitLocker key extraction, process risk visualization. | Partial+ | Volatility/Volatility3 JSON/JSONL import normalizes process/network/malfind rows; bounded direct `.mem`/`.raw`/`.vmem`/`.vmss`/`.vmsn`/`.hpak`/`.dmp` and memory-named `.bin` scans now surface redacted BitLocker recovery-key candidates, suspicious strings, URLs, and IP pivots; full process reconstruction remains planned. |
 | LotL detection | PowerShell/WMI/local-admin command collection. | Partial | PowerShell history, WMI repository string pivots, scheduled-task suspicious command flags, and event log rule detections exist; deeper cross-artifact LotL correlation remains planned. |
-| Deepfake/similar images | Media classification, visual similarity grouping. | Partial | Image dimensions/hash/perceptual-hash/similarity-bucket triage and bounded thumbnail previews exist; classifier/deepfake detection remains planned. |
+| Deepfake/similar images | Media classification, visual similarity grouping. | Partial+ | Image dimensions/hash/perceptual-hash/similarity-bucket triage, bounded thumbnail previews, and rule-based visual classification hints exist; ML classifier/deepfake detection remains planned. |
 | Chromebook | ChromeOS dump analysis. | Deferred | Track as separate evidence profile after Linux/browser coverage improves. |
 
 ## RapidTriage Backlog Additions
