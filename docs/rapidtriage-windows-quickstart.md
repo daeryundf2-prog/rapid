@@ -91,6 +91,8 @@ Recommended first workflow:
 
 Direct E01 input is supported only when the required external tools are available. If `rapidtriage doctor` warns that E01 tools are missing, use WSL2 or scan a mounted/extracted folder instead.
 
+When sharing results from Windows, prefer the Review board's reviewer bundle export. The ZIP contains static reviewer HTML, selected evidence JSON, report exports, hash manifests, and a bundle manifest, but it does not include the original image. Verify the ZIP SHA256 from `rapidtriage-bundle-manifest.json` before external handoff.
+
 ## Try The Synthetic Sample
 
 After the launcher finishes installing dependencies, you can create and run a small sample case:

@@ -1619,6 +1619,7 @@ async function saveCaseReport(event) {
       `<a class="mini-link" href="${baseUrl}/docx" target="_blank" rel="noreferrer">DOCX</a>`,
       `<a class="mini-link" href="${baseUrl}/pdf" target="_blank" rel="noreferrer">PDF</a>`,
       `<a class="mini-link" href="${baseUrl}/manifest" target="_blank" rel="noreferrer">Hashes</a>`,
+      '<button class="mini-inline-button" type="button" data-open-tab="review">Back to review</button>',
     ].join(" ");
     if (payload.report_path) {
       status.insertAdjacentHTML("beforeend", ` <span>${escapeHtml(payload.report_path)}</span>`);
@@ -1647,6 +1648,8 @@ async function createReviewerBundle(event) {
     status.innerHTML = [
       "Saved",
       `<a class="mini-link" href="${archiveUrl}" target="_blank" rel="noreferrer">Download ZIP</a>`,
+      payload.outputs?.selected_evidence ? `<span>Selected JSON: ${escapeHtml(payload.outputs.selected_evidence)}</span>` : "",
+      payload.outputs?.bundle_manifest ? `<span>Bundle manifest: ${escapeHtml(payload.outputs.bundle_manifest)}</span>` : "",
       payload.outputs?.reviewer ? `<span>${escapeHtml(payload.outputs.reviewer)}</span>` : "",
     ].filter(Boolean).join(" ");
   } catch (error) {
@@ -1683,6 +1686,7 @@ function renderReport(markdown) {
         <button class="secondary-button" type="button" data-open-tab="review">Open review board</button>
         <a class="link-button" href="/api/runs/${encodeURIComponent(selectedRunId)}/outputs/report/file">Download run report</a>
       </div>
+      <p class="help-text">Workflow reminder: classify hits in Review, generate a hash manifest, then generate the case report or reviewer bundle from checked evidence only.</p>
     </section>
     <pre class="report-view">${escapeHtml(markdown)}</pre>
   `;
@@ -1736,6 +1740,7 @@ function renderReviewBoard(payload) {
 function renderReviewSelectionTray(bookmarks) {
   const selectedIds = getReviewSelection();
   const selectedBookmarks = bookmarks.filter((bookmark) => selectedIds.includes(String(bookmark.bookmark_id || "")));
+  const reportSelectedCount = selectedBookmarks.filter((bookmark) => Boolean(bookmark.review?.include_in_report)).length;
   return `
     <section id="reviewSelectionTray" class="review-selection-tray ${selectedBookmarks.length ? "" : "empty"}">
       <div class="review-group-header">
@@ -1745,6 +1750,7 @@ function renderReviewSelectionTray(bookmarks) {
         </div>
         <div class="detail-actions">
           <span class="status-pill">${selectedBookmarks.length}</span>
+          <span class="status-pill">${reportSelectedCount} report set</span>
           <button class="secondary-button" type="button" data-clear-review-selection ${selectedBookmarks.length ? "" : "disabled"}>Clear selection</button>
         </div>
       </div>
@@ -1782,6 +1788,7 @@ function renderSubmissionManifestPanel(summary) {
         <a class="link-button ${disabled}" href="${reportCount ? fileUrl : "#"}" target="_blank" rel="noreferrer">Download hash manifest</a>
         <a class="link-button ${disabled}" href="${reportCount ? jsonUrl : "#"}" target="_blank" rel="noreferrer">Preview JSON</a>
       </div>
+      <p class="help-text">Use this before report/bundle export. It is the evidence integrity anchor for selected report candidates.</p>
       ${reportCount ? "" : '<p class="help-text">Mark evidence as “Include in report set” before generating the submission manifest.</p>'}
     </section>
   `;
@@ -1861,6 +1868,7 @@ function renderReviewerBundlePanel(summary, casePayload) {
         <h3>Share selected review material without the original image</h3>
       </div>
       <p>Builds a static HTML/JSON/DOCX/PDF/ZIP reviewer package from report candidates, review notes, and hashes. It does not copy the original evidence image.</p>
+      <p class="help-text">The ZIP includes reviewer HTML, selected evidence JSON, report exports, hash manifests, audit JSON, and a bundle manifest. Share it only after checking the archive SHA256.</p>
       <form id="reviewerBundleForm" class="report-form">
         <div class="report-grid">
           <label>

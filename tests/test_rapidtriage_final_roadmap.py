@@ -171,6 +171,9 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             export_manifest = json.loads((bundle_dir / "rapidtriage-case-report.exports.json").read_text(encoding="utf-8"))
             self.assertIn("Reviewer Bundle", reviewer_html)
             self.assertIn("rapidtriage-bundle-manifest.json", reviewer_html)
+            self.assertIn("Reviewer Checklist", reviewer_html)
+            self.assertIn("Quick Preview", reviewer_html)
+            self.assertIn("Status:", reviewer_html)
             self.assertIn("Content-Security-Policy", report_html)
             self.assertIn("Content-Security-Policy", reviewer_html)
             self.assertNotIn("<script>alert(1)</script>", report_html)
@@ -196,6 +199,9 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertIn("report_export_manifest", payload["outputs"])
             self.assertIn("bundle_manifest", payload["outputs"])
             self.assertIn("reviewer", payload["outputs"])
+            selected = json.loads((bundle_dir / "rapidtriage-selected-evidence.json").read_text(encoding="utf-8"))
+            self.assertEqual(selected["items"][0]["hash_status"], "hashed")
+            self.assertIn("note", selected["items"][0])
 
     def test_plugins_command_lists_builtins_and_validates_external_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

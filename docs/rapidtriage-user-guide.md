@@ -41,7 +41,7 @@ rapidtriage case-search ./case.db --case-id CASE-001 -k password --source docume
 rapidtriage case-search ./case.db --case-id CASE-001 -k password --review-status relevant --verification-status verified
 ```
 
-The web Case DB panel also supports selecting repetitive results and batch-marking them as verified or rejected.
+The web Case DB panel also supports reloading saved searches, replaying recent keyword sets, selecting visible/low-priority repetitive results, and batch-marking them as verified or rejected. In the source viewer, use `Alt+R` to save a hit as relevant, `Alt+X` to reject it, `Alt+I` to toggle report inclusion, and `Alt+[` / `Alt+]` to move between opened search hits.
 
 ## Processing Transparency
 
@@ -361,7 +361,7 @@ Use a bundle when a reviewer should see selected evidence metadata, review state
 rapidtriage bundle ./rapidtriage-case.json --allowed-root ./mounted-case --output-dir ./review-bundle --json
 ```
 
-The bundle includes `rapidtriage-reviewer.html`, selected evidence JSON, a hash manifest, a report draft, an audit file, and an archive SHA256.
+The bundle includes `rapidtriage-reviewer.html`, selected evidence JSON, a hash manifest, report drafts/exports, report export hashes, `rapidtriage-bundle-manifest.json`, an audit file, and an archive SHA256. The reviewer HTML includes a quick preview, review status counts, reviewer checklist, selected evidence table, and the report draft. It does not include the original evidence image, so reviewers must request the authoritative source evidence if a path needs re-checking.
 
 ## Security Notes
 
