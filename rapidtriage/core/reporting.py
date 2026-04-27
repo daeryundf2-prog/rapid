@@ -73,6 +73,7 @@ def build_run_report_context(
             "warning_count": processing.get("warning_count", 0) if isinstance(processing, Mapping) else 0,
             "highest_warning_level": processing.get("highest_warning_level", "none") if isinstance(processing, Mapping) else "none",
             "warnings": list(processing.get("warnings", [])) if isinstance(processing, Mapping) and isinstance(processing.get("warnings", []), list) else [],
+            "decisions": build_processing_decision_rows(steps, processing if isinstance(processing, Mapping) else {}),
         },
         "summary": {
             "document_candidate_count": summary["document_candidate_count"],
@@ -233,6 +234,13 @@ def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
     else:
         lines.append("- none")
 
+    lines.extend(["", "### Processing decisions / skipped, capped, reused", ""])
+    if processing.get("decisions"):
+        for item in processing["decisions"][:30]:
+            lines.append(f"- {item}")
+    else:
+        lines.append("- No skipped, capped, or reused processing decisions were recorded.")
+
     lines.extend(
         [
             "",
@@ -361,6 +369,43 @@ def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
     for item in report_context["outputs"]:
         lines.append(f"- `{item['name']}`: `{item['path']}`")
     return "\n".join(lines) + "\n"
+
+
+def build_processing_decision_rows(steps: object, processing: Mapping[str, object]) -> List[str]:
+    rows: List[str] = []
+    caps = processing.get("caps", {}) if isinstance(processing.get("caps"), Mapping) else {}
+    if processing.get("read_only"):
+        rows.append("Read-only mode was enabled, so extraction steps may be intentionally skipped.")
+    if processing.get("dry_run"):
+        rows.append("Dry-run mode was enabled, so selected actions were previewed without writing extracted evidence.")
+    max_extract = int(caps.get("max_extract_size_bytes") or 0)
+    max_files = int(caps.get("max_file_count") or 0)
+    if max_extract:
+        rows.append(f"Extraction was capped at {max_extract} bytes per configured processing profile.")
+    if max_files:
+        rows.append(f"Extraction file count was capped at {max_files} selected files.")
+    if processing.get("reused_outputs"):
+        reused = ", ".join(str(item) for item in processing.get("reused_outputs", []))
+        rows.append(f"Resume reused existing outputs: {reused}. Verify timestamps when comparing repeated runs.")
+
+    if not isinstance(steps, list):
+        return rows
+    for step in steps:
+        if not isinstance(step, Mapping):
+            continue
+        name = str(step.get("name") or "step")
+        status = str(step.get("status") or "")
+        if status in {"skipped", "reused"}:
+            rows.append(f"`{name}` status=`{status}` output=`{step.get('output', '')}`.")
+        skip_reasons = step.get("skip_reasons")
+        if isinstance(skip_reasons, Mapping) and skip_reasons:
+            reasons = ", ".join(f"{key}={value}" for key, value in skip_reasons.items())
+            rows.append(f"`{name}` skip reasons: {reasons}.")
+        warning_messages = step.get("warning_messages")
+        if isinstance(warning_messages, list):
+            for message in warning_messages[:3]:
+                rows.append(f"`{name}` warning: {message}")
+    return list(dict.fromkeys(rows))
 
 
 def summarize_document_hits(results: object, *, limit: int) -> List[Dict[str, object]]:

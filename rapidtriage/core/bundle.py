@@ -42,6 +42,7 @@ def build_submission_bundle(
     report_path = output_dir / "rapidtriage-case-report.md"
     reviewer_path = output_dir / "rapidtriage-reviewer.html"
     audit_path = output_dir / "rapidtriage-bundle-audit.json"
+    bundle_manifest_path = output_dir / "rapidtriage-bundle-manifest.json"
     zip_path = output_dir.with_suffix(".zip")
 
     write_result(manifest, manifest_path)
@@ -60,6 +61,8 @@ def build_submission_bundle(
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "case_json": str(case_json),
         "output_dir": str(output_dir),
+        "allowed_roots": [str(root.expanduser().resolve()) for root in allowed_roots],
+        "integrity_note": "The bundle archive hash is stored in rapidtriage-bundle-manifest.json after ZIP creation.",
         "outputs": {
             "manifest": str(manifest_path),
             "selected_evidence": str(selected_path),
@@ -69,9 +72,29 @@ def build_submission_bundle(
             "report_pdf": report_exports["pdf"],
             "report_export_manifest": report_exports["manifest"],
             "reviewer": str(reviewer_path),
+            "bundle_manifest": str(bundle_manifest_path),
         },
     }
     write_result(audit, audit_path)
+    preliminary_manifest = {
+        "command": "bundle",
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "case_id": manifest.get("case_id", ""),
+        "output_dir": str(output_dir),
+        "archive": str(zip_path),
+        "archive_hashes": {},
+        "summary": {
+            "hashed_item_count": manifest.get("summary", {}).get("hashed_item_count", 0)
+            if isinstance(manifest.get("summary"), Mapping)
+            else 0,
+            "skipped_count": manifest.get("summary", {}).get("skipped_count", 0)
+            if isinstance(manifest.get("summary"), Mapping)
+            else 0,
+        },
+        "outputs": audit["outputs"] | {"audit": str(audit_path), "archive": str(zip_path)},
+        "custody_note": "Reviewer bundle contains review metadata, selected evidence hashes, and report drafts; it does not include the original evidence image.",
+    }
+    write_result(preliminary_manifest, bundle_manifest_path)
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in (
             manifest_path,
@@ -83,24 +106,18 @@ def build_submission_bundle(
             Path(report_exports["manifest"]),
             reviewer_path,
             audit_path,
+            bundle_manifest_path,
         ):
             archive.write(path, path.name)
     integrity = compute_hashes(zip_path)
     bundle_manifest = {
+        **preliminary_manifest,
         "command": "bundle",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "case_id": manifest.get("case_id", ""),
         "output_dir": str(output_dir),
         "archive": str(zip_path),
         "archive_hashes": integrity,
-        "summary": {
-            "hashed_item_count": manifest.get("summary", {}).get("hashed_item_count", 0)
-            if isinstance(manifest.get("summary"), Mapping)
-            else 0,
-            "skipped_count": manifest.get("summary", {}).get("skipped_count", 0)
-            if isinstance(manifest.get("summary"), Mapping)
-            else 0,
-        },
         "outputs": {
             "manifest": str(manifest_path),
             "selected_evidence": str(selected_path),
@@ -111,10 +128,11 @@ def build_submission_bundle(
             "report_export_manifest": report_exports["manifest"],
             "reviewer": str(reviewer_path),
             "audit": str(audit_path),
+            "bundle_manifest": str(bundle_manifest_path),
             "archive": str(zip_path),
         },
     }
-    write_result(bundle_manifest, output_dir / "rapidtriage-bundle-manifest.json")
+    write_result(bundle_manifest, bundle_manifest_path)
     return bundle_manifest
 
 
@@ -160,6 +178,7 @@ def render_reviewer_html(
             "<body><main>",
             "<h1>RapidTriage Reviewer Bundle</h1>",
             "<p>This portable review package contains selected artifact metadata, analyst review state, hashes, and report text. It does not include the original evidence image.</p>",
+            "<p><strong>Integrity:</strong> verify <code>rapidtriage-submission-manifest.json</code>, <code>rapidtriage-case-report.exports.json</code>, and <code>rapidtriage-bundle-manifest.json</code> before external handoff.</p>",
             f"<span class=\"metric\">Case: {escape(manifest.get('case_id', ''))}</span>",
             f"<span class=\"metric\">Hashed items: {escape(manifest_summary.get('hashed_item_count', 0))}</span>",
             f"<span class=\"metric\">Skipped: {escape(manifest_summary.get('skipped_count', 0))}</span>",

@@ -29,4 +29,7 @@ RapidTriage should be designed for analysts who are tired, under time pressure, 
 - The evidence viewer supports `Alt+[` and `Alt+]` for previous/next search hit navigation.
 - Case DB batch review supports selecting visible rows or low-priority rows before verify/reject actions.
 - The review board can build a portable reviewer ZIP with static HTML, selected evidence JSON, report exports, hashes, and no original image.
+- Run reports now call out skipped, capped, warning, and reused processing decisions so analysts can explain why a run was fast or incomplete.
+- Case reports now state each template's noise policy, and the technical appendix includes processing caps, source path, scan scope, and warnings.
+- Reviewer bundles include an explicit bundle manifest and integrity guidance for handoff checks.
 - Add progressive processing profiles: fast first pass, then standard/deep enrichment.

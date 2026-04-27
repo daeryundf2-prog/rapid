@@ -417,7 +417,10 @@ class RapidTriageApiTests(unittest.TestCase):
             report_payload = report_response.json()
             self.assertIn("디지털 포렌식 분석 보고서", report_payload["markdown"])
             self.assertIn("Report template: `technical-appendix`", report_payload["markdown"])
+            self.assertIn("Noise policy:", report_payload["markdown"])
             self.assertIn("Technical appendix", report_payload["markdown"])
+            self.assertIn("Max extract bytes", report_payload["markdown"])
+            self.assertIn("Source path", report_payload["markdown"])
             self.assertIn("IOC/Indicator review pivots", report_payload["markdown"])
             self.assertIn("Review this indicator pivot.", report_payload["markdown"])
             self.assertIn("CASE-001", report_payload["markdown"])
@@ -470,6 +473,7 @@ class RapidTriageApiTests(unittest.TestCase):
             with zipfile.ZipFile(output_dir / "rapidtriage-reviewer-bundle.zip") as reviewer_zip:
                 self.assertIn("rapidtriage-reviewer.html", reviewer_zip.namelist())
                 self.assertIn("rapidtriage-selected-evidence.json", reviewer_zip.namelist())
+                self.assertIn("rapidtriage-bundle-manifest.json", reviewer_zip.namelist())
 
             bundle_file_response = client.get(f"/api/runs/{run_id}/reviewer-bundle/file")
             self.assertEqual(bundle_file_response.status_code, 200)

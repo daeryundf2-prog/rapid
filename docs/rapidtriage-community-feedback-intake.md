@@ -35,8 +35,10 @@ This note captures public practitioner feedback from Reddit, Forensic Focus, and
 - Added previous/next search-hit navigation in the viewer with `Alt+[` and `Alt+]`.
 - Added web batch-selection helpers for visible and low-priority Case DB results.
 - Added web reviewer-bundle generation for static review ZIPs that exclude original evidence images.
+- Added explicit run-report processing decisions for skipped, capped, warning, and reused stages.
+- Added report template noise-policy text and fuller technical appendix processing/source context.
+- Added reviewer-bundle integrity guidance and `rapidtriage-bundle-manifest.json` into the portable ZIP.
 
 ## Next Backlog From Feedback
 
-- Add a processing profile summary to every run report: what was included, skipped, capped, and intentionally deferred.
-- Add report templates that hide noisy metadata by default and expose full technical metadata in an appendix.
+- Add thumbnail/previews to portable reviewer bundles without copying original evidence images.

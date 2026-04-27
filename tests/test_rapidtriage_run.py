@@ -156,6 +156,11 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(files_extract_payload["summary"]["extracted_count"], 0)
             self.assertGreaterEqual(files_extract_payload["summary"]["skipped_count"], 1)
 
+            report_text = (output_dir / "rapidtriage-run-report.md").read_text(encoding="utf-8")
+            self.assertIn("Processing decisions / skipped, capped, reused", report_text)
+            self.assertIn("Read-only mode was enabled", report_text)
+            self.assertIn("docs-extract` status=`skipped", report_text)
+
     def test_run_resume_reuses_valid_stage_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"

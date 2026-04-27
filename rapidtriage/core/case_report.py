@@ -41,6 +41,7 @@ def build_case_report_markdown(
         "# 디지털 포렌식 분석 보고서",
         "",
         f"> Report template: `{template}`",
+        f"> Noise policy: {template_noise_policy(template)}",
         "",
         "## 1. 사건 정보",
         "",
@@ -85,15 +86,18 @@ def build_case_report_markdown(
         ]
     )
 
-    for step in run_summary.get("steps", []):
-        if not isinstance(step, Mapping):
-            continue
-        lines.append(
-            f"- `{step.get('name')}`: {step.get('status')} "
-            f"(output=`{step.get('output', '')}`)"
-        )
-    if not any(line.startswith("- `") for line in lines[-20:]):
-        lines.append("- 절차 정보 없음")
+    if template == "executive-summary":
+        lines.append("- 상세 parser/output 경로는 executive summary에서 생략함. 필요 시 technical appendix 템플릿을 생성해 검증한다.")
+    else:
+        for step in run_summary.get("steps", []):
+            if not isinstance(step, Mapping):
+                continue
+            lines.append(
+                f"- `{step.get('name')}`: {step.get('status')} "
+                f"(output=`{step.get('output', '')}`)"
+            )
+        if not any(line.startswith("- `") for line in lines[-20:]):
+            lines.append("- 절차 정보 없음")
 
     lines.extend(
         [
@@ -196,6 +200,9 @@ def build_case_report_markdown(
     )
     if template == "technical-appendix":
         processing = run_summary.get("processing") if isinstance(run_summary.get("processing"), Mapping) else {}
+        source = run_summary.get("source") if isinstance(run_summary.get("source"), Mapping) else {}
+        warnings = processing.get("warnings") if isinstance(processing.get("warnings"), list) else []
+        caps = processing.get("caps") if isinstance(processing.get("caps"), Mapping) else {}
         lines.extend(
             [
                 "## 9. Technical appendix",
@@ -203,10 +210,31 @@ def build_case_report_markdown(
                 f"- Processing profile: `{processing.get('profile_label', '')}`",
                 f"- Processing warning count: {processing.get('warning_count', 0)}",
                 f"- Highest warning level: `{processing.get('highest_warning_level', 'none')}`",
+                f"- Max extract bytes: `{caps.get('max_extract_size_bytes', 0)}`",
+                f"- Max extract files: `{caps.get('max_file_count', 0)}`",
+                f"- Source kind: `{source.get('kind', '')}`",
+                f"- Source path: `{source.get('source_path', '')}`",
+                f"- Scan scope root: `{run_summary.get('scan_scope_root', '')}`",
                 "",
             ]
         )
+        if warnings:
+            lines.extend(["### 9.1 Processing warnings", ""])
+            for item in warnings[:20]:
+                if isinstance(item, Mapping):
+                    lines.append(f"- `{item.get('step', '')}` [{item.get('level', '')}]: {item.get('message', '')}")
+            lines.append("")
     return "\n".join(lines)
+
+
+def template_noise_policy(template: str) -> str:
+    policies = {
+        "executive-summary": "decision-maker view; parser paths and low-level step output are intentionally summarized.",
+        "legal-handoff": "balanced handoff; includes procedure and evidence hashes while avoiding raw JSON dumps.",
+        "technical-appendix": "fuller technical appendix; includes processing caps, warnings, source path, and parser context.",
+        "hash-only": "hash appendix only; omits narrative analysis and most metadata.",
+    }
+    return policies.get(template, policies["legal-handoff"])
 
 
 def build_case_indicator_rows(case_payload: Mapping[str, object], *, limit: int = 20) -> list[dict[str, object]]:
