@@ -1532,6 +1532,33 @@ mark {
   overflow-wrap: anywhere;
 }
 
+.source-hit-item {
+  display: grid;
+  gap: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 7px 8px;
+}
+
+.source-hit-citation {
+  font-weight: 800;
+}
+
+.source-hit-snippet::before {
+  content: "Snippet: ";
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.source-hit-hint {
+  color: var(--muted) !important;
+}
+
+.source-hit-hint::before {
+  content: "Review hint: ";
+  font-weight: 800;
+}
+
 @media (max-width: 880px) {
   .shell {
     grid-template-columns: 1fr;

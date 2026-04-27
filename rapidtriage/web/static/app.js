@@ -1638,7 +1638,7 @@ function reviewNoteFromFileSearchMatch(match) {
   return [
     `Current-file hit: ${match.citation || match.match_id || "source-search hit"}`,
     match.snippet ? `Snippet: ${match.snippet}` : "",
-    match.review_hint || "",
+    match.review_hint ? `Review hint: ${match.review_hint}` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -2074,18 +2074,41 @@ function renderSourceHitNotes(note) {
   return `
     <div class="source-hit-list">
       <strong>Current-file cited hits</strong>
-      ${hits.map((hit) => `<span>${escapeHtml(hit)}</span>`).join("")}
+      ${hits.map((hit) => `
+        <div class="source-hit-item">
+          <span class="source-hit-citation">${escapeHtml(hit.citation)}</span>
+          ${hit.snippet ? `<span class="source-hit-snippet">${escapeHtml(hit.snippet)}</span>` : ""}
+          ${hit.reviewHint ? `<span class="source-hit-hint">${escapeHtml(hit.reviewHint)}</span>` : ""}
+        </div>
+      `).join("")}
     </div>
   `;
 }
 
 function sourceHitNotes(note) {
-  return String(note || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.toLowerCase().startsWith("current-file hit:"))
-    .map((line) => line.replace(/^current-file hit:\s*/i, ""))
-    .filter(Boolean);
+  const hits = [];
+  let current = null;
+  for (const rawLine of String(note || "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.toLowerCase().startsWith("current-file hit:")) {
+      current = { citation: line.replace(/^current-file hit:\s*/i, "") };
+      if (current.citation) hits.push(current);
+      continue;
+    }
+    if (!current || !line) continue;
+    if (line.toLowerCase().startsWith("snippet:")) {
+      current.snippet = line.replace(/^snippet:\s*/i, "");
+      continue;
+    }
+    if (line.toLowerCase().startsWith("review hint:")) {
+      current.reviewHint = line.replace(/^review hint:\s*/i, "");
+      continue;
+    }
+    if (line.toLowerCase().includes("verify") || line.toLowerCase().includes("review")) {
+      if (!current.reviewHint) current.reviewHint = line;
+    }
+  }
+  return hits;
 }
 
 function renderReviewHistory(bookmark) {

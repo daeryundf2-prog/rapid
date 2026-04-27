@@ -168,7 +168,12 @@ def build_case_report_markdown(
             )
             if source_hits:
                 lines.append("- Source-search cited hits:")
-                lines.extend(f"  - {hit}" for hit in source_hits)
+                for hit in source_hits:
+                    lines.append(f"  - Citation: {hit.get('citation', '')}")
+                    if hit.get("snippet"):
+                        lines.append(f"    - Snippet: {hit.get('snippet')}")
+                    if hit.get("review_hint"):
+                        lines.append(f"    - Review hint: {hit.get('review_hint')}")
             lines.extend(
                 [
                     f"- MD5: `{hashes.get('md5', '')}`",
@@ -245,15 +250,39 @@ def template_noise_policy(template: str) -> str:
     return policies.get(template, policies["legal-handoff"])
 
 
-def extract_source_hit_notes(note: str) -> list[str]:
-    hits: list[str] = []
+def extract_source_hit_notes(note: str) -> list[dict[str, str]]:
+    hits: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
     for line in note.splitlines():
         cleaned = line.strip()
         if cleaned.lower().startswith("current-file hit:"):
             hit = re.sub(r"^current-file hit:\s*", "", cleaned, flags=re.IGNORECASE)
             if hit:
-                hits.append(hit)
+                current = {"citation": hit}
+                hits.append(current)
+            continue
+        if not current or not cleaned:
+            continue
+        if cleaned.lower().startswith("snippet:"):
+            current["snippet"] = trim_report_inline_text(
+                re.sub(r"^snippet:\s*", "", cleaned, flags=re.IGNORECASE)
+            )
+            continue
+        if cleaned.lower().startswith("review hint:"):
+            current["review_hint"] = trim_report_inline_text(
+                re.sub(r"^review hint:\s*", "", cleaned, flags=re.IGNORECASE)
+            )
+            continue
+        if "verify" in cleaned.lower() or "review" in cleaned.lower():
+            current.setdefault("review_hint", trim_report_inline_text(cleaned))
     return hits
+
+
+def trim_report_inline_text(value: str, *, limit: int = 240) -> str:
+    normalized = re.sub(r"\s+", " ", str(value)).strip()
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 3]}..."
 
 
 def build_case_indicator_rows(case_payload: Mapping[str, object], *, limit: int = 20) -> list[dict[str, object]]:
