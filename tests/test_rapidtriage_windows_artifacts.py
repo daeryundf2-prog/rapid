@@ -371,7 +371,18 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(main(["artifacts", str(root), "--kind", "windows-filesystem", "--output", str(output)]), 0)
             payload = json.loads(output.read_text(encoding="utf-8"))
             artifacts = payload["artifacts"]
-            mft = [item for item in artifacts if item["artifact_type"] == "mft-record"]
+            mft = [
+                item
+                for item in artifacts
+                if item["artifact_type"] == "mft-record"
+                and item["details"]["parser"] == "windows-filesystem-import"
+            ]
+            native_mft = [
+                item
+                for item in artifacts
+                if item["artifact_type"] == "mft-record"
+                and item["details"]["parser"] == "windows-mft-native"
+            ]
             usn = [
                 item
                 for item in artifacts
@@ -396,6 +407,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(mft_files[0]["details"]["native_record_count"], 1)
             self.assertTrue(mft_files[0]["details"]["record_header_samples"][0]["in_use"])
             self.assertIn(r"C:\Users\alice\Desktop\deleted.txt", mft_files[0]["details"]["path_candidates"])
+            self.assertEqual(native_mft[0]["details"]["record_number"], "0")
+            self.assertEqual(native_mft[0]["details"]["sequence_number"], 3)
+            self.assertTrue(native_mft[0]["details"]["in_use"])
+            self.assertIn(r"C:\Users\alice\Desktop\deleted.txt", native_mft[0]["details"]["path_candidates"])
+            self.assertTrue(native_mft[0]["details"]["validation_required"])
             self.assertEqual(usn_files[0]["details"]["source_path"], str(fixture.usn_journal.resolve()))
             self.assertEqual(usn_files[0]["details"]["native_record_count"], 1)
             self.assertEqual(native_usn[0]["details"]["file_path"], "deleted.txt")

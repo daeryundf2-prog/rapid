@@ -10,7 +10,7 @@ from typing import Iterable, Mapping
 
 from ...core.models import ArtifactRecord
 
-PARSER_VERSION = "windows-filesystem-v2"
+PARSER_VERSION = "windows-filesystem-v3"
 SUPPORTED_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 MFT_HINTS = ("mft", "mftexcmd", "$mft")
 USN_HINTS = ("usn", "usnjrnl", "$j")
@@ -65,6 +65,8 @@ def collect_native_ntfs_artifacts(root: Path) -> Iterable[ArtifactRecord]:
             continue
         if name == "$mft":
             yield build_mft_inventory_record(path)
+            for index, record in enumerate(parse_mft_record_headers(read_prefix(path, NATIVE_SCAN_LIMIT))):
+                yield build_native_mft_record(path, record, index)
             seen.add(resolved)
         elif name in {"$j", "$usnjrnl"} or (name.endswith(".usn") and "usn" in parent_blob):
             yield build_usn_journal_inventory_record(path)
@@ -132,6 +134,52 @@ def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
             "recommended_parsers": ["MFTECmd", "UsnJrnl2Csv", "The Sleuth Kit"],
             "note": "Native USN records are decoded when bounded v2/v3 record structures are recoverable; validate critical timelines with a dedicated parser.",
         },
+    )
+
+
+def build_native_mft_record(path: Path, record: Mapping[str, object], index: int) -> ArtifactRecord:
+    path_candidates = list(record.get("path_candidates") or [])
+    file_path = str(path_candidates[0]) if path_candidates else ""
+    details = {
+        "parser": "windows-mft-native",
+        "parser_version": PARSER_VERSION,
+        "coverage_status": "native-file-record-header",
+        "reportability": "triage",
+        "source_path": str(path.resolve()),
+        "source_format": "ntfs-mft",
+        "source_hashes": file_hashes(path),
+        "source_index": index,
+        "artifact_family": "mft",
+        "record_number": str(record.get("record_number_candidate", "")),
+        "parent_reference": "",
+        "file_path": file_path,
+        "path_candidates": path_candidates[:10],
+        "timestamp": "",
+        "timestamp_source": "not_available_native_header_scan",
+        "deleted_hint": not bool(record.get("in_use")),
+        "sequence_number": record.get("sequence_number", 0),
+        "hard_link_count": record.get("hard_link_count", 0),
+        "first_attribute_offset": record.get("first_attribute_offset", 0),
+        "flags": record.get("flags", 0),
+        "in_use": bool(record.get("in_use")),
+        "directory": bool(record.get("directory")),
+        "used_size": record.get("used_size", 0),
+        "allocated_size": record.get("allocated_size", 0),
+        "base_file_reference": record.get("base_file_reference", 0),
+        "record_offset": record.get("record_offset", 0),
+        "parser_confidence": 0.55,
+        "evidence_strength": "ntfs-mft-file-record-header",
+        "validation_required": True,
+        "validation_guidance": "Native MFT rows decode bounded FILE record headers and nearby path strings only; validate full attributes, parent paths, and timestamps with MFTECmd/analyzeMFT before final testimony.",
+        "raw": dict(record),
+        "raw_preview": json.dumps(record, ensure_ascii=False, sort_keys=True)[:2000],
+    }
+    return ArtifactRecord(
+        provider=WindowsFilesystemProvider.name,
+        artifact_type="mft-record",
+        path=str(path.resolve()),
+        supported=True,
+        details=details,
     )
 
 
@@ -309,9 +357,14 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
             return records
         if offset + 48 <= len(blob):
             flags = int_from(blob, offset + 0x16, 2)
+            allocated_size = int_from(blob, offset + 0x1C, 4)
+            record_size = allocated_size if 48 <= allocated_size <= 4096 and offset + allocated_size <= len(blob) else 1024
+            record_blob = blob[offset : min(len(blob), offset + record_size)]
+            path_candidates = extract_path_candidates(extract_utf16_strings(record_blob))
             records.append(
                 {
                     "record_offset": offset,
+                    "record_number_candidate": offset // 1024,
                     "sequence_number": int_from(blob, offset + 0x10, 2),
                     "hard_link_count": int_from(blob, offset + 0x12, 2),
                     "first_attribute_offset": int_from(blob, offset + 0x14, 2),
@@ -319,8 +372,9 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
                     "in_use": bool(flags & 0x01),
                     "directory": bool(flags & 0x02),
                     "used_size": int_from(blob, offset + 0x18, 4),
-                    "allocated_size": int_from(blob, offset + 0x1C, 4),
+                    "allocated_size": allocated_size,
                     "base_file_reference": int_from(blob, offset + 0x20, 8),
+                    "path_candidates": path_candidates[:10],
                 }
             )
         offset += 4
