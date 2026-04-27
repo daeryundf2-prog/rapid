@@ -160,10 +160,12 @@ Volume Shadow Copy comparison:
 - Use `vsc-compare` after mounting or exporting the current volume and one or more VSC snapshots.
 - The default comparison is fast and metadata-based; add `--hash` when you need byte-level modified-file confirmation.
 - Deleted means present in the snapshot but missing from the current tree, which is useful for ransomware, wiper, and user-deletion review pivots.
+- Use `vsc-extract` when deleted/modified snapshot-side files should be copied into a preservation package with source and destination SHA256 values.
 
 ```bash
 rapidtriage vsc-compare ./current-volume ./vss/snapshot-1 --output vsc-delta.json
 rapidtriage vsc-compare ./current-volume ./vss/snapshot-1 ./vss/snapshot-2 --hash --max-records 5000
+rapidtriage vsc-extract ./current-volume ./vss/snapshot-1 --output-dir ./vsc-evidence --status deleted --status modified
 rapidtriage case-db ./case.db --import-vsc-compare ./vsc-delta.json --case-id CASE-001
 rapidtriage case-search ./case.db --case-id CASE-001 -k deleted --source artifacts --metadata status=deleted
 ```

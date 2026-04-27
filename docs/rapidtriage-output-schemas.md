@@ -68,6 +68,25 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `case-db --import-vsc-compare` stores each change record as `vsc-deleted-file`, `vsc-added-file`, or `vsc-modified-file` artifact rows so they can be searched, reviewed, tagged, and included in reports.
 - `case-search --metadata KEY=VALUE` can narrow artifact results by promoted metadata such as `event_id=4104`, `event_family=execution`, `channel_family=powershell`, `channel=Security`, `status=deleted`, or `snapshot_label=VSC1`.
 
+### `vsc-extract`
+
+- Output: `OUTPUT_DIR/rapidtriage-vsc-extract.json`
+- Top-level keys:
+  - `generated_at`
+  - `tool`
+  - `current_root`
+  - `snapshot_roots`
+  - `output_dir`
+  - `evidence_root`
+  - `options`
+  - `summary`
+  - `comparison_summary`
+  - `copied`
+  - `skipped`
+  - `notes`
+- `copied` rows include `status`, `snapshot_label`, `relative_path`, source/destination paths, size, source SHA256, destination SHA256, mtime, and evidence-strength label.
+- Deleted and modified rows preserve the snapshot-side file by default; selecting `--status added` preserves the current-side file.
+
 ### `compare`
 
 - Output: `rapidtriage-compare.json`

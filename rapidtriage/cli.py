@@ -50,7 +50,7 @@ from .core.search import SearchError, run_unified_search
 from .core.timeline import TimelineError, build_timeline_report, run_timeline
 from .core.timeline_export import TimelineExportError, build_unified_timeline_export
 from .core.validation import ValidationError, build_validation_package
-from .core.vsc import VscCompareError, compare_vsc_snapshots
+from .core.vsc import VscCompareError, compare_vsc_snapshots, extract_vsc_changes
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 TOP_LEVEL_EPILOG = """Examples:
@@ -309,6 +309,32 @@ def build_parser() -> argparse.ArgumentParser:
     vsc_compare.add_argument("--case-sensitive", action="store_true", help="Compare paths case-sensitively")
     vsc_compare.add_argument("--max-records", type=int, default=10000, help="Maximum change records per snapshot (0 means unlimited)")
     vsc_compare.add_argument("--json", action="store_true", help="Print the full JSON comparison after saving it")
+
+    vsc_extract = sub.add_parser(
+        "vsc-extract",
+        help="Copy deleted/modified Volume Shadow Copy candidates into an evidence package",
+        description="Compare current files against VSC snapshot folders and copy selected snapshot/current files with hashes",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage vsc-extract ./current ./vss/snapshot-1 --output-dir ./vsc-evidence
+              rapidtriage vsc-extract ./current ./vss/snapshot-1 --status deleted --status modified --max-file-count 500
+            """
+        ),
+    )
+    vsc_extract.add_argument("current_root", help="Current mounted/exported file tree")
+    vsc_extract.add_argument("snapshot_roots", nargs="+", help="One or more VSC snapshot file trees to compare/extract")
+    vsc_extract.add_argument("--output-dir", required=True, help="Directory that receives rapidtriage-vsc-extract.json and copied evidence")
+    vsc_extract.add_argument("--manifest", help="Manifest JSON output path (default: OUTPUT_DIR/rapidtriage-vsc-extract.json)")
+    vsc_extract.add_argument("--status", action="append", choices=["deleted", "modified", "added"], help="Change status to copy; repeatable. Defaults to deleted+modified")
+    vsc_extract.add_argument("--no-hash", action="store_true", help="Skip comparison-time hashing; copied files are still hashed after copy")
+    vsc_extract.add_argument("--case-sensitive", action="store_true", help="Compare paths case-sensitively")
+    vsc_extract.add_argument("--overwrite", action="store_true", help="Allow overwriting existing files in OUTPUT_DIR/evidence")
+    vsc_extract.add_argument("--max-records", type=int, default=10000, help="Maximum change records per snapshot (0 means unlimited)")
+    vsc_extract.add_argument("--max-file-count", type=int, default=1000, help="Maximum files to copy (0 means unlimited)")
+    vsc_extract.add_argument("--max-total-bytes", type=int, default=2 * 1024 * 1024 * 1024, help="Maximum copied source bytes (0 means unlimited)")
+    vsc_extract.add_argument("--json", action="store_true", help="Print the full JSON extraction manifest after saving it")
 
     carve = sub.add_parser(
         "carve",
@@ -1572,6 +1598,63 @@ def main(argv=None) -> int:
             print(
                 f"Snapshots: {summary['snapshot_count']}  "
                 f"Deleted: {summary['deleted']}  Added: {summary['added']}  Modified: {summary['modified']}"
+            )
+        return 0
+
+    if args.command == "vsc-extract":
+        current_root = Path(args.current_root).expanduser().resolve()
+        snapshot_roots = [Path(item).expanduser().resolve() for item in args.snapshot_roots]
+        output_dir = Path(args.output_dir).expanduser().resolve()
+        output = Path(args.manifest).expanduser().resolve() if args.manifest else output_dir / "rapidtriage-vsc-extract.json"
+        try:
+            payload = extract_vsc_changes(
+                current_root,
+                snapshot_roots,
+                output_dir,
+                statuses=args.status or ["deleted", "modified"],
+                compute_hashes=not args.no_hash,
+                case_sensitive=args.case_sensitive,
+                max_records=args.max_records,
+                max_file_count=args.max_file_count,
+                max_total_bytes=args.max_total_bytes,
+                overwrite=args.overwrite,
+            )
+        except VscCompareError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="vsc-extract",
+            options={
+                "current_root": str(current_root),
+                "snapshot_roots": [str(path) for path in snapshot_roots],
+                "output_dir": str(output_dir),
+                "manifest": str(output),
+                "status": args.status or ["deleted", "modified"],
+                "hash": not args.no_hash,
+                "case_sensitive": args.case_sensitive,
+                "overwrite": args.overwrite,
+                "max_records": args.max_records,
+                "max_file_count": args.max_file_count,
+                "max_total_bytes": args.max_total_bytes,
+            },
+            input_root=current_root,
+            output_files=[("vsc-extract-json", output), ("vsc-extract-evidence", Path(str(payload["evidence_root"])))],
+            notes=[
+                "VSC extract copies selected snapshot/current files into an evidence folder and records SHA256 values.",
+                "Deleted and modified statuses preserve the snapshot-side file; added status preserves the current-side file.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved VSC extract JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(
+                f"Selected: {summary['selected_count']}  "
+                f"Copied: {summary['copied_count']}  Skipped: {summary['skipped_count']}"
             )
         return 0
 

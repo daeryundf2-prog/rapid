@@ -42,6 +42,38 @@ class RapidTriageVscCompareTests(unittest.TestCase):
             self.assertIn("sha256", by_path["modified.txt"]["current"])
             self.assertTrue(output.with_name("vsc.audit.json").is_file())
 
+    def test_vsc_extract_copies_deleted_and_modified_snapshot_files_with_hashes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            current = root / "current"
+            snapshot = root / "snapshot-2024-04-01"
+            output_dir = root / "vsc-evidence"
+            current.mkdir()
+            snapshot.mkdir()
+
+            (snapshot / "deleted.txt").write_text("snapshot only", encoding="utf-8")
+            (snapshot / "modified.txt").write_text("old content", encoding="utf-8")
+            (current / "modified.txt").write_text("new content", encoding="utf-8")
+            (current / "added.txt").write_text("current only", encoding="utf-8")
+
+            exit_code = main(["vsc-extract", str(current), str(snapshot), "--output-dir", str(output_dir)])
+
+            self.assertEqual(exit_code, 0)
+            manifest = output_dir / "rapidtriage-vsc-extract.json"
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            copied = {item["relative_path"]: item for item in payload["copied"]}
+
+            self.assertEqual(payload["tool"], "rapidtriage-vsc-extract")
+            self.assertEqual(payload["summary"]["selected_count"], 2)
+            self.assertEqual(payload["summary"]["copied_count"], 2)
+            self.assertEqual(copied["deleted.txt"]["status"], "deleted")
+            self.assertEqual(copied["modified.txt"]["status"], "modified")
+            self.assertEqual(len(copied["deleted.txt"]["source_sha256"]), 64)
+            self.assertEqual(copied["deleted.txt"]["source_sha256"], copied["deleted.txt"]["destination_sha256"])
+            self.assertTrue((output_dir / "evidence" / "snapshot-2024-04-01" / "deleted" / "deleted.txt").is_file())
+            self.assertTrue((output_dir / "evidence" / "snapshot-2024-04-01" / "modified" / "modified.txt").is_file())
+            self.assertTrue(manifest.with_name("rapidtriage-vsc-extract.audit.json").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

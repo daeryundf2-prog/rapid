@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -90,6 +91,157 @@ def compare_vsc_snapshots(
             "modified is based on size/mtime by default; use --hash when byte-level confirmation is required.",
         ],
     }
+
+
+def extract_vsc_changes(
+    current_root: Path,
+    snapshot_roots: Iterable[Path],
+    output_dir: Path,
+    *,
+    statuses: Iterable[str] = ("deleted", "modified"),
+    compute_hashes: bool = True,
+    case_sensitive: bool = False,
+    max_records: int = 10000,
+    max_file_count: int = 1000,
+    max_total_bytes: int = 2 * 1024 * 1024 * 1024,
+    overwrite: bool = False,
+) -> dict[str, object]:
+    selected_statuses = {status.strip().lower() for status in statuses if status.strip()}
+    allowed_statuses = {"deleted", "modified", "added"}
+    if not selected_statuses or not selected_statuses.issubset(allowed_statuses):
+        raise VscCompareError("statuses must be one or more of: deleted, modified, added")
+    destination_root = output_dir.expanduser().resolve()
+    evidence_root = destination_root / "evidence"
+    comparison = compare_vsc_snapshots(
+        current_root,
+        snapshot_roots,
+        compute_hashes=compute_hashes,
+        case_sensitive=case_sensitive,
+        max_records=max_records,
+    )
+    copied: list[dict[str, object]] = []
+    skipped: list[dict[str, object]] = []
+    copied_bytes = 0
+    selected_count = 0
+    for comparison_row in comparison["comparisons"]:
+        snapshot_label = safe_path_part(str(comparison_row.get("snapshot_label") or "snapshot"))
+        for record in comparison_row.get("records", []):
+            if not isinstance(record, dict):
+                continue
+            status = str(record.get("status") or "")
+            if status not in selected_statuses:
+                continue
+            source = source_entry_for_vsc_extract(record)
+            relative_path = str(record.get("relative_path") or "")
+            selected_count += 1
+            if not source:
+                skipped.append(skip_record(record, "missing-source-entry"))
+                continue
+            source_path = Path(str(source.get("path") or ""))
+            if not source_path.is_file():
+                skipped.append(skip_record(record, "source-not-readable"))
+                continue
+            try:
+                size = source_path.stat().st_size
+            except OSError:
+                skipped.append(skip_record(record, "source-stat-failed"))
+                continue
+            if max_file_count > 0 and len(copied) >= max_file_count:
+                skipped.append(skip_record(record, "max-file-count"))
+                continue
+            if max_total_bytes > 0 and copied_bytes + size > max_total_bytes:
+                skipped.append(skip_record(record, "max-total-bytes"))
+                continue
+            destination = evidence_root / snapshot_label / status / safe_relative_path(relative_path)
+            if destination.exists() and not overwrite:
+                skipped.append(skip_record(record, "destination-exists", destination=destination))
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copy2(source_path, destination)
+            except OSError:
+                skipped.append(skip_record(record, "copy-failed", destination=destination))
+                continue
+            copied_bytes += size
+            copied.append(
+                {
+                    "status": status,
+                    "snapshot_label": snapshot_label,
+                    "relative_path": relative_path,
+                    "source_path": str(source_path.resolve()),
+                    "destination_path": str(destination.resolve()),
+                    "size": size,
+                    "source_sha256": str(source.get("sha256") or "") or file_sha256(source_path),
+                    "destination_sha256": file_sha256(destination),
+                    "modified_at": source.get("modified_at") or "",
+                    "evidence_strength": "vsc-snapshot-file-copy",
+                }
+            )
+    manifest = {
+        "generated_at": dt.datetime.now().isoformat(),
+        "tool": "rapidtriage-vsc-extract",
+        "current_root": comparison["current_root"],
+        "snapshot_roots": comparison["snapshot_roots"],
+        "output_dir": str(destination_root),
+        "evidence_root": str(evidence_root),
+        "options": {
+            "statuses": sorted(selected_statuses),
+            "compute_hashes": compute_hashes,
+            "case_sensitive": case_sensitive,
+            "max_records": max_records,
+            "max_file_count": max_file_count,
+            "max_total_bytes": max_total_bytes,
+            "overwrite": overwrite,
+        },
+        "summary": {
+            "snapshot_count": comparison["summary"]["snapshot_count"],
+            "selected_count": selected_count,
+            "copied_count": len(copied),
+            "skipped_count": len(skipped),
+            "copied_bytes": copied_bytes,
+        },
+        "comparison_summary": comparison["summary"],
+        "copied": copied,
+        "skipped": skipped,
+        "notes": [
+            "deleted and modified records copy the snapshot-side file by default; added records copy the current-side file when selected.",
+            "The manifest records source and destination SHA256 values for preservation review.",
+        ],
+    }
+    return manifest
+
+
+def source_entry_for_vsc_extract(record: dict[str, object]) -> dict[str, object] | None:
+    status = str(record.get("status") or "")
+    if status in {"deleted", "modified"}:
+        source = record.get("snapshot")
+    elif status == "added":
+        source = record.get("current")
+    else:
+        source = None
+    return source if isinstance(source, dict) else None
+
+
+def skip_record(record: dict[str, object], reason: str, *, destination: Path | None = None) -> dict[str, object]:
+    payload = {
+        "status": str(record.get("status") or ""),
+        "snapshot_label": str(record.get("snapshot_label") or ""),
+        "relative_path": str(record.get("relative_path") or ""),
+        "reason": reason,
+    }
+    if destination is not None:
+        payload["destination_path"] = str(destination)
+    return payload
+
+
+def safe_relative_path(value: str) -> Path:
+    parts = [part for part in Path(value.replace("\\", "/")).parts if part not in {"", ".", ".."}]
+    return Path(*parts) if parts else Path("unnamed")
+
+
+def safe_path_part(value: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in value.strip())
+    return cleaned or "snapshot"
 
 
 def build_file_index(root: Path, *, compute_hashes: bool, case_sensitive: bool) -> dict[str, FileEntry]:
