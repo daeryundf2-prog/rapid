@@ -53,6 +53,12 @@ Verify release checksums:
 python scripts/build-release.py --output-dir release --verify
 ```
 
+Verify the collected release evidence:
+
+```bash
+python scripts/verify-release-evidence.py --release-dir release --validation-dir release-validation --benchmark-dir release-benchmark --smoke-dir rapidtriage-windows-smoke --smoke-dir rapidtriage-macos-linux-smoke
+```
+
 See [docs/rapidtriage-windows-quickstart.md](docs/rapidtriage-windows-quickstart.md) for the Windows launcher, diagnostics, and E01 fallback guidance.
 See [docs/rapidtriage-macos-linux-quickstart.md](docs/rapidtriage-macos-linux-quickstart.md) for the macOS/Linux launcher and first-run flow.
 See [docs/rapidtriage-e01-workflow.md](docs/rapidtriage-e01-workflow.md) for what direct E01/Ex01 input does today and when to mount/export first.

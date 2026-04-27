@@ -49,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
         add_if_exists(archive, repo / "scripts" / "start-rapidtriage.sh", "scripts/start-rapidtriage.sh")
         add_if_exists(archive, repo / "scripts" / "smoke-test-rapidtriage.sh", "scripts/smoke-test-rapidtriage.sh")
         add_if_exists(archive, repo / "scripts" / "summarize-smoke.py", "scripts/summarize-smoke.py")
+        add_if_exists(archive, repo / "scripts" / "verify-release-evidence.py", "scripts/verify-release-evidence.py")
         add_tree(archive, repo / "scripts" / "windows", "scripts/windows")
         archive.writestr("data/.gitkeep", "")
         archive.writestr("cases/.gitkeep", "")

@@ -96,6 +96,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("release-checksums", command_names)
             self.assertIn("verify-release-checksums", command_names)
             self.assertIn("smoke-summary", command_names)
+            self.assertIn("release-evidence", command_names)
 
     def test_case_catalog_adds_exports_and_imports_case(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -217,6 +218,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("scripts/start-rapidtriage.sh", names)
             self.assertIn("scripts/smoke-test-rapidtriage.sh", names)
             self.assertIn("scripts/summarize-smoke.py", names)
+            self.assertIn("scripts/verify-release-evidence.py", names)
             self.assertIn("scripts/windows/start-rapidtriage.ps1", names)
             self.assertIn("scripts/windows/smoke-test-rapidtriage.ps1", names)
             self.assertIn("scripts/windows/smoke-test-rapidtriage.bat", names)
@@ -279,6 +281,74 @@ class RapidTriageOpsTests(unittest.TestCase):
             summary = json.loads((smoke_dir / "smoke-summary.json").read_text(encoding="utf-8"))
             self.assertTrue(summary["passed"])
             self.assertTrue((smoke_dir / "smoke-summary.md").is_file())
+
+    def test_release_evidence_script_reports_pass_for_complete_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            repo = Path(__file__).resolve().parent.parent
+            release_dir = root / "release"
+            validation_dir = root / "validation"
+            benchmark_dir = root / "benchmark"
+            smoke_dir = root / "smoke-windows"
+            evidence_dir = root / "release-evidence"
+
+            release = subprocess.run(
+                ["python", "scripts/build-release.py", "--output-dir", str(release_dir), "--skip-build"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(release.returncode, 0, release.stderr)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                validation_exit = main(["validation", "--output-dir", str(validation_dir), "--json"])
+                benchmark_exit = main(
+                    [
+                        "benchmark",
+                        "--output-dir",
+                        str(benchmark_dir),
+                        "--file-count",
+                        "3",
+                        "--search-iterations",
+                        "1",
+                        "--overwrite",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(validation_exit, 0)
+            self.assertEqual(benchmark_exit, 0)
+
+            smoke_dir.mkdir()
+            (smoke_dir / "smoke-summary.json").write_text(json.dumps({"passed": True, "checks": []}), encoding="utf-8")
+            (smoke_dir / "smoke-summary.md").write_text("# PASS\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python",
+                    "scripts/verify-release-evidence.py",
+                    "--release-dir",
+                    str(release_dir),
+                    "--validation-dir",
+                    str(validation_dir),
+                    "--benchmark-dir",
+                    str(benchmark_dir),
+                    "--smoke-dir",
+                    str(smoke_dir),
+                    "--output-dir",
+                    str(evidence_dir),
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads((evidence_dir / "release-evidence-report.json").read_text(encoding="utf-8"))
+            self.assertTrue(report["passed"])
+            self.assertEqual(report["summary"]["fail"], 0)
+            self.assertTrue((evidence_dir / "release-evidence-report.md").is_file())
 
 
 if __name__ == "__main__":

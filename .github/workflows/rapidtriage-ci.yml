@@ -52,3 +52,9 @@ jobs:
 
       - name: Build validation package
         run: python -m rapidtriage validation --output-dir release-validation-ci --overwrite --json
+
+      - name: Build benchmark evidence
+        run: python -m rapidtriage benchmark --output-dir release-benchmark-ci --file-count 10 --search-iterations 1 --overwrite --json
+
+      - name: Verify release evidence
+        run: python scripts/verify-release-evidence.py --release-dir release-ci --validation-dir release-validation-ci --benchmark-dir release-benchmark-ci --minimum-smoke-count 0 --output-dir release-evidence-ci

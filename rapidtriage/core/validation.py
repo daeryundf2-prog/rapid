@@ -238,6 +238,10 @@ def build_recommended_commands() -> list[dict[str, str]]:
             "name": "smoke-summary",
             "command": "python scripts/summarize-smoke.py ./rapidtriage-macos-linux-smoke",
         },
+        {
+            "name": "release-evidence",
+            "command": "python scripts/verify-release-evidence.py --release-dir release --validation-dir release-validation --benchmark-dir release-benchmark --smoke-dir rapidtriage-windows-smoke --smoke-dir rapidtriage-macos-linux-smoke",
+        },
     ]
 
 

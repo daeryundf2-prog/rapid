@@ -13,6 +13,7 @@
 - On macOS/Linux, run `sh scripts/smoke-test-rapidtriage.sh`.
 - Run `python scripts/build-release.py --output-dir release` and attach `SHA256SUMS` plus `dependency-inventory.txt`.
 - Run `python scripts/build-release.py --output-dir release --verify`.
+- Run `python scripts/verify-release-evidence.py --release-dir release --validation-dir release-validation --benchmark-dir release-benchmark --smoke-dir rapidtriage-windows-smoke --smoke-dir rapidtriage-macos-linux-smoke`.
 - Attach `release-manifest.json`, `smoke-summary.json`, and `smoke-summary.md` for each smoke-tested platform.
 - Run the Windows/macOS usability checklist in `docs/rapidtriage-fresh-machine-smoke-test.md` before calling the release analyst-ready.
 - Attach SHA256 checksums, dependency inventory/SBOM, and signing/notarization verification output for every distributed artifact.
@@ -33,6 +34,7 @@ Expected artifacts:
 - macOS/Linux quick-start docs, E01 workflow docs, and fresh-machine smoke test docs.
 - Release validation JSON/Markdown package.
 - SHA256SUMS, signing/notarization evidence, and dependency inventory/SBOM.
+- `release-evidence-report.json` and `release-evidence-report.md` showing PASS/FAIL for release, validation, benchmark, and smoke evidence.
 - Support contact/SLA document and emergency parser-fix policy.
 
 ## Release Notes Must Include
