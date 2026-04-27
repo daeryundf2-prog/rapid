@@ -117,6 +117,20 @@ class RapidTriageApiTests(unittest.TestCase):
                 connection.commit()
             finally:
                 connection.close()
+            json_path = root / "structured.json"
+            json_path.write_text(json.dumps({"case": "CASE-001", "hit": {"keyword": "password"}}), encoding="utf-8")
+            xml_path = root / "structured.xml"
+            xml_path.write_text("<root><event id='1'>password xml hit</event></root>", encoding="utf-8")
+            eml_path = root / "message.eml"
+            eml_path.write_text(
+                "From: alice@example.com\n"
+                "To: bob@example.com\n"
+                "Subject: Password review\n"
+                "Date: Mon, 27 Apr 2026 12:00:00 +0900\n"
+                "\n"
+                "password email body\n",
+                encoding="utf-8",
+            )
             client = TestClient(create_app(RunJobStore()))
 
             response = client.post(
@@ -214,6 +228,24 @@ class RapidTriageApiTests(unittest.TestCase):
             sqlite_search = sqlite_search_response.json()
             self.assertEqual(sqlite_search["summary"]["match_count"], 1)
             self.assertEqual(sqlite_search["matches"][0]["table"], "notes")
+            json_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(json_path)})
+            self.assertEqual(json_preview_response.status_code, 200, json_preview_response.text)
+            json_preview = json_preview_response.json()
+            self.assertEqual(json_preview["preview_type"], "json")
+            self.assertEqual(json_preview["viewer_metadata"]["strategy"], "bounded-json-parse")
+            self.assertEqual(json_preview["json"]["summary"]["type"], "object")
+            xml_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(xml_path)})
+            self.assertEqual(xml_preview_response.status_code, 200, xml_preview_response.text)
+            xml_preview = xml_preview_response.json()
+            self.assertEqual(xml_preview["preview_type"], "xml")
+            self.assertEqual(xml_preview["xml"]["root_tag"], "root")
+            self.assertTrue(any(node["tag"] == "event" for node in xml_preview["xml"]["nodes"]))
+            eml_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(eml_path)})
+            self.assertEqual(eml_preview_response.status_code, 200, eml_preview_response.text)
+            eml_preview = eml_preview_response.json()
+            self.assertEqual(eml_preview["preview_type"], "email")
+            self.assertEqual(eml_preview["email"]["messages"][0]["subject"], "Password review")
+            self.assertIn("password email body", eml_preview["email"]["messages"][0]["body_preview"])
             filtered_search_response = client.get(
                 f"/api/runs/{run_id}/search",
                 params={

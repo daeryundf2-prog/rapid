@@ -5,11 +5,14 @@ import mimetypes
 import os
 import re
 import contextlib
+import email
 import sqlite3
 import datetime as dt
+from email import policy
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 from urllib.parse import quote
+from xml.etree import ElementTree as ET
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
@@ -37,6 +40,11 @@ SQLITE_HEADER = b"SQLite format 3\x00"
 SQLITE_PREVIEW_TABLE_LIMIT = 8
 SQLITE_PREVIEW_ROW_LIMIT = 10
 SQLITE_PREVIEW_COLUMN_LIMIT = 12
+STRUCTURED_PREVIEW_MAX_BYTES = 5 * 1024 * 1024
+JSON_PREVIEW_ITEM_LIMIT = 50
+XML_PREVIEW_NODE_LIMIT = 80
+EMAIL_PREVIEW_MESSAGE_LIMIT = 10
+EMAIL_BODY_PREVIEW_CHARS = 4000
 
 
 class RunCreateRequest(BaseModel):
@@ -1023,6 +1031,13 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         "text": "",
         "truncated": False,
         "message": "No inline preview is available for this file type.",
+        "viewer_metadata": {
+            "source_format": suffix.lstrip(".") or "unknown",
+            "strategy": "binary-fallback",
+            "preview_status": "not-available",
+            "parser": "rapidtriage.source-viewer",
+            "parser_version": "1",
+        },
     }
     if mime_type.startswith("image/"):
         payload["preview_type"] = "image"
@@ -1031,6 +1046,15 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         return payload
     if is_sqlite_candidate(source_path, suffix):
         payload.update(build_sqlite_preview(source_path))
+        return payload
+    if suffix in {".json", ".jsonl", ".ndjson"}:
+        payload.update(build_json_preview(source_path, suffix))
+        return payload
+    if suffix == ".xml":
+        payload.update(build_xml_preview(source_path))
+        return payload
+    if suffix in {".eml", ".mbox"}:
+        payload.update(build_email_preview(source_path, suffix))
         return payload
 
     text = ""
@@ -1052,6 +1076,14 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         payload["text"] = text[:max_chars]
         payload["truncated"] = len(text) > max_chars
         payload["message"] = "Text preview is available."
+        payload["viewer_metadata"] = {
+            "source_format": suffix.lstrip(".") or "text",
+            "strategy": "bounded-text",
+            "preview_status": "available",
+            "parser": "rapidtriage.source-viewer.text",
+            "parser_version": "1",
+            "max_chars": max_chars,
+        }
     return payload
 
 
@@ -1081,6 +1113,15 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
     return {
         "preview_type": "sqlite",
         "message": "SQLite table preview is available.",
+        "viewer_metadata": {
+            "source_format": "sqlite",
+            "strategy": "read-only-table-preview",
+            "preview_status": "available",
+            "parser": "rapidtriage.source-viewer.sqlite",
+            "parser_version": "1",
+            "table_limit": SQLITE_PREVIEW_TABLE_LIMIT,
+            "row_limit": SQLITE_PREVIEW_ROW_LIMIT,
+        },
         "sqlite": {
             "table_count": len(tables),
             "tables": previews,
@@ -1090,6 +1131,243 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
             "truncated": len(tables) > SQLITE_PREVIEW_TABLE_LIMIT,
         },
     }
+
+
+def build_json_preview(source_path: Path, suffix: str) -> Dict[str, object]:
+    if source_path.stat().st_size > STRUCTURED_PREVIEW_MAX_BYTES:
+        return {
+            "preview_type": "binary",
+            "message": f"JSON preview is capped at {STRUCTURED_PREVIEW_MAX_BYTES} bytes. Use source search or open source.",
+            "viewer_metadata": structured_viewer_metadata("json", "bounded-json-parse", "capped"),
+            "json": {"error": "file-too-large"},
+        }
+    try:
+        text = source_path.read_text(encoding="utf-8", errors="replace")
+        if suffix == ".json":
+            data = json.loads(text)
+            preview = summarize_json_value(data)
+            formatted = json.dumps(data, ensure_ascii=False, indent=2)
+            item_count = json_item_count(data)
+        else:
+            rows = []
+            errors = []
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                if not line.strip():
+                    continue
+                if len(rows) >= JSON_PREVIEW_ITEM_LIMIT:
+                    break
+                try:
+                    rows.append({"line": line_number, "value": summarize_json_value(json.loads(line))})
+                except json.JSONDecodeError as exc:
+                    errors.append({"line": line_number, "error": str(exc)})
+            preview = {"type": "jsonl", "rows": rows, "errors": errors[:5]}
+            formatted = "\n".join(text.splitlines()[:JSON_PREVIEW_ITEM_LIMIT])
+            item_count = len(rows)
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "preview_type": "text",
+            "message": f"JSON parse failed, showing text fallback: {exc}",
+            "text": safe_read_text(source_path, max_chars=20000),
+            "truncated": source_path.stat().st_size > 20000,
+            "viewer_metadata": structured_viewer_metadata("json", "parse-fallback-text", "parse-failed"),
+        }
+    return {
+        "preview_type": "json",
+        "message": "JSON structured preview is available.",
+        "text": formatted[:20000],
+        "truncated": len(formatted) > 20000,
+        "viewer_metadata": structured_viewer_metadata("json", "bounded-json-parse", "available"),
+        "json": {
+            "summary": preview,
+            "item_count": item_count,
+            "item_limit": JSON_PREVIEW_ITEM_LIMIT,
+            "truncated": item_count >= JSON_PREVIEW_ITEM_LIMIT,
+        },
+    }
+
+
+def summarize_json_value(value: object, *, depth: int = 0) -> object:
+    if depth >= 3:
+        if isinstance(value, dict):
+            return {"type": "object", "keys": len(value)}
+        if isinstance(value, list):
+            return {"type": "array", "items": len(value)}
+        return value
+    if isinstance(value, dict):
+        return {
+            "type": "object",
+            "keys": list(value.keys())[:JSON_PREVIEW_ITEM_LIMIT],
+            "sample": {str(key): summarize_json_value(item, depth=depth + 1) for key, item in list(value.items())[:10]},
+        }
+    if isinstance(value, list):
+        return {
+            "type": "array",
+            "items": len(value),
+            "sample": [summarize_json_value(item, depth=depth + 1) for item in value[:10]],
+        }
+    return value
+
+
+def json_item_count(value: object) -> int:
+    if isinstance(value, dict):
+        return len(value)
+    if isinstance(value, list):
+        return len(value)
+    return 1
+
+
+def build_xml_preview(source_path: Path) -> Dict[str, object]:
+    if source_path.stat().st_size > STRUCTURED_PREVIEW_MAX_BYTES:
+        return {
+            "preview_type": "binary",
+            "message": f"XML preview is capped at {STRUCTURED_PREVIEW_MAX_BYTES} bytes. Use source search or open source.",
+            "viewer_metadata": structured_viewer_metadata("xml", "bounded-xml-parse", "capped"),
+            "xml": {"error": "file-too-large"},
+        }
+    try:
+        text = source_path.read_text(encoding="utf-8", errors="replace")
+        root = ET.fromstring(text.encode("utf-8", errors="replace"))
+        nodes = summarize_xml_nodes(root)
+    except (OSError, ET.ParseError) as exc:
+        return {
+            "preview_type": "text",
+            "message": f"XML parse failed, showing text fallback: {exc}",
+            "text": safe_read_text(source_path, max_chars=20000),
+            "truncated": source_path.stat().st_size > 20000,
+            "viewer_metadata": structured_viewer_metadata("xml", "parse-fallback-text", "parse-failed"),
+        }
+    return {
+        "preview_type": "xml",
+        "message": "XML structured preview is available.",
+        "text": text[:20000],
+        "truncated": len(text) > 20000,
+        "viewer_metadata": structured_viewer_metadata("xml", "bounded-xml-parse", "available"),
+        "xml": {
+            "root_tag": local_xml_name(root.tag),
+            "root_attributes": dict(root.attrib),
+            "nodes": nodes,
+            "node_limit": XML_PREVIEW_NODE_LIMIT,
+            "truncated": len(nodes) >= XML_PREVIEW_NODE_LIMIT,
+        },
+    }
+
+
+def summarize_xml_nodes(root: ET.Element) -> list[dict[str, object]]:
+    nodes: list[dict[str, object]] = []
+    stack: list[tuple[ET.Element, str, int]] = [(root, "/" + local_xml_name(root.tag), 0)]
+    while stack and len(nodes) < XML_PREVIEW_NODE_LIMIT:
+        node, path, depth = stack.pop()
+        text = " ".join((node.text or "").split())
+        nodes.append(
+            {
+                "path": path,
+                "tag": local_xml_name(node.tag),
+                "depth": depth,
+                "attributes": dict(list(node.attrib.items())[:10]),
+                "text": text[:240],
+                "child_count": len(list(node)),
+            }
+        )
+        children = list(node)
+        for index, child in reversed(list(enumerate(children[:20], start=1))):
+            stack.append((child, f"{path}/{local_xml_name(child.tag)}[{index}]", depth + 1))
+    return nodes
+
+
+def local_xml_name(value: str) -> str:
+    return value.rsplit("}", 1)[-1] if "}" in value else value
+
+
+def build_email_preview(source_path: Path, suffix: str) -> Dict[str, object]:
+    try:
+        if suffix == ".eml":
+            messages = [email.message_from_bytes(source_path.read_bytes(), policy=policy.default)]
+        else:
+            messages = parse_mbox_messages(source_path)
+    except OSError as exc:
+        return {
+            "preview_type": "binary",
+            "message": f"Email preview failed: {exc}",
+            "viewer_metadata": structured_viewer_metadata("email", "bounded-email-parse", "parse-failed"),
+            "email": {"error": str(exc)},
+        }
+    summaries = [summarize_email_message(message, index) for index, message in enumerate(messages, start=1)]
+    text = "\n\n".join(item["body_preview"] for item in summaries if item.get("body_preview"))
+    return {
+        "preview_type": "email",
+        "message": "Email structured preview is available.",
+        "text": text[:20000],
+        "truncated": len(messages) >= EMAIL_PREVIEW_MESSAGE_LIMIT or len(text) > 20000,
+        "viewer_metadata": structured_viewer_metadata("email", "bounded-email-parse", "available"),
+        "email": {
+            "message_count": len(summaries),
+            "message_limit": EMAIL_PREVIEW_MESSAGE_LIMIT,
+            "messages": summaries,
+            "truncated": len(messages) >= EMAIL_PREVIEW_MESSAGE_LIMIT,
+        },
+    }
+
+
+def parse_mbox_messages(source_path: Path) -> list[email.message.EmailMessage]:
+    raw = source_path.read_bytes()
+    chunks = re.split(rb"(?m)^From .*$", raw)
+    messages = []
+    for chunk in chunks:
+        if not chunk.strip():
+            continue
+        messages.append(email.message_from_bytes(chunk, policy=policy.default))
+        if len(messages) >= EMAIL_PREVIEW_MESSAGE_LIMIT:
+            break
+    return messages
+
+
+def summarize_email_message(message: email.message.EmailMessage, index: int) -> dict[str, object]:
+    attachments = []
+    body_parts = []
+    for part in message.walk():
+        content_disposition = str(part.get_content_disposition() or "")
+        filename = part.get_filename()
+        content_type = part.get_content_type()
+        if content_disposition == "attachment" or filename:
+            attachments.append({"filename": filename or "", "content_type": content_type})
+            continue
+        if content_type in {"text/plain", "text/html"}:
+            try:
+                body_parts.append(part.get_content())
+            except (LookupError, UnicodeDecodeError):
+                continue
+    body = "\n".join(str(part) for part in body_parts)
+    return {
+        "index": index,
+        "subject": str(message.get("subject") or ""),
+        "from": str(message.get("from") or ""),
+        "to": str(message.get("to") or ""),
+        "cc": str(message.get("cc") or ""),
+        "date": str(message.get("date") or ""),
+        "message_id": str(message.get("message-id") or ""),
+        "attachments": attachments[:20],
+        "attachment_count": len(attachments),
+        "body_preview": body[:EMAIL_BODY_PREVIEW_CHARS],
+        "body_truncated": len(body) > EMAIL_BODY_PREVIEW_CHARS,
+    }
+
+
+def structured_viewer_metadata(source_format: str, strategy: str, status: str) -> dict[str, object]:
+    return {
+        "source_format": source_format,
+        "strategy": strategy,
+        "preview_status": status,
+        "parser": f"rapidtriage.source-viewer.{source_format}",
+        "parser_version": "1",
+    }
+
+
+def safe_read_text(source_path: Path, *, max_chars: int) -> str:
+    try:
+        with source_path.open("r", encoding="utf-8", errors="replace") as handle:
+            return handle.read(max_chars)
+    except OSError:
+        return ""
 
 
 def list_sqlite_tables(connection: sqlite3.Connection) -> list[str]:

@@ -24,7 +24,7 @@ RapidTriage should absorb this as a product principle:
 | --- | --- | --- | --- |
 | Processing strategy | Skip full carving/heavy indexing by default, run later if needed. | Partial | Keep `run` bounded by default; add queued deep processing profiles. |
 | Windows artifacts | Hundreds of categorized artifacts, OS/account metadata, last boot time, admin status. | Early | Expand normalized Windows parsers with fixture-backed coverage. |
-| Viewers | Dedicated SQL, JSON, XML, email, media, browser, and artifact viewers. | Partial+ | SQLite source files now get a read-only capped web table preview and text-column keyword search; JSON/XML/email/media/browser viewers remain incremental work. |
+| Viewers | Dedicated SQL, JSON, XML, email, media, browser, and artifact viewers. | Partial+ | SQLite, JSON, XML, and EML/MBOX source files now get read-only capped web previews with viewer metadata; SQLite also supports text-column keyword search. Media/browser/artifact viewers remain incremental work. |
 | Registry | Deleted key/value recovery and visual marking. | Planned | Add registry hive parser/recovery module after validation corpus exists. |
 | Event logs | Event semantic tags, recovered deleted records, parameter-level filters. | Planned | EVTX parser should emit normalized `Event` plus typed parameters. |
 | VSC | Compare current volume with Volume Shadow Copies and detect VSC deletion commands. | Planned | Add VSC import/compare workflow as Windows advanced parser work. |
@@ -59,7 +59,7 @@ High priority:
 
 Medium priority:
 
-- Add SQLite/JSON/XML/email dedicated viewers.
+- Add SQLite/JSON/XML/email dedicated viewers. Status: SQLite, JSON, XML, and EML/MBOX source viewers now provide structured bounded previews in the web evidence viewer.
 - Add Defender, Firewall, Task Scheduler, WER, Prefetch, JumpList, LNK, ShellBags, USB history parsers. Status: first-pass fixture-backed coverage exists, with LNK header/string parsing and recoverable embedded Jump List Shell Link destination promotion; deeper OLE Jump List stream traversal remains later.
 - Add optional TI connector plugin contract for URL/IP/hash enrichment.
 - Add Korean OCR validation set and OCR quality metrics.
@@ -97,3 +97,8 @@ RapidTriage should not blindly chase a "500 artifact" number. The better target 
 8. Add parser confidence fields to normalized artifacts. Status: normalization now promotes parser/detail confidence into the canonical artifact confidence field, and media rows expose parser confidence.
 9. Add Korean OCR validation fixture. Status: Korean OCR sidecar fixture now asserts language hints plus OCR quality metrics such as Hangul counts.
 10. Add XVA suffix detection to `EvidenceAdapter`. Status: XVA is detected as a virtual-disk export/convert-first workflow with explicit next actions.
+11. Add JSON source viewer in the web UI. Status: bounded JSON/JSONL/NDJSON previews summarize structure and keep formatted excerpts for review.
+12. Add XML source viewer in the web UI. Status: bounded XML previews show root metadata and element outline while preserving raw excerpt search.
+13. Add email source viewer in the web UI. Status: EML/MBOX previews show headers, body snippets, and attachment names without loading external content.
+14. Add viewer validation metadata. Status: source previews now expose parser, strategy, status, version, and source format metadata in the UI.
+15. Update tests and intake documentation for the structured viewer tranche. Status: API coverage and Maestro/WISDOM intake status updated.

@@ -1127,6 +1127,15 @@ function renderEvidenceViewer(payload, reviewContext = null) {
   if (payload.preview_type === "sqlite") {
     body = renderSqlitePreview(payload.sqlite || {});
   }
+  if (payload.preview_type === "json") {
+    body = renderJsonPreview(payload.json || {}, payload);
+  }
+  if (payload.preview_type === "xml") {
+    body = renderXmlPreview(payload.xml || {}, payload);
+  }
+  if (payload.preview_type === "email") {
+    body = renderEmailPreview(payload.email || {}, payload);
+  }
   return `
     <div class="viewer-header">
       <div>
@@ -1143,9 +1152,24 @@ function renderEvidenceViewer(payload, reviewContext = null) {
     <section id="sourceMetadataPanel" class="source-metadata-panel">
       <p class="help-text">해시는 큰 파일에서 시간이 걸릴 수 있어 필요할 때만 계산합니다.</p>
     </section>
+    ${renderViewerMetadata(payload.viewer_metadata || {})}
     ${renderFileSearchBox(payload)}
     ${renderReviewCapture(reviewContext, payload)}
     ${body}
+  `;
+}
+
+function renderViewerMetadata(metadata) {
+  if (!Object.keys(metadata || {}).length) return "";
+  return `
+    <section class="source-metadata-panel">
+      <div class="metadata-grid">
+        ${metric("Viewer", metadata.parser || "source-viewer")}
+        ${metric("Strategy", metadata.strategy || "unknown")}
+        ${metric("Status", metadata.preview_status || "unknown")}
+        ${metric("Format", metadata.source_format || "unknown")}
+      </div>
+    </section>
   `;
 }
 
@@ -1189,6 +1213,73 @@ function renderSqlitePreview(sqlite) {
         </article>
       `).join("")}
       ${sqlite.truncated ? '<p class="help-text">Additional tables are hidden to keep the viewer responsive.</p>' : ""}
+    </section>
+  `;
+}
+
+function renderJsonPreview(json, payload) {
+  const summary = json.summary || {};
+  return `
+    <section class="structured-preview">
+      <div class="file-search-summary">
+        ${metric("JSON items", json.item_count ?? 0)}
+        ${metric("Limit", json.item_limit ?? "n/a")}
+        ${metric("Type", summary.type || "json")}
+      </div>
+      <p class="help-text">JSON viewer is capped and read-only. Use file search above for exact keyword hits.</p>
+      <pre class="viewer-text">${escapeHtml(JSON.stringify(summary, null, 2))}</pre>
+      ${payload.text ? `<details><summary>Formatted source excerpt</summary><pre class="viewer-text">${escapeHtml(payload.text)}</pre></details>` : ""}
+      ${json.truncated ? '<p class="help-text">JSON preview was capped for performance.</p>' : ""}
+    </section>
+  `;
+}
+
+function renderXmlPreview(xml, payload) {
+  const nodes = xml.nodes || [];
+  return `
+    <section class="structured-preview">
+      <div class="file-search-summary">
+        ${metric("Root", xml.root_tag || "unknown")}
+        ${metric("Nodes", nodes.length)}
+        ${metric("Limit", xml.node_limit ?? "n/a")}
+      </div>
+      <p class="help-text">XML viewer shows a bounded element outline for fast review. Use file search for exact text hits.</p>
+      <div class="dense-list">
+        ${nodes.map((node) => `
+          <article class="dense-row">
+            <strong>${escapeHtml(node.path || node.tag || "")}</strong>
+            <span>${escapeHtml(node.text || "")}</span>
+            <small>${escapeHtml(Object.entries(node.attributes || {}).map(([key, value]) => `${key}=${value}`).join(" · "))}</small>
+          </article>
+        `).join("")}
+      </div>
+      ${payload.text ? `<details><summary>Raw XML excerpt</summary><pre class="viewer-text">${escapeHtml(payload.text)}</pre></details>` : ""}
+      ${xml.truncated ? '<p class="help-text">XML outline was capped for performance.</p>' : ""}
+    </section>
+  `;
+}
+
+function renderEmailPreview(emailPayload, payload) {
+  const messages = emailPayload.messages || [];
+  return `
+    <section class="structured-preview">
+      <div class="file-search-summary">
+        ${metric("Messages", emailPayload.message_count ?? messages.length)}
+        ${metric("Limit", emailPayload.message_limit ?? "n/a")}
+        ${metric("Preview", payload.truncated ? "capped" : "complete")}
+      </div>
+      <p class="help-text">Email viewer extracts headers, body preview, and attachment names without loading external content.</p>
+      <div class="dense-list">
+        ${messages.map((message) => `
+          <article class="dense-row">
+            <strong>${escapeHtml(message.subject || "(no subject)")}</strong>
+            <span>${escapeHtml([message.from, message.to, message.date].filter(Boolean).join(" -> "))}</span>
+            <small>${escapeHtml(message.body_preview || "")}</small>
+            ${(message.attachments || []).length ? `<small>Attachments: ${escapeHtml((message.attachments || []).map((item) => item.filename || item.content_type).join(", "))}</small>` : ""}
+          </article>
+        `).join("")}
+      </div>
+      ${emailPayload.truncated ? '<p class="help-text">Email preview was capped for performance.</p>' : ""}
     </section>
   `;
 }
