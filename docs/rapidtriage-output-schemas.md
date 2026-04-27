@@ -338,6 +338,10 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `linux-ssh-authorized-key`
   - `linux-ssh-known-host`
   - `linux-auth-log-event`
+  - `linux-auditd-event`
+  - `linux-package`
+  - `linux-package-event`
+  - `linux-container-config`
   - `linux-cron-entry`
   - `linux-systemd-service`
 
@@ -349,4 +353,4 @@ Current Windows parser rows include source validation fields where available: `p
 
 Current macOS parser rows include user profile inventory, Safari/Chromium/Firefox history/download rows, LaunchServices quarantine events, TCC privacy permissions with `service`, `client`, `allowed`, `last_modified_at`, `risk_flags`, and `risk_score`, and LaunchAgent plist fields such as `label`, `program`, `program_arguments`, and `run_at_load`. Native macOS inventory rows for Unified Logs, Spotlight stores, FSEvents, and APFS snapshot hints add source hashes, size, modified time, bounded string/path/URL pivots, risk flags, validation guidance, and reportability fields for search/review before dedicated macOS tooling validation.
 
-Current Linux parser rows include user inventory, shell history commands, SSH authorized-key hashes and known-host pivots, auth log events, cron entries, and systemd units. High-value fields include `user`, `uid`, `shell`, `command`, `src_ip`, `schedule`, `unit_name`, `exec_start`, `source_hashes`, `risk_flags`, and `risk_score`.
+Current Linux parser rows include user inventory, shell history commands, SSH authorized-key hashes and known-host pivots, auth log events, auditd events, dpkg package/status events, Docker container config rows, cron entries, and systemd units. High-value fields include `user`, `uid`, `shell`, `command`, `src_ip`, `schedule`, `unit_name`, `exec_start`, `package`, `version`, `container_id`, `image`, `source_hashes`, `risk_flags`, and `risk_score`.

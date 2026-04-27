@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import re
 import shlex
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Iterable
 
 from ..core.models import ArtifactRecord
 
-PARSER_VERSION = "linux-system-v1"
+PARSER_VERSION = "linux-system-v2"
 SKIP_USERS = {"daemon", "nobody", "sync", "shutdown", "halt", "mail", "news", "uucp", "operator", "games"}
 MAX_TEXT_BYTES = 4 * 1024 * 1024
 MAX_LOG_LINES = 5000
@@ -19,6 +20,16 @@ AUTH_LOG_RELATIVE_PATHS = (
     ("var", "log", "secure"),
     ("var", "log", "secure.1"),
 )
+AUDIT_LOG_RELATIVE_PATHS = (
+    ("var", "log", "audit", "audit.log"),
+    ("var", "log", "audit", "audit.log.1"),
+)
+DPKG_STATUS = ("var", "lib", "dpkg", "status")
+DPKG_LOG_RELATIVE_PATHS = (
+    ("var", "log", "dpkg.log"),
+    ("var", "log", "dpkg.log.1"),
+)
+DOCKER_CONTAINER_ROOT = ("var", "lib", "docker", "containers")
 SHELL_HISTORY_NAMES = (".bash_history", ".zsh_history", ".sh_history", ".ash_history")
 SYSTEMD_DIRS = (
     ("etc", "systemd", "system"),
@@ -70,6 +81,9 @@ class LinuxSystemArtifactsProvider:
             yield from collect_shell_history(user_root)
             yield from collect_ssh_artifacts(user_root)
         yield from collect_auth_logs(root)
+        yield from collect_auditd_logs(root)
+        yield from collect_package_artifacts(root)
+        yield from collect_container_artifacts(root)
         yield from collect_cron(root)
         yield from collect_systemd_units(root)
 
@@ -333,6 +347,226 @@ def collect_auth_logs(root: Path) -> Iterable[ArtifactRecord]:
             )
 
 
+def collect_auditd_logs(root: Path) -> Iterable[ArtifactRecord]:
+    for relative_parts in AUDIT_LOG_RELATIVE_PATHS:
+        path = root.joinpath(*relative_parts)
+        if not path.is_file():
+            continue
+        source_hashes = file_hashes(path)
+        for index, line in enumerate(read_text_lines(path, max_lines=MAX_LOG_LINES)):
+            parsed = parse_auditd_line(line)
+            if not parsed:
+                continue
+            flags = auditd_risk_flags(parsed)
+            yield ArtifactRecord(
+                provider=LinuxSystemArtifactsProvider.name,
+                artifact_type="linux-auditd-event",
+                path=str(path.resolve()),
+                supported=True,
+                details={
+                    "parser": "linux-auditd-log",
+                    "parser_version": PARSER_VERSION,
+                    "coverage_status": "parsed",
+                    "reportability": "triage",
+                    "source_path": str(path.resolve()),
+                    "source_hashes": source_hashes,
+                    "source_index": index,
+                    **parsed,
+                    "risk_flags": flags,
+                    "risk_score": auditd_risk_score(flags),
+                },
+            )
+
+
+def parse_auditd_line(line: str) -> dict[str, object]:
+    if "type=" not in line or "msg=audit(" not in line:
+        return {}
+    fields = dict(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|\S+)", line))
+    event_type = fields.get("type", "")
+    timestamp = ""
+    serial = ""
+    msg = fields.get("msg", "")
+    match = re.search(r"audit\((?P<epoch>[0-9.]+):(?P<serial>\d+)\)", msg)
+    if match:
+        timestamp = isoformat_from_unix(str(int(float(match.group("epoch")))))
+        serial = match.group("serial")
+    normalized = {
+        "event_type": event_type,
+        "timestamp": timestamp,
+        "audit_serial": serial,
+        "uid": strip_quotes(fields.get("uid", "")),
+        "auid": strip_quotes(fields.get("auid", "")),
+        "ses": strip_quotes(fields.get("ses", "")),
+        "comm": strip_quotes(fields.get("comm", "")),
+        "exe": strip_quotes(fields.get("exe", "")),
+        "cwd": strip_quotes(fields.get("cwd", "")),
+        "name": strip_quotes(fields.get("name", "")),
+        "key": strip_quotes(fields.get("key", "")),
+        "success": strip_quotes(fields.get("success", "")),
+        "raw_preview": line[:1000],
+    }
+    return normalized if event_type else {}
+
+
+def auditd_risk_flags(parsed: dict[str, object]) -> list[str]:
+    blob = " ".join(str(parsed.get(key) or "").lower() for key in ("comm", "exe", "cwd", "name", "key", "raw_preview"))
+    flags: list[str] = []
+    if any(token.strip() in blob for token in SUSPICIOUS_COMMAND_TOKENS):
+        flags.append("suspicious-command-token")
+    if "/etc/sudoers" in blob or "/etc/shadow" in blob or "/root/.ssh" in blob:
+        flags.append("sensitive-file-access")
+    if parsed.get("auid") == "0" or parsed.get("uid") == "0":
+        flags.append("root-context")
+    return sorted(set(flags))
+
+
+def auditd_risk_score(flags: list[str]) -> int:
+    weights = {"suspicious-command-token": 30, "sensitive-file-access": 25, "root-context": 15}
+    return min(sum(weights.get(flag, 5) for flag in flags), 100)
+
+
+def collect_package_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    status_path = root.joinpath(*DPKG_STATUS)
+    if status_path.is_file():
+        source_hashes = file_hashes(status_path)
+        for index, package in enumerate(parse_dpkg_status(status_path)):
+            yield ArtifactRecord(
+                provider=LinuxSystemArtifactsProvider.name,
+                artifact_type="linux-package",
+                path=str(status_path.resolve()),
+                supported=True,
+                details={
+                    "parser": "linux-dpkg-status",
+                    "parser_version": PARSER_VERSION,
+                    "coverage_status": "parsed",
+                    "reportability": "triage",
+                    "source_path": str(status_path.resolve()),
+                    "source_hashes": source_hashes,
+                    "source_index": index,
+                    **package,
+                },
+            )
+    for relative_parts in DPKG_LOG_RELATIVE_PATHS:
+        path = root.joinpath(*relative_parts)
+        if not path.is_file():
+            continue
+        source_hashes = file_hashes(path)
+        for index, row in enumerate(parse_dpkg_log(path)):
+            yield ArtifactRecord(
+                provider=LinuxSystemArtifactsProvider.name,
+                artifact_type="linux-package-event",
+                path=str(path.resolve()),
+                supported=True,
+                details={
+                    "parser": "linux-dpkg-log",
+                    "parser_version": PARSER_VERSION,
+                    "coverage_status": "parsed",
+                    "reportability": "triage",
+                    "source_path": str(path.resolve()),
+                    "source_hashes": source_hashes,
+                    "source_index": index,
+                    **row,
+                },
+            )
+
+
+def parse_dpkg_status(path: Path) -> list[dict[str, object]]:
+    packages: list[dict[str, object]] = []
+    current: dict[str, str] = {}
+    for line in read_text_lines(path, max_lines=MAX_LOG_LINES * 4):
+        if not line.strip():
+            if current.get("Package"):
+                packages.append(dpkg_package_payload(current))
+            current = {}
+            continue
+        if ":" not in line or line.startswith(" "):
+            continue
+        key, value = line.split(":", 1)
+        current[key] = value.strip()
+    if current.get("Package"):
+        packages.append(dpkg_package_payload(current))
+    return packages
+
+
+def dpkg_package_payload(row: dict[str, str]) -> dict[str, object]:
+    return {
+        "package": row.get("Package", ""),
+        "version": row.get("Version", ""),
+        "architecture": row.get("Architecture", ""),
+        "status": row.get("Status", ""),
+        "maintainer": row.get("Maintainer", ""),
+        "description": row.get("Description", ""),
+    }
+
+
+def parse_dpkg_log(path: Path) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for line in read_text_lines(path, max_lines=MAX_LOG_LINES):
+        parts = line.split()
+        if len(parts) < 4 or parts[2] not in {"install", "upgrade", "remove", "purge", "status"}:
+            continue
+        rows.append(
+            {
+                "timestamp": f"{parts[0]}T{parts[1]}",
+                "action": parts[2],
+                "package": parts[3].split(":", 1)[0],
+                "raw_preview": line[:1000],
+            }
+        )
+    return rows
+
+
+def collect_container_artifacts(root: Path) -> Iterable[ArtifactRecord]:
+    docker_root = root.joinpath(*DOCKER_CONTAINER_ROOT)
+    if not docker_root.is_dir():
+        return
+    for config_path in sorted(docker_root.glob("*/config.v2.json"), key=lambda item: str(item).lower()):
+        details = parse_docker_container_config(config_path)
+        flags = container_risk_flags(details)
+        yield ArtifactRecord(
+            provider=LinuxSystemArtifactsProvider.name,
+            artifact_type="linux-container-config",
+            path=str(config_path.resolve()),
+            supported=True,
+            details={
+                "parser": "linux-docker-container-config",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "parsed" if details else "inventory",
+                "reportability": "triage",
+                "source_path": str(config_path.resolve()),
+                "source_hashes": file_hashes(config_path),
+                **details,
+                "risk_flags": flags,
+                "risk_score": command_risk_score(flags),
+            },
+        )
+
+
+def parse_docker_container_config(path: Path) -> dict[str, object]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    config = payload.get("Config") if isinstance(payload.get("Config"), dict) else {}
+    return {
+        "container_id": str(payload.get("ID") or path.parent.name),
+        "name": str(payload.get("Name") or "").lstrip("/"),
+        "image": str(config.get("Image") or payload.get("Image") or ""),
+        "command": " ".join(str(item) for item in config.get("Cmd", []) if item) if isinstance(config.get("Cmd"), list) else str(config.get("Cmd") or ""),
+        "entrypoint": " ".join(str(item) for item in config.get("Entrypoint", []) if item) if isinstance(config.get("Entrypoint"), list) else str(config.get("Entrypoint") or ""),
+        "created": str(payload.get("Created") or ""),
+        "log_path": str(payload.get("LogPath") or ""),
+    }
+
+
+def container_risk_flags(details: dict[str, object]) -> list[str]:
+    command = " ".join(str(details.get(key) or "") for key in ("image", "command", "entrypoint", "log_path"))
+    flags = ["container-runtime-config", *command_risk_flags(command)]
+    if ":latest" in str(details.get("image") or ""):
+        flags.append("latest-image-tag")
+    return sorted(set(flags))
+
+
 def parse_auth_log_line(line: str) -> dict[str, object]:
     for event_type, pattern in AUTH_PATTERNS:
         match = pattern.search(line)
@@ -347,6 +581,10 @@ def parse_auth_log_line(line: str) -> dict[str, object]:
             **data,
         }
     return {}
+
+
+def strip_quotes(value: object) -> str:
+    return str(value or "").strip("\"")
 
 
 def process_hint(line: str) -> str:

@@ -202,6 +202,7 @@ On mounted or exported Linux evidence, `linux-system` collects a bounded IR-orie
 - Shell history from common Bash/Zsh/Ash history files, including suspicious command-token flags.
 - SSH `authorized_keys` and `known_hosts` pivots with key material redacted to SHA256.
 - Auth log events for accepted/failed SSH, sudo commands, account creation, and cron execution.
+- Auditd event rows, dpkg package/status events, and Docker container config rows for quick IR pivots.
 - Cron entries and systemd service units, including root execution, user-writable paths, and suspicious downloader/reverse-shell command hints.
 
 Use:
