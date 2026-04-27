@@ -339,5 +339,5 @@ dashcam-ingest
 
 ```bash
 python -m unittest discover -s tests
-python -m build --wheel --sdist --no-isolation
+python -m build --wheel --sdist
 ```

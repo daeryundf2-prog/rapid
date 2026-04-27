@@ -204,7 +204,7 @@ def build_recommended_commands() -> list[dict[str, str]]:
         {"name": "unit-tests", "command": "python -m unittest discover -s tests"},
         {"name": "compile", "command": "python -m compileall -q rapidtriage"},
         {"name": "web-js-syntax", "command": "node --check rapidtriage/web/static/app.js"},
-        {"name": "build", "command": "python -m build --wheel --sdist --no-isolation"},
+        {"name": "build", "command": "python -m build --wheel --sdist"},
         {"name": "release-zip", "command": "python scripts/build-release.py --output-dir release"},
         {"name": "windows-signature-verify", "command": "Get-AuthenticodeSignature .\\release\\*.exe | Format-List"},
         {"name": "macos-notarization-verify", "command": "codesign --verify --deep --strict APP && spctl --assess --type execute APP"},

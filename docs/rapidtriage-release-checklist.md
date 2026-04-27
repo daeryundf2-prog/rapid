@@ -5,7 +5,7 @@
 - Run `python -m unittest discover -s tests`.
 - Run `python -m compileall -q rapidtriage`.
 - Run `node --check rapidtriage/web/static/app.js`.
-- Run `python -m build --wheel --sdist --no-isolation`.
+- Run `python -m build --wheel --sdist`.
 - Run `rapidtriage sample --run --overwrite`.
 - Run `rapidtriage benchmark --output-dir ./release-benchmark --file-count 1000 --overwrite`.
 - Run `rapidtriage validation --output-dir ./release-validation --overwrite`.

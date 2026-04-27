@@ -20,7 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if not args.skip_build:
-        subprocess.run([sys.executable, "-m", "build", "--wheel", "--sdist", "--no-isolation"], cwd=repo, check=True)
+        subprocess.run([sys.executable, "-m", "build", "--wheel", "--sdist"], cwd=repo, check=True)
         dist_dir = repo / "dist"
         for artifact in dist_dir.glob("*"):
             shutil.copy2(artifact, output_dir / artifact.name)
