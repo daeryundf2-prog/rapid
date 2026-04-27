@@ -422,9 +422,19 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn(r"C:\Users\alice\Desktop\deleted.txt", native_mft[0]["details"]["path_candidates"])
             self.assertTrue(native_mft[0]["details"]["validation_required"])
             self.assertEqual(usn_files[0]["details"]["source_path"], str(fixture.usn_journal.resolve()))
-            self.assertEqual(usn_files[0]["details"]["native_record_count"], 1)
+            self.assertEqual(usn_files[0]["details"]["native_record_count"], 2)
+            self.assertIn({"value": "2", "count": 1}, usn_files[0]["details"]["record_version_counts"])
+            self.assertIn({"value": "3", "count": 1}, usn_files[0]["details"]["record_version_counts"])
             self.assertEqual(native_usn[0]["details"]["file_path"], "deleted.txt")
+            self.assertEqual(native_usn[0]["details"]["validation_status"], "valid")
+            self.assertEqual(native_usn[0]["details"]["parser_confidence"], 0.85)
+            self.assertTrue(native_usn[0]["details"]["deleted_hint"])
             self.assertIn("FILE_DELETE", native_usn[0]["details"]["reason_flags"])
+            self.assertIn("ARCHIVE", native_usn[0]["details"]["file_attribute_names"])
+            self.assertEqual(native_usn[1]["details"]["major_version"], 3)
+            self.assertEqual(native_usn[1]["details"]["file_path"], "renamed.txt")
+            self.assertEqual(native_usn[1]["details"]["rename_hint"], "rename-new-name")
+            self.assertIn("CLOSE", native_usn[1]["details"]["reason_flags"])
 
     def test_windows_search_index_collector_imports_exports_and_inventories_edb(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

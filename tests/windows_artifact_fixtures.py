@@ -685,6 +685,11 @@ def _write_filesystem_fixtures(mft_csv: Path, usn_jsonl: Path, mft_native: Path,
             timestamp=datetime(2024, 4, 1, 4, 6, 7, tzinfo=timezone.utc),
             reason=0x00000200,
         )
+        + build_minimal_usn_journal_v3(
+            file_name="renamed.txt",
+            timestamp=datetime(2024, 4, 1, 4, 7, 8, tzinfo=timezone.utc),
+            reason=0x00002000 | 0x80000000,
+        )
     )
 
 
@@ -705,7 +710,7 @@ def build_minimal_mft() -> bytes:
 def build_minimal_usn_journal(file_name: str, timestamp: datetime, reason: int) -> bytes:
     encoded_name = file_name.encode("utf-16le")
     name_offset = 60
-    length = name_offset + len(encoded_name)
+    length = align8(name_offset + len(encoded_name))
     record = bytearray(length)
     record[0:4] = length.to_bytes(4, "little")
     record[4:6] = (2).to_bytes(2, "little")
@@ -721,6 +726,31 @@ def build_minimal_usn_journal(file_name: str, timestamp: datetime, reason: int) 
     record[58:60] = name_offset.to_bytes(2, "little")
     record[name_offset : name_offset + len(encoded_name)] = encoded_name
     return bytes(record)
+
+
+def build_minimal_usn_journal_v3(file_name: str, timestamp: datetime, reason: int) -> bytes:
+    encoded_name = file_name.encode("utf-16le")
+    name_offset = 76
+    length = align8(name_offset + len(encoded_name))
+    record = bytearray(length)
+    record[0:4] = length.to_bytes(4, "little")
+    record[4:6] = (3).to_bytes(2, "little")
+    record[6:8] = (0).to_bytes(2, "little")
+    record[8:24] = (43).to_bytes(16, "little")
+    record[24:40] = (5).to_bytes(16, "little")
+    record[40:48] = (9002).to_bytes(8, "little")
+    record[48:56] = datetime_to_filetime(timestamp).to_bytes(8, "little")
+    record[56:60] = reason.to_bytes(4, "little")
+    record[64:68] = (101).to_bytes(4, "little")
+    record[68:72] = (0x20).to_bytes(4, "little")
+    record[72:74] = len(encoded_name).to_bytes(2, "little")
+    record[74:76] = name_offset.to_bytes(2, "little")
+    record[name_offset : name_offset + len(encoded_name)] = encoded_name
+    return bytes(record)
+
+
+def align8(value: int) -> int:
+    return (value + 7) & ~7
 
 
 def _write_windows_search_fixture(csv_path: Path, edb_path: Path) -> None:

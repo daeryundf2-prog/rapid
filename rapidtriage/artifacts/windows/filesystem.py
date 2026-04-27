@@ -10,7 +10,7 @@ from typing import Iterable, Mapping
 
 from ...core.models import ArtifactRecord
 
-PARSER_VERSION = "windows-filesystem-v3"
+PARSER_VERSION = "windows-filesystem-v4"
 SUPPORTED_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 MFT_HINTS = ("mft", "mftexcmd", "$mft")
 USN_HINTS = ("usn", "usnjrnl", "$j")
@@ -20,12 +20,44 @@ USN_REASON_FLAGS = {
     0x00000001: "DATA_OVERWRITE",
     0x00000002: "DATA_EXTEND",
     0x00000004: "DATA_TRUNCATION",
+    0x00000010: "NAMED_DATA_OVERWRITE",
+    0x00000020: "NAMED_DATA_EXTEND",
+    0x00000040: "NAMED_DATA_TRUNCATION",
     0x00000100: "FILE_CREATE",
     0x00000200: "FILE_DELETE",
+    0x00000400: "EA_CHANGE",
+    0x00000800: "SECURITY_CHANGE",
     0x00001000: "RENAME_OLD_NAME",
     0x00002000: "RENAME_NEW_NAME",
-    0x00008000: "SECURITY_CHANGE",
+    0x00004000: "INDEXABLE_CHANGE",
+    0x00008000: "BASIC_INFO_CHANGE",
+    0x00010000: "HARD_LINK_CHANGE",
+    0x00020000: "COMPRESSION_CHANGE",
+    0x00040000: "ENCRYPTION_CHANGE",
+    0x00080000: "OBJECT_ID_CHANGE",
+    0x00100000: "REPARSE_POINT_CHANGE",
+    0x00200000: "STREAM_CHANGE",
     0x80000000: "CLOSE",
+}
+USN_SOURCE_INFO_FLAGS = {
+    0x00000001: "DATA_MANAGEMENT",
+    0x00000002: "AUXILIARY_DATA",
+    0x00000004: "REPLICATION_MANAGEMENT",
+    0x00000008: "CLIENT_REPLICATION_MANAGEMENT",
+}
+NTFS_FILE_ATTRIBUTE_NAMES = {
+    0x00000001: "READONLY",
+    0x00000002: "HIDDEN",
+    0x00000004: "SYSTEM",
+    0x00000010: "DIRECTORY",
+    0x00000020: "ARCHIVE",
+    0x00000040: "DEVICE",
+    0x00000080: "NORMAL",
+    0x00000100: "TEMPORARY",
+    0x00000400: "REPARSE_POINT",
+    0x00000800: "COMPRESSED",
+    0x00001000: "OFFLINE",
+    0x00004000: "ENCRYPTED",
 }
 
 
@@ -129,10 +161,13 @@ def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
             "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
             "scan_bytes": len(blob),
             "native_record_count": len(records),
+            "record_validation_counts": count_values(record.get("validation_status") for record in records),
+            "record_version_counts": count_values(str(record.get("major_version") or "") for record in records),
+            "reason_flag_counts": count_many(record.get("reason_flags") for record in records),
             "record_samples": records[:50],
             "extracted_string_count": len(strings),
             "recommended_parsers": ["MFTECmd", "UsnJrnl2Csv", "The Sleuth Kit"],
-            "note": "Native USN records are decoded when bounded v2/v3 record structures are recoverable; validate critical timelines with a dedicated parser.",
+            "note": "Native USN records are decoded when bounded v2/v3 record structures are recoverable; validation counts summarize structural and timestamp confidence. Validate critical timelines with a dedicated parser.",
         },
     )
 
@@ -198,12 +233,28 @@ def build_native_usn_record(path: Path, record: Mapping[str, object], index: int
         "parent_reference": str(record.get("parent_file_reference_number") or ""),
         "file_path": str(record.get("file_name") or ""),
         "timestamp": str(record.get("timestamp") or ""),
-        "deleted_hint": False,
+        "timestamp_source": "usn_filetime" if record.get("timestamp") else "invalid_or_missing_filetime",
+        "deleted_hint": bool(record.get("deleted_hint")),
+        "rename_hint": str(record.get("rename_hint") or ""),
         "reason": str(record.get("reason") or ""),
+        "reason_raw": record.get("reason_raw", 0),
         "reason_flags": list(record.get("reason_flags") or []),
+        "source_info": record.get("source_info", 0),
+        "source_info_flags": list(record.get("source_info_flags") or []),
+        "security_id": record.get("security_id", 0),
+        "file_attributes": record.get("file_attributes", 0),
+        "file_attribute_names": list(record.get("file_attribute_names") or []),
         "usn": record.get("usn", 0),
         "record_offset": record.get("record_offset", 0),
         "record_length": record.get("record_length", 0),
+        "major_version": record.get("major_version", 0),
+        "minor_version": record.get("minor_version", 0),
+        "validation_status": str(record.get("validation_status") or "unknown"),
+        "validation_warnings": list(record.get("validation_warnings") or []),
+        "parser_confidence": record.get("parser_confidence", 0.0),
+        "evidence_strength": "ntfs-usn-native-record",
+        "validation_required": True,
+        "validation_guidance": "Native USN rows validate record layout, length, name bounds, version, and FILETIME plausibility, but critical timelines should still be cross-checked with MFTECmd/UsnJrnl2Csv or another dedicated parser.",
         "raw": dict(record),
         "raw_preview": json.dumps(record, ensure_ascii=False, sort_keys=True)[:2000],
     }
@@ -386,39 +437,143 @@ def parse_usn_records(blob: bytes) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     offset = 0
     while offset + 60 <= len(blob):
-        length = int_from(blob, offset, 4)
-        major = int_from(blob, offset + 4, 2)
-        if length < 60 or length > 65536 or offset + length > len(blob) or major not in {2, 3, 4}:
+        record = parse_usn_record_at(blob, offset)
+        if record is None:
             offset += 1
             continue
-        name_length = int_from(blob, offset + 56, 2)
-        name_offset = int_from(blob, offset + 58, 2)
-        if name_offset < 60 or name_length <= 0 or name_offset + name_length > length:
-            offset += 1
-            continue
-        record_blob = blob[offset : offset + length]
-        reason = int_from(record_blob, 40, 4)
-        record = {
-            "record_offset": offset,
-            "record_length": length,
-            "major_version": major,
-            "minor_version": int_from(record_blob, 6, 2),
-            "file_reference_number": int_from(record_blob, 8, 8),
-            "parent_file_reference_number": int_from(record_blob, 16, 8),
-            "usn": int_from(record_blob, 24, 8),
-            "timestamp": filetime_to_iso(int_from(record_blob, 32, 8)),
-            "reason": reason_string(reason),
-            "reason_flags": reason_flags(reason),
-            "source_info": int_from(record_blob, 44, 4),
-            "security_id": int_from(record_blob, 48, 4),
-            "file_attributes": int_from(record_blob, 52, 4),
-            "file_name": record_blob[name_offset : name_offset + name_length].decode("utf-16le", errors="ignore"),
-        }
         records.append(record)
-        offset += length
+        offset += int(record["record_length"])
         if len(records) >= 5000:
             return records
     return records
+
+
+def parse_usn_record_at(blob: bytes, offset: int) -> dict[str, object] | None:
+    length = int_from(blob, offset, 4)
+    major = int_from(blob, offset + 4, 2)
+    if length < 60 or length > 65536 or offset + length > len(blob) or major not in {2, 3}:
+        return None
+    record_blob = blob[offset : offset + length]
+    if major == 2:
+        layout = {
+            "minimum_length": 60,
+            "file_reference_offset": 8,
+            "parent_reference_offset": 16,
+            "reference_size": 8,
+            "usn_offset": 24,
+            "timestamp_offset": 32,
+            "reason_offset": 40,
+            "source_info_offset": 44,
+            "security_id_offset": 48,
+            "file_attributes_offset": 52,
+            "name_length_offset": 56,
+            "name_offset_offset": 58,
+        }
+    else:
+        layout = {
+            "minimum_length": 76,
+            "file_reference_offset": 8,
+            "parent_reference_offset": 24,
+            "reference_size": 16,
+            "usn_offset": 40,
+            "timestamp_offset": 48,
+            "reason_offset": 56,
+            "source_info_offset": 60,
+            "security_id_offset": 64,
+            "file_attributes_offset": 68,
+            "name_length_offset": 72,
+            "name_offset_offset": 74,
+        }
+    if length < int(layout["minimum_length"]):
+        return None
+    name_length = int_from(record_blob, int(layout["name_length_offset"]), 2)
+    name_offset = int_from(record_blob, int(layout["name_offset_offset"]), 2)
+    if name_offset < int(layout["minimum_length"]) or name_length <= 0 or name_offset + name_length > length:
+        return None
+    filetime_value = int_from(record_blob, int(layout["timestamp_offset"]), 8)
+    timestamp = filetime_to_iso(filetime_value)
+    reason = int_from(record_blob, int(layout["reason_offset"]), 4)
+    source_info = int_from(record_blob, int(layout["source_info_offset"]), 4)
+    file_attributes = int_from(record_blob, int(layout["file_attributes_offset"]), 4)
+    reason_flag_names = reason_flags(reason)
+    validation_warnings = usn_validation_warnings(
+        length=length,
+        name_length=name_length,
+        name_offset=name_offset,
+        major=major,
+        timestamp=timestamp,
+        reason=reason,
+        reason_flag_names=reason_flag_names,
+    )
+    validation_status = "valid" if not validation_warnings else "valid-with-warnings"
+    parser_confidence = 0.85 if validation_status == "valid" else 0.7
+    return {
+        "record_offset": offset,
+        "record_length": length,
+        "major_version": major,
+        "minor_version": int_from(record_blob, 6, 2),
+        "file_reference_number": int_from(record_blob, int(layout["file_reference_offset"]), int(layout["reference_size"])),
+        "parent_file_reference_number": int_from(record_blob, int(layout["parent_reference_offset"]), int(layout["reference_size"])),
+        "usn": int_from(record_blob, int(layout["usn_offset"]), 8),
+        "timestamp": timestamp,
+        "timestamp_filetime": filetime_value,
+        "reason": reason_string(reason),
+        "reason_raw": reason,
+        "reason_flags": reason_flag_names,
+        "source_info": source_info,
+        "source_info_flags": flag_names(source_info, USN_SOURCE_INFO_FLAGS),
+        "security_id": int_from(record_blob, int(layout["security_id_offset"]), 4),
+        "file_attributes": file_attributes,
+        "file_attribute_names": flag_names(file_attributes, NTFS_FILE_ATTRIBUTE_NAMES),
+        "file_name_length": name_length,
+        "file_name_offset": name_offset,
+        "file_name": record_blob[name_offset : name_offset + name_length].decode("utf-16le", errors="ignore"),
+        "deleted_hint": "FILE_DELETE" in reason_flag_names,
+        "rename_hint": rename_hint(reason_flag_names),
+        "validation_status": validation_status,
+        "validation_warnings": validation_warnings,
+        "parser_confidence": parser_confidence,
+    }
+
+
+def usn_validation_warnings(
+    *,
+    length: int,
+    name_length: int,
+    name_offset: int,
+    major: int,
+    timestamp: str,
+    reason: int,
+    reason_flag_names: list[str],
+) -> list[str]:
+    warnings: list[str] = []
+    if major not in {2, 3}:
+        warnings.append("unsupported-usn-record-version")
+    if length % 8:
+        warnings.append("record-length-not-8-byte-aligned")
+    if name_length % 2:
+        warnings.append("filename-length-not-utf16-even")
+    if name_offset % 2:
+        warnings.append("filename-offset-not-utf16-even")
+    if not timestamp:
+        warnings.append("invalid-filetime")
+    if reason and not reason_flag_names:
+        warnings.append("unknown-reason-flags")
+    if reason == 0:
+        warnings.append("empty-reason")
+    return warnings
+
+
+def rename_hint(reason_flag_names: list[str]) -> str:
+    has_old = "RENAME_OLD_NAME" in reason_flag_names
+    has_new = "RENAME_NEW_NAME" in reason_flag_names
+    if has_old and has_new:
+        return "rename-old-and-new"
+    if has_old:
+        return "rename-old-name"
+    if has_new:
+        return "rename-new-name"
+    return ""
 
 
 def int_from(blob: bytes, offset: int, size: int) -> int:
@@ -466,6 +621,33 @@ def reason_flags(value: int) -> list[str]:
 def reason_string(value: int) -> str:
     flags = reason_flags(value)
     return "|".join(flags) if flags else f"0x{value:08x}"
+
+
+def flag_names(value: int, names: Mapping[int, str]) -> list[str]:
+    return [name for flag, name in names.items() if value & flag]
+
+
+def count_values(values: Iterable[object]) -> list[dict[str, object]]:
+    counts: dict[str, int] = {}
+    for value in values:
+        text = str(value or "")
+        if not text:
+            continue
+        counts[text] = counts.get(text, 0) + 1
+    return [{"value": value, "count": count} for value, count in sorted(counts.items())]
+
+
+def count_many(values: Iterable[object]) -> list[dict[str, object]]:
+    counts: dict[str, int] = {}
+    for collection in values:
+        if not isinstance(collection, Iterable) or isinstance(collection, (str, bytes)):
+            continue
+        for value in collection:
+            text = str(value or "")
+            if not text:
+                continue
+            counts[text] = counts.get(text, 0) + 1
+    return [{"value": value, "count": count} for value, count in sorted(counts.items())]
 
 
 def filetime_to_iso(value: int) -> str:
