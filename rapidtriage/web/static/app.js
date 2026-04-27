@@ -1577,6 +1577,7 @@ async function searchCurrentFile(event) {
     output.innerHTML = renderFileSearchResults(payload);
     bindCopyButtons();
     bindCompareActions();
+    bindFileSearchHitActions();
   } catch (error) {
     output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
   } finally {
@@ -1613,6 +1614,7 @@ function renderFileSearchResults(payload) {
             ${compareButton(compareItemFromFileSearchMatch(payload, match))}
             <button class="icon-action" type="button" data-copy-path="${escapeHtml(match.citation || match.snippet || "")}">Copy citation</button>
             <button class="icon-action" type="button" data-copy-path="${escapeHtml(match.compare_preview || match.snippet || "")}">Copy snippet</button>
+            <button class="icon-action" type="button" data-review-note-text="${escapeHtml(reviewNoteFromFileSearchMatch(match))}">Add to review note</button>
           </div>
         </article>
       `).join("")}
@@ -1630,6 +1632,51 @@ function compareItemFromFileSearchMatch(payload, match) {
     preview: match.compare_preview || match.snippet || "",
     pointer: match.pointer || "",
   };
+}
+
+function reviewNoteFromFileSearchMatch(match) {
+  return [
+    `Current-file hit: ${match.citation || match.match_id || "source-search hit"}`,
+    match.snippet ? `Snippet: ${match.snippet}` : "",
+    match.review_hint || "",
+  ].filter(Boolean).join("\n");
+}
+
+function bindFileSearchHitActions() {
+  for (const button of detailPanel.querySelectorAll("[data-review-note-text]")) {
+    if (button.dataset.reviewNoteBound) continue;
+    button.dataset.reviewNoteBound = "1";
+    button.addEventListener("click", () => appendViewerReviewNote(button.dataset.reviewNoteText || "", button));
+  }
+}
+
+function appendViewerReviewNote(note, button = null) {
+  const form = detailPanel.querySelector("#viewerReviewForm");
+  const noteInput = form?.elements.note;
+  if (!noteInput || !note) {
+    if (button) {
+      button.textContent = "No review form";
+      button.disabled = true;
+    }
+    return false;
+  }
+  const existing = String(noteInput.value || "").trim();
+  noteInput.value = [existing, note.trim()].filter(Boolean).join("\n\n");
+  const tagInput = form.elements.tags;
+  if (tagInput) {
+    tagInput.value = mergeTagText(tagInput.value, ["source-search-hit"]);
+  }
+  noteInput.focus();
+  if (button) button.textContent = "Added";
+  return true;
+}
+
+function mergeTagText(value, additions) {
+  const tags = new Set(parseTags(value));
+  for (const addition of additions) {
+    if (addition) tags.add(addition);
+  }
+  return Array.from(tags).join(", ");
 }
 
 async function saveViewerReview(event) {
