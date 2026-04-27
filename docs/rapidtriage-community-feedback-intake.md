@@ -31,10 +31,12 @@ This note captures public practitioner feedback from Reddit, Forensic Focus, and
 - Added run-complete action shortcuts for Case DB preparation, whole-case search, review decisions, and report/submission workflow.
 - Added high-risk source-name warnings for drive roots, user homes, and common host folders such as `Users`, `Documents`, `Downloads`, and `Desktop`.
 - Added evidence-viewer review shortcuts: `Alt+R` to save relevant, `Alt+X` to save not relevant, and `Alt+I` to toggle report inclusion.
+- Added recent whole-case search chips and Case DB saved-search reloads so repeated keyword work does not require retyping.
+- Added previous/next search-hit navigation in the viewer with `Alt+[` and `Alt+]`.
+- Added web batch-selection helpers for visible and low-priority Case DB results.
+- Added web reviewer-bundle generation for static review ZIPs that exclude original evidence images.
 
 ## Next Backlog From Feedback
 
 - Add a processing profile summary to every run report: what was included, skipped, capped, and intentionally deferred.
-- Add saved searches and reusable keyword packs per case.
 - Add report templates that hide noisy metadata by default and expose full technical metadata in an appendix.
-- Add portable reviewer bundle: static HTML/JSON review package with selected artifacts, thumbnails/previews, hashes, and no original image.

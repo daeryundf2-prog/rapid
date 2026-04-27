@@ -25,7 +25,8 @@ RapidTriage should be designed for analysts who are tired, under time pressure, 
 - Evidence preflight warns when the selected source looks like a host drive, user home, or common analyst-machine folder instead of a deliberate exhibit.
 - Processing summaries now expose parser warning badges for warning steps, zero-row parser outputs, and reused outputs.
 - The evidence viewer supports keyboard shortcuts for review decisions: `Alt+R` saves relevant, `Alt+X` saves not relevant, and `Alt+I` toggles report inclusion.
-- Add saved searches and recent keywords per case.
-- Add viewer-specific shortcuts for next hit and previous hit.
-- Add batch review for repeated low-value hits.
+- Whole-case search remembers recent keyword sets per run, and Case DB search can reload saved searches/recent DB keywords from the web panel.
+- The evidence viewer supports `Alt+[` and `Alt+]` for previous/next search hit navigation.
+- Case DB batch review supports selecting visible rows or low-priority rows before verify/reject actions.
+- The review board can build a portable reviewer ZIP with static HTML, selected evidence JSON, report exports, hashes, and no original image.
 - Add progressive processing profiles: fast first pass, then standard/deep enrichment.

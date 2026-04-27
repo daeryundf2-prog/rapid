@@ -13,6 +13,7 @@ const runList = document.querySelector("#runList");
 const detailPanel = document.querySelector("#detailPanel");
 const RUN_FORM_STORAGE_KEY = "rapidtriage.runForm.v1";
 const SEARCH_STORAGE_PREFIX = "rapidtriage.search.";
+const SEARCH_HISTORY_PREFIX = "rapidtriage.searchHistory.";
 const COMPARE_STORAGE_PREFIX = "rapidtriage.compare.";
 const REVIEW_SELECTION_STORAGE_PREFIX = "rapidtriage.reviewSelection.";
 const SEARCH_PRESETS = [
@@ -88,6 +89,7 @@ const SHORTCUTS = [
   { keys: ["Ctrl K", "Cmd K"], label: "Open entire case search" },
   { keys: ["Ctrl F", "Cmd F"], label: "Search current file, or filter visible rows" },
   { keys: ["[", "]"], label: "Previous / next page in heavy tables" },
+  { keys: ["Alt [", "Alt ]"], label: "Previous / next opened search hit" },
   { keys: ["Alt R"], label: "Mark the open viewer hit relevant and save" },
   { keys: ["Alt X"], label: "Reject the open viewer hit as not relevant and save" },
   { keys: ["Alt I"], label: "Toggle include-in-report for the open viewer hit" },
@@ -558,7 +560,11 @@ function renderCaseDbPanel(payload) {
         </label>
         <label>Save search as <input name="save_as" placeholder="Credential hits, PowerShell triage..." /></label>
         <button id="caseDbSearchButton" type="submit">Search Case DB</button>
+        <button class="secondary-button" id="caseDbSavedSearchButton" type="button">Load saved searches</button>
       </form>
+      <section id="caseDbSavedSearches" class="viewer-panel compact">
+        <p class="empty-state">Saved searches and recent DB keywords appear here after the Case DB is prepared.</p>
+      </section>
       <section id="caseDbResult" class="viewer-panel">
         <p class="empty-state">Enter keywords and search. The Case DB will be prepared automatically if needed.</p>
       </section>
@@ -1032,6 +1038,7 @@ function renderSearch(payload = null) {
       <label class="check-label"><input id="unifiedSearchOcr" type="checkbox" ${draft.ocr === false ? "" : "checked"} /> Include OCR on image candidates</label>
       <button id="unifiedSearchButton" type="submit">Search evidence</button>
     </form>
+    ${renderRecentSearchChips()}
     <div class="preset-row" aria-label="Keyword presets">
       ${SEARCH_PRESETS.map((preset) => `<button class="preset-chip" type="button" data-keywords="${escapeHtml(preset.keywords.join(", "))}">${escapeHtml(preset.label)}</button>`).join("")}
     </div>
@@ -1066,7 +1073,7 @@ function renderSearchResults(payload, rows) {
     <table class="data-table">
       <thead><tr><th>Source</th><th>Item</th><th>Keywords</th><th>Preview / Evidence</th><th></th></tr></thead>
       <tbody>
-        ${rows.map((match) => `
+        ${rows.map((match, index) => `
           <tr data-filter="${rowText(match)}">
             <td>${escapeHtml(match.source)}<span>${escapeHtml(match.kind || "")}</span></td>
             <td><strong>${escapeHtml(match.title || fileName(match.path))}</strong><span>${escapeHtml(match.path || "")}</span></td>
@@ -1076,13 +1083,28 @@ function renderSearchResults(payload, rows) {
               ${renderSearchMetadata(match)}
             </td>
             <td class="action-stack">
-              ${reviewActionButtons(match)}
+              ${reviewActionButtons(match, index)}
             </td>
           </tr>
         `).join("")}
       </tbody>
     </table>
     ${renderOcrErrors(payload.ocr?.errors || [])}
+  `;
+}
+
+function renderRecentSearchChips() {
+  const history = getSearchHistory().slice(0, 8);
+  if (!history.length) return "";
+  return `
+    <div class="preset-row recent-search-row" aria-label="Recent searches">
+      <span class="help-text">Recent:</span>
+      ${history.map((entry) => `
+        <button class="preset-chip" type="button" data-keywords="${escapeHtml((entry.keywords || []).join(", "))}">
+          ${escapeHtml((entry.keywords || []).join(", "))}
+        </button>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -1125,6 +1147,7 @@ function bindSearchForm() {
       .filter(Boolean);
     if (!keywords.length) return;
     setSearchDraft({ keywords, ocr: includeOcr, source, extension, path_contains: pathContains });
+    rememberSearchKeywords({ keywords, source, extension, path_contains: pathContains });
     button.disabled = true;
     button.textContent = "Searching...";
     try {
@@ -1150,7 +1173,11 @@ function bindSearchForm() {
   });
   for (const button of detailPanel.querySelectorAll("[data-view-source-path]")) {
     button.addEventListener("click", async () => {
-      await loadEvidencePreview(button.dataset.viewSourcePath, parseReviewContext(button.dataset.reviewContext));
+      await loadEvidencePreview(
+        button.dataset.viewSourcePath,
+        parseReviewContext(button.dataset.reviewContext),
+        button.dataset.searchResultIndex,
+      );
     });
   }
   for (const button of detailPanel.querySelectorAll("[data-keywords]")) {
@@ -1163,13 +1190,19 @@ function bindSearchForm() {
   }
 }
 
-async function loadEvidencePreview(path, reviewContext = null) {
+async function loadEvidencePreview(path, reviewContext = null, searchResultIndex = null) {
   const viewer = detailPanel.querySelector("#evidenceViewer");
   if (!viewer || !path) return;
+  if (searchResultIndex !== null && searchResultIndex !== undefined && searchResultIndex !== "") {
+    viewer.dataset.currentSearchResultIndex = String(searchResultIndex);
+  }
   viewer.innerHTML = '<p class="empty-state">Loading preview...</p>';
   try {
     const payload = await api(`/api/runs/${selectedRunId}/source-preview?path=${encodeURIComponent(path)}`);
     viewer.innerHTML = renderEvidenceViewer(payload, reviewContext);
+    if (searchResultIndex !== null && searchResultIndex !== undefined && searchResultIndex !== "") {
+      viewer.dataset.currentSearchResultIndex = String(searchResultIndex);
+    }
     bindViewerButtons();
   } catch (error) {
     viewer.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
@@ -1595,6 +1628,32 @@ async function saveCaseReport(event) {
   }
 }
 
+async function createReviewerBundle(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = form.querySelector("#reviewerBundleStatus");
+  const request = {
+    title: form.elements.title?.value || null,
+    include_all: Boolean(form.elements.include_all?.checked),
+    max_items: Number(form.elements.max_items?.value || 500),
+  };
+  status.textContent = "Building reviewer bundle...";
+  try {
+    const payload = await api(`/api/runs/${selectedRunId}/reviewer-bundle`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    const archiveUrl = `/api/runs/${encodeURIComponent(selectedRunId)}/reviewer-bundle/file`;
+    status.innerHTML = [
+      "Saved",
+      `<a class="mini-link" href="${archiveUrl}" target="_blank" rel="noreferrer">Download ZIP</a>`,
+      payload.outputs?.reviewer ? `<span>${escapeHtml(payload.outputs.reviewer)}</span>` : "",
+    ].filter(Boolean).join(" ");
+  } catch (error) {
+    status.textContent = `Failed: ${error.message}`;
+  }
+}
+
 function parseReviewContext(value) {
   if (!value) return null;
   try {
@@ -1667,6 +1726,7 @@ function renderReviewBoard(payload) {
     </div>
     ${renderSubmissionManifestPanel(summary)}
     ${renderCaseReportPanel(summary, payload.case)}
+    ${renderReviewerBundlePanel(summary, payload.case)}
     ${renderReviewSelectionTray(bookmarks)}
     <p class="empty-state">Use this board to separate report-ready evidence from noise. The saved structure lives in rapidtriage-case.json.</p>
     ${["relevant", "needs-review", "not-relevant", "unreviewed"].map((status) => renderReviewGroup(status, groups[status] || [])).join("")}
@@ -1736,6 +1796,7 @@ function renderCaseReportPanel(summary, casePayload) {
         <h3>Write a submission-style investigation report</h3>
       </div>
       <p>Creates rapidtriage-case-report.md from case metadata, reviewed evidence, analyst notes, and the submission hash manifest.</p>
+      <p class="help-text">Template guide: Legal handoff keeps attorney/reviewer noise low, Executive summary hides most technical detail, Technical appendix preserves parser/hash context, Hash-only focuses on evidence integrity.</p>
       <form id="caseReportForm" class="report-form">
         <div class="report-grid">
           <label>
@@ -1787,6 +1848,37 @@ function renderCaseReportPanel(summary, casePayload) {
         </div>
       </form>
       ${reportCount ? "" : '<p class="help-text">Mark evidence as “Include in report set” before generating a report draft.</p>'}
+    </section>
+  `;
+}
+
+function renderReviewerBundlePanel(summary, casePayload) {
+  const reportCount = Number(summary.report_item_count || 0);
+  return `
+    <section class="guidance-card">
+      <div>
+        <p class="eyebrow">portable reviewer bundle</p>
+        <h3>Share selected review material without the original image</h3>
+      </div>
+      <p>Builds a static HTML/JSON/DOCX/PDF/ZIP reviewer package from report candidates, review notes, and hashes. It does not copy the original evidence image.</p>
+      <form id="reviewerBundleForm" class="report-form">
+        <div class="report-grid">
+          <label>
+            Bundle title
+            <input name="title" value="${escapeHtml(casePayload.title || "RapidTriage reviewer bundle")}" />
+          </label>
+          <label>
+            Max evidence items
+            <input name="max_items" type="number" min="1" max="5000" value="500" />
+          </label>
+        </div>
+        <div class="review-actions">
+          <label class="check-label"><input name="include_all" type="checkbox" /> Include every reviewed bookmark, not only report candidates</label>
+          <button type="submit" ${reportCount ? "" : "disabled"}>Build reviewer bundle</button>
+          <span id="reviewerBundleStatus" class="review-save-status"></span>
+        </div>
+      </form>
+      ${reportCount ? "" : '<p class="help-text">Mark evidence as “Include in report set” before building a reviewer bundle.</p>'}
     </section>
   `;
 }
@@ -1918,11 +2010,11 @@ function bookmarkContextForMatch(match) {
   };
 }
 
-function reviewActionButtons(match) {
+function reviewActionButtons(match, searchResultIndex = null) {
   const context = bookmarkContextForMatch(match);
   const items = [];
   if (match.path) {
-    items.push(viewSourceButton(match, context));
+    items.push(viewSourceButton(match, context, searchResultIndex));
     items.push(sourceFileLink(match));
     items.push(compareButton(compareItemFromMatch(match, context)));
   }
@@ -1978,9 +2070,10 @@ function compareItemFromBookmark(bookmark) {
   };
 }
 
-function viewSourceButton(match, context) {
+function viewSourceButton(match, context, searchResultIndex = null) {
   if (!match.path) return "";
-  return `<button class="icon-action" type="button" data-view-source-path="${escapeHtml(match.path)}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}">View / review</button>`;
+  const indexAttribute = searchResultIndex === null || searchResultIndex === undefined ? "" : ` data-search-result-index="${escapeHtml(searchResultIndex)}"`;
+  return `<button class="icon-action" type="button" data-view-source-path="${escapeHtml(match.path)}" data-review-context="${escapeHtml(JSON.stringify(context || {}))}"${indexAttribute}>View / review</button>`;
 }
 
 function sourceFileLink(match) {
@@ -2283,6 +2376,16 @@ function parseCompareItem(value) {
   }
 }
 
+function parseJsonDataset(value) {
+  if (!value) return null;
+  try {
+    const item = JSON.parse(value);
+    return item && typeof item === "object" ? item : null;
+  } catch {
+    return null;
+  }
+}
+
 async function previewCompareItem(path) {
   if (!path) return;
   if (!detailPanel.querySelector("#evidenceViewer")) {
@@ -2312,6 +2415,8 @@ function bindPanelActions() {
   }
   const reportForm = detailPanel.querySelector("#caseReportForm");
   if (reportForm) reportForm.addEventListener("submit", saveCaseReport);
+  const bundleForm = detailPanel.querySelector("#reviewerBundleForm");
+  if (bundleForm) bundleForm.addEventListener("submit", createReviewerBundle);
   bindCaseDbPanel();
   bindCompareActions();
   bindReviewSelectionActions();
@@ -2320,6 +2425,7 @@ function bindPanelActions() {
 function bindCaseDbPanel() {
   const importForm = detailPanel.querySelector("#caseDbImportForm");
   const searchForm = detailPanel.querySelector("#caseDbSearchForm");
+  const savedSearchButton = detailPanel.querySelector("#caseDbSavedSearchButton");
   if (importForm) {
     importForm.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -2336,6 +2442,7 @@ function bindCaseDbPanel() {
       try {
         const payload = await ensureSelectedRunCaseDb(request);
         output.innerHTML = renderCaseDbEnsureResult(payload);
+        await loadCaseDbSavedSearches(payload.database, payload.case_id);
       } catch (error) {
         output.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
       } finally {
@@ -2384,6 +2491,8 @@ function bindCaseDbPanel() {
         button.textContent = "Searching...";
         const payload = await api("/api/case-db/search", { method: "POST", body: JSON.stringify(request) });
         output.innerHTML = renderCaseDbSearchResult(payload);
+        rememberCaseDbKeywords(request);
+        await loadCaseDbSavedSearches(request.database, request.case_id);
         bindCaseDbReviewButtons(request.database, request.case_id);
         bindCaseDbBatchButtons(request.database, request.case_id);
         bindCaseDbReportExportButton(request.database, request.case_id);
@@ -2395,6 +2504,12 @@ function bindCaseDbPanel() {
       }
     });
   }
+  if (savedSearchButton && importForm) {
+    savedSearchButton.addEventListener("click", async () => {
+      const importData = new FormData(importForm);
+      await loadCaseDbSavedSearches(String(importData.get("database") || ""), String(importData.get("case_id") || ""));
+    });
+  }
 }
 
 async function ensureSelectedRunCaseDb(request) {
@@ -2403,6 +2518,76 @@ async function ensureSelectedRunCaseDb(request) {
     method: "POST",
     body: JSON.stringify(request),
   });
+}
+
+async function loadCaseDbSavedSearches(database, caseId) {
+  const panel = detailPanel.querySelector("#caseDbSavedSearches");
+  if (!panel || !database || !caseId) return;
+  panel.innerHTML = '<p class="empty-state">Loading saved searches...</p>';
+  try {
+    const payload = await api("/api/case-db/saved-searches/list", {
+      method: "POST",
+      body: JSON.stringify({ database, case_id: caseId }),
+    });
+    panel.innerHTML = renderCaseDbSavedSearches(payload.saved_searches || []);
+    bindCaseDbSavedSearchButtons();
+  } catch (error) {
+    panel.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function renderCaseDbSavedSearches(savedSearches) {
+  const recent = getCaseDbKeywordHistory().slice(0, 6);
+  if (!savedSearches.length && !recent.length) {
+    return '<p class="empty-state">No saved searches yet. Search once and use “Save search as” to keep it.</p>';
+  }
+  return `
+    <div class="review-group-header">
+      <div>
+        <p class="eyebrow">saved searches</p>
+        <h3>Repeat useful searches without retyping</h3>
+      </div>
+      <span class="status-pill">${savedSearches.length}</span>
+    </div>
+    <div class="preset-row">
+      ${savedSearches.map((item) => `
+        <button class="preset-chip" type="button" data-case-db-saved-search="${escapeHtml(JSON.stringify(item))}">
+          ${escapeHtml(item.name || (item.keywords || []).join(", "))}
+        </button>
+      `).join("")}
+      ${recent.map((item) => `
+        <button class="preset-chip quiet" type="button" data-case-db-keywords="${escapeHtml((item.keywords || []).join(", "))}">
+          recent: ${escapeHtml((item.keywords || []).join(", "))}
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function bindCaseDbSavedSearchButtons() {
+  const searchForm = detailPanel.querySelector("#caseDbSearchForm");
+  if (!searchForm) return;
+  for (const button of detailPanel.querySelectorAll("[data-case-db-saved-search]")) {
+    button.addEventListener("click", () => {
+      const item = parseJsonDataset(button.dataset.caseDbSavedSearch);
+      applyCaseDbSearchPreset(searchForm, item);
+      searchForm.requestSubmit();
+    });
+  }
+  for (const button of detailPanel.querySelectorAll("[data-case-db-keywords]")) {
+    button.addEventListener("click", () => {
+      searchForm.elements.keywords.value = button.dataset.caseDbKeywords || "";
+      searchForm.requestSubmit();
+    });
+  }
+}
+
+function applyCaseDbSearchPreset(form, item) {
+  if (!item || typeof item !== "object") return;
+  form.elements.keywords.value = (item.keywords || []).join(", ");
+  form.elements.source.value = (item.sources || [])[0] || "";
+  form.elements.review_status.value = item.review_status || "";
+  form.elements.verification_status.value = item.verification_status || "";
 }
 
 function renderCaseDbEnsureResult(payload) {
@@ -2442,6 +2627,8 @@ function renderCaseDbSearchResult(payload) {
           <h3>Mark repetitive results together</h3>
         </div>
         <div class="detail-actions">
+          <button class="secondary-button" type="button" data-case-db-select="visible">Select visible</button>
+          <button class="secondary-button" type="button" data-case-db-select="low">Select low priority</button>
           <button class="secondary-button" type="button" data-case-db-batch="verify">Verify selected</button>
           <button class="secondary-button" type="button" data-case-db-batch="reject">Reject selected</button>
           <button class="secondary-button" type="button" data-case-db-export-report>Export report candidates</button>
@@ -2461,7 +2648,7 @@ function renderCaseDbSearchResult(payload) {
             target_id: match.target_id,
           };
           return `
-            <tr data-filter="${rowText(match)}">
+            <tr data-filter="${rowText(match)}" data-case-db-priority="${escapeHtml(match.review_priority?.level || "low")}">
               <td><input type="checkbox" data-case-db-target="${escapeHtml(JSON.stringify(targetPayload))}" /></td>
               <td><strong>${escapeHtml(match.citation_id || "")}</strong><span>${escapeHtml(match.target_type || "")}:${escapeHtml(match.target_id || "")}</span></td>
               <td>${priorityBadge(match.review_priority)}<span>${escapeHtml(match.review_priority?.recommended_action || "")}</span></td>
@@ -2557,6 +2744,24 @@ function bindCaseDbReviewButtons(database, caseId) {
 }
 
 function bindCaseDbBatchButtons(database, caseId) {
+  for (const button of detailPanel.querySelectorAll("[data-case-db-select]")) {
+    button.addEventListener("click", () => {
+      const mode = button.dataset.caseDbSelect;
+      const rows = Array.from(detailPanel.querySelectorAll("tr[data-case-db-priority]"));
+      let selectedCount = 0;
+      for (const row of rows) {
+        const checkbox = row.querySelector("[data-case-db-target]");
+        if (!checkbox || row.hidden) continue;
+        const shouldSelect = mode === "visible" || row.dataset.caseDbPriority === "low";
+        if (shouldSelect) {
+          checkbox.checked = true;
+          selectedCount += 1;
+        }
+      }
+      const status = detailPanel.querySelector("#caseDbBatchStatus");
+      if (status) status.textContent = `Selected ${selectedCount} ${mode === "low" ? "low-priority" : "visible"} result(s).`;
+    });
+  }
   for (const button of detailPanel.querySelectorAll("[data-case-db-batch]")) {
     button.addEventListener("click", async () => {
       const action = button.dataset.caseDbBatch;
@@ -2662,6 +2867,10 @@ function bindKeyboardShortcuts() {
       focusContextSearch();
       return;
     }
+    if (event.altKey && !event.metaKey && !event.ctrlKey && (event.key === "[" || event.key === "]")) {
+      if (await openAdjacentSearchHit(event.key === "[" ? -1 : 1)) event.preventDefault();
+      return;
+    }
     if (event.altKey && !event.metaKey && !event.ctrlKey && event.key.toLowerCase() === "r") {
       if (await applyViewerReviewShortcut("relevant", true)) event.preventDefault();
       return;
@@ -2734,6 +2943,20 @@ function toggleViewerReportShortcut() {
   if (!includeInput) return false;
   includeInput.checked = !includeInput.checked;
   if (status) status.textContent = includeInput.checked ? "Include in report enabled. Save review to persist." : "Include in report disabled. Save review to persist.";
+  return true;
+}
+
+async function openAdjacentSearchHit(delta) {
+  if (activeTab !== "search") return false;
+  const buttons = Array.from(detailPanel.querySelectorAll("[data-view-source-path][data-search-result-index]"));
+  if (!buttons.length) return false;
+  const viewer = detailPanel.querySelector("#evidenceViewer");
+  const current = Number(viewer?.dataset.currentSearchResultIndex ?? buttons[0].dataset.searchResultIndex ?? 0);
+  const nextIndex = Math.max(0, Math.min(buttons.length - 1, current + delta));
+  const button = buttons.find((item) => Number(item.dataset.searchResultIndex) === nextIndex) || buttons[nextIndex];
+  if (!button) return false;
+  await loadEvidencePreview(button.dataset.viewSourcePath, parseReviewContext(button.dataset.reviewContext), button.dataset.searchResultIndex);
+  button.closest("tr")?.scrollIntoView({ behavior: "smooth", block: "center" });
   return true;
 }
 
@@ -3041,6 +3264,14 @@ function searchStorageKey() {
   return `${SEARCH_STORAGE_PREFIX}${selectedRunId || "default"}`;
 }
 
+function searchHistoryStorageKey() {
+  return `${SEARCH_HISTORY_PREFIX}${selectedRunId || "default"}`;
+}
+
+function caseDbHistoryStorageKey() {
+  return `${SEARCH_HISTORY_PREFIX}caseDb.${selectedRunId || "default"}`;
+}
+
 function getSearchDraft() {
   if (!storageAvailable()) return { keywords: [], ocr: true, source: "", extension: "", path_contains: "" };
   try {
@@ -3060,6 +3291,80 @@ function getSearchDraft() {
 function setSearchDraft(payload) {
   if (!storageAvailable()) return;
   window.localStorage.setItem(searchStorageKey(), JSON.stringify(payload));
+}
+
+function getSearchHistory() {
+  if (!storageAvailable()) return [];
+  try {
+    const payload = JSON.parse(window.localStorage.getItem(searchHistoryStorageKey()) || "[]");
+    return Array.isArray(payload) ? payload.filter((item) => Array.isArray(item.keywords)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberSearchKeywords(entry) {
+  if (!storageAvailable()) return;
+  const normalized = {
+    keywords: (entry.keywords || []).map(String).filter(Boolean),
+    source: entry.source || "",
+    extension: entry.extension || "",
+    path_contains: entry.path_contains || "",
+    updated_at: new Date().toISOString(),
+  };
+  const signature = JSON.stringify({
+    keywords: normalized.keywords.map((item) => item.toLowerCase()),
+    source: normalized.source,
+    extension: normalized.extension,
+    path_contains: normalized.path_contains,
+  });
+  const history = getSearchHistory().filter((item) => {
+    const itemSignature = JSON.stringify({
+      keywords: (item.keywords || []).map((keyword) => String(keyword).toLowerCase()),
+      source: item.source || "",
+      extension: item.extension || "",
+      path_contains: item.path_contains || "",
+    });
+    return itemSignature !== signature;
+  });
+  window.localStorage.setItem(searchHistoryStorageKey(), JSON.stringify([normalized, ...history].slice(0, 12)));
+}
+
+function getCaseDbKeywordHistory() {
+  if (!storageAvailable()) return [];
+  try {
+    const payload = JSON.parse(window.localStorage.getItem(caseDbHistoryStorageKey()) || "[]");
+    return Array.isArray(payload) ? payload.filter((item) => Array.isArray(item.keywords)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberCaseDbKeywords(entry) {
+  if (!storageAvailable()) return;
+  const normalized = {
+    keywords: (entry.keywords || []).map(String).filter(Boolean),
+    source: (entry.sources || [])[0] || "",
+    review_status: entry.review_status || "",
+    verification_status: entry.verification_status || "",
+    updated_at: new Date().toISOString(),
+  };
+  const signature = JSON.stringify({
+    keywords: normalized.keywords.map((item) => item.toLowerCase()),
+    source: normalized.source,
+    review_status: normalized.review_status,
+    verification_status: normalized.verification_status,
+  });
+  const history = getCaseDbKeywordHistory().filter((item) => {
+    const itemSignature = JSON.stringify({
+      keywords: (item.keywords || []).map((keyword) => String(keyword).toLowerCase()),
+      source: item.source || "",
+      review_status: item.review_status || "",
+      verification_status: item.verification_status || "",
+    });
+    return itemSignature !== signature;
+  });
+  window.localStorage.setItem(caseDbHistoryStorageKey(), JSON.stringify([normalized, ...history].slice(0, 12)));
 }
 
 runForm.addEventListener("submit", async (event) => {

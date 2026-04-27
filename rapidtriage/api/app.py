@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..core.audit import audit_path_for, write_audit_record
+from ..core.bundle import BundleError, build_submission_bundle
 from ..core.case import CaseBookmarkError, create_or_update_case_payload, load_case_payload, save_case_payload
 from ..core.case_catalog import CaseCatalog, CaseCatalogError, default_case_catalog_path
 from ..core.case_report import build_case_report_markdown, case_report_export_paths, write_case_report_exports
@@ -94,6 +95,12 @@ class CaseReportCreateRequest(BaseModel):
     requester: Optional[str] = None
     scope: Optional[str] = None
     conclusion: Optional[str] = None
+    include_all: bool = False
+    max_items: int = Field(500, ge=1, le=5000)
+
+
+class ReviewerBundleCreateRequest(BaseModel):
+    title: Optional[str] = None
     include_all: bool = False
     max_items: int = Field(500, ge=1, le=5000)
 
@@ -708,6 +715,48 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         }
         return FileResponse(path, filename=path.name, media_type=media_types[normalized])
 
+    @api.post("/api/runs/{run_id}/reviewer-bundle")
+    def create_reviewer_bundle(run_id: str, request: ReviewerBundleCreateRequest) -> Dict[str, object]:
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail="run is not completed")
+        case_path = default_case_path(store, run_id)
+        if not case_path.is_file():
+            raise HTTPException(status_code=404, detail="case review file not found")
+        try:
+            return build_submission_bundle(
+                case_json=case_path,
+                output_dir=default_reviewer_bundle_dir_path(store, run_id),
+                allowed_roots=allowed_source_roots(job.summary),
+                include_all=request.include_all,
+                max_items=request.max_items,
+                title=request.title,
+            )
+        except (BundleError, CaseBookmarkError, OSError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @api.get("/api/runs/{run_id}/reviewer-bundle/file")
+    def download_reviewer_bundle(run_id: str) -> FileResponse:
+        job = get_job(store, run_id)
+        if job.summary is None:
+            raise HTTPException(status_code=409, detail="run is not completed")
+        case_path = default_case_path(store, run_id)
+        if not case_path.is_file():
+            raise HTTPException(status_code=404, detail="case review file not found")
+        try:
+            payload = build_submission_bundle(
+                case_json=case_path,
+                output_dir=default_reviewer_bundle_dir_path(store, run_id),
+                allowed_roots=allowed_source_roots(job.summary),
+                include_all=False,
+                max_items=500,
+                title=None,
+            )
+        except (BundleError, CaseBookmarkError, OSError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        archive = Path(str(payload.get("archive") or payload.get("outputs", {}).get("archive", "")))
+        return FileResponse(archive, filename=archive.name, media_type="application/zip")
+
     @api.post("/api/runs/{run_id}/bookmarks")
     def create_run_bookmark(run_id: str, request: BookmarkCreateRequest) -> Dict[str, object]:
         source_name = normalize_bookmark_source(request.source)
@@ -920,6 +969,10 @@ def default_submission_manifest_path(store: RunJobStore, run_id: str) -> Path:
 
 def default_case_report_path(store: RunJobStore, run_id: str) -> Path:
     return default_case_path(store, run_id).with_name("rapidtriage-case-report.md")
+
+
+def default_reviewer_bundle_dir_path(store: RunJobStore, run_id: str) -> Path:
+    return default_case_path(store, run_id).with_name("rapidtriage-reviewer-bundle")
 
 
 def build_run_case_report(

@@ -457,6 +457,24 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(export_manifest_response.status_code, 200)
             self.assertIn("case-report.exports", export_manifest_response.text)
 
+            bundle_response = client.post(
+                f"/api/runs/{run_id}/reviewer-bundle",
+                json={"title": "Reviewer handoff", "max_items": 50},
+            )
+            self.assertEqual(bundle_response.status_code, 200, bundle_response.text)
+            bundle_payload = bundle_response.json()
+            self.assertEqual(bundle_payload["command"], "bundle")
+            self.assertTrue((output_dir / "rapidtriage-reviewer-bundle" / "rapidtriage-reviewer.html").is_file())
+            self.assertTrue((output_dir / "rapidtriage-reviewer-bundle.zip").is_file())
+            self.assertIn("sha256", bundle_payload["archive_hashes"])
+            with zipfile.ZipFile(output_dir / "rapidtriage-reviewer-bundle.zip") as reviewer_zip:
+                self.assertIn("rapidtriage-reviewer.html", reviewer_zip.namelist())
+                self.assertIn("rapidtriage-selected-evidence.json", reviewer_zip.namelist())
+
+            bundle_file_response = client.get(f"/api/runs/{run_id}/reviewer-bundle/file")
+            self.assertEqual(bundle_file_response.status_code, 200)
+            self.assertEqual(bundle_file_response.content[:2], b"PK")
+
     def test_run_catalog_persists_and_imports_existing_output_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

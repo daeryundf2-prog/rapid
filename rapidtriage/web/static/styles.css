@@ -699,6 +699,10 @@ mark {
   margin-bottom: 8px;
 }
 
+.recent-search-row {
+  align-items: center;
+}
+
 .preset-chip,
 .step-item {
   min-height: 30px;
@@ -709,6 +713,10 @@ mark {
   padding: 6px 10px;
   font-size: 0.78rem;
   font-weight: 800;
+}
+
+.preset-chip.quiet {
+  color: var(--muted);
 }
 
 .step-item {
@@ -1209,6 +1217,10 @@ mark {
   border-radius: 8px;
   background: #fff;
   padding: 14px;
+}
+
+.viewer-panel.compact {
+  padding: 10px 12px;
 }
 
 .viewer-header {
