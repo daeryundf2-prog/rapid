@@ -326,13 +326,19 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
 
             self.assertEqual(main(["artifacts", str(root), "--kind", "windows-prefetch", "--output", str(output)]), 0)
             payload = json.loads(output.read_text(encoding="utf-8"))
-            details = payload["artifacts"][0]["details"]
+            prefetch_file = next(item for item in payload["artifacts"] if item["artifact_type"] == "prefetch-file")
+            references = [item for item in payload["artifacts"] if item["artifact_type"] == "prefetch-reference"]
+            details = prefetch_file["details"]
 
             self.assertEqual(details["prefetch_parse_status"], "parsed-common-header")
             self.assertEqual(details["run_count"], 3)
             self.assertEqual(details["last_run_at"], "2024-04-01T09:10:11+00:00")
             self.assertIn(details["last_run_at"], details["last_run_times"])
             self.assertTrue(any("POWERSHELL.EXE" in path for path in details["referenced_paths"]))
+            self.assertTrue(references)
+            self.assertEqual(references[0]["details"]["referenced_file_name"], "POWERSHELL.EXE")
+            self.assertEqual(references[0]["details"]["last_run_at"], "2024-04-01T09:10:11+00:00")
+            self.assertTrue(references[0]["details"]["validation_required"])
 
     def test_windows_prefetch_collector_is_available_as_dedicated_artifacts_kind(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

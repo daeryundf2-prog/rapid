@@ -1367,7 +1367,7 @@
           "supported": true,
           "details": {
             "parser": "windows-prefetch-inventory",
-            "parser_version": "prefetch-inventory-v4",
+            "parser_version": "prefetch-inventory-v5",
             "coverage_status": "detected",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
