@@ -131,6 +131,19 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["support_level"], "unsupported")
             self.assertEqual(result["scan_strategy"], "manual-export-first")
 
+    def test_warns_when_source_name_looks_like_host_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source = Path(tmp_dir) / "Users"
+            source.mkdir()
+
+            result = identify_evidence(source).to_dict()
+
+            self.assertEqual(result["adapter"], "folder")
+            self.assertTrue(
+                any("common host folder" in warning for warning in result["warnings"]),
+                result["warnings"],
+            )
+
     def test_cli_evidence_outputs_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             stdout = io.StringIO()

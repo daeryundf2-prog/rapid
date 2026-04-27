@@ -88,6 +88,9 @@ const SHORTCUTS = [
   { keys: ["Ctrl K", "Cmd K"], label: "Open entire case search" },
   { keys: ["Ctrl F", "Cmd F"], label: "Search current file, or filter visible rows" },
   { keys: ["[", "]"], label: "Previous / next page in heavy tables" },
+  { keys: ["Alt R"], label: "Mark the open viewer hit relevant and save" },
+  { keys: ["Alt X"], label: "Reject the open viewer hit as not relevant and save" },
+  { keys: ["Alt I"], label: "Toggle include-in-report for the open viewer hit" },
   { keys: ["?"], label: "Show or hide this shortcut guide" },
 ];
 
@@ -352,6 +355,7 @@ function renderSummary(payload) {
   const outputs = payload.outputs || {};
   return `
     ${renderWorkflowGuide(summary)}
+    ${renderRunActionStrip(payload)}
     ${renderProcessingSummary(payload)}
     ${renderWorkspaceCards(summary)}
     <div class="metric-grid">
@@ -383,6 +387,26 @@ function renderSummary(payload) {
   `;
 }
 
+function renderRunActionStrip(payload) {
+  const outputs = payload.outputs || {};
+  const hasReport = Boolean(outputs.report);
+  return `
+    <section class="run-action-strip" aria-label="Run completion actions">
+      <div>
+        <p class="eyebrow">run complete actions</p>
+        <h3>Move from processing to evidence review</h3>
+        <p>완료된 실행에서 바로 Case DB 준비, 전체 검색, 리뷰 보드, 보고서/제출 묶음으로 넘어갑니다.</p>
+      </div>
+      <div class="run-action-buttons">
+        <button class="secondary-button" type="button" data-focus-case-db="1">Prepare Case DB</button>
+        <button class="secondary-button" type="button" data-open-tab="search">Search evidence</button>
+        <button class="secondary-button" type="button" data-open-tab="review">Review decisions</button>
+        <button class="secondary-button" type="button" data-open-tab="report">${hasReport ? "Open report" : "Report tools"}</button>
+      </div>
+    </section>
+  `;
+}
+
 function renderProcessingSummary(payload) {
   const processing = payload.processing || {};
   const caps = processing.caps || {};
@@ -400,6 +424,7 @@ function renderProcessingSummary(payload) {
           ${escapeHtml(processing.highest_warning_level || "none")} · ${formatNumber(processing.warning_count || 0)}
         </span>
       </div>
+      ${renderParserWarningBadges(payload)}
       <div class="processing-caps">
         <span>${processing.read_only ? "Read-only on" : "Extraction allowed"}</span>
         <span>${processing.dry_run ? "Dry run on" : "Dry run off"}</span>
@@ -421,6 +446,48 @@ function renderProcessingSummary(payload) {
       </div>
     </section>
   `;
+}
+
+function renderParserWarningBadges(payload) {
+  const steps = Array.isArray(payload.steps) ? payload.steps : [];
+  const warningSteps = steps.filter((step) => (step.warning_level || "none") !== "none");
+  const zeroSteps = steps.filter((step) => stepHasZeroRows(step));
+  const reusedSteps = steps.filter((step) => Boolean(step.reused));
+  const badges = [
+    {
+      label: "Warnings",
+      value: warningSteps.length,
+      tone: warningSteps.length ? "warning" : "none",
+      title: warningSteps.map((step) => step.name).join(", ") || "No warning steps",
+    },
+    {
+      label: "Zero-row parsers",
+      value: zeroSteps.length,
+      tone: zeroSteps.length ? "notice" : "none",
+      title: zeroSteps.map((step) => step.name).join(", ") || "No empty parser outputs",
+    },
+    {
+      label: "Reused outputs",
+      value: reusedSteps.length,
+      tone: reusedSteps.length ? "notice" : "none",
+      title: reusedSteps.map((step) => step.name).join(", ") || "No reused outputs",
+    },
+  ];
+  return `
+    <div class="parser-badge-row" aria-label="Parser warning badges">
+      ${badges.map((badge) => `
+        <span class="parser-badge ${escapeHtml(badge.tone)}" title="${escapeHtml(badge.title)}">
+          ${escapeHtml(badge.label)} · ${formatNumber(badge.value)}
+        </span>
+      `).join("")}
+    </div>
+  `;
+}
+
+function stepHasZeroRows(step) {
+  if (!step || (step.warning_level || "none") === "none") return false;
+  const countKeys = ["provider_count", "candidate_count", "document_count", "scanned_file_count", "artifact_count", "event_count", "indicator_count"];
+  return countKeys.some((key) => Number(step[key]) === 0);
 }
 
 function renderProcessingStep(step) {
@@ -2230,6 +2297,12 @@ function bindPanelActions() {
       await switchTab(button.dataset.openTab);
     });
   }
+  for (const button of detailPanel.querySelectorAll("[data-focus-case-db]")) {
+    button.addEventListener("click", () => {
+      detailPanel.querySelector(".case-db-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      detailPanel.querySelector("#caseDbImportButton")?.focus();
+    });
+  }
   for (const button of detailPanel.querySelectorAll("[data-page-tab]")) {
     button.addEventListener("click", async () => {
       const tab = button.dataset.pageTab;
@@ -2589,6 +2662,18 @@ function bindKeyboardShortcuts() {
       focusContextSearch();
       return;
     }
+    if (event.altKey && !event.metaKey && !event.ctrlKey && event.key.toLowerCase() === "r") {
+      if (await applyViewerReviewShortcut("relevant", true)) event.preventDefault();
+      return;
+    }
+    if (event.altKey && !event.metaKey && !event.ctrlKey && event.key.toLowerCase() === "x") {
+      if (await applyViewerReviewShortcut("not-relevant", false)) event.preventDefault();
+      return;
+    }
+    if (event.altKey && !event.metaKey && !event.ctrlKey && event.key.toLowerCase() === "i") {
+      if (toggleViewerReportShortcut()) event.preventDefault();
+      return;
+    }
     if (!event.metaKey && !event.ctrlKey && !event.altKey && /^[1-4]$/.test(event.key)) {
       event.preventDefault();
       await switchViewGroupByIndex(Number(event.key) - 1);
@@ -2626,6 +2711,30 @@ function focusContextSearch() {
     return;
   }
   detailPanel.querySelector("#tableFilter")?.focus();
+}
+
+async function applyViewerReviewShortcut(statusValue, includeInReport) {
+  const form = detailPanel.querySelector("#viewerReviewForm");
+  if (!form) return false;
+  const status = form.querySelector("[name='status']");
+  const includeInput = form.querySelector("[name='include_in_report']");
+  if (status) status.value = statusValue;
+  if (includeInput) includeInput.checked = includeInReport;
+  await saveViewerReview({
+    preventDefault() {},
+    currentTarget: form,
+  });
+  return true;
+}
+
+function toggleViewerReportShortcut() {
+  const form = detailPanel.querySelector("#viewerReviewForm");
+  const includeInput = form?.querySelector("[name='include_in_report']");
+  const status = form?.querySelector("#viewerReviewStatus");
+  if (!includeInput) return false;
+  includeInput.checked = !includeInput.checked;
+  if (status) status.textContent = includeInput.checked ? "Include in report enabled. Save review to persist." : "Include in report disabled. Save review to persist.";
+  return true;
 }
 
 async function switchViewGroupByIndex(index) {

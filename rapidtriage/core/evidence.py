@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -376,12 +376,43 @@ ADAPTERS: tuple[EvidenceAdapter, ...] = (
 def identify_evidence(source: Path) -> EvidenceAdapterResult:
     resolved = source.expanduser().resolve()
     if resolved.is_dir():
-        return FolderAdapter().identify(resolved)
+        return add_source_name_warnings(FolderAdapter().identify(resolved))
     suffix = resolved.suffix.lower()
     for adapter in ADAPTERS:
         if suffix in adapter.supported_suffixes:
-            return adapter.identify(resolved)
-    return UnsupportedAdapter().identify(resolved)
+            return add_source_name_warnings(adapter.identify(resolved))
+    return add_source_name_warnings(UnsupportedAdapter().identify(resolved))
+
+
+def add_source_name_warnings(result: EvidenceAdapterResult) -> EvidenceAdapterResult:
+    warnings = [*result.warnings, *source_name_warnings(Path(result.source_path))]
+    deduped = list(dict.fromkeys(warnings))
+    if deduped == result.warnings:
+        return result
+    return replace(result, warnings=deduped)
+
+
+def source_name_warnings(source: Path) -> list[str]:
+    warnings: list[str] = []
+    try:
+        resolved = source.expanduser().resolve()
+    except OSError:
+        resolved = source.expanduser().absolute()
+
+    home = Path.home().resolve()
+    if resolved == Path(resolved.anchor):
+        warnings.append("Source appears to be a filesystem or drive root. Confirm this is the intended exhibit, not the analyst host.")
+    if resolved == home:
+        warnings.append("Source is the current user's home directory. Confirm this is the intended exhibit root before scanning.")
+    if resolved == home.parent:
+        warnings.append("Source is the local user-profile parent directory. Confirm this is not the analyst workstation.")
+
+    risky_names = {"users", "home", "desktop", "documents", "downloads"}
+    if resolved.name.lower() in risky_names:
+        warnings.append(
+            "Source display name matches a common host folder. Confirm the selected path belongs to the evidence, not the analysis machine."
+        )
+    return warnings
 
 
 def recommended_virtual_disk_tools(suffix: str) -> list[str]:

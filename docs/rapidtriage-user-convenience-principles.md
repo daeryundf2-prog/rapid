@@ -21,8 +21,11 @@ RapidTriage should be designed for analysts who are tired, under time pressure, 
 - Processing profiles are available in the web UI so the first pass can stay fast instead of accidentally enabling deep extraction on a huge case.
 - Whole-case search supports source, extension, and path filters so analysts can narrow noisy cases before opening rows.
 - The evidence viewer computes MD5/SHA1/SHA256 only on demand, avoiding accidental slowdowns on very large files.
-- Add "send to Case DB" and "make submission bundle" actions directly from the completed run summary.
+- Completed run summaries now show direct actions for Case DB preparation, whole-case search, review decisions, and report/submission workflow.
+- Evidence preflight warns when the selected source looks like a host drive, user home, or common analyst-machine folder instead of a deliberate exhibit.
+- Processing summaries now expose parser warning badges for warning steps, zero-row parser outputs, and reused outputs.
+- The evidence viewer supports keyboard shortcuts for review decisions: `Alt+R` saves relevant, `Alt+X` saves not relevant, and `Alt+I` toggles report inclusion.
 - Add saved searches and recent keywords per case.
-- Add viewer-specific shortcuts for next hit, previous hit, mark relevant, reject, and include in report.
+- Add viewer-specific shortcuts for next hit and previous hit.
 - Add batch review for repeated low-value hits.
 - Add progressive processing profiles: fast first pass, then standard/deep enrichment.
