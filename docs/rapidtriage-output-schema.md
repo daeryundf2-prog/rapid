@@ -43,6 +43,7 @@ Planned rule-engine / IOC lookup additions are tracked separately in `docs/rapid
 | `rapidtriage artifacts ROOT --kind KIND` | `./rapidtriage-artifacts-KIND.json` | dedicated collector output for one artifact family |
 | `rapidtriage vsc-compare CURRENT SNAPSHOT...` | `rapidtriage-vsc-compare.json` | current-vs-VSC snapshot deleted/added/modified candidates, optionally hash-confirmed |
 | `rapidtriage compare LEFT RIGHT` | `rapidtriage-compare.json` | two-file A/B review with hashes, changed fields, and bounded text diff preview |
+| `rapidtriage carve ROOT --output-dir DIR` | `DIR/rapidtriage-carve.json` | bounded JPEG/PNG/PDF/ZIP carving candidates with source offsets, SHA256, status, and optional extracted bytes |
 | `rapidtriage run ROOT --mode MODE` | `OUTPUT_DIR/rapidtriage-run-summary.json` | workflow summary JSON plus `rapidtriage-run-report.md`, `rapidtriage-timeline.json`, and `rapidtriage-timeline-report.md` |
 | `rapidtriage search RUN_OUTPUT -k KEYWORD` | `rapidtriage-search.json` | unified keyword search over completed run outputs, including optional OCR |
 | `rapidtriage validation --output-dir DIR` | `DIR/rapidtriage-validation-package.json` | release checks, required commands, required documents, known limits, and validation report sidecar |

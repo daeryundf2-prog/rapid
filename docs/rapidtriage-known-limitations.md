@@ -12,7 +12,7 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 - AD1, L01/Lx01, AFF/AFF4, XVA, and mobile packages are still adapter-detected only and require vendor/tool export first. Memory dumps also receive bounded indicator scanning, not full process reconstruction.
 - `rapidtriage evidence PATH --json` now reports `support_level`, `scan_strategy`, `next_actions`, `warnings`, and missing tools so analysts can decide whether to scan directly, install tooling, mount read-only, or vendor-export first.
 - XFS/ext partition selection is supported for direct image recovery, but actual XFS file recovery depends on the installed Sleuth Kit build. XVA virtual-server dump workflows are not implemented yet.
-- Deep deleted-file carving is not implemented.
+- Deep deleted-file carving is available as a bounded signature workflow for JPEG, PNG, PDF, and ZIP candidates. It is intentionally capped and does not replace full filesystem-aware carving or commercial media validation.
 
 ## Parser Coverage
 

@@ -9,6 +9,13 @@ from .core.audit import audit_path_for, write_audit_record
 from .core.artifacts import ArtifactCollectionError, SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
 from .core.benchmark import BenchmarkError, DEFAULT_BENCHMARK_FILE_COUNT, DEFAULT_BENCHMARK_KEYWORD, run_benchmark
 from .core.bundle import BundleError, build_submission_bundle
+from .core.carving import (
+    DEFAULT_MAX_CANDIDATES,
+    DEFAULT_MAX_CARVE_BYTES,
+    DEFAULT_MAX_SCAN_BYTES,
+    CarvingError,
+    run_bounded_carving,
+)
 from .core.case import (
     REVIEW_STATUSES,
     CaseBookmarkError,
@@ -102,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage collect-export /Volumes/case-mount ./collect-export --profile intrusion --copy
               rapidtriage compare ./before.txt ./after.txt --output compare.json
               rapidtriage vsc-compare ./current ./vss/snapshot-1 --output vsc-delta.json
+              rapidtriage carve /cases/image-mount --output-dir ./carve-review --extract
               rapidtriage files . --category executables --ext exe --modified-after 2025-01-01 --output recent-executables.json
               rapidtriage extract rapidtriage-files.json ./extract-out --category documents --ext txt
               rapidtriage extract rapidtriage-docs.json ./docs-out --kind pdf
@@ -301,6 +309,29 @@ def build_parser() -> argparse.ArgumentParser:
     vsc_compare.add_argument("--case-sensitive", action="store_true", help="Compare paths case-sensitively")
     vsc_compare.add_argument("--max-records", type=int, default=10000, help="Maximum change records per snapshot (0 means unlimited)")
     vsc_compare.add_argument("--json", action="store_true", help="Print the full JSON comparison after saving it")
+
+    carve = sub.add_parser(
+        "carve",
+        help="Run bounded signature carving for deleted/recovered file candidates",
+        description="Run bounded signature carving for deleted/recovered file candidates",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage carve /cases/image-mount --output-dir ./carve-review
+              rapidtriage carve disk.raw --output-dir ./carve-review --extract --max-candidates 50
+            """
+        ),
+    )
+    carve.add_argument("root", help="Mounted/exported folder or file to scan for carved candidates")
+    carve.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
+    carve.add_argument("--output-dir", required=True, help="Directory that receives rapidtriage-carve.json and optional carved files")
+    carve.add_argument("--extract", action="store_true", help="Write carved candidate bytes under OUTPUT_DIR/carved")
+    carve.add_argument("--max-scan-bytes", type=int, default=DEFAULT_MAX_SCAN_BYTES, help="Maximum bytes to inspect per source file")
+    carve.add_argument("--max-carve-bytes", type=int, default=DEFAULT_MAX_CARVE_BYTES, help="Maximum bytes to copy for one carved candidate")
+    carve.add_argument("--max-candidates", type=int, default=DEFAULT_MAX_CANDIDATES, help="Maximum carving candidates to report")
+    carve.add_argument("--ext", action="append", help="Only scan source files with this extension (repeatable)")
+    carve.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     compare = sub.add_parser(
         "compare",
@@ -1542,6 +1573,50 @@ def main(argv=None) -> int:
                 f"Snapshots: {summary['snapshot_count']}  "
                 f"Deleted: {summary['deleted']}  Added: {summary['added']}  Modified: {summary['modified']}"
             )
+        return 0
+
+    if args.command == "carve":
+        input_root = resolve_input_root(Path(args.root), kind=args.input_kind)
+        output_dir = Path(args.output_dir).expanduser().resolve()
+        try:
+            payload = run_bounded_carving(
+                input_root,
+                output_dir,
+                extract=args.extract,
+                max_scan_bytes=args.max_scan_bytes,
+                max_carve_bytes=args.max_carve_bytes,
+                max_candidates=args.max_candidates,
+                extensions=args.ext,
+            )
+        except (CarvingError, OSError, ValueError) as exc:
+            parser.error(str(exc))
+        output = output_dir / "rapidtriage-carve.json"
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="carve",
+            options={
+                "output_dir": str(output_dir),
+                "extract": args.extract,
+                "max_scan_bytes": args.max_scan_bytes,
+                "max_carve_bytes": args.max_carve_bytes,
+                "max_candidates": args.max_candidates,
+                "extensions": args.ext or [],
+            },
+            input_root=input_root,
+            output_files=[("carve-json", output)]
+            + [
+                (f"carved:{entry['kind']}:{entry['offset']}", Path(str(entry["extracted_path"])).resolve())
+                for entry in payload.get("entries", [])
+                if entry.get("extracted_path")
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved carve JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(f"Candidates: {payload['summary']['candidate_count']}  Extracted: {payload['summary']['extracted_count']}")
         return 0
 
     if args.command == "collect-plan":

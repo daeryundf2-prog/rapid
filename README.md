@@ -262,6 +262,7 @@ Schema and sample references:
 - `timeline`: `rapidtriage/schemas/timeline.schema.json`
 - `indicators`: `rapidtriage/schemas/indicators.schema.json`
 - `compare`: `rapidtriage/schemas/compare.schema.json`
+- `carve`: bounded signature carving output written as `rapidtriage-carve.json`
 - `case`: `rapidtriage/schemas/case.schema.json`
 - `submission-manifest`: `rapidtriage/schemas/submission-manifest.schema.json`
 - `rule-engine`: `docs/rapidtriage-rule-engine.md` + `docs/samples/rapidtriage-rules.sample.yaml`
@@ -274,6 +275,7 @@ Implemented:
 - `collect-export` creates a profile-based evidence package from `collect-plan` targets. It defaults to a dry-run manifest, copies only with `--copy`, preserves source-relative paths under `OUTPUT_DIR/evidence`, records SHA256/source/destination/size/mtime, and skips broad inventory-only directories to avoid accidental whole-profile exports.
 - `vsc-compare` compares a current mounted/exported tree with one or more Volume Shadow Copy snapshot folders, surfacing deleted, added, and modified file candidates with optional SHA256 confirmation.
 - `compare` compares two individual evidence/export files for A/B review, records MD5/SHA1/SHA256, field differences, and a bounded unified text diff when safe.
+- `carve` performs capped signature carving for JPEG, PNG, PDF, and ZIP candidates, preserving source path, byte offsets, SHA256, status, and optional extracted bytes under `OUTPUT_DIR/carved`.
 - `extract` copies selected `files` or `docs` results into an output directory with overwrite guards, size/count limits, hashes, and manifest/audit output.
 - `artifacts` exposes dedicated collectors for `browser`, `recent-files`, `eventlog`, `windows-os-account`, `windows-execution`, `windows-prefetch`, `windows-filesystem`, `windows-system`, `linux-system`, `macos-system`, `android-apk`, `media-image`, `memory-volatility`, and `cloud-export`. Browser artifacts include web usage pivots, source hashes, AI-service visit detections, and review-only AI conversation candidates recovered from browser storage for common tools such as ChatGPT, Claude, Gemini, Perplexity, and Copilot; Linux artifacts include shell history, SSH, auth log, cron, and systemd pivots; macOS artifacts include TCC privacy permissions; memory artifacts include Volatility imports plus bounded direct dump scans for redacted BitLocker key candidates, suspicious strings, URLs, and IPs.
 - `indicators` summarizes URL, domain, IP, and hash indicators from completed run outputs, keeps source pointers, and can apply local `--rules` IOC matches without calling external threat-intelligence APIs.
