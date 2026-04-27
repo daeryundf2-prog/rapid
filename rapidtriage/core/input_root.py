@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 
-SUPPORTED_INPUT_ROOT_KINDS = ("folder", "mounted-image", "e01-derived", "live")
+SUPPORTED_INPUT_ROOT_KINDS = ("folder", "mounted-image", "e01-derived", "disk-image-derived", "archive-image-derived", "live")
 PathLike = Union[Path, str]
 
 

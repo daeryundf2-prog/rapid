@@ -59,6 +59,24 @@
         },
         "partition_start_sector": {
           "type": "integer"
+        },
+        "recovery_mode": {
+          "type": "string"
+        },
+        "image_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tool": {
+          "type": "string"
+        },
+        "converted_raw_path": {
+          "type": "string"
+        },
+        "conversion_tool": {
+          "type": "string"
         }
       }
     },

@@ -8,7 +8,19 @@ from pathlib import Path
 from typing import Dict, List, Mapping, Sequence, Union
 
 from .audit import write_audit_record
+from .archive_image import (
+    ArchiveImageExtractionError,
+    ArchiveImageExtractionResult,
+    extract_archive_image_to_directory,
+    is_archive_image_path,
+)
 from .artifacts import run_artifact_collection
+from .disk_image import (
+    DiskImageExtractionError,
+    DiskImageExtractionResult,
+    extract_raw_image_to_directory,
+    is_raw_image_path,
+)
 from .docs import build_manifest, run_docs_search, write_result
 from .e01 import E01ExtractionError, E01ExtractionResult, extract_e01_to_directory, is_e01_path
 from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, SUPPORTED_DOC_KINDS, run_extract
@@ -18,6 +30,12 @@ from .input_root import InputRoot, derive_child_input_root, resolve_input_root
 from .reporting import build_run_report_context, render_run_markdown_report
 from .rules import RuleSet, summarize_payload_annotations
 from .timeline import build_timeline_report, run_timeline
+from .virtual_disk import (
+    VirtualDiskExtractionError,
+    VirtualDiskExtractionResult,
+    extract_virtual_disk_to_directory,
+    is_virtual_disk_path,
+)
 
 SUPPORTED_RUN_MODES: tuple[str, ...] = ("seizure", "fraud", "hacking", "recovery")
 IMPLEMENTED_RUN_MODES = set(SUPPORTED_RUN_MODES)
@@ -179,7 +197,7 @@ def run_triage_mode(
     profile = RUN_PROFILES[normalized_mode]
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    input_root, e01_result = prepare_run_input_root(root, input_kind=input_kind, output_dir=output_dir)
+    input_root, image_result = prepare_run_input_root(root, input_kind=input_kind, output_dir=output_dir)
     scan_root = resolve_scan_root(input_root.root_path, profile)
     scan_input_root = derive_child_input_root(input_root, scan_root)
 
@@ -198,9 +216,18 @@ def run_triage_mode(
     summary_path = output_dir / "rapidtriage-run-summary.json"
     report_path = output_dir / "rapidtriage-run-report.md"
     e01_metadata_path = output_dir / "rapidtriage-e01.json"
+    disk_image_metadata_path = output_dir / "rapidtriage-disk-image.json"
+    archive_image_metadata_path = output_dir / "rapidtriage-archive-image.json"
+    virtual_disk_metadata_path = output_dir / "rapidtriage-virtual-disk.json"
 
-    if e01_result is not None:
-        write_result(e01_result.to_dict(), e01_metadata_path)
+    if isinstance(image_result, E01ExtractionResult):
+        write_result(image_result.to_dict(), e01_metadata_path)
+    if isinstance(image_result, DiskImageExtractionResult):
+        write_result(image_result.to_dict(), disk_image_metadata_path)
+    if isinstance(image_result, ArchiveImageExtractionResult):
+        write_result(image_result.to_dict(), archive_image_metadata_path)
+    if isinstance(image_result, VirtualDiskExtractionResult):
+        write_result(image_result.to_dict(), virtual_disk_metadata_path)
 
     reused_outputs: set[str] = set()
 
@@ -359,8 +386,14 @@ def run_triage_mode(
         "summary": summary_path,
         "report": report_path,
     }
-    if e01_result is not None:
+    if isinstance(image_result, E01ExtractionResult):
         outputs = {"e01": e01_metadata_path, **outputs}
+    if isinstance(image_result, DiskImageExtractionResult):
+        outputs = {"disk_image": disk_image_metadata_path, **outputs}
+    if isinstance(image_result, ArchiveImageExtractionResult):
+        outputs = {"archive_image": archive_image_metadata_path, **outputs}
+    if isinstance(image_result, VirtualDiskExtractionResult):
+        outputs = {"virtual_disk": virtual_disk_metadata_path, **outputs}
     summary_payload = build_run_summary(
         root=input_root.root_path,
         output_dir=output_dir,
@@ -384,7 +417,7 @@ def run_triage_mode(
             "reused_outputs": sorted(reused_outputs),
         },
         rule_set=rule_set,
-        source=build_run_source_record(input_root, e01_result=e01_result),
+        source=build_run_source_record(input_root, image_result=image_result),
     )
     audit_output = output_dir / "rapidtriage-run-audit.json"
     summary_payload["audit"] = str(audit_output)
@@ -418,13 +451,29 @@ def run_triage_mode(
             "overwrite": overwrite,
             "resume": resume,
             "reused_outputs": sorted(reused_outputs),
-            "e01_source": str(e01_result.source_path) if e01_result else None,
-            "e01_extracted_root": str(e01_result.extract_dir) if e01_result else None,
+            "image_source": str(image_result.source_path) if image_result else None,
+            "image_extracted_root": str(image_result.extract_dir) if image_result else None,
+            "image_extraction_command": str(image_result.to_dict().get("command")) if image_result else None,
         },
         input_root=input_root,
-        input_files=[("e01-source", e01_result.source_path)] if e01_result else [],
+        input_files=[("image-source", image_result.source_path)] if image_result else [],
         output_files=[
-            *([("e01-metadata", e01_metadata_path)] if e01_result else []),
+            *([("e01-metadata", e01_metadata_path)] if isinstance(image_result, E01ExtractionResult) else []),
+            *(
+                [("disk-image-metadata", disk_image_metadata_path)]
+                if isinstance(image_result, DiskImageExtractionResult)
+                else []
+            ),
+            *(
+                [("archive-image-metadata", archive_image_metadata_path)]
+                if isinstance(image_result, ArchiveImageExtractionResult)
+                else []
+            ),
+            *(
+                [("virtual-disk-metadata", virtual_disk_metadata_path)]
+                if isinstance(image_result, VirtualDiskExtractionResult)
+                else []
+            ),
             ("manifest", manifest_path),
             ("docs", docs_path),
             ("docs-index", docs_index_path),
@@ -490,7 +539,10 @@ def prepare_run_input_root(
     *,
     input_kind: str | None,
     output_dir: Path,
-) -> tuple[InputRoot, E01ExtractionResult | None]:
+) -> tuple[
+    InputRoot,
+    E01ExtractionResult | DiskImageExtractionResult | ArchiveImageExtractionResult | VirtualDiskExtractionResult | None,
+]:
     if isinstance(root, InputRoot):
         return resolve_input_root(root, kind=input_kind), None
 
@@ -501,26 +553,77 @@ def prepare_run_input_root(
         except E01ExtractionError as exc:
             raise RunModeError(str(exc)) from exc
         return InputRoot(source_path=str(root_path), root_path=result.extract_dir, kind="e01-derived"), result
+    if is_raw_image_path(root_path):
+        try:
+            result = extract_raw_image_to_directory(root_path, output_dir / "_disk_image")
+        except DiskImageExtractionError as exc:
+            raise RunModeError(str(exc)) from exc
+        return InputRoot(source_path=str(root_path), root_path=result.extract_dir, kind="disk-image-derived"), result
+    if is_archive_image_path(root_path):
+        try:
+            result = extract_archive_image_to_directory(root_path, output_dir / "_archive_image")
+        except ArchiveImageExtractionError as exc:
+            raise RunModeError(str(exc)) from exc
+        return InputRoot(source_path=str(root_path), root_path=result.extract_dir, kind="archive-image-derived"), result
+    if is_virtual_disk_path(root_path):
+        try:
+            result = extract_virtual_disk_to_directory(root_path, output_dir / "_virtual_disk")
+        except VirtualDiskExtractionError as exc:
+            raise RunModeError(str(exc)) from exc
+        return InputRoot(source_path=str(root_path), root_path=result.extract_dir, kind="disk-image-derived"), result
     return resolve_input_root(root_path, kind=input_kind), None
 
 
 def build_run_source_record(
     input_root: InputRoot,
     *,
-    e01_result: E01ExtractionResult | None,
+    image_result: E01ExtractionResult
+    | DiskImageExtractionResult
+    | ArchiveImageExtractionResult
+    | VirtualDiskExtractionResult
+    | None,
 ) -> dict[str, object]:
-    if e01_result is None:
+    if image_result is None:
         return {
             "type": input_root.kind,
             "source_path": input_root.source_path,
             "analysis_root": str(input_root.root_path),
         }
+    if isinstance(image_result, DiskImageExtractionResult):
+        return {
+            "type": "raw-image",
+            "source_path": str(image_result.source_path),
+            "analysis_root": str(image_result.extract_dir),
+            "stage_dir": str(image_result.stage_dir),
+            "partition_start_sector": image_result.partition_start_sector,
+            "recovery_mode": image_result.recovery_mode,
+            "image_paths": [str(path) for path in image_result.image_paths],
+        }
+    if isinstance(image_result, ArchiveImageExtractionResult):
+        return {
+            "type": "archive-image",
+            "source_path": str(image_result.source_path),
+            "analysis_root": str(image_result.extract_dir),
+            "stage_dir": str(image_result.stage_dir),
+            "tool": image_result.tool,
+        }
+    if isinstance(image_result, VirtualDiskExtractionResult):
+        return {
+            "type": "virtual-disk",
+            "source_path": str(image_result.source_path),
+            "analysis_root": str(image_result.extract_dir),
+            "stage_dir": str(image_result.stage_dir),
+            "converted_raw_path": str(image_result.converted_raw_path),
+            "conversion_tool": image_result.conversion_tool,
+            "partition_start_sector": image_result.raw_result.partition_start_sector,
+            "recovery_mode": image_result.raw_result.recovery_mode,
+        }
     return {
         "type": "e01",
-        "source_path": str(e01_result.source_path),
-        "analysis_root": str(e01_result.extract_dir),
-        "stage_dir": str(e01_result.stage_dir),
-        "partition_start_sector": e01_result.partition_start_sector,
+        "source_path": str(image_result.source_path),
+        "analysis_root": str(image_result.extract_dir),
+        "stage_dir": str(image_result.stage_dir),
+        "partition_start_sector": image_result.partition_start_sector,
     }
 
 

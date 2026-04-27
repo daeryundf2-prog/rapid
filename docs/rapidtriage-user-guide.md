@@ -2,9 +2,9 @@
 
 ## What Happens When You Add Evidence
 
-RapidTriage is currently strongest when you give it a mounted folder, exported folder, or ordinary filesystem path. If you give it an E01/Ex01 file, it can identify the format and can run direct extraction only when `ewfmount`, `mmls`, and `tsk_recover` are available. On Windows, the most reliable workflow is still WSL2 extraction or mounting/exporting the image first, then scanning the mounted folder.
+RapidTriage is currently strongest when you give it a mounted folder, exported folder, or ordinary filesystem path. It can also run direct extraction for E01/Ex01, raw/split images, ISO/DMG/WIM/SWM, and common qemu-convertible virtual disks when the required external tools are installed. On Windows, the most reliable image workflow is still WSL2 extraction or mounting/exporting the image first, then scanning the mounted folder.
 
-For AD1, AFF/AFF4, raw/split images, ISO/DMG/WIM, VHD/VHDX/VMDK/VDI/XVA/QCOW, mobile packages, and memory dumps, use `Check evidence support` or `rapidtriage evidence` first. If RapidTriage says the source must be mounted/exported, do that with your trusted forensic workflow and select the resulting folder.
+For AD1, AFF/AFF4, XVA, mobile packages, and memory dumps, use `Check evidence support` or `rapidtriage evidence` first. If RapidTriage says the source must be mounted/exported, do that with your trusted forensic workflow and select the resulting folder. For raw/split, archive, and virtual-disk inputs, the same support check shows whether Sleuth Kit, 7-Zip/bsdtar, or qemu-img are available for direct extraction.
 
 Use:
 

@@ -106,7 +106,7 @@ Goal: become defensible and stable enough for professional use.
 
 Tasks:
 
-- Add evidence adapter execution layer for mounted/raw/ISO/VHD/VMDK where platform tools allow safe read-only mounting or extraction. Status: E01 execution exists with libewf/Sleuth Kit; other image families are detected with mount/export guidance.
+- Add evidence adapter execution layer for mounted/raw/ISO/VHD/VMDK where platform tools allow safe read-only mounting or extraction. Status: E01 execution exists with libewf/Sleuth Kit; raw/split images recover through Sleuth Kit, ISO/DMG/WIM/SWM extract through 7-Zip/bsdtar where available, and VHD/VHDX/VMDK/VDI/QCOW/QCOW2 convert through qemu-img before Sleuth Kit recovery. AD1/L01/Lx01/AFF/AFF4 and XVA remain export-first.
 - Add stronger chain-of-custody: evidence IDs, acquisition/source hash, tool versions, audit events, run profile, warnings, and report linkage. Status: run/audit/report/bundle outputs carry profiles, warnings, hashes, and source links; full acquisition hash workflow remains release-hardening work.
 - Add large-case benchmark suite: 10k, 100k, 1M synthetic records; documents/logs/browser artifacts; search latency targets. Status: benchmark command exists with synthetic/existing-root modes; published release benchmark matrix remains required.
 - Add failure recovery: checkpoint each stage, resume indexing, preserve previous outputs, and record parser exceptions.

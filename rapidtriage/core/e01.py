@@ -122,7 +122,12 @@ def mmls_first_filesystem(text: str) -> int | None:
         start = int(match.group(1))
         size = int(match.group(2))
         description = match.group(3).lower()
-        if any(token in description for token in ("fat", "exfat", "ntfs", "basic data", "msdos")):
+        if "swap" in description:
+            continue
+        if any(
+            token in description
+            for token in ("fat", "exfat", "ntfs", "basic data", "msdos", "ext2", "ext3", "ext4", "linux", "xfs")
+        ):
             if size > best_size:
                 best_start = start
                 best_size = size

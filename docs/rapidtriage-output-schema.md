@@ -352,7 +352,7 @@ Current run modes:
 - `preferred_locations`
 - `artifacts_kinds`
 
-`source` records the original input and the analysis root. For direct `.E01` input, `source.type` is `e01`, `source.source_path` points to the evidence image, and `source.analysis_root` points to the read-only extracted filesystem under the run output directory.
+`source` records the original input and the analysis root. For direct `.E01` input, `source.type` is `e01`, `source.source_path` points to the evidence image, and `source.analysis_root` points to the read-only extracted filesystem under the run output directory. Direct raw/split image runs use `source.type=raw-image` and preserve `image_paths`, `partition_start_sector`, and `recovery_mode`; direct ISO/DMG/WIM/SWM runs use `source.type=archive-image` and record the extraction `tool`; qemu-convertible virtual disks use `source.type=virtual-disk`, `converted_raw_path`, `conversion_tool`, and the downstream Sleuth Kit recovery metadata.
 
 `processing` records user-facing run evidence:
 

@@ -6,9 +6,12 @@ RapidTriage is a local triage and review tool, not a full commercial forensic su
 
 - Mounted folders and exported evidence folders are the most reliable input.
 - E01/Ex01 direct handling requires external `libewf` and Sleuth Kit tools.
-- Raw, split images, ISO, DMG, WIM, AD1, AFF/AFF4, VHD/VHDX, VMDK, VDI, XVA, QCOW/QCOW2, and mobile packages are detected by adapters, but full native extraction/parsing is still planned. Memory dumps also receive bounded indicator scanning, not full process reconstruction.
+- Raw/split images can be extracted with Sleuth Kit (`mmls`, `tsk_recover`) when those tools are installed.
+- ISO/DMG/WIM/SWM images can be extracted when supported archive tooling is available (`7zz`/`7z`, or `bsdtar` for ISO).
+- VHD/VHDX/VMDK/VDI/QCOW/QCOW2 virtual disks can be converted with `qemu-img` and then recovered with Sleuth Kit when those tools are installed.
+- AD1, L01/Lx01, AFF/AFF4, XVA, and mobile packages are still adapter-detected only and require vendor/tool export first. Memory dumps also receive bounded indicator scanning, not full process reconstruction.
 - `rapidtriage evidence PATH --json` now reports `support_level`, `scan_strategy`, `next_actions`, `warnings`, and missing tools so analysts can decide whether to scan directly, install tooling, mount read-only, or vendor-export first.
-- XFS filesystem extraction and native virtual-server dump workflows are not implemented yet.
+- XFS/ext partition selection is supported for direct image recovery, but actual XFS file recovery depends on the installed Sleuth Kit build. XVA virtual-server dump workflows are not implemented yet.
 - Deep deleted-file carving is not implemented.
 
 ## Parser Coverage

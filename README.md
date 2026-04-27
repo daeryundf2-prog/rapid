@@ -208,12 +208,13 @@ rapidtriage web --host 127.0.0.1 --port 8765
 
 The local UI is a browser-based dashboard served by FastAPI. It supports:
 
-- Creating `run` workflows from a folder path, mounted image root, E01-derived folder, or direct `.E01` image path.
+- Creating `run` workflows from a folder path, mounted image root, E01-derived folder, direct `.E01` image path, raw/split image, archive image, or qemu-convertible virtual disk when required external tools are present.
 - Checking evidence support before a run, including folders, E01/Ex01, AD1/L01/Lx01, AFF/AFF4, DD/RAW/IMG/001, ISO/DMG/WIM, VHD/VHDX/VMDK/VDI/XVA/QCOW, mobile packages, and memory dumps.
 - Choosing a processing profile: fast first pass, bounded standard extraction, or uncapped deep processing.
 - Previewing KAPE-style collection profiles from the start screen so users can see present/missing Windows/macOS artifact targets before a heavy run.
 - Showing a guided first-run workflow, safe read-only default, and remembered local form/search inputs to reduce repeated typing.
 - For direct `.E01` input, extracting the image read-only into the run output directory through `ewfmount`, `mmls`, and `tsk_recover`, then running the same triage pipeline on the extracted filesystem.
+- For direct DD/RAW/IMG/001 input, recovering files with Sleuth Kit; for ISO/DMG/WIM/SWM, extracting with `7zz`/`7z` or ISO `bsdtar`; for VHD/VHDX/VMDK/VDI/QCOW/QCOW2, converting with `qemu-img` before Sleuth Kit recovery.
 - Persisting the local run catalog across server restarts.
 - Importing an existing run output directory that contains `rapidtriage-run-summary.json`.
 - Viewing run status, summaries, files, docs, artifacts, timeline events, indicator pivots, and generated markdown reports.
@@ -288,7 +289,7 @@ Implemented:
 - `case-search` searches imported SQLite case databases across FTS-indexed documents, file records, artifacts, indicator pivots, and timeline events while preserving citation IDs; hits include review-priority guidance and source-reference details, and artifact/indicator hits expose reviewable source paths plus key Windows and macOS metadata for event logs, PowerShell history, MFT/USN rows, browser history, AI-service usage, quarantine events, LaunchAgents, and IOC values.
 - `case-review` stores DB-backed review/verification marks, tags, notes, reviewer names, and report-candidate flags for individual search targets.
 - `case-db-report` exports DB-backed reviewed report candidates with review citations, target citations, source references, parser/hash context, and analyst review state.
-- `evidence` identifies folder, E01/Ex01, raw image, ISO, and virtual-disk source adapters and reports whether required external tooling is available.
+- `evidence` identifies folder, E01/Ex01, raw image, ISO/DMG/WIM/SWM, and virtual-disk source adapters and reports whether required external extraction tooling is available.
 - `benchmark` writes JSON and Markdown benchmark results with ingest/search latency, peak memory, output size, and result counts.
 - `validation` writes JSON and Markdown release-readiness checks, required command evidence, required documents, known limits, and operator-owned external responsibilities.
 - `case-catalog` stores user-facing case metadata, associated run outputs, and portable catalog archives.

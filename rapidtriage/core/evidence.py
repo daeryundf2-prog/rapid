@@ -6,7 +6,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol
 
+from .archive_image import ARCHIVE_IMAGE_SUFFIXES, ARCHIVE_IMAGE_TOOLS, missing_archive_image_tools
+from .disk_image import RAW_IMAGE_REQUIRED_TOOLS, RAW_IMAGE_SUFFIXES, missing_raw_image_tools
 from .e01 import E01_SUFFIXES, E01_REQUIRED_TOOLS, missing_e01_tools
+from .virtual_disk import VIRTUAL_DISK_REQUIRED_TOOLS, VIRTUAL_DISK_SUFFIXES, missing_virtual_disk_tools
 
 
 class EvidenceAdapter(Protocol):
@@ -104,84 +107,109 @@ class EwfAdapter:
 
 class RawImageAdapter:
     name = "raw-image"
-    supported_suffixes = (".dd", ".raw", ".img", ".001", ".000", ".0000", ".0001", ".00001", ".ima")
+    supported_suffixes = RAW_IMAGE_SUFFIXES
 
     def identify(self, source: Path) -> EvidenceAdapterResult:
         supported = source.suffix.lower() in self.supported_suffixes
+        missing = missing_raw_image_tools()
+        ready = supported and not missing
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
             detected_format="raw",
-            supported=supported,
+            supported=ready,
             can_mount=False,
-            can_extract=False,
-            required_tools=[],
-            missing_tools=[],
-            message="Raw/split image detected. Mount it with OS/forensic tooling, then scan the mounted or recovered folder.",
-            support_level="detected-only",
-            scan_strategy="mount-or-recover-first",
-            next_actions=[
-                "Mount read-only with OS/forensic tooling or recover the filesystem with Sleuth Kit.",
-                "Scan the mounted/exported folder with rapidtriage run.",
-            ],
-            warnings=["RapidTriage does not directly parse raw/split disk image files yet."],
+            can_extract=ready,
+            required_tools=list(RAW_IMAGE_REQUIRED_TOOLS),
+            missing_tools=missing,
+            message=(
+                "Raw/split disk image can be recovered with Sleuth Kit tools and scanned automatically."
+                if ready
+                else "Raw/split image detected, but Sleuth Kit tools are missing. Mount/recover it first, then scan the folder."
+            ),
+            support_level="direct-extract" if ready else "tooling-required",
+            scan_strategy="auto-extract-then-scan" if ready else "mount-or-recover-first",
+            next_actions=(
+                ["Run rapidtriage run IMAGE.001 --mode hacking --output-dir OUTPUT."]
+                if ready
+                else [
+                    "Install Sleuth Kit tools (`mmls` and `tsk_recover`) or use a trusted forensic suite to recover files.",
+                    "Scan the mounted/exported folder with rapidtriage run.",
+                ]
+            ),
+            warnings=[] if ready else ["Direct raw/split extraction is disabled until Sleuth Kit tools are present."],
             external_validation_required=True,
         )
 
 
 class IsoAdapter:
     name = "iso"
-    supported_suffixes = (".iso", ".dmg", ".wim", ".swm")
+    supported_suffixes = ARCHIVE_IMAGE_SUFFIXES
 
     def identify(self, source: Path) -> EvidenceAdapterResult:
         supported = source.suffix.lower() in self.supported_suffixes
         suffix = source.suffix.lower().lstrip(".")
+        missing = missing_archive_image_tools(source.suffix.lower())
+        ready = supported and not missing
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
             detected_format=suffix or "optical-archive-image",
-            supported=supported,
+            supported=ready,
             can_mount=False,
-            can_extract=False,
-            required_tools=[],
-            missing_tools=[],
-            message=f"{suffix.upper()} image detected. Mount/extract it first, then scan the mounted folder.",
-            support_level="detected-only",
-            scan_strategy="mount-or-extract-first",
-            next_actions=[
-                f"Mount or extract the {suffix.upper()} image read-only using trusted platform tooling.",
-                "Run RapidTriage against the mounted/exported folder.",
-            ],
-            warnings=[f"Direct {suffix.upper()} image parsing is not implemented in RapidTriage yet."],
+            can_extract=ready,
+            required_tools=list(ARCHIVE_IMAGE_TOOLS),
+            missing_tools=missing,
+            message=(
+                f"{suffix.upper()} image can be extracted with available archive tooling and scanned automatically."
+                if ready
+                else f"{suffix.upper()} image detected, but archive extraction tools are missing. Mount/export it first."
+            ),
+            support_level="direct-extract" if ready else "tooling-required",
+            scan_strategy="auto-extract-then-scan" if ready else "mount-or-extract-first",
+            next_actions=(
+                [f"Run rapidtriage run IMAGE.{suffix} --mode hacking --output-dir OUTPUT."]
+                if ready
+                else [
+                    "Install 7-Zip/7zz or bsdtar where supported, or mount/export with trusted platform tooling.",
+                    "Run RapidTriage against the mounted/exported folder.",
+                ]
+            ),
+            warnings=[] if ready else [f"Direct {suffix.upper()} extraction is disabled until archive tooling is present."],
             external_validation_required=True,
         )
 
 
 class VirtualDiskAdapter:
     name = "virtual-disk"
-    supported_suffixes = (".vhd", ".vhdx", ".vmdk", ".vdi", ".xva", ".qcow", ".qcow2")
+    supported_suffixes = VIRTUAL_DISK_SUFFIXES
 
     def identify(self, source: Path) -> EvidenceAdapterResult:
         supported = source.suffix.lower() in self.supported_suffixes
-        recommended_tools = recommended_virtual_disk_tools(source.suffix.lower())
-        missing = [tool for tool in recommended_tools if shutil.which(tool) is None]
+        missing = missing_virtual_disk_tools(source.suffix.lower())
+        ready = supported and not missing
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
             detected_format=source.suffix.lower().lstrip(".") or "virtual-disk",
-            supported=supported,
+            supported=ready,
             can_mount=False,
-            can_extract=False,
-            required_tools=recommended_tools,
+            can_extract=ready,
+            required_tools=list(VIRTUAL_DISK_REQUIRED_TOOLS),
             missing_tools=missing,
             message=(
-                "Virtual disk detected. Use Windows Disk Management/PowerShell, qemu-nbd, or guestmount to expose it, "
-                "then scan the mounted filesystem folder."
+                "Virtual disk can be converted with qemu-img, recovered with Sleuth Kit, and scanned automatically."
+                if ready
+                else "Virtual disk detected. Install qemu-img/Sleuth Kit where supported or mount/export it first."
             ),
-            support_level="detected-only",
-            scan_strategy="mount-virtual-disk-first",
-            next_actions=virtual_disk_next_actions(source.suffix.lower()),
-            warnings=["Direct virtual disk mounting/extraction is not implemented inside RapidTriage yet."],
+            support_level="direct-extract" if ready else "tooling-required",
+            scan_strategy="auto-convert-extract-then-scan" if ready else "mount-virtual-disk-first",
+            next_actions=(
+                [f"Run rapidtriage run IMAGE{source.suffix.lower()} --mode hacking --output-dir OUTPUT."]
+                if ready
+                else virtual_disk_next_actions(source.suffix.lower())
+            ),
+            warnings=[] if ready else ["Direct virtual disk extraction is disabled until required tooling is present."],
             external_validation_required=True,
         )
 
@@ -372,6 +400,12 @@ def supported_evidence_formats() -> list[dict[str, object]]:
 
 def adapter_support_level(adapter: EvidenceAdapter) -> str:
     if isinstance(adapter, EwfAdapter):
+        return "direct-extract-when-tools-present"
+    if isinstance(adapter, RawImageAdapter):
+        return "direct-extract-when-tools-present"
+    if isinstance(adapter, IsoAdapter):
+        return "direct-extract-when-tools-present"
+    if isinstance(adapter, VirtualDiskAdapter):
         return "direct-extract-when-tools-present"
     if isinstance(adapter, FolderAdapter):
         return "direct-folder"
