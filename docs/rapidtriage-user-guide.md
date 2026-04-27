@@ -351,7 +351,7 @@ Before handing a build to analysts, generate a validation package:
 rapidtriage validation --output-dir ./release-validation --overwrite --json
 ```
 
-The package writes JSON and Markdown listing required checks, release commands, user-facing documents, known limitations, chain-of-custody expectations, and external responsibilities such as legal validation, signed installers, and support SLAs. Treat it as the release evidence checklist that should sit next to benchmark output, sample-case output, and build artifacts.
+The package writes JSON and Markdown listing required checks, release commands, user-facing documents, known limitations, chain-of-custody expectations, release artifact requirements, independent validation plan, signing/notarization evidence, and support SLA template. Treat it as the release evidence checklist that should sit next to benchmark output, sample-case output, checksums, SBOM/dependency inventory, and build artifacts.
 
 ## Portable Reviewer Bundle
 

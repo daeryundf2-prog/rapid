@@ -79,8 +79,17 @@ class RapidTriageOpsTests(unittest.TestCase):
             check_ids = {item["id"] for item in payload["checks"]}
             self.assertIn("unit-tests", check_ids)
             self.assertIn("known-limitations", check_ids)
+            self.assertIn("windows-code-signing", check_ids)
+            self.assertIn("macos-notarization", check_ids)
+            release_ids = {item["id"] for item in payload["release_artifact_requirements"]}
+            self.assertIn("windows-installer", release_ids)
+            self.assertIn("macos-app-or-package", release_ids)
+            validation_ids = {item["id"] for item in payload["independent_validation_plan"]}
+            self.assertIn("parser-corpus", validation_ids)
+            self.assertEqual(payload["support_sla_template"]["status"], "operator-owned-template")
             command_names = {item["name"] for item in payload["recommended_commands"]}
             self.assertIn("validation-package", command_names)
+            self.assertIn("windows-signature-verify", command_names)
 
     def test_case_catalog_adds_exports_and_imports_case(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -131,13 +131,13 @@ Tasks:
 - Add cloud export/import workflows. Status: Google Takeout-style location/activity JSON and Apple/general account JSON imports are implemented with source hashes and normalized event/account rows; authorized `cloud-collect` request manifests can fetch bounded API JSON responses with redacted credentials, response hashes, and audit output before normalization.
 - Add image/media triage: thumbnails, OCR queues, perceptual hash, similarity grouping, optional AI classification. Status: image hash/dimensions/perceptual-hash/similarity-bucket/OCR-queue hints plus bounded inline thumbnail previews are implemented; OCR sidecar import, Korean language hints, translation-needed status, and rule-based visual classification validation metadata are implemented; ML classifier/deepfake workflows remain planned.
 - Add memory forensics integration with Volatility-style output normalization. Status: Volatility/Volatility3 JSON/JSONL process, cmdline, netscan, and malfind normalization is implemented with process keys, command-line indicators, risk flags, and source hashes; bounded direct memory dumps now surface redacted and group-validated BitLocker recovery-key candidates, process string candidates, suspicious strings, URLs, and IP pivots.
-- Add support/training/legal validation package. Status: `rapidtriage validation` generates JSON/Markdown release checks, required command evidence, required documents, known limits, and external operator-owned responsibilities.
+- Add support/training/legal validation package. Status: `rapidtriage validation` generates JSON/Markdown release checks, required command evidence, required documents, known limits, release artifact signing/notarization requirements, independent validation plan, support SLA template, and external operator-owned responsibilities.
 
 Acceptance criteria:
 
-- Independent validation datasets prove parser behavior. Status: deterministic parser fixtures and release validation package are implemented; independent third-party validation remains outside the repository.
-- Cross-platform installers are signed and repeatably built. Status: repeatable source/wheel/portable build checks are documented; signing infrastructure remains a release-operator responsibility.
-- Users can rely on documented support, training, migration, and release notes. Status: user guide, known limitations, release checklist, release notes template, and validation package are implemented; live support SLA is operator-owned.
+- Independent validation datasets prove parser behavior. Status: deterministic parser fixtures and validation-package independent validation plan are implemented; independent third-party execution remains outside the repository.
+- Cross-platform installers are signed and repeatably built. Status: repeatable source/wheel/portable build checks plus Windows signing/macOS notarization evidence requirements are documented; certificate/notary infrastructure remains a release-operator responsibility.
+- Users can rely on documented support, training, migration, and release notes. Status: user guide, known limitations, release checklist, release notes template, validation package, and SLA template are implemented; staffed live support remains operator-owned.
 
 ## Implementation Order
 

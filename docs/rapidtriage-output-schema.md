@@ -61,6 +61,9 @@ Top-level keys:
 - `output_dir`
 - `outputs`
 - `checks`
+- `release_artifact_requirements`
+- `independent_validation_plan`
+- `support_sla_template`
 - `recommended_commands`
 - `required_documents`
 - `known_limits`

@@ -43,6 +43,9 @@ def build_validation_package(*, output_dir: Path, overwrite: bool = False) -> di
         },
         "checks": build_validation_checks(),
         "commercial_gap_assessment": build_commercial_gap_assessment(),
+        "release_artifact_requirements": build_release_artifact_requirements(),
+        "independent_validation_plan": build_independent_validation_plan(),
+        "support_sla_template": build_support_sla_template(),
         "recommended_commands": build_recommended_commands(),
         "required_documents": build_required_documents(),
         "known_limits": build_known_limits(),
@@ -74,6 +77,27 @@ def build_validation_checks() -> list[dict[str, object]]:
             "category": "packaging",
             "status": "required",
             "evidence": "Wheel/sdist build output and portable ZIP smoke result.",
+            "required_for_release": True,
+        },
+        {
+            "id": "windows-code-signing",
+            "category": "packaging",
+            "status": "operator-owned",
+            "evidence": "Authenticode signature verification output for Windows executable/installers, including certificate subject, timestamp, and SHA256.",
+            "required_for_release": False,
+        },
+        {
+            "id": "macos-notarization",
+            "category": "packaging",
+            "status": "operator-owned",
+            "evidence": "macOS codesign verification, notarization ticket/staple output, Gatekeeper assessment, and package SHA256.",
+            "required_for_release": False,
+        },
+        {
+            "id": "release-checksums-sbom",
+            "category": "supply-chain",
+            "status": "required",
+            "evidence": "Release artifact SHA256SUMS, dependency lock/build metadata, and SBOM or dependency inventory.",
             "required_for_release": True,
         },
         {
@@ -129,7 +153,7 @@ def build_validation_checks() -> list[dict[str, object]]:
             "id": "support-readiness",
             "category": "operations",
             "status": "operator-owned",
-            "evidence": "Support contact, triage SLA, training material, and escalation process for deployed users.",
+            "evidence": "Support contact, triage SLA, training material, escalation process, and emergency parser-fix policy for deployed users.",
             "required_for_release": False,
         },
     ]
@@ -181,6 +205,9 @@ def build_recommended_commands() -> list[dict[str, str]]:
         {"name": "compile", "command": "python -m compileall -q rapidtriage"},
         {"name": "web-js-syntax", "command": "node --check rapidtriage/web/static/app.js"},
         {"name": "build", "command": "python -m build --wheel --sdist --no-isolation"},
+        {"name": "release-zip", "command": "python scripts/build-release.py --output-dir release"},
+        {"name": "windows-signature-verify", "command": "Get-AuthenticodeSignature .\\release\\*.exe | Format-List"},
+        {"name": "macos-notarization-verify", "command": "codesign --verify --deep --strict APP && spctl --assess --type execute APP"},
         {"name": "doctor", "command": "rapidtriage doctor --json"},
         {"name": "sample", "command": "rapidtriage sample --run --overwrite --read-only --json"},
         {
@@ -192,6 +219,85 @@ def build_recommended_commands() -> list[dict[str, str]]:
             "command": "rapidtriage validation --output-dir ./release-validation --overwrite --json",
         },
     ]
+
+
+def build_release_artifact_requirements() -> list[dict[str, object]]:
+    return [
+        {
+            "id": "windows-installer",
+            "platform": "windows",
+            "required_evidence": [
+                "installer_or_portable_zip_sha256",
+                "authenticode_signature_status",
+                "timestamp_authority",
+                "fresh_windows_smoke_test",
+            ],
+            "operator_owned": True,
+            "release_gate": "must-pass-before-public-release",
+        },
+        {
+            "id": "macos-app-or-package",
+            "platform": "macos",
+            "required_evidence": [
+                "artifact_sha256",
+                "codesign_verify_output",
+                "notarization_ticket_or_staple_output",
+                "gatekeeper_assessment",
+                "fresh_macos_smoke_test",
+            ],
+            "operator_owned": True,
+            "release_gate": "must-pass-before-public-release",
+        },
+        {
+            "id": "source-wheel-sdist",
+            "platform": "cross-platform",
+            "required_evidence": [
+                "wheel_sha256",
+                "sdist_sha256",
+                "python_version",
+                "dependency_inventory",
+                "unit_test_output",
+            ],
+            "operator_owned": False,
+            "release_gate": "required-for-internal-release",
+        },
+    ]
+
+
+def build_independent_validation_plan() -> list[dict[str, object]]:
+    return [
+        {
+            "id": "parser-corpus",
+            "owner": "independent-reviewer",
+            "minimum_scope": "Windows EVTX/Registry/MFT/USN, browser history, mobile export, cloud export, memory import, and media/OCR fixtures.",
+            "evidence": "Expected-result corpus, tool output, diff against RapidTriage JSON, and reviewed false-positive/false-negative notes.",
+        },
+        {
+            "id": "large-case-performance",
+            "owner": "release-engineer",
+            "minimum_scope": "10k, 100k, and representative real exported case folders where legally available.",
+            "evidence": "Benchmark JSON/Markdown, peak memory notes, elapsed time, skipped files, and resume behavior.",
+        },
+        {
+            "id": "legal-report-review",
+            "owner": "forensic-lead",
+            "minimum_scope": "Report wording, limitations, source hashes, review decisions, and non-claims.",
+            "evidence": "Signed review checklist attached to release notes.",
+        },
+    ]
+
+
+def build_support_sla_template() -> dict[str, object]:
+    return {
+        "status": "operator-owned-template",
+        "severity_levels": [
+            {"level": "sev1", "example": "data loss, evidence mutation risk, crash blocking urgent case", "target_response": "4 business hours"},
+            {"level": "sev2", "example": "parser regression or incorrect high-value artifact field", "target_response": "1 business day"},
+            {"level": "sev3", "example": "usability issue, missing parser coverage, documentation gap", "target_response": "3 business days"},
+        ],
+        "required_channels": ["support_contact", "secure_evidence-sharing_process", "release_notes", "known_limitations_update"],
+        "emergency_patch_policy": "Do not claim a parser fix as report-grade until a fixture and validation note are attached.",
+    }
 
 
 def build_required_documents() -> list[dict[str, str]]:
@@ -221,6 +327,17 @@ def render_validation_markdown(payload: Mapping[str, object]) -> str:
     commands = payload.get("recommended_commands") if isinstance(payload.get("recommended_commands"), list) else []
     documents = payload.get("required_documents") if isinstance(payload.get("required_documents"), list) else []
     limits = payload.get("known_limits") if isinstance(payload.get("known_limits"), list) else []
+    release_requirements = (
+        payload.get("release_artifact_requirements")
+        if isinstance(payload.get("release_artifact_requirements"), list)
+        else []
+    )
+    independent_plan = (
+        payload.get("independent_validation_plan")
+        if isinstance(payload.get("independent_validation_plan"), list)
+        else []
+    )
+    sla_template = payload.get("support_sla_template") if isinstance(payload.get("support_sla_template"), Mapping) else {}
     commercial_gaps = (
         payload.get("commercial_gap_assessment")
         if isinstance(payload.get("commercial_gap_assessment"), list)
@@ -254,6 +371,28 @@ def render_validation_markdown(payload: Mapping[str, object]) -> str:
     for item in documents:
         if isinstance(item, Mapping):
             lines.append(f"- `{item.get('path', '')}`: {item.get('purpose', '')}")
+
+    lines.extend(["", "## Release Artifact Requirements", ""])
+    for item in release_requirements:
+        if not isinstance(item, Mapping):
+            continue
+        evidence = ", ".join(str(value) for value in item.get("required_evidence", []) if value)
+        lines.append(f"- `{item.get('id', '')}` ({item.get('platform', '')}): {item.get('release_gate', '')}; evidence: {evidence}")
+
+    lines.extend(["", "## Independent Validation Plan", ""])
+    for item in independent_plan:
+        if isinstance(item, Mapping):
+            lines.append(f"- `{item.get('id', '')}` ({item.get('owner', '')}): {item.get('minimum_scope', '')} Evidence: {item.get('evidence', '')}")
+
+    lines.extend(["", "## Support SLA Template", ""])
+    severity_levels = sla_template.get("severity_levels", [])
+    if not isinstance(severity_levels, list):
+        severity_levels = []
+    for item in severity_levels:
+        if isinstance(item, Mapping):
+            lines.append(f"- `{item.get('level', '')}`: {item.get('example', '')}; target response: {item.get('target_response', '')}")
+    if sla_template:
+        lines.append(f"- Emergency patch policy: {sla_template.get('emergency_patch_policy', '')}")
 
     lines.extend(["", "## Known Limits To Disclose", ""])
     for item in limits:
