@@ -55,6 +55,7 @@ sh scripts/smoke-test-rapidtriage.sh
 - The app starts without manual Python package commands.
 - The sample case completes.
 - The automated smoke test completes and writes doctor, sample, search, benchmark, validation, evidence-support, and web-index outputs.
+- The automated smoke summary reports `PASS`.
 - Windows and macOS/Linux smoke outputs are attached when both platforms are claimed.
 - The first screen tells the user what to do next.
 - Unsupported direct image formats produce clear mount/export guidance.

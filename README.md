@@ -47,6 +47,12 @@ macOS/Linux release smoke test:
 sh scripts/smoke-test-rapidtriage.sh
 ```
 
+Verify release checksums:
+
+```bash
+python scripts/build-release.py --output-dir release --verify
+```
+
 See [docs/rapidtriage-windows-quickstart.md](docs/rapidtriage-windows-quickstart.md) for the Windows launcher, diagnostics, and E01 fallback guidance.
 See [docs/rapidtriage-macos-linux-quickstart.md](docs/rapidtriage-macos-linux-quickstart.md) for the macOS/Linux launcher and first-run flow.
 See [docs/rapidtriage-e01-workflow.md](docs/rapidtriage-e01-workflow.md) for what direct E01/Ex01 input does today and when to mount/export first.

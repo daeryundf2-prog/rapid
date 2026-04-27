@@ -72,7 +72,7 @@ Before handing a macOS/Linux build to another analyst, run the automated smoke t
 sh scripts/smoke-test-rapidtriage.sh
 ```
 
-The smoke test installs the package, runs `doctor`, creates and searches the sample case, runs a small benchmark, builds the validation package, checks evidence-support guidance, and confirms the web UI returns HTTP 200. Outputs are written to:
+The smoke test installs the package, runs `doctor`, creates and searches the sample case, runs a small benchmark, builds the validation package, checks evidence-support guidance, confirms the web UI returns HTTP 200, and writes `smoke-summary.json` plus `smoke-summary.md`. Outputs are written to:
 
 ```text
 rapidtriage-macos-linux-smoke

@@ -166,5 +166,11 @@ PY
   trap - EXIT INT TERM
 fi
 
+if [ "$SKIP_WEB" -eq 0 ]; then
+  checked_python "Summarizing smoke outputs" "$REPO_ROOT/scripts/summarize-smoke.py" "$SMOKE_DIR"
+else
+  checked_python "Summarizing smoke outputs" "$REPO_ROOT/scripts/summarize-smoke.py" "$SMOKE_DIR" --allow-missing-web
+fi
+
 step "macOS/Linux smoke test completed"
 echo "Smoke outputs: $SMOKE_DIR"

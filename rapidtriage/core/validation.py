@@ -230,6 +230,14 @@ def build_recommended_commands() -> list[dict[str, str]]:
             "name": "release-checksums",
             "command": "python scripts/build-release.py --output-dir release",
         },
+        {
+            "name": "verify-release-checksums",
+            "command": "python scripts/build-release.py --output-dir release --verify",
+        },
+        {
+            "name": "smoke-summary",
+            "command": "python scripts/summarize-smoke.py ./rapidtriage-macos-linux-smoke",
+        },
     ]
 
 

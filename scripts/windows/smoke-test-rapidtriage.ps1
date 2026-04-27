@@ -123,5 +123,11 @@ if (!$SkipWeb) {
     }
 }
 
+if ($SkipWeb) {
+    Invoke-CheckedPython "Summarizing smoke outputs" @((Join-Path $RepoRoot "scripts\summarize-smoke.py"), $SmokeDir, "--allow-missing-web")
+} else {
+    Invoke-CheckedPython "Summarizing smoke outputs" @((Join-Path $RepoRoot "scripts\summarize-smoke.py"), $SmokeDir)
+}
+
 Write-Step "Windows smoke test completed"
 Write-Host "Smoke outputs: $SmokeDir" -ForegroundColor Green

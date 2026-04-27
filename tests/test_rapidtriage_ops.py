@@ -94,6 +94,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("windows-smoke-test", command_names)
             self.assertIn("macos-linux-smoke-test", command_names)
             self.assertIn("release-checksums", command_names)
+            self.assertIn("verify-release-checksums", command_names)
+            self.assertIn("smoke-summary", command_names)
 
     def test_case_catalog_adds_exports_and_imports_case(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -209,10 +211,12 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue((output_dir / "rapidtriage-portable.zip").is_file())
             self.assertTrue((output_dir / "SHA256SUMS").is_file())
             self.assertTrue((output_dir / "dependency-inventory.txt").is_file())
+            self.assertTrue((output_dir / "release-manifest.json").is_file())
             with zipfile.ZipFile(output_dir / "rapidtriage-portable.zip") as archive:
                 names = set(archive.namelist())
             self.assertIn("scripts/start-rapidtriage.sh", names)
             self.assertIn("scripts/smoke-test-rapidtriage.sh", names)
+            self.assertIn("scripts/summarize-smoke.py", names)
             self.assertIn("scripts/windows/start-rapidtriage.ps1", names)
             self.assertIn("scripts/windows/smoke-test-rapidtriage.ps1", names)
             self.assertIn("scripts/windows/smoke-test-rapidtriage.bat", names)
@@ -221,6 +225,60 @@ class RapidTriageOpsTests(unittest.TestCase):
             checksums = (output_dir / "SHA256SUMS").read_text(encoding="utf-8")
             self.assertIn("rapidtriage-portable.zip", checksums)
             self.assertIn("dependency-inventory.txt", checksums)
+            self.assertIn("release-manifest.json", checksums)
+            manifest = json.loads((output_dir / "release-manifest.json").read_text(encoding="utf-8"))
+            artifact_names = {item["name"] for item in manifest["artifacts"]}
+            self.assertIn("rapidtriage-portable.zip", artifact_names)
+
+            verify = subprocess.run(
+                [
+                    "python",
+                    "scripts/build-release.py",
+                    "--output-dir",
+                    str(output_dir),
+                    "--verify",
+                ],
+                cwd=Path(__file__).resolve().parent.parent,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(verify.returncode, 0, verify.stderr)
+
+    def test_smoke_summary_script_reports_pass_for_valid_smoke_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            smoke_dir = Path(tmp_dir) / "smoke"
+            smoke_dir.mkdir()
+            (smoke_dir / "doctor.json").write_text(json.dumps({"status": "ok"}), encoding="utf-8")
+            (smoke_dir / "sample.json").write_text(
+                json.dumps({"run": {"output_dir": str(smoke_dir / "sample" / "run-output")}}),
+                encoding="utf-8",
+            )
+            (smoke_dir / "sample-search.json").write_text(json.dumps({"match_count": 1}), encoding="utf-8")
+            (smoke_dir / "benchmark.json").write_text(json.dumps({"metrics": {"ingest_seconds": 0.1}}), encoding="utf-8")
+            (smoke_dir / "validation.json").write_text(
+                json.dumps({"status": "release-validation-package-ready"}),
+                encoding="utf-8",
+            )
+            (smoke_dir / "evidence-vhdx.json").write_text(
+                json.dumps({"adapter": "virtual-disk", "message": "mount/export first"}),
+                encoding="utf-8",
+            )
+            (smoke_dir / "web-index.html").write_text("<!doctype html>", encoding="utf-8")
+
+            result = subprocess.run(
+                ["python", "scripts/summarize-smoke.py", str(smoke_dir)],
+                cwd=Path(__file__).resolve().parent.parent,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            summary = json.loads((smoke_dir / "smoke-summary.json").read_text(encoding="utf-8"))
+            self.assertTrue(summary["passed"])
+            self.assertTrue((smoke_dir / "smoke-summary.md").is_file())
 
 
 if __name__ == "__main__":
