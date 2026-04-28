@@ -14,7 +14,7 @@ from typing import Iterable, Mapping, Sequence
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v8"
+PARSER_VERSION = "eventlog-normalized-v9"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
@@ -714,9 +714,11 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             "native_message_preview": raw_preview,
         }
         data.update(dict(binxml_promoted.get("flat_fields") or {}))
+        system_fields = binxml_promoted.get("system_fields") if isinstance(binxml_promoted.get("system_fields"), Mapping) else {}
         provider_name = str(native_indicators.get("provider_name") or "")
         channel = str(native_indicators.get("channel") or "")
         computer = str(native_indicators.get("computer") or "")
+        event_created_at = str(system_fields.get("TimeCreated") or timestamp)
         details = normalize_event_details(
             parser="windows-eventlog-evtx-native",
             source_format="evtx",
@@ -724,15 +726,17 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             source_index=source_index,
             source_hashes=source_hashes,
             provider_name=provider_name,
-            event_id=str((binxml_promoted.get("system_fields") or {}).get("EventID") or ""),
-            record_id=str(record_id or ""),
+            event_id=str(system_fields.get("EventID") or ""),
+            record_id=str(system_fields.get("EventRecordID") or record_id or ""),
             channel=channel,
-            level=str((binxml_promoted.get("system_fields") or {}).get("Level") or ""),
+            level=str(system_fields.get("Level") or ""),
             computer=computer,
-            event_created_at=timestamp,
+            event_created_at=event_created_at,
             data=data,
             raw_preview=raw_preview,
             user_name=str(native_indicators.get("user_name") or ""),
+            process_id=str(system_fields.get("ProcessID") or ""),
+            thread_id=str(system_fields.get("ThreadID") or ""),
             process_name=str(native_indicators.get("process_name") or ""),
             command_line=str(native_indicators.get("command_line") or raw_preview),
         )
@@ -1451,22 +1455,73 @@ def read_binxml_name(blob: bytes, offset: int) -> tuple[str, int]:
 
 
 def read_inline_binxml_value_text(blob: bytes, offset: int) -> tuple[str, int, str]:
-    if offset + 4 > len(blob):
+    if offset + 2 > len(blob):
         return "", offset + 1, "truncated"
     token = blob[offset]
     token_kind = token & 0xBF
     if token_kind != 0x05:
         return "", offset, "missing-value-text-token"
     value_type = blob[offset + 1]
-    if value_type != 0x01:
+    value_type_name = binxml_value_type_name(value_type)
+
+    if value_type == 0x00:
+        return "", offset + 2, value_type_name
+    if value_type == 0x01:
+        if offset + 4 > len(blob):
+            return "", len(blob), "truncated-string"
+        char_count = read_u16(blob, offset + 2)
+        start = offset + 4
+        end = start + char_count * 2
+        if end > len(blob):
+            return "", len(blob), "truncated-string"
+        text = decode_utf16le_string(blob[start:end])
+        return text, end, value_type_name
+    if value_type == 0x02:
+        if offset + 4 > len(blob):
+            return "", len(blob), "truncated-ansi-string"
+        byte_count = read_u16(blob, offset + 2)
+        start = offset + 4
+        end = start + byte_count
+        if end > len(blob):
+            return "", len(blob), "truncated-ansi-string"
+        text, _ = decode_binxml_template_value(blob[start:end], value_type)
+        return text, end, value_type_name
+    if value_type == 0x0E:
+        if offset + 4 > len(blob):
+            return "", len(blob), "truncated-binary"
+        byte_count = read_u16(blob, offset + 2)
+        start = offset + 4
+        end = start + byte_count
+        if end > len(blob):
+            return "", len(blob), "truncated-binary"
+        text, _ = decode_binxml_template_value(blob[start:end], value_type)
+        return text, end, value_type_name
+
+    fixed_lengths = {
+        0x03: 1,
+        0x04: 1,
+        0x05: 2,
+        0x06: 2,
+        0x07: 4,
+        0x08: 4,
+        0x09: 8,
+        0x0A: 8,
+        0x0D: 4,
+        0x0F: 16,
+        0x11: 8,
+        0x12: 16,
+        0x14: 4,
+        0x15: 8,
+    }
+    byte_count = fixed_lengths.get(value_type)
+    if byte_count is None:
         return "", offset + 2, f"unsupported-type-0x{value_type:02x}"
-    char_count = read_u16(blob, offset + 2)
-    start = offset + 4
-    end = start + char_count * 2
+    start = offset + 2
+    end = start + byte_count
     if end > len(blob):
-        return "", len(blob), "truncated-string"
-    text = decode_utf16le_string(blob[start:end])
-    return text, end, "StringType"
+        return "", len(blob), f"truncated-{value_type_name.lower()}"
+    text, _ = decode_binxml_template_value(blob[start:end], value_type)
+    return text, end, value_type_name
 
 
 def read_binxml_template_values(blob: bytes, offset: int) -> tuple[list[dict[str, object]], int, list[str]]:

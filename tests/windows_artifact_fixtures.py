@@ -508,13 +508,29 @@ def build_minimal_binxml_fragment(strings: list[str]) -> bytes:
                         _binxml_element_with_attributes("Provider", [("Name", provider)], []),
                         _binxml_element("EventID", [_binxml_value("4104")]),
                         _binxml_element("Level", [_binxml_value("3")]),
+                        _binxml_element_with_raw_attributes(
+                            "TimeCreated",
+                            [("SystemTime", _binxml_filetime(datetime(2024, 4, 1, 3, 4, 5, tzinfo=timezone.utc)))],
+                            [],
+                        ),
+                        _binxml_element_with_raw_attributes(
+                            "Execution",
+                            [("ProcessID", _binxml_uint32(4321)), ("ThreadID", _binxml_uint32(8765))],
+                            [],
+                        ),
                         _binxml_element("Channel", [_binxml_value(channel)]),
                         _binxml_element("Computer", [_binxml_value(computer)]),
                     ],
                 ),
                 _binxml_element(
                     "EventData",
-                    [_binxml_element("CommandLine", [_binxml_value(command)])],
+                    [
+                        _binxml_element("CommandLine", [_binxml_value(command)]),
+                        _binxml_element("ProcessId", [_binxml_uint32(4321)]),
+                        _binxml_element("IsElevated", [_binxml_bool(True)]),
+                        _binxml_element("ActivityGuid", [_binxml_guid(bytes.fromhex("00112233445566778899aabbccddeeff"))]),
+                        _binxml_element("PayloadHash", [_binxml_binary(bytes.fromhex("feedface"))]),
+                    ],
                 ),
             ],
         )
@@ -527,10 +543,18 @@ def _binxml_element(name: str, children: list[bytes]) -> bytes:
 
 
 def _binxml_element_with_attributes(name: str, attributes: list[tuple[str, str]], children: list[bytes]) -> bytes:
+    return _binxml_element_with_raw_attributes(
+        name,
+        [(attribute_name, _binxml_value(value)) for attribute_name, value in attributes],
+        children,
+    )
+
+
+def _binxml_element_with_raw_attributes(name: str, attributes: list[tuple[str, bytes]], children: list[bytes]) -> bytes:
     return (
         b"\x41\xff\xff\x00\x00\x00\x00"
         + _binxml_name(name)
-        + b"".join(_binxml_attribute(attribute_name, value) for attribute_name, value in attributes)
+        + b"".join(_binxml_attribute_raw(attribute_name, value) for attribute_name, value in attributes)
         + b"\x02"
         + b"".join(children)
         + b"\x04"
@@ -538,12 +562,36 @@ def _binxml_element_with_attributes(name: str, attributes: list[tuple[str, str]]
 
 
 def _binxml_attribute(name: str, value: str) -> bytes:
-    return b"\x06" + _binxml_name(name) + _binxml_value(value)
+    return _binxml_attribute_raw(name, _binxml_value(value))
+
+
+def _binxml_attribute_raw(name: str, value: bytes) -> bytes:
+    return b"\x06" + _binxml_name(name) + value
 
 
 def _binxml_value(value: str) -> bytes:
     encoded = value.encode("utf-16le")
     return b"\x05\x01" + len(value).to_bytes(2, "little") + encoded
+
+
+def _binxml_uint32(value: int) -> bytes:
+    return b"\x05\x08" + value.to_bytes(4, "little")
+
+
+def _binxml_bool(value: bool) -> bytes:
+    return b"\x05\x0d" + (1 if value else 0).to_bytes(4, "little")
+
+
+def _binxml_filetime(value: datetime) -> bytes:
+    return b"\x05\x11" + datetime_to_filetime(value).to_bytes(8, "little")
+
+
+def _binxml_guid(value: bytes) -> bytes:
+    return b"\x05\x0f" + value[:16].ljust(16, b"\x00")
+
+
+def _binxml_binary(value: bytes) -> bytes:
+    return b"\x05\x0e" + len(value).to_bytes(2, "little") + value
 
 
 def _binxml_substitution(index: int, value_type: int) -> bytes:

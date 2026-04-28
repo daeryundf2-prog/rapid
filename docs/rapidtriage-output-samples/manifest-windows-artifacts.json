@@ -583,7 +583,7 @@
             "parent_command_line": "",
             "parent_process_name": "",
             "parser": "windows-eventlog-builtin-rulepack",
-            "parser_version": "eventlog-normalized-v8",
+            "parser_version": "eventlog-normalized-v9",
             "process_id": "",
             "process_name": "",
             "provider_name": "Microsoft-Windows-Security-Auditing",
@@ -678,7 +678,7 @@
             "parent_process_name": "",
             "parser": "windows-eventlog-xml",
             "parser_confidence": 0.9,
-            "parser_version": "eventlog-normalized-v8",
+            "parser_version": "eventlog-normalized-v9",
             "process_id": "",
             "process_name": "",
             "provider_name": "Microsoft-Windows-Security-Auditing",
@@ -820,7 +820,7 @@
                 "value": "detected-by-rule"
               }
             ],
-            "parser_version": "eventlog-normalized-v8",
+            "parser_version": "eventlog-normalized-v9",
             "process_counts": [],
             "record_sequence_gaps": [],
             "reportability": "triage",
