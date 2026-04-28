@@ -13,7 +13,7 @@ from typing import Iterable, Mapping, Sequence
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v4"
+PARSER_VERSION = "eventlog-normalized-v5"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
@@ -26,6 +26,8 @@ EVTX_RECORD_HEADER_SIZE = 24
 MAX_NATIVE_EVTX_RECORDS = 10_000
 MAX_NATIVE_EVTX_RECORD_SIZE = 16 * 1024 * 1024
 MAX_NATIVE_EVTX_STRINGS = 200
+NATIVE_EVTX_PARSE_SCOPE = "record-header-string-triage"
+NATIVE_EVTX_BINXML_STATUS = "not-decoded"
 
 EVENT_ID_CATEGORIES = {
     "4624": ("logon-success", "Authentication success"),
@@ -665,9 +667,18 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
         chunk_context = native_evtx_chunk_context(blob, offset)
         sequence = native_evtx_sequence(record_id, previous_record_id)
         previous_record_id = record_id or previous_record_id
-        raw_preview = " ".join(extracted_strings)[:2000]
+        parameter_candidates = native_evtx_parameter_candidates(native_indicators)
+        raw_preview = native_evtx_message_preview(native_indicators, extracted_strings)
         data = {
             "evtx_parse_status": "native-binary-partial",
+            "evtx_native_parse_scope": NATIVE_EVTX_PARSE_SCOPE,
+            "evtx_binxml_status": NATIVE_EVTX_BINXML_STATUS,
+            "evtx_field_fidelity": "partial-string-pivot",
+            "evtx_validation_required": True,
+            "evtx_validation_guidance": (
+                "Use an EVTX-capable parser export such as EvtxECmd, Hayabusa, Chainsaw, or "
+                "Velociraptor when report-grade Event/System/EventData field fidelity is required."
+            ),
             "evtx_file_header": native_evtx_file_header(blob),
             "evtx_chunk_context": chunk_context,
             "evtx_record_offset": offset,
@@ -684,7 +695,8 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             "CommandLine": native_indicators.get("command_line", ""),
             "SourceIp": native_indicators.get("source_ip", ""),
             "TargetUserName": native_indicators.get("user_name", ""),
-            "parameter_candidates": native_evtx_parameter_candidates(native_indicators),
+            "parameter_candidates": parameter_candidates,
+            "native_message_preview": raw_preview,
         }
         provider_name = str(native_indicators.get("provider_name") or "")
         channel = str(native_indicators.get("channel") or "")
@@ -746,14 +758,23 @@ def native_evtx_record_integrity(record_blob: bytes, offset: int) -> dict[str, o
 
 
 def native_evtx_file_header(blob: bytes) -> dict[str, object]:
+    header_size = read_u32(blob, 32) or (EVTX_FILE_HEADER_SIZE if len(blob) >= EVTX_FILE_HEADER_SIZE else len(blob))
+    checksum = read_u32(blob, 124)
     return {
         "signature_valid": blob.startswith(EVTX_FILE_SIGNATURE),
-        "header_size": EVTX_FILE_HEADER_SIZE if len(blob) >= EVTX_FILE_HEADER_SIZE else len(blob),
+        "header_size": header_size,
         "file_size": len(blob),
         "oldest_chunk_number": read_u64(blob, 8),
         "current_chunk_number": read_u64(blob, 16),
         "next_record_identifier": read_u64(blob, 24),
+        "minor_version": read_u16(blob, 36),
+        "major_version": read_u16(blob, 38),
+        "header_block_size": read_u16(blob, 40),
+        "chunk_count": read_u16(blob, 42),
         "header_flags": read_u32(blob, 120),
+        "header_checksum": checksum,
+        "header_checksum_present": checksum != 0,
+        "validation_status": "signature-only" if checksum == 0 else "checksum-present-unverified",
     }
 
 
@@ -767,11 +788,16 @@ def native_evtx_chunk_context(blob: bytes, record_offset: int) -> dict[str, obje
     return {
         "chunk_offset": chunk_offset,
         "chunk_signature_valid": signature_valid,
+        "chunk_validation_status": "header-present" if signature_valid else "missing-or-not-a-chunk-header",
         "record_relative_offset": record_offset - chunk_offset,
         "first_event_record_number": read_u64(blob, chunk_offset + 8) if signature_valid else 0,
         "last_event_record_number": read_u64(blob, chunk_offset + 16) if signature_valid else 0,
         "first_event_record_identifier": read_u64(blob, chunk_offset + 24) if signature_valid else 0,
         "last_event_record_identifier": read_u64(blob, chunk_offset + 32) if signature_valid else 0,
+        "last_record_offset": read_u32(blob, chunk_offset + 40) if signature_valid else 0,
+        "free_space_offset": read_u32(blob, chunk_offset + 44) if signature_valid else 0,
+        "events_checksum": read_u32(blob, chunk_offset + 48) if signature_valid else 0,
+        "header_checksum": read_u32(blob, chunk_offset + 52) if signature_valid else 0,
     }
 
 
@@ -841,6 +867,32 @@ def native_evtx_parameter_candidates(indicators: Mapping[str, object]) -> list[d
     for value in indicators.get("path_candidates", []) if isinstance(indicators.get("path_candidates"), list) else []:
         candidates.append({"name": "Path", "value": str(value), "confidence": "string-pivot"})
     return candidates[:50]
+
+
+def native_evtx_message_preview(indicators: Mapping[str, object], strings: Sequence[str]) -> str:
+    parts: list[str] = []
+    labels = (
+        ("provider", indicators.get("provider_name")),
+        ("channel", indicators.get("channel")),
+        ("computer", indicators.get("computer")),
+        ("command", indicators.get("command_line")),
+        ("process", indicators.get("process_name")),
+        ("source_ip", indicators.get("source_ip")),
+        ("user", indicators.get("user_name")),
+    )
+    for label, value in labels:
+        text = str(value or "").strip()
+        if text:
+            parts.append(f"{label}={text}")
+    seen = {part.split("=", 1)[-1] for part in parts}
+    for value in strings:
+        text = str(value or "").strip()
+        if text and text not in seen:
+            parts.append(text)
+            seen.add(text)
+        if len(parts) >= 20:
+            break
+    return " | ".join(parts)[:2000]
 
 
 def first_native_channel(strings: Sequence[str]) -> str:
@@ -1187,7 +1239,9 @@ def build_eventlog_file_record(path: Path, *, native_record_count: int = 0) -> A
             "channel_hint": channel_hint_from_path(path),
             "native_record_count": native_record_count,
             "native_parse_status": "partial-record-scan" if native_record_count else "no-records-emitted",
-            "native_parser_scope": "record-header-string-triage",
+            "native_parser_scope": NATIVE_EVTX_PARSE_SCOPE,
+            "native_binxml_status": NATIVE_EVTX_BINXML_STATUS,
+            "native_validation_required": True,
             "recommended_parsers": ["EvtxECmd", "Hayabusa", "Chainsaw", "Velociraptor Windows.EventLogs.Evtx"],
             "note": "Binary EVTX detected. RapidTriage emits partial native record rows when record headers and UTF-16 strings are recoverable; import EvtxECmd/Hayabusa/Chainsaw/Velociraptor JSONL/CSV/XML output for full BinXML field mapping.",
         },
@@ -1351,6 +1405,7 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
     native_integrity_counts: Counter[str] = Counter()
     native_sequence_counts: Counter[str] = Counter()
     native_channel_hint_counts: Counter[str] = Counter()
+    native_binxml_status_counts: Counter[str] = Counter()
     source_paths: set[str] = set()
     timestamps: list[str] = []
     high_risk_events: list[dict[str, object]] = []
@@ -1392,6 +1447,7 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
             )
             increment_counter(native_sequence_counts, str(sequence.get("status") or "unknown"))
             increment_counter(native_channel_hint_counts, str(native_indicators.get("channel_hint_source") or "unknown"))
+            increment_counter(native_binxml_status_counts, str(details.get("evtx_binxml_status") or "unknown"))
         for flag in details.get("risk_flags") or []:
             text = str(flag)
             if text.startswith("suspicious-term:"):
@@ -1481,6 +1537,7 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "native_integrity_counts": counter_items(native_integrity_counts),
         "native_sequence_counts": counter_items(native_sequence_counts),
         "native_channel_hint_counts": counter_items(native_channel_hint_counts),
+        "native_binxml_status_counts": counter_items(native_binxml_status_counts),
         "detection_level_counts": counter_items(detection_level_counts),
         "first_event_at": timestamps[0] if timestamps else "",
         "last_event_at": timestamps[-1] if timestamps else "",
@@ -1488,7 +1545,8 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "record_sequence_gaps": record_sequence_gaps(record_ids_by_channel),
         "summary_notes": [
             "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
-            "Binary EVTX rows include partial native record scans when recoverable; use external parser exports for complete BinXML field fidelity.",
+            "Binary EVTX rows include partial native record scans when recoverable; native_binxml_status_counts shows whether BinXML field decoding is complete.",
+            "Use external parser exports for complete Event/System/EventData BinXML field fidelity before report-grade conclusions.",
         ],
     }
     return ArtifactRecord(
@@ -1564,6 +1622,12 @@ def read_u32(blob: bytes, offset: int) -> int:
     if offset < 0 or offset + 4 > len(blob):
         return 0
     return int.from_bytes(blob[offset : offset + 4], "little", signed=False)
+
+
+def read_u16(blob: bytes, offset: int) -> int:
+    if offset < 0 or offset + 2 > len(blob):
+        return 0
+    return int.from_bytes(blob[offset : offset + 2], "little", signed=False)
 
 
 def read_u64(blob: bytes, offset: int) -> int:

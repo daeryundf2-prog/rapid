@@ -415,6 +415,12 @@ def build_minimal_evtx(record_id: int, timestamp: datetime, strings: list[str]) 
     )
     header = bytearray(4096)
     header[0:8] = b"ElfFile\x00"
+    header[24:32] = (record_id + 1).to_bytes(8, "little")
+    header[32:36] = (4096).to_bytes(4, "little")
+    header[36:38] = (1).to_bytes(2, "little")
+    header[38:40] = (3).to_bytes(2, "little")
+    header[40:42] = (4096).to_bytes(2, "little")
+    header[42:44] = (1).to_bytes(2, "little")
     return bytes(header) + record
 
 

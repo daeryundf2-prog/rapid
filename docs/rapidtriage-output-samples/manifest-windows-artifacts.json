@@ -1,895 +1,894 @@
 {
   "generated_at": "<GENERATED_AT>",
-  "root": "<ROOT>",
-  "platform": "<PLATFORM>",
   "keywords": [],
+  "platform": "<PLATFORM>",
   "providers": [
     {
-      "name": "generic-documents",
-      "description": "Cross-platform document candidates discovered from the filesystem",
-      "target_platform": "any",
-      "supported": true,
       "artifacts": [
         {
-          "provider": "generic-documents",
           "artifact_type": "document-pattern",
-          "path": "<ROOT>",
-          "supported": true,
           "details": {
             "extension": ".docx"
-          }
+          },
+          "path": "<ROOT>",
+          "provider": "generic-documents",
+          "supported": true
         },
         {
-          "provider": "generic-documents",
           "artifact_type": "document-pattern",
-          "path": "<ROOT>",
-          "supported": true,
           "details": {
             "extension": ".pdf"
-          }
+          },
+          "path": "<ROOT>",
+          "provider": "generic-documents",
+          "supported": true
         },
         {
-          "provider": "generic-documents",
           "artifact_type": "document-pattern",
-          "path": "<ROOT>",
-          "supported": true,
           "details": {
             "extension": ".txt"
-          }
+          },
+          "path": "<ROOT>",
+          "provider": "generic-documents",
+          "supported": true
         }
-      ]
+      ],
+      "description": "Cross-platform document candidates discovered from the filesystem",
+      "name": "generic-documents",
+      "supported": true,
+      "target_platform": "any"
     },
     {
-      "name": "android-apk-artifacts",
+      "artifacts": [],
       "description": "Android APK inventory, hashes, manifest metadata, permissions, and triage risk flags",
-      "target_platform": "android",
+      "name": "android-apk-artifacts",
       "supported": true,
-      "artifacts": []
+      "target_platform": "android"
     },
     {
-      "name": "cloud-export-artifacts",
+      "artifacts": [],
       "description": "Cloud account export normalization for Google Takeout-style activity/location and account JSON",
-      "target_platform": "cloud",
+      "name": "cloud-export-artifacts",
       "supported": true,
-      "artifacts": []
+      "target_platform": "cloud"
     },
     {
-      "name": "linux-system-artifacts",
+      "artifacts": [],
       "description": "Linux user, shell history, SSH, auth log, cron, and systemd triage artifacts",
-      "target_platform": "linux",
+      "name": "linux-system-artifacts",
       "supported": true,
-      "artifacts": []
+      "target_platform": "linux"
     },
     {
-      "name": "macos-system-artifacts",
+      "artifacts": [],
       "description": "macOS user, browser, quarantine, TCC privacy permission, and LaunchAgent triage artifacts",
-      "target_platform": "macos",
+      "name": "macos-system-artifacts",
       "supported": true,
-      "artifacts": []
+      "target_platform": "macos"
     },
     {
-      "name": "media-image-artifacts",
+      "artifacts": [],
       "description": "Image inventory with dimensions, hashes, perceptual hash, OCR queue hints, and similarity buckets",
-      "target_platform": "any",
+      "name": "media-image-artifacts",
       "supported": true,
-      "artifacts": []
+      "target_platform": "any"
     },
     {
-      "name": "memory-volatility-artifacts",
+      "artifacts": [],
       "description": "Volatility/Volatility3 output normalization plus bounded direct memory dump indicator scanning",
-      "target_platform": "memory",
+      "name": "memory-volatility-artifacts",
       "supported": true,
-      "artifacts": []
+      "target_platform": "memory"
     },
     {
-      "name": "mobile-export-artifacts",
+      "artifacts": [],
       "description": "Cellebrite/XRY/GrayKey/AXIOM-style mobile export CSV/JSON normalization",
-      "target_platform": "mobile",
+      "name": "mobile-export-artifacts",
       "supported": true,
-      "artifacts": []
+      "target_platform": "mobile"
     },
     {
-      "name": "windows-browser-artifacts",
-      "description": "Windows browser history/download collectors backed by real profile files",
-      "target_platform": "windows",
-      "supported": true,
       "artifacts": [
         {
-          "provider": "windows-browser-artifacts",
           "artifact_type": "browser-history",
-          "path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
-          "supported": true,
           "details": {
+            "ai_conversation_candidate_count": 0,
+            "ai_conversation_candidates": [],
+            "ai_usage": [],
+            "ai_usage_count": 0,
+            "browser": "firefox",
+            "coverage_status": "parsed",
+            "download_count": 0,
+            "downloads": [],
+            "history": [
+              {
+                "last_visited_at": "2026-04-06T08:00:00+00:00",
+                "title": "Firefox Support",
+                "url": "https://support.mozilla.org/kb/download-firefox",
+                "visit_count": 3
+              }
+            ],
+            "history_count": 1,
+            "internet_category_counts": [
+              {
+                "count": 1,
+                "value": "download"
+              }
+            ],
+            "internet_usage": [
+              {
+                "ai_service": "",
+                "category": "download",
+                "domain": "support.mozilla.org",
+                "last_visited_at": "2026-04-06T08:00:00+00:00",
+                "query_hint": "",
+                "source_index": 0,
+                "title": "Firefox Support",
+                "url": "https://support.mozilla.org/kb/download-firefox",
+                "visit_count": 3
+              }
+            ],
+            "internet_usage_count": 1,
             "parser": "browser-history",
             "parser_version": "windows-browser-v3",
-            "coverage_status": "parsed",
+            "profile": "default-release",
             "reportability": "triage",
-            "source_path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
             "source_hashes": {
               "md5": "220306cae6f1c00bb9852539e0738ac6",
               "sha1": "fa1f60b336407af7b82b7501738d607a80a2236f",
               "sha256": "a500ca837ddabfd418bd3103fb020923eb2d21ca85e4bfa38e2af8159573c99a"
             },
-            "user": "alice",
-            "browser": "firefox",
-            "profile": "default-release",
-            "history_count": 1,
-            "download_count": 0,
-            "internet_usage_count": 1,
-            "ai_usage_count": 0,
-            "ai_conversation_candidate_count": 0,
-            "internet_category_counts": [
-              {
-                "value": "download",
-                "count": 1
-              }
-            ],
+            "source_path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
             "top_domains": [
               {
-                "value": "support.mozilla.org",
-                "count": 1
+                "count": 1,
+                "value": "support.mozilla.org"
+              }
+            ],
+            "user": "alice"
+          },
+          "path": "<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+          "provider": "windows-browser-artifacts",
+          "supported": true
+        },
+        {
+          "artifact_type": "browser-history-downloads",
+          "details": {
+            "ai_conversation_candidate_count": 0,
+            "ai_conversation_candidates": [],
+            "ai_usage": [],
+            "ai_usage_count": 0,
+            "browser": "chrome",
+            "coverage_status": "parsed",
+            "download_count": 1,
+            "downloads": [
+              {
+                "ended_at": "2026-04-08T16:02:00+00:00",
+                "source_url": "https://download.example.com/report.zip",
+                "started_at": "2026-04-08T16:01:00+00:00",
+                "state": 1,
+                "tab_url": "https://portal.example.com/downloads",
+                "target_path": "C:\\Users\\alice\\Downloads\\report.zip",
+                "total_bytes": 4096
               }
             ],
             "history": [
               {
-                "url": "https://support.mozilla.org/kb/download-firefox",
-                "title": "Firefox Support",
-                "visit_count": 3,
-                "last_visited_at": "2026-04-06T08:00:00+00:00"
+                "last_visited_at": "2026-04-09T10:30:00+00:00",
+                "title": "Case Portal",
+                "url": "https://example.com/case",
+                "visit_count": 4
+              },
+              {
+                "last_visited_at": "2026-04-08T16:05:00+00:00",
+                "title": "Evidence Download",
+                "url": "https://download.example.com/report.zip",
+                "visit_count": 2
               }
             ],
-            "downloads": [],
+            "history_count": 2,
+            "internet_category_counts": [
+              {
+                "count": 1,
+                "value": "download"
+              },
+              {
+                "count": 1,
+                "value": "web"
+              }
+            ],
             "internet_usage": [
               {
-                "source_index": 0,
-                "url": "https://support.mozilla.org/kb/download-firefox",
-                "title": "Firefox Support",
-                "domain": "support.mozilla.org",
-                "category": "download",
-                "visit_count": 3,
-                "last_visited_at": "2026-04-06T08:00:00+00:00",
                 "ai_service": "",
-                "query_hint": ""
+                "category": "web",
+                "domain": "example.com",
+                "last_visited_at": "2026-04-09T10:30:00+00:00",
+                "query_hint": "",
+                "source_index": 0,
+                "title": "Case Portal",
+                "url": "https://example.com/case",
+                "visit_count": 4
+              },
+              {
+                "ai_service": "",
+                "category": "download",
+                "domain": "download.example.com",
+                "last_visited_at": "2026-04-08T16:05:00+00:00",
+                "query_hint": "",
+                "source_index": 1,
+                "title": "Evidence Download",
+                "url": "https://download.example.com/report.zip",
+                "visit_count": 2
               }
             ],
-            "ai_usage": [],
-            "ai_conversation_candidates": []
-          }
-        },
-        {
-          "provider": "windows-browser-artifacts",
-          "artifact_type": "browser-history-downloads",
-          "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
-          "supported": true,
-          "details": {
+            "internet_usage_count": 2,
             "parser": "browser-history",
             "parser_version": "windows-browser-v3",
-            "coverage_status": "parsed",
+            "profile": "Default",
             "reportability": "triage",
-            "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
             "source_hashes": {
               "md5": "512e2bc96d901588756f1b1ddfe60685",
               "sha1": "f76080b4212e3878e4502f562b9df48d0a2e4a6f",
               "sha256": "779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c"
             },
-            "user": "alice",
-            "browser": "chrome",
-            "profile": "Default",
-            "history_count": 2,
-            "download_count": 1,
-            "internet_usage_count": 2,
-            "ai_usage_count": 0,
-            "ai_conversation_candidate_count": 0,
-            "internet_category_counts": [
-              {
-                "value": "download",
-                "count": 1
-              },
-              {
-                "value": "web",
-                "count": 1
-              }
-            ],
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
             "top_domains": [
               {
-                "value": "download.example.com",
-                "count": 1
+                "count": 1,
+                "value": "download.example.com"
               },
               {
-                "value": "example.com",
-                "count": 1
+                "count": 1,
+                "value": "example.com"
+              }
+            ],
+            "user": "alice"
+          },
+          "path": "<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+          "provider": "windows-browser-artifacts",
+          "supported": true
+        },
+        {
+          "artifact_type": "browser-history-downloads",
+          "details": {
+            "ai_conversation_candidate_count": 0,
+            "ai_conversation_candidates": [],
+            "ai_usage": [],
+            "ai_usage_count": 0,
+            "browser": "edge",
+            "coverage_status": "parsed",
+            "download_count": 1,
+            "downloads": [
+              {
+                "ended_at": "2026-04-07T09:11:00+00:00",
+                "source_url": "https://contoso.example/recent",
+                "started_at": "2026-04-07T09:10:00+00:00",
+                "state": 1,
+                "tab_url": "https://contoso.example/recent",
+                "target_path": "C:\\Users\\alice\\Downloads\\briefing.pdf",
+                "total_bytes": 8192
               }
             ],
             "history": [
               {
-                "url": "https://example.com/case",
-                "title": "Case Portal",
-                "visit_count": 4,
-                "last_visited_at": "2026-04-09T10:30:00+00:00"
-              },
-              {
-                "url": "https://download.example.com/report.zip",
-                "title": "Evidence Download",
-                "visit_count": 2,
-                "last_visited_at": "2026-04-08T16:05:00+00:00"
+                "last_visited_at": "2026-04-07T09:15:00+00:00",
+                "title": "Recent Activity",
+                "url": "https://contoso.example/recent",
+                "visit_count": 7
               }
             ],
-            "downloads": [
+            "history_count": 1,
+            "internet_category_counts": [
               {
-                "source_url": "https://download.example.com/report.zip",
-                "target_path": "C:\\Users\\alice\\Downloads\\report.zip",
-                "tab_url": "https://portal.example.com/downloads",
-                "total_bytes": 4096,
-                "state": 1,
-                "started_at": "2026-04-08T16:01:00+00:00",
-                "ended_at": "2026-04-08T16:02:00+00:00"
+                "count": 1,
+                "value": "web"
               }
             ],
             "internet_usage": [
               {
-                "source_index": 0,
-                "url": "https://example.com/case",
-                "title": "Case Portal",
-                "domain": "example.com",
+                "ai_service": "",
                 "category": "web",
-                "visit_count": 4,
-                "last_visited_at": "2026-04-09T10:30:00+00:00",
-                "ai_service": "",
-                "query_hint": ""
-              },
-              {
-                "source_index": 1,
-                "url": "https://download.example.com/report.zip",
-                "title": "Evidence Download",
-                "domain": "download.example.com",
-                "category": "download",
-                "visit_count": 2,
-                "last_visited_at": "2026-04-08T16:05:00+00:00",
-                "ai_service": "",
-                "query_hint": ""
+                "domain": "contoso.example",
+                "last_visited_at": "2026-04-07T09:15:00+00:00",
+                "query_hint": "",
+                "source_index": 0,
+                "title": "Recent Activity",
+                "url": "https://contoso.example/recent",
+                "visit_count": 7
               }
             ],
-            "ai_usage": [],
-            "ai_conversation_candidates": []
-          }
-        },
-        {
-          "provider": "windows-browser-artifacts",
-          "artifact_type": "browser-history-downloads",
-          "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
-          "supported": true,
-          "details": {
+            "internet_usage_count": 1,
             "parser": "browser-history",
             "parser_version": "windows-browser-v3",
-            "coverage_status": "parsed",
+            "profile": "Profile 1",
             "reportability": "triage",
-            "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
             "source_hashes": {
               "md5": "7fbcd3ae3d9f3a910bed54850656e78b",
               "sha1": "b39f4e8f409d2902d5567bc64d03ae2bc99f48ef",
               "sha256": "da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639"
             },
-            "user": "alice",
-            "browser": "edge",
-            "profile": "Profile 1",
-            "history_count": 1,
-            "download_count": 1,
-            "internet_usage_count": 1,
-            "ai_usage_count": 0,
-            "ai_conversation_candidate_count": 0,
-            "internet_category_counts": [
-              {
-                "value": "web",
-                "count": 1
-              }
-            ],
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
             "top_domains": [
               {
-                "value": "contoso.example",
-                "count": 1
+                "count": 1,
+                "value": "contoso.example"
               }
             ],
-            "history": [
-              {
-                "url": "https://contoso.example/recent",
-                "title": "Recent Activity",
-                "visit_count": 7,
-                "last_visited_at": "2026-04-07T09:15:00+00:00"
-              }
-            ],
-            "downloads": [
-              {
-                "source_url": "https://contoso.example/recent",
-                "target_path": "C:\\Users\\alice\\Downloads\\briefing.pdf",
-                "tab_url": "https://contoso.example/recent",
-                "total_bytes": 8192,
-                "state": 1,
-                "started_at": "2026-04-07T09:10:00+00:00",
-                "ended_at": "2026-04-07T09:11:00+00:00"
-              }
-            ],
-            "internet_usage": [
-              {
-                "source_index": 0,
-                "url": "https://contoso.example/recent",
-                "title": "Recent Activity",
-                "domain": "contoso.example",
-                "category": "web",
-                "visit_count": 7,
-                "last_visited_at": "2026-04-07T09:15:00+00:00",
-                "ai_service": "",
-                "query_hint": ""
-              }
-            ],
-            "ai_usage": [],
-            "ai_conversation_candidates": []
-          }
+            "user": "alice"
+          },
+          "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+          "provider": "windows-browser-artifacts",
+          "supported": true
         }
-      ]
+      ],
+      "description": "Windows browser history/download collectors backed by real profile files",
+      "name": "windows-browser-artifacts",
+      "supported": true,
+      "target_platform": "windows"
     },
     {
-      "name": "windows-recent-files",
-      "description": "Windows Recent items and Jump Lists collected from per-user profile directories",
-      "target_platform": "windows",
-      "supported": true,
       "artifacts": [
         {
-          "provider": "windows-recent-files",
           "artifact_type": "jumplist-automatic",
-          "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/5f7b5f1e01b83767.automaticDestinations-ms",
-          "supported": true,
           "details": {
-            "parser": "windows-recent-files",
-            "parser_version": "windows-recent-files-v3",
-            "user": "alice",
-            "entry_name": "5f7b5f1e01b83767.automaticDestinations-ms",
-            "entry_hint": "5f7b5f1e01b83767",
-            "size": 224,
-            "modified_at": "2024-03-05T06:08:09+00:00",
-            "source_hashes": {
-              "sha256": "247c2f514fcdfdbf9358c1289c7382e3a557f2d7b2f04133fd1ef37a1e7a4d08"
-            },
-            "jump_list_parse_status": "parsed-embedded-lnk",
-            "container_hint": "custom-binary",
-            "jumplist_kind": "automatic",
             "application_id_hash": "5f7b5f1e01b83767",
-            "ole_parse_status": "not-ole",
-            "ole_stream_count": 0,
-            "ole_streams": [],
-            "embedded_paths": [
-              "C:\\Users\\alice\\Documents\\Case Notes.docx",
-              "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
-            ],
+            "container_hint": "custom-binary",
             "destination_count": 1,
             "destination_stream_count": 0,
             "destinations": [
               {
-                "index": 0,
-                "lnk_offset": 14,
-                "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+                "command_line_arguments": "",
                 "embedded_paths": [
                   "C:\\Users\\alice\\Documents\\Case Notes.docx",
                   "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
                 ],
-                "target_created_at": "2024-03-05T06:08:09+00:00",
-                "target_accessed_at": "2024-03-05T06:08:09+00:00",
-                "target_modified_at": "2024-03-05T06:08:09+00:00",
-                "working_dir": "C:\\Users\\alice\\Documents",
-                "command_line_arguments": "",
+                "index": 0,
                 "link_flag_names": [
                   "HasRelativePath",
                   "HasWorkingDir",
                   "HasArguments",
                   "IsUnicode"
-                ]
+                ],
+                "lnk_offset": 14,
+                "target_accessed_at": "2024-03-05T06:08:09+00:00",
+                "target_created_at": "2024-03-05T06:08:09+00:00",
+                "target_modified_at": "2024-03-05T06:08:09+00:00",
+                "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+                "working_dir": "C:\\Users\\alice\\Documents"
               }
             ],
-            "note": "OLE Jump List streams are traversed when recoverable; otherwise embedded Shell Link and path extraction is provided for triage search."
-          }
-        },
-        {
-          "provider": "windows-recent-files",
-          "artifact_type": "jumplist-custom",
-          "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/CustomDestinations/9b9cdc69c1c24e2b.customDestinations-ms",
-          "supported": true,
-          "details": {
-            "parser": "windows-recent-files",
-            "parser_version": "windows-recent-files-v3",
-            "user": "alice",
-            "entry_name": "9b9cdc69c1c24e2b.customDestinations-ms",
-            "entry_hint": "9b9cdc69c1c24e2b",
-            "size": 222,
-            "modified_at": "2024-03-05T06:09:10+00:00",
-            "source_hashes": {
-              "sha256": "a1fbe7d6e1240b87cd735ee7a9bfb56adcec0090dbfeb08796a48573b75fb1f7"
-            },
+            "embedded_paths": [
+              "C:\\Users\\alice\\Documents\\Case Notes.docx",
+              "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
+            ],
+            "entry_hint": "5f7b5f1e01b83767",
+            "entry_name": "5f7b5f1e01b83767.automaticDestinations-ms",
             "jump_list_parse_status": "parsed-embedded-lnk",
-            "container_hint": "custom-binary",
-            "jumplist_kind": "custom",
-            "application_id_hash": "9b9cdc69c1c24e2b",
+            "jumplist_kind": "automatic",
+            "modified_at": "2024-03-05T06:08:09+00:00",
+            "note": "OLE Jump List streams are traversed when recoverable; otherwise embedded Shell Link and path extraction is provided for triage search.",
             "ole_parse_status": "not-ole",
             "ole_stream_count": 0,
             "ole_streams": [],
-            "embedded_paths": [
-              "C:\\Users\\alice\\Downloads\\installer.exe",
-              "C:\\Users\\alice\\Downloads\\installer.exe\u0018C:\\Users\\alice\\Documents"
-            ],
+            "parser": "windows-recent-files",
+            "parser_version": "windows-recent-files-v3",
+            "size": 224,
+            "source_hashes": {
+              "sha256": "247c2f514fcdfdbf9358c1289c7382e3a557f2d7b2f04133fd1ef37a1e7a4d08"
+            },
+            "user": "alice"
+          },
+          "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/5f7b5f1e01b83767.automaticDestinations-ms",
+          "provider": "windows-recent-files",
+          "supported": true
+        },
+        {
+          "artifact_type": "jumplist-custom",
+          "details": {
+            "application_id_hash": "9b9cdc69c1c24e2b",
+            "container_hint": "custom-binary",
             "destination_count": 1,
             "destination_stream_count": 0,
             "destinations": [
               {
-                "index": 0,
-                "lnk_offset": 16,
-                "target_path": "C:\\Users\\alice\\Downloads\\installer.exe",
+                "command_line_arguments": "",
                 "embedded_paths": [
                   "C:\\Users\\alice\\Downloads\\installer.exe",
                   "C:\\Users\\alice\\Downloads\\installer.exe\u0018C:\\Users\\alice\\Documents"
                 ],
-                "target_created_at": "2024-03-05T06:09:10+00:00",
-                "target_accessed_at": "2024-03-05T06:09:10+00:00",
-                "target_modified_at": "2024-03-05T06:09:10+00:00",
-                "working_dir": "C:\\Users\\alice\\Documents",
-                "command_line_arguments": "",
+                "index": 0,
                 "link_flag_names": [
                   "HasRelativePath",
                   "HasWorkingDir",
                   "HasArguments",
                   "IsUnicode"
-                ]
+                ],
+                "lnk_offset": 16,
+                "target_accessed_at": "2024-03-05T06:09:10+00:00",
+                "target_created_at": "2024-03-05T06:09:10+00:00",
+                "target_modified_at": "2024-03-05T06:09:10+00:00",
+                "target_path": "C:\\Users\\alice\\Downloads\\installer.exe",
+                "working_dir": "C:\\Users\\alice\\Documents"
               }
             ],
-            "note": "OLE Jump List streams are traversed when recoverable; otherwise embedded Shell Link and path extraction is provided for triage search."
-          }
-        },
-        {
-          "provider": "windows-recent-files",
-          "artifact_type": "recent-shortcut",
-          "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/Case Notes.lnk",
-          "supported": true,
-          "details": {
+            "embedded_paths": [
+              "C:\\Users\\alice\\Downloads\\installer.exe",
+              "C:\\Users\\alice\\Downloads\\installer.exe\u0018C:\\Users\\alice\\Documents"
+            ],
+            "entry_hint": "9b9cdc69c1c24e2b",
+            "entry_name": "9b9cdc69c1c24e2b.customDestinations-ms",
+            "jump_list_parse_status": "parsed-embedded-lnk",
+            "jumplist_kind": "custom",
+            "modified_at": "2024-03-05T06:09:10+00:00",
+            "note": "OLE Jump List streams are traversed when recoverable; otherwise embedded Shell Link and path extraction is provided for triage search.",
+            "ole_parse_status": "not-ole",
+            "ole_stream_count": 0,
+            "ole_streams": [],
             "parser": "windows-recent-files",
             "parser_version": "windows-recent-files-v3",
-            "user": "alice",
-            "entry_name": "Case Notes.lnk",
-            "entry_hint": "Case Notes",
-            "size": 210,
-            "modified_at": "2024-03-05T06:07:08+00:00",
+            "size": 222,
             "source_hashes": {
-              "sha256": "da2e4b2e40f05a29846a074c4b547a8c7433269318482fd77197e4e1f3c736f0"
+              "sha256": "a1fbe7d6e1240b87cd735ee7a9bfb56adcec0090dbfeb08796a48573b75fb1f7"
             },
-            "lnk_parse_status": "parsed",
-            "lnk_header_size": 76,
-            "link_flags": 184,
+            "user": "alice"
+          },
+          "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/CustomDestinations/9b9cdc69c1c24e2b.customDestinations-ms",
+          "provider": "windows-recent-files",
+          "supported": true
+        },
+        {
+          "artifact_type": "recent-shortcut",
+          "details": {
+            "command_line_arguments": "",
+            "description": "",
+            "embedded_paths": [
+              "C:\\Users\\alice\\Documents\\Case Notes.docx",
+              "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
+            ],
+            "entry_hint": "Case Notes",
+            "entry_name": "Case Notes.lnk",
+            "file_attribute_names": [
+              "ARCHIVE"
+            ],
+            "file_attributes": 32,
+            "hot_key": 0,
+            "icon_location": "",
             "link_flag_names": [
               "HasRelativePath",
               "HasWorkingDir",
               "HasArguments",
               "IsUnicode"
             ],
-            "file_attributes": 32,
-            "file_attribute_names": [
-              "ARCHIVE"
-            ],
-            "target_created_at": "2024-03-05T06:07:08+00:00",
-            "target_accessed_at": "2024-03-05T06:07:08+00:00",
-            "target_modified_at": "2024-03-05T06:07:08+00:00",
-            "target_file_size": 4096,
-            "show_command": 1,
-            "hot_key": 0,
-            "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
-            "embedded_paths": [
-              "C:\\Users\\alice\\Documents\\Case Notes.docx",
-              "C:\\Users\\alice\\Documents\\Case Notes.docx\u0018C:\\Users\\alice\\Documents"
-            ],
-            "description": "",
-            "relative_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
-            "working_dir": "C:\\Users\\alice\\Documents",
-            "command_line_arguments": "",
-            "icon_location": "",
+            "link_flags": 184,
             "link_info": {},
-            "string_data_offset": 210
-          }
+            "lnk_header_size": 76,
+            "lnk_parse_status": "parsed",
+            "modified_at": "2024-03-05T06:07:08+00:00",
+            "parser": "windows-recent-files",
+            "parser_version": "windows-recent-files-v3",
+            "relative_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+            "show_command": 1,
+            "size": 210,
+            "source_hashes": {
+              "sha256": "da2e4b2e40f05a29846a074c4b547a8c7433269318482fd77197e4e1f3c736f0"
+            },
+            "string_data_offset": 210,
+            "target_accessed_at": "2024-03-05T06:07:08+00:00",
+            "target_created_at": "2024-03-05T06:07:08+00:00",
+            "target_file_size": 4096,
+            "target_modified_at": "2024-03-05T06:07:08+00:00",
+            "target_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+            "user": "alice",
+            "working_dir": "C:\\Users\\alice\\Documents"
+          },
+          "path": "<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/Case Notes.lnk",
+          "provider": "windows-recent-files",
+          "supported": true
         }
-      ]
+      ],
+      "description": "Windows Recent items and Jump Lists collected from per-user profile directories",
+      "name": "windows-recent-files",
+      "supported": true,
+      "target_platform": "windows"
     },
     {
-      "name": "windows-os-account",
-      "description": "Windows OS and account summary artifacts",
-      "target_platform": "windows",
-      "supported": true,
       "artifacts": [
         {
-          "provider": "windows-os-account",
           "artifact_type": "windows-user-profile",
-          "path": "<ROOT>/Users/alice",
-          "supported": true,
           "details": {
+            "account_type_hint": "user-profile",
+            "coverage_status": "parsed",
+            "ntuser_dat_hashes": {},
+            "ntuser_dat_present": false,
             "parser": "windows-user-profile-inventory",
             "parser_version": "windows-os-account-v3",
-            "coverage_status": "parsed",
+            "profile_modified_at": "2024-03-05T06:06:06+00:00",
+            "profile_path": "<ROOT>/Users/alice",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice",
             "user_name": "alice",
-            "profile_path": "<ROOT>/Users/alice",
-            "profile_modified_at": "2024-03-05T06:06:06+00:00",
-            "ntuser_dat_present": false,
-            "usrclass_dat_present": false,
-            "ntuser_dat_hashes": {},
             "usrclass_dat_hashes": {},
-            "account_type_hint": "user-profile"
-          }
+            "usrclass_dat_present": false
+          },
+          "path": "<ROOT>/Users/alice",
+          "provider": "windows-os-account",
+          "supported": true
         }
-      ]
+      ],
+      "description": "Windows OS and account summary artifacts",
+      "name": "windows-os-account",
+      "supported": true,
+      "target_platform": "windows"
     },
     {
-      "name": "windows-execution",
+      "artifacts": [],
       "description": "Windows execution artifacts from registry exports and PowerShell history",
-      "target_platform": "windows",
+      "name": "windows-execution",
       "supported": true,
-      "artifacts": []
+      "target_platform": "windows"
     },
     {
-      "name": "windows-filesystem",
+      "artifacts": [],
       "description": "Windows MFT and USN Journal imports plus bounded native NTFS inventory",
-      "target_platform": "windows",
+      "name": "windows-filesystem",
       "supported": true,
-      "artifacts": []
+      "target_platform": "windows"
     },
     {
-      "name": "windows-eventlog",
-      "description": "Windows Event Log EVTX inventory and XML/JSON/JSONL/CSV event imports",
-      "target_platform": "windows",
-      "supported": true,
       "artifacts": [
         {
-          "provider": "windows-eventlog",
           "artifact_type": "eventlog-detection",
-          "path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
-          "supported": true,
           "details": {
-            "parser": "windows-eventlog-builtin-rulepack",
-            "parser_version": "eventlog-normalized-v4",
-            "rulepack_version": "eventlog-builtin-rules-v1",
+            "authentication_package_name": "",
+            "channel": "Security",
+            "channel_family": "security",
+            "command_line": "",
+            "computer": "WIN-CASE01",
             "coverage_status": "detected-by-rule",
-            "reportability": "triage",
-            "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
-            "source_format": "xml",
-            "source_index": 0,
-            "source_hashes": {
-              "sha256": "3280198506b93b1d8c90fed52b92c8740c1b0ebb493bbe0d86d40941bad6f906"
-            },
-            "provider_name": "Microsoft-Windows-Security-Auditing",
-            "event_id": "4624",
+            "destination_hostname": "",
+            "destination_ip": "",
+            "destination_port": "",
             "event_category": "logon-success",
+            "event_created_at": "2024-04-01T12:34:56.000000+00:00",
+            "event_description": "Authentication success",
             "event_family": "authentication",
+            "event_id": "4624",
             "event_tags": [
               "category:logon-success",
               "channel:security",
               "event-id:4624",
               "family:authentication"
             ],
-            "event_description": "Authentication success",
-            "record_id": "1001",
-            "channel": "Security",
-            "channel_family": "security",
-            "level": "0",
-            "computer": "WIN-CASE01",
-            "user_sid": "",
-            "user_name": "alice",
-            "subject_user_name": "",
-            "target_user_name": "alice",
-            "target_domain_name": "",
-            "logon_type": "10",
-            "source_ip": "10.0.0.5",
-            "source_port": "",
-            "destination_ip": "",
-            "destination_hostname": "",
-            "destination_port": "",
-            "service_name": "",
-            "service_file_name": "",
-            "process_id": "",
-            "thread_id": "",
-            "process_name": "",
-            "new_process_name": "",
-            "parent_process_name": "",
-            "parent_command_line": "",
-            "command_line": "",
-            "script_block_text": "",
-            "query_name": "",
-            "target_object": "",
-            "image_loaded": "",
-            "task_name": "",
-            "workstation_name": "",
-            "logon_process_name": "",
-            "authentication_package_name": "",
-            "status_code": "",
             "failure_reason": "",
-            "share_name": "",
+            "false_positive_note": "Validate expected administration, source host, account owner, and nearby activity before reporting.",
+            "image_loaded": "",
+            "level": "0",
+            "logon_process_name": "",
+            "logon_type": "10",
+            "matched_event": {
+              "artifact_type": "eventlog-event",
+              "path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+              "record_id": "1001",
+              "source_hashes": {
+                "sha256": "3280198506b93b1d8c90fed52b92c8740c1b0ebb493bbe0d86d40941bad6f906"
+              },
+              "source_index": 0
+            },
+            "matched_fields": [
+              "event_category",
+              "event_id",
+              "logon_type"
+            ],
+            "new_process_name": "",
+            "parent_command_line": "",
+            "parent_process_name": "",
+            "parser": "windows-eventlog-builtin-rulepack",
+            "parser_version": "eventlog-normalized-v5",
+            "process_id": "",
+            "process_name": "",
+            "provider_name": "Microsoft-Windows-Security-Auditing",
+            "query_name": "",
+            "record_id": "1001",
             "relative_target_name": "",
-            "event_created_at": "2024-04-01T12:34:56.000000+00:00",
-            "timestamp": "2024-04-01T12:34:56.000000+00:00",
+            "reportability": "triage",
+            "risk_flags": [
+              "builtin-rule:RT-EVTX-RDP-LOGON",
+              "rdp-logon"
+            ],
+            "risk_score": 45,
             "rule": {
-              "title": "Remote interactive logon",
+              "description": "Successful logon with LogonType 10, commonly associated with RDP remote interactive sessions.",
               "id": "RT-EVTX-RDP-LOGON",
               "level": "medium",
               "mitre_tags": [
                 "attack.lateral-movement",
                 "attack.t1021.001"
               ],
-              "description": "Successful logon with LogonType 10, commonly associated with RDP remote interactive sessions.",
-              "source": "rapidtriage-builtin"
+              "source": "rapidtriage-builtin",
+              "title": "Remote interactive logon"
             },
-            "risk_flags": [
-              "builtin-rule:RT-EVTX-RDP-LOGON",
-              "rdp-logon"
-            ],
-            "risk_score": 45,
-            "matched_fields": [
-              "event_category",
-              "event_id",
-              "logon_type"
-            ],
-            "false_positive_note": "Validate expected administration, source host, account owner, and nearby activity before reporting.",
-            "triage_recommendation": "Pivot by account, source IP/host, logon type, and nearby failures/successes.",
-            "matched_event": {
-              "artifact_type": "eventlog-event",
-              "path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
-              "source_index": 0,
-              "record_id": "1001",
-              "source_hashes": {
-                "sha256": "3280198506b93b1d8c90fed52b92c8740c1b0ebb493bbe0d86d40941bad6f906"
-              }
-            }
-          }
-        },
-        {
-          "provider": "windows-eventlog",
-          "artifact_type": "eventlog-event",
-          "path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
-          "supported": true,
-          "details": {
-            "parser": "windows-eventlog-xml",
-            "parser_version": "eventlog-normalized-v4",
-            "coverage_status": "mapped",
-            "reportability": "reportable",
-            "parser_confidence": 0.9,
-            "evidence_strength": "event-log-record",
-            "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+            "rulepack_version": "eventlog-builtin-rules-v1",
+            "script_block_text": "",
+            "service_file_name": "",
+            "service_name": "",
+            "share_name": "",
             "source_format": "xml",
-            "source_index": 0,
             "source_hashes": {
               "sha256": "3280198506b93b1d8c90fed52b92c8740c1b0ebb493bbe0d86d40941bad6f906"
             },
-            "provider_name": "Microsoft-Windows-Security-Auditing",
-            "event_id": "4624",
+            "source_index": 0,
+            "source_ip": "10.0.0.5",
+            "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+            "source_port": "",
+            "status_code": "",
+            "subject_user_name": "",
+            "target_domain_name": "",
+            "target_object": "",
+            "target_user_name": "alice",
+            "task_name": "",
+            "thread_id": "",
+            "timestamp": "2024-04-01T12:34:56.000000+00:00",
+            "triage_recommendation": "Pivot by account, source IP/host, logon type, and nearby failures/successes.",
+            "user_name": "alice",
+            "user_sid": "",
+            "workstation_name": ""
+          },
+          "path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+          "provider": "windows-eventlog",
+          "supported": true
+        },
+        {
+          "artifact_type": "eventlog-event",
+          "details": {
+            "authentication_package_name": "",
+            "channel": "Security",
+            "channel_family": "security",
+            "command_line": "",
+            "computer": "WIN-CASE01",
+            "coverage_status": "mapped",
+            "data": {
+              "IpAddress": "10.0.0.5",
+              "LogonType": "10",
+              "TargetUserName": "alice"
+            },
+            "destination_hostname": "",
+            "destination_ip": "",
+            "destination_port": "",
             "event_category": "logon-success",
+            "event_created_at": "2024-04-01T12:34:56.000000+00:00",
+            "event_description": "Authentication success",
             "event_family": "authentication",
+            "event_id": "4624",
             "event_tags": [
               "category:logon-success",
               "channel:security",
               "event-id:4624",
               "family:authentication"
             ],
-            "event_description": "Authentication success",
-            "record_id": "1001",
-            "channel": "Security",
-            "channel_family": "security",
-            "level": "0",
-            "computer": "WIN-CASE01",
-            "user_sid": "",
-            "user_name": "alice",
-            "subject_user_name": "",
-            "target_user_name": "alice",
-            "target_domain_name": "",
-            "logon_type": "10",
-            "source_ip": "10.0.0.5",
-            "source_port": "",
-            "destination_ip": "",
-            "destination_hostname": "",
-            "destination_port": "",
-            "service_name": "",
-            "service_file_name": "",
-            "process_id": "",
-            "thread_id": "",
-            "process_name": "",
-            "new_process_name": "",
-            "parent_process_name": "",
-            "parent_command_line": "",
-            "command_line": "",
-            "script_block_text": "",
-            "query_name": "",
-            "target_object": "",
-            "image_loaded": "",
-            "task_name": "",
-            "workstation_name": "",
-            "logon_process_name": "",
-            "authentication_package_name": "",
-            "status_code": "",
+            "evidence_strength": "event-log-record",
             "failure_reason": "",
-            "share_name": "",
-            "relative_target_name": "",
-            "task": "",
-            "opcode": "",
+            "image_loaded": "",
             "keywords": "",
-            "event_created_at": "2024-04-01T12:34:56.000000+00:00",
-            "timestamp": "2024-04-01T12:34:56.000000+00:00",
-            "rule": {
-              "title": "",
-              "id": "",
-              "level": "",
-              "mitre_tags": []
-            },
+            "level": "0",
+            "logon_process_name": "",
+            "logon_type": "10",
+            "new_process_name": "",
+            "opcode": "",
+            "parent_command_line": "",
+            "parent_process_name": "",
+            "parser": "windows-eventlog-xml",
+            "parser_confidence": 0.9,
+            "parser_version": "eventlog-normalized-v5",
+            "process_id": "",
+            "process_name": "",
+            "provider_name": "Microsoft-Windows-Security-Auditing",
+            "query_name": "",
+            "raw_preview": "<ns0:Event xmlns:ns0=\"http://schemas.microsoft.com/win/2004/08/events/event\">\n    <ns0:System>\n      <ns0:Provider Name=\"Microsoft-Windows-Security-Auditing\" />\n      <ns0:EventID>4624</ns0:EventID>\n      <ns0:Level>0</ns0:Level>\n      <ns0:Channel>Security</ns0:Channel>\n      <ns0:Computer>WIN-CASE01</ns0:Computer>\n      <ns0:EventRecordID>1001</ns0:EventRecordID>\n      <ns0:TimeCreated SystemTime=\"2024-04-01T12:34:56.0000000Z\" />\n    </ns0:System>\n    <ns0:EventData>\n      <ns0:Data Name=\"TargetUserName\">alice</ns0:Data>\n      <ns0:Data Name=\"IpAddress\">10.0.0.5</ns0:Data>\n      <ns0:Data Name=\"LogonType\">10</ns0:Data>\n    </ns0:EventData>\n  </ns0:Event>\n",
+            "record_id": "1001",
+            "relative_target_name": "",
+            "reportability": "reportable",
             "risk_flags": [],
             "risk_score": 0,
-            "triage_recommendation": "Pivot by account, source IP/host, logon type, and nearby failures/successes.",
-            "data": {
-              "TargetUserName": "alice",
-              "IpAddress": "10.0.0.5",
-              "LogonType": "10"
+            "rule": {
+              "id": "",
+              "level": "",
+              "mitre_tags": [],
+              "title": ""
             },
-            "raw_preview": "<ns0:Event xmlns:ns0=\"http://schemas.microsoft.com/win/2004/08/events/event\">\n    <ns0:System>\n      <ns0:Provider Name=\"Microsoft-Windows-Security-Auditing\" />\n      <ns0:EventID>4624</ns0:EventID>\n      <ns0:Level>0</ns0:Level>\n      <ns0:Channel>Security</ns0:Channel>\n      <ns0:Computer>WIN-CASE01</ns0:Computer>\n      <ns0:EventRecordID>1001</ns0:EventRecordID>\n      <ns0:TimeCreated SystemTime=\"2024-04-01T12:34:56.0000000Z\" />\n    </ns0:System>\n    <ns0:EventData>\n      <ns0:Data Name=\"TargetUserName\">alice</ns0:Data>\n      <ns0:Data Name=\"IpAddress\">10.0.0.5</ns0:Data>\n      <ns0:Data Name=\"LogonType\">10</ns0:Data>\n    </ns0:EventData>\n  </ns0:Event>\n"
-          }
+            "script_block_text": "",
+            "service_file_name": "",
+            "service_name": "",
+            "share_name": "",
+            "source_format": "xml",
+            "source_hashes": {
+              "sha256": "3280198506b93b1d8c90fed52b92c8740c1b0ebb493bbe0d86d40941bad6f906"
+            },
+            "source_index": 0,
+            "source_ip": "10.0.0.5",
+            "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+            "source_port": "",
+            "status_code": "",
+            "subject_user_name": "",
+            "target_domain_name": "",
+            "target_object": "",
+            "target_user_name": "alice",
+            "task": "",
+            "task_name": "",
+            "thread_id": "",
+            "timestamp": "2024-04-01T12:34:56.000000+00:00",
+            "triage_recommendation": "Pivot by account, source IP/host, logon type, and nearby failures/successes.",
+            "user_name": "alice",
+            "user_sid": "",
+            "workstation_name": ""
+          },
+          "path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+          "provider": "windows-eventlog",
+          "supported": true
         },
         {
-          "provider": "windows-eventlog",
           "artifact_type": "eventlog-summary",
-          "path": "<ROOT>",
-          "supported": true,
           "details": {
-            "parser": "windows-eventlog-summary",
-            "parser_version": "eventlog-normalized-v4",
-            "coverage_status": "summarized",
-            "reportability": "triage",
-            "source_path": "<ROOT>",
-            "source_format": "summary",
-            "event_count": 1,
-            "detection_count": 1,
-            "parsed_row_count": 2,
-            "inventory_count": 0,
-            "source_files": [
-              "<ROOT>/Windows/System32/winevt/Logs/Security.xml"
-            ],
-            "detection_rule_counts": [
-              {
-                "value": "RT-EVTX-RDP-LOGON",
-                "count": 1
-              }
-            ],
-            "event_id_counts": [
-              {
-                "value": "4624",
-                "count": 1
-              }
-            ],
-            "event_category_counts": [
-              {
-                "value": "logon-success",
-                "count": 1
-              }
-            ],
-            "event_family_counts": [
-              {
-                "value": "authentication",
-                "count": 1
-              }
-            ],
             "channel_counts": [
               {
-                "value": "Security",
-                "count": 1
+                "count": 1,
+                "value": "Security"
               }
             ],
             "channel_family_counts": [
               {
-                "value": "security",
-                "count": 1
+                "count": 1,
+                "value": "security"
               }
             ],
-            "user_counts": [
-              {
-                "value": "alice",
-                "count": 1
-              }
-            ],
-            "source_ip_counts": [
-              {
-                "value": "10.0.0.5",
-                "count": 1
-              }
-            ],
-            "process_counts": [],
-            "parser_status_counts": [
-              {
-                "value": "mapped",
-                "count": 1
-              },
-              {
-                "value": "detected-by-rule",
-                "count": 1
-              }
-            ],
-            "reportability_counts": [
-              {
-                "value": "reportable",
-                "count": 1
-              },
-              {
-                "value": "triage",
-                "count": 1
-              }
-            ],
-            "risk_term_counts": [],
-            "native_integrity_counts": [],
-            "native_sequence_counts": [],
-            "native_channel_hint_counts": [],
+            "coverage_status": "summarized",
+            "detection_count": 1,
             "detection_level_counts": [
               {
-                "value": "medium",
-                "count": 1
+                "count": 1,
+                "value": "medium"
+              }
+            ],
+            "detection_rule_counts": [
+              {
+                "count": 1,
+                "value": "RT-EVTX-RDP-LOGON"
+              }
+            ],
+            "event_category_counts": [
+              {
+                "count": 1,
+                "value": "logon-success"
+              }
+            ],
+            "event_count": 1,
+            "event_family_counts": [
+              {
+                "count": 1,
+                "value": "authentication"
+              }
+            ],
+            "event_id_counts": [
+              {
+                "count": 1,
+                "value": "4624"
               }
             ],
             "first_event_at": "2024-04-01T12:34:56.000000+00:00",
-            "last_event_at": "2024-04-01T12:34:56.000000+00:00",
             "high_risk_events": [
               {
-                "timestamp": "2024-04-01T12:34:56.000000+00:00",
-                "event_id": "4624",
-                "event_category": "logon-success",
                 "channel": "Security",
-                "user_name": "alice",
-                "source_ip": "10.0.0.5",
+                "event_category": "logon-success",
+                "event_id": "4624",
                 "process_name": "",
-                "risk_score": 45,
                 "risk_flags": [
                   "builtin-rule:RT-EVTX-RDP-LOGON",
                   "rdp-logon"
                 ],
+                "risk_score": 45,
                 "rule": {
-                  "title": "Remote interactive logon",
+                  "description": "Successful logon with LogonType 10, commonly associated with RDP remote interactive sessions.",
                   "id": "RT-EVTX-RDP-LOGON",
                   "level": "medium",
                   "mitre_tags": [
                     "attack.lateral-movement",
                     "attack.t1021.001"
                   ],
-                  "description": "Successful logon with LogonType 10, commonly associated with RDP remote interactive sessions.",
-                  "source": "rapidtriage-builtin"
+                  "source": "rapidtriage-builtin",
+                  "title": "Remote interactive logon"
                 },
-                "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml"
+                "source_ip": "10.0.0.5",
+                "source_path": "<ROOT>/Windows/System32/winevt/Logs/Security.xml",
+                "timestamp": "2024-04-01T12:34:56.000000+00:00",
+                "user_name": "alice"
               }
             ],
+            "inventory_count": 0,
+            "last_event_at": "2024-04-01T12:34:56.000000+00:00",
+            "native_binxml_status_counts": [],
+            "native_channel_hint_counts": [],
+            "native_integrity_counts": [],
+            "native_sequence_counts": [],
+            "parsed_row_count": 2,
+            "parser": "windows-eventlog-summary",
+            "parser_status_counts": [
+              {
+                "count": 1,
+                "value": "mapped"
+              },
+              {
+                "count": 1,
+                "value": "detected-by-rule"
+              }
+            ],
+            "parser_version": "eventlog-normalized-v5",
+            "process_counts": [],
             "record_sequence_gaps": [],
+            "reportability": "triage",
+            "reportability_counts": [
+              {
+                "count": 1,
+                "value": "reportable"
+              },
+              {
+                "count": 1,
+                "value": "triage"
+              }
+            ],
+            "risk_term_counts": [],
+            "source_files": [
+              "<ROOT>/Windows/System32/winevt/Logs/Security.xml"
+            ],
+            "source_format": "summary",
+            "source_ip_counts": [
+              {
+                "count": 1,
+                "value": "10.0.0.5"
+              }
+            ],
+            "source_path": "<ROOT>",
             "summary_notes": [
               "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
-              "Binary EVTX rows include partial native record scans when recoverable; use external parser exports for complete BinXML field fidelity."
+              "Binary EVTX rows include partial native record scans when recoverable; native_binxml_status_counts shows whether BinXML field decoding is complete.",
+              "Use external parser exports for complete Event/System/EventData BinXML field fidelity before report-grade conclusions."
+            ],
+            "user_counts": [
+              {
+                "count": 1,
+                "value": "alice"
+              }
             ]
-          }
+          },
+          "path": "<ROOT>",
+          "provider": "windows-eventlog",
+          "supported": true
         }
-      ]
+      ],
+      "description": "Windows Event Log EVTX inventory and XML/JSON/JSONL/CSV event imports",
+      "name": "windows-eventlog",
+      "supported": true,
+      "target_platform": "windows"
     },
     {
-      "name": "windows-registry",
-      "description": "Windows Registry .reg export artifacts",
-      "target_platform": "windows",
-      "supported": true,
       "artifacts": [
         {
-          "provider": "windows-registry",
           "artifact_type": "registry-key",
-          "path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
-          "supported": true,
           "details": {
+            "coverage_status": "mapped",
+            "hive_hint": "HKEY_CURRENT_USER",
+            "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
             "parser": "windows-registry-reg-export",
             "parser_version": "registry-normalized-v4",
-            "coverage_status": "mapped",
+            "persistence_values": [],
+            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]",
             "reportability": "triage",
-            "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+            "risk_flags": [],
+            "risk_score": 0,
             "source_format": "reg",
             "source_hashes": {
               "sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4"
             },
-            "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
-            "hive_hint": "HKEY_CURRENT_USER",
+            "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+            "usb_device": {},
             "value_count": 2,
             "value_names": [
               "0",
@@ -898,214 +897,163 @@
             "values": {
               "0": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
               "NodeSlot": "dword:00000001"
-            },
-            "persistence_values": [],
-            "usb_device": {},
-            "risk_flags": [],
-            "risk_score": 0,
-            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]"
-          }
+            }
+          },
+          "path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+          "provider": "windows-registry",
+          "supported": true
         },
         {
-          "provider": "windows-registry",
           "artifact_type": "registry-key",
-          "path": "<ROOT>/Windows/System32/config/rdp.reg",
-          "supported": true,
           "details": {
+            "coverage_status": "mapped",
+            "hive_hint": "HKEY_CURRENT_USER",
+            "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50",
             "parser": "windows-registry-reg-export",
             "parser_version": "registry-normalized-v4",
-            "coverage_status": "mapped",
+            "persistence_values": [],
+            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50]",
             "reportability": "triage",
-            "source_path": "<ROOT>/Windows/System32/config/rdp.reg",
+            "risk_flags": [],
+            "risk_score": 0,
             "source_format": "reg",
             "source_hashes": {
               "sha256": "0f2b6d48874757936e4c25cafff657a0be3041b52644b0198ca64f21f0860183"
             },
-            "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50",
-            "hive_hint": "HKEY_CURRENT_USER",
+            "source_path": "<ROOT>/Windows/System32/config/rdp.reg",
+            "usb_device": {},
             "value_count": 1,
             "value_names": [
               "MRU0"
             ],
             "values": {
               "MRU0": "\"10.0.0.50\""
-            },
-            "persistence_values": [],
-            "usb_device": {},
-            "risk_flags": [],
-            "risk_score": 0,
-            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50]"
-          }
+            }
+          },
+          "path": "<ROOT>/Windows/System32/config/rdp.reg",
+          "provider": "windows-registry",
+          "supported": true
         },
         {
-          "provider": "windows-registry",
           "artifact_type": "registry-run-key",
-          "path": "<ROOT>/Windows/System32/config/software.reg",
-          "supported": true,
           "details": {
+            "coverage_status": "mapped",
+            "hive_hint": "HKEY_LOCAL_MACHINE",
+            "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
             "parser": "windows-registry-reg-export",
             "parser_version": "registry-normalized-v4",
-            "coverage_status": "mapped",
+            "persistence_values": [
+              {
+                "command": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                "executable_hint": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                "risk_flags": [
+                  "suspicious-value:appdata"
+                ],
+                "value_name": "SecurityUpdater"
+              }
+            ],
+            "raw_preview": "[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run]",
             "reportability": "triage",
-            "source_path": "<ROOT>/Windows/System32/config/software.reg",
+            "risk_flags": [
+              "persistence-key",
+              "suspicious-value:appdata"
+            ],
+            "risk_score": 70,
             "source_format": "reg",
             "source_hashes": {
               "sha256": "bdd4195a9ef353c5742507127c1d80ed88b28e24a7038f5797582bb5258ba764"
             },
-            "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-            "hive_hint": "HKEY_LOCAL_MACHINE",
+            "source_path": "<ROOT>/Windows/System32/config/software.reg",
+            "usb_device": {},
             "value_count": 1,
             "value_names": [
               "SecurityUpdater"
             ],
             "values": {
               "SecurityUpdater": "\"C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe\""
-            },
-            "persistence_values": [
-              {
-                "value_name": "SecurityUpdater",
-                "command": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
-                "executable_hint": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
-                "risk_flags": [
-                  "suspicious-value:appdata"
-                ]
-              }
-            ],
-            "usb_device": {},
-            "risk_flags": [
-              "persistence-key",
-              "suspicious-value:appdata"
-            ],
-            "risk_score": 70,
-            "raw_preview": "[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run]"
-          }
+            }
+          },
+          "path": "<ROOT>/Windows/System32/config/software.reg",
+          "provider": "windows-registry",
+          "supported": true
         },
         {
-          "provider": "windows-registry",
           "artifact_type": "registry-summary",
-          "path": "<ROOT>",
-          "supported": true,
           "details": {
+            "artifact_type_counts": [
+              {
+                "count": 2,
+                "value": "registry-key"
+              },
+              {
+                "count": 2,
+                "value": "registry-user-activity"
+              },
+              {
+                "count": 1,
+                "value": "registry-run-key"
+              },
+              {
+                "count": 1,
+                "value": "registry-usb"
+              }
+            ],
+            "coverage_status": "summarized",
+            "deleted_cell_candidate_count": 0,
+            "deleted_cell_candidates": [],
+            "hive_cell_hits": [],
+            "hive_cell_row_count": 0,
+            "hive_counts": [
+              {
+                "count": 3,
+                "value": "HKEY_CURRENT_USER"
+              },
+              {
+                "count": 3,
+                "value": "HKEY_LOCAL_MACHINE"
+              }
+            ],
+            "hive_file_count": 0,
+            "hive_files": [],
+            "hive_string_hits": [],
+            "hive_string_row_count": 0,
+            "key_count": 4,
             "parser": "windows-registry-summary",
             "parser_version": "registry-normalized-v4",
-            "coverage_status": "summarized",
-            "reportability": "triage",
-            "source_path": "<ROOT>",
-            "source_format": "summary",
+            "persistence_entries": [
+              {
+                "command": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                "executable_hint": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                "risk_flags": [
+                  "suspicious-value:appdata"
+                ],
+                "value_name": "SecurityUpdater"
+              }
+            ],
             "record_count": 6,
-            "key_count": 4,
-            "hive_file_count": 0,
-            "hive_string_row_count": 0,
-            "hive_cell_row_count": 0,
-            "deleted_cell_candidate_count": 0,
-            "user_activity_count": 2,
+            "reportability": "triage",
             "source_files": [
               "<ROOT>/Users/alice/NTUSER-shellbags.reg",
               "<ROOT>/Windows/System32/config/rdp.reg",
               "<ROOT>/Windows/System32/config/software.reg"
             ],
-            "artifact_type_counts": [
-              {
-                "value": "registry-key",
-                "count": 2
-              },
-              {
-                "value": "registry-user-activity",
-                "count": 2
-              },
-              {
-                "value": "registry-run-key",
-                "count": 1
-              },
-              {
-                "value": "registry-usb",
-                "count": 1
-              }
-            ],
+            "source_format": "summary",
             "source_format_counts": [
               {
-                "value": "reg",
-                "count": 6
+                "count": 6,
+                "value": "reg"
               }
             ],
-            "hive_counts": [
-              {
-                "value": "HKEY_CURRENT_USER",
-                "count": 3
-              },
-              {
-                "value": "HKEY_LOCAL_MACHINE",
-                "count": 3
-              }
-            ],
-            "hive_files": [],
-            "hive_string_hits": [],
-            "hive_cell_hits": [],
-            "deleted_cell_candidates": [],
-            "user_activity_entries": [
-              {
-                "source_path": "<ROOT>/Windows/System32/config/software.reg",
-                "source_format": "reg",
-                "coverage_status": "mapped-reg-export",
-                "hive_hint": "HKEY_LOCAL_MACHINE",
-                "user_hive_scope": "registry-export",
-                "user_activity_category": "persistence",
-                "activity_label": "CurrentVersion Run persistence",
-                "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-                "value_names": [
-                  "SecurityUpdater"
-                ],
-                "risk_flags": [
-                  "suspicious-value:appdata",
-                  "user-activity:persistence",
-                  "user-hive-persistence"
-                ],
-                "validation_required": false
-              },
-              {
-                "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
-                "source_format": "reg",
-                "coverage_status": "mapped-reg-export",
-                "hive_hint": "HKEY_CURRENT_USER",
-                "user_hive_scope": "exported-user-hive",
-                "user_activity_category": "shellbag",
-                "activity_label": "ShellBags BagMRU",
-                "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
-                "value_names": [
-                  "0",
-                  "NodeSlot"
-                ],
-                "risk_flags": [
-                  "folder-view-history",
-                  "user-activity:shellbag"
-                ],
-                "validation_required": false
-              }
-            ],
-            "persistence_entries": [
-              {
-                "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-                "value_name": "SecurityUpdater",
-                "command": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
-                "executable_hint": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
-                "risk_flags": [
-                  "suspicious-value:appdata"
-                ]
-              }
-            ],
-            "usb_devices": [
-              {
-                "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890",
-                "device_class": "Disk&Ven_Test&Prod_USB&Rev_1.00",
-                "serial_hint": "1234567890",
-                "friendly_name": "Test USB Device",
-                "parent_id_prefix": ""
-              }
+            "source_path": "<ROOT>",
+            "summary_notes": [
+              "Registry hive rows use native regf header parsing, bounded string scanning, bounded nk/vk cell candidate scanning, and separate deleted/free cell candidate rows; full key-tree reconstruction and deleted-value testimony require validation with a dedicated hive parser.",
+              "Run-key command hints are triage pivots, not proof that a program executed."
             ],
             "suspicious_entries": [
               {
-                "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
                 "artifact_type": "registry-user-activity",
+                "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
                 "risk_flags": [
                   "suspicious-value:appdata",
                   "user-activity:persistence",
@@ -1115,8 +1063,8 @@
                 "source_path": "<ROOT>/Windows/System32/config/software.reg"
               },
               {
-                "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
                 "artifact_type": "registry-run-key",
+                "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
                 "risk_flags": [
                   "persistence-key",
                   "suspicious-value:appdata"
@@ -1125,8 +1073,8 @@
                 "source_path": "<ROOT>/Windows/System32/config/software.reg"
               },
               {
-                "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
                 "artifact_type": "registry-user-activity",
+                "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
                 "risk_flags": [
                   "folder-view-history",
                   "user-activity:shellbag"
@@ -1135,73 +1083,102 @@
                 "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg"
               }
             ],
-            "summary_notes": [
-              "Registry hive rows use native regf header parsing, bounded string scanning, bounded nk/vk cell candidate scanning, and separate deleted/free cell candidate rows; full key-tree reconstruction and deleted-value testimony require validation with a dedicated hive parser.",
-              "Run-key command hints are triage pivots, not proof that a program executed."
+            "usb_devices": [
+              {
+                "device_class": "Disk&Ven_Test&Prod_USB&Rev_1.00",
+                "friendly_name": "Test USB Device",
+                "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890",
+                "parent_id_prefix": "",
+                "serial_hint": "1234567890"
+              }
+            ],
+            "user_activity_count": 2,
+            "user_activity_entries": [
+              {
+                "activity_label": "CurrentVersion Run persistence",
+                "coverage_status": "mapped-reg-export",
+                "hive_hint": "HKEY_LOCAL_MACHINE",
+                "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                "risk_flags": [
+                  "suspicious-value:appdata",
+                  "user-activity:persistence",
+                  "user-hive-persistence"
+                ],
+                "source_format": "reg",
+                "source_path": "<ROOT>/Windows/System32/config/software.reg",
+                "user_activity_category": "persistence",
+                "user_hive_scope": "registry-export",
+                "validation_required": false,
+                "value_names": [
+                  "SecurityUpdater"
+                ]
+              },
+              {
+                "activity_label": "ShellBags BagMRU",
+                "coverage_status": "mapped-reg-export",
+                "hive_hint": "HKEY_CURRENT_USER",
+                "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+                "risk_flags": [
+                  "folder-view-history",
+                  "user-activity:shellbag"
+                ],
+                "source_format": "reg",
+                "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+                "user_activity_category": "shellbag",
+                "user_hive_scope": "exported-user-hive",
+                "validation_required": false,
+                "value_names": [
+                  "0",
+                  "NodeSlot"
+                ]
+              }
             ]
-          }
+          },
+          "path": "<ROOT>",
+          "provider": "windows-registry",
+          "supported": true
         },
         {
-          "provider": "windows-registry",
           "artifact_type": "registry-usb",
-          "path": "<ROOT>/Windows/System32/config/software.reg",
-          "supported": true,
           "details": {
+            "coverage_status": "mapped",
+            "hive_hint": "HKEY_LOCAL_MACHINE",
+            "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890",
             "parser": "windows-registry-reg-export",
             "parser_version": "registry-normalized-v4",
-            "coverage_status": "mapped",
+            "persistence_values": [],
+            "raw_preview": "[HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890]",
             "reportability": "triage",
-            "source_path": "<ROOT>/Windows/System32/config/software.reg",
+            "risk_flags": [],
+            "risk_score": 0,
             "source_format": "reg",
             "source_hashes": {
               "sha256": "bdd4195a9ef353c5742507127c1d80ed88b28e24a7038f5797582bb5258ba764"
             },
-            "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890",
-            "hive_hint": "HKEY_LOCAL_MACHINE",
+            "source_path": "<ROOT>/Windows/System32/config/software.reg",
+            "usb_device": {
+              "device_class": "Disk&Ven_Test&Prod_USB&Rev_1.00",
+              "friendly_name": "Test USB Device",
+              "parent_id_prefix": "",
+              "serial_hint": "1234567890"
+            },
             "value_count": 1,
             "value_names": [
               "FriendlyName"
             ],
             "values": {
               "FriendlyName": "\"Test USB Device\""
-            },
-            "persistence_values": [],
-            "usb_device": {
-              "device_class": "Disk&Ven_Test&Prod_USB&Rev_1.00",
-              "serial_hint": "1234567890",
-              "friendly_name": "Test USB Device",
-              "parent_id_prefix": ""
-            },
-            "risk_flags": [],
-            "risk_score": 0,
-            "raw_preview": "[HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890]"
-          }
+            }
+          },
+          "path": "<ROOT>/Windows/System32/config/software.reg",
+          "provider": "windows-registry",
+          "supported": true
         },
         {
-          "provider": "windows-registry",
           "artifact_type": "registry-user-activity",
-          "path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
-          "supported": true,
           "details": {
-            "parser": "windows-registry-user-hive-activity",
-            "parser_version": "registry-normalized-v4",
-            "coverage_status": "mapped-reg-export",
-            "reportability": "review",
-            "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
-            "source_format": "reg",
-            "source_hashes": {
-              "sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4"
-            },
-            "hive_hint": "HKEY_CURRENT_USER",
-            "user_hive_scope": "exported-user-hive",
-            "user_activity_category": "shellbag",
             "activity_label": "ShellBags BagMRU",
-            "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
-            "value_count": 2,
-            "value_names": [
-              "0",
-              "NodeSlot"
-            ],
+            "coverage_status": "mapped-reg-export",
             "decoded_values": {
               "0": {
                 "raw": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
@@ -1212,310 +1189,310 @@
                 "value": "dword:00000001"
               }
             },
-            "parser_confidence": 0.86,
             "evidence_strength": "registry-export-key",
+            "hive_hint": "HKEY_CURRENT_USER",
+            "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+            "parser": "windows-registry-user-hive-activity",
+            "parser_confidence": 0.86,
+            "parser_version": "registry-normalized-v4",
+            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]",
+            "reportability": "review",
             "risk_flags": [
               "folder-view-history",
               "user-activity:shellbag"
             ],
             "risk_score": 60,
-            "validation_required": false,
-            "validation_guidance": "Registry export keys preserve explicit paths and values, but report-grade user activity should still be cross-checked against source hive hashes and collection context.",
-            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]"
-          }
-        },
-        {
-          "provider": "windows-registry",
-          "artifact_type": "registry-user-activity",
-          "path": "<ROOT>/Windows/System32/config/software.reg",
-          "supported": true,
-          "details": {
-            "parser": "windows-registry-user-hive-activity",
-            "parser_version": "registry-normalized-v4",
-            "coverage_status": "mapped-reg-export",
-            "reportability": "review",
-            "source_path": "<ROOT>/Windows/System32/config/software.reg",
             "source_format": "reg",
             "source_hashes": {
-              "sha256": "bdd4195a9ef353c5742507127c1d80ed88b28e24a7038f5797582bb5258ba764"
+              "sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4"
             },
-            "hive_hint": "HKEY_LOCAL_MACHINE",
-            "user_hive_scope": "registry-export",
-            "user_activity_category": "persistence",
-            "activity_label": "CurrentVersion Run persistence",
-            "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-            "value_count": 1,
+            "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+            "user_activity_category": "shellbag",
+            "user_hive_scope": "exported-user-hive",
+            "validation_guidance": "Registry export keys preserve explicit paths and values, but report-grade user activity should still be cross-checked against source hive hashes and collection context.",
+            "validation_required": false,
+            "value_count": 2,
             "value_names": [
-              "SecurityUpdater"
-            ],
+              "0",
+              "NodeSlot"
+            ]
+          },
+          "path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+          "provider": "windows-registry",
+          "supported": true
+        },
+        {
+          "artifact_type": "registry-user-activity",
+          "details": {
+            "activity_label": "CurrentVersion Run persistence",
+            "coverage_status": "mapped-reg-export",
             "decoded_values": {
               "SecurityUpdater": {
-                "raw": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
                 "command": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
-                "executable_hint": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe"
+                "executable_hint": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                "raw": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe"
               }
             },
-            "parser_confidence": 0.86,
             "evidence_strength": "registry-export-key",
+            "hive_hint": "HKEY_LOCAL_MACHINE",
+            "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            "parser": "windows-registry-user-hive-activity",
+            "parser_confidence": 0.86,
+            "parser_version": "registry-normalized-v4",
+            "raw_preview": "[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run]",
+            "reportability": "review",
             "risk_flags": [
               "suspicious-value:appdata",
               "user-activity:persistence",
               "user-hive-persistence"
             ],
             "risk_score": 80,
-            "validation_required": false,
+            "source_format": "reg",
+            "source_hashes": {
+              "sha256": "bdd4195a9ef353c5742507127c1d80ed88b28e24a7038f5797582bb5258ba764"
+            },
+            "source_path": "<ROOT>/Windows/System32/config/software.reg",
+            "user_activity_category": "persistence",
+            "user_hive_scope": "registry-export",
             "validation_guidance": "Registry export keys preserve explicit paths and values, but report-grade user activity should still be cross-checked against source hive hashes and collection context.",
-            "raw_preview": "[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run]"
-          }
+            "validation_required": false,
+            "value_count": 1,
+            "value_names": [
+              "SecurityUpdater"
+            ]
+          },
+          "path": "<ROOT>/Windows/System32/config/software.reg",
+          "provider": "windows-registry",
+          "supported": true
         }
-      ]
+      ],
+      "description": "Windows Registry .reg export artifacts",
+      "name": "windows-registry",
+      "supported": true,
+      "target_platform": "windows"
     },
     {
-      "name": "windows-remote-access",
-      "description": "Windows RDP configuration, cache, and exported destination artifacts",
-      "target_platform": "windows",
-      "supported": true,
       "artifacts": [
         {
-          "provider": "windows-remote-access",
           "artifact_type": "rdp-cache-file",
-          "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
-          "supported": true,
           "details": {
+            "cache_parse_status": "image-signature-pivots",
+            "coverage_status": "mapped",
+            "entry_name": "Cache0000.bin",
+            "modified_at": "2024-03-05T06:07:12+00:00",
+            "note": "RDP cache file inventoried with bounded image signature pivots for remote-access thumbnail review; validate important screenshots with a dedicated RDP cache decoder.",
             "parser": "windows-remote-access",
             "parser_version": "windows-remote-access-v2",
-            "coverage_status": "mapped",
             "reportability": "triage",
-            "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
+            "size": 16,
             "source_format": "rdp-cache",
             "source_hashes": {
               "sha256": "be45a509d05e772aa8200d8a922c64a197020bb5ccf6d52913ebf11c27f78e7f"
             },
-            "user": "alice",
-            "entry_name": "Cache0000.bin",
-            "size": 16,
-            "cache_parse_status": "image-signature-pivots",
+            "source_path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
             "thumbnail_candidate_count": 0,
             "thumbnail_candidates": [],
-            "modified_at": "2024-03-05T06:07:12+00:00",
             "timestamp": "2024-03-05T06:07:12+00:00",
             "timestamp_source": "rdp_cache_modified_at",
-            "note": "RDP cache file inventoried with bounded image signature pivots for remote-access thumbnail review; validate important screenshots with a dedicated RDP cache decoder."
-          }
+            "user": "alice"
+          },
+          "path": "<ROOT>/Users/alice/AppData/Local/Microsoft/Terminal Server Client/Cache/Cache0000.bin",
+          "provider": "windows-remote-access",
+          "supported": true
         },
         {
-          "provider": "windows-remote-access",
           "artifact_type": "rdp-config",
-          "path": "<ROOT>/Users/alice/Documents/Default.rdp",
-          "supported": true,
           "details": {
+            "coverage_status": "mapped",
+            "destination": "10.0.0.50",
+            "fields": {
+              "full address": "10.0.0.50",
+              "gatewayhostname": "rd-gateway.example",
+              "username": "CORP\\alice"
+            },
+            "gateway_hostname": "rd-gateway.example",
+            "modified_at": "2024-03-05T06:07:11+00:00",
             "parser": "windows-remote-access",
             "parser_version": "windows-remote-access-v2",
-            "coverage_status": "mapped",
             "reportability": "triage",
-            "source_path": "<ROOT>/Users/alice/Documents/Default.rdp",
+            "screen_mode": "",
             "source_format": "rdp",
             "source_hashes": {
               "sha256": "e615763020e18b95272df423c489140252c35f7fa7c4b2eb0bbc203cfad96685"
             },
-            "user": "alice",
-            "destination": "10.0.0.50",
-            "username_hint": "CORP\\alice",
-            "screen_mode": "",
-            "gateway_hostname": "rd-gateway.example",
-            "fields": {
-              "full address": "10.0.0.50",
-              "username": "CORP\\alice",
-              "gatewayhostname": "rd-gateway.example"
-            },
-            "modified_at": "2024-03-05T06:07:11+00:00",
+            "source_path": "<ROOT>/Users/alice/Documents/Default.rdp",
             "timestamp": "2024-03-05T06:07:11+00:00",
-            "timestamp_source": "rdp_file_modified_at"
-          }
+            "timestamp_source": "rdp_file_modified_at",
+            "user": "alice",
+            "username_hint": "CORP\\alice"
+          },
+          "path": "<ROOT>/Users/alice/Documents/Default.rdp",
+          "provider": "windows-remote-access",
+          "supported": true
         },
         {
-          "provider": "windows-remote-access",
           "artifact_type": "rdp-destination",
-          "path": "<ROOT>/Windows/System32/config/rdp.reg",
-          "supported": true,
           "details": {
+            "coverage_status": "mapped",
+            "destination": "10.0.0.50",
+            "evidence_strength": "remote-access-destination",
             "parser": "windows-remote-access",
             "parser_version": "windows-remote-access-v2",
-            "coverage_status": "mapped",
+            "raw_preview": "Windows Registry Editor Version 5.00\n\n[HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50]\n\"MRU0\"=\"10.0.0.50\"\n",
             "reportability": "triage",
-            "source_path": "<ROOT>/Windows/System32/config/rdp.reg",
             "source_format": "reg-export",
             "source_hashes": {
               "sha256": "0f2b6d48874757936e4c25cafff657a0be3041b52644b0198ca64f21f0860183"
             },
-            "destination": "10.0.0.50",
-            "evidence_strength": "remote-access-destination",
-            "raw_preview": "Windows Registry Editor Version 5.00\n\n[HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50]\n\"MRU0\"=\"10.0.0.50\"\n"
-          }
+            "source_path": "<ROOT>/Windows/System32/config/rdp.reg"
+          },
+          "path": "<ROOT>/Windows/System32/config/rdp.reg",
+          "provider": "windows-remote-access",
+          "supported": true
         }
-      ]
+      ],
+      "description": "Windows RDP configuration, cache, and exported destination artifacts",
+      "name": "windows-remote-access",
+      "supported": true,
+      "target_platform": "windows"
     },
     {
-      "name": "windows-search-index",
-      "description": "Windows Search index EDB inventory and CSV/JSON export imports",
-      "target_platform": "windows",
-      "supported": true,
       "artifacts": [
         {
-          "provider": "windows-search-index",
           "artifact_type": "windows-search-edb-file",
-          "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
-          "supported": false,
           "details": {
-            "parser": "windows-search-edb-inventory",
-            "parser_version": "windows-search-index-import-v3",
             "coverage_status": "ese-header-string-scan",
-            "reportability": "inventory-only",
-            "source_path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
-            "source_format": "ese-edb",
-            "source_hashes": {
-              "sha256": "a9a209f53f1525135d35eb951d743f7931df271e7e0c9c2f39d3dead3adb6eee"
-            },
-            "size": 25,
-            "modified_at": 1709618830.0,
             "ese_header": {
-              "header_readable": true,
-              "signature_valid": false,
-              "signature_hex": "6c652077",
-              "header_sha256": "a9a209f53f1525135d35eb951d743f7931df271e7e0c9c2f39d3dead3adb6eee",
-              "format_version": 1868852841,
               "file_type": 1931506551,
-              "page_size": 0
+              "format_version": 1868852841,
+              "header_readable": true,
+              "header_sha256": "a9a209f53f1525135d35eb951d743f7931df271e7e0c9c2f39d3dead3adb6eee",
+              "page_size": 0,
+              "signature_hex": "6c652077",
+              "signature_valid": false
             },
-            "parser_confidence": 0.35,
             "evidence_strength": "search-index-database-presence",
-            "string_scan_bytes": 25,
             "extracted_string_count": 1,
             "extracted_strings": [
               "sample windows search edb"
             ],
+            "modified_at": 1709618830.0,
+            "note": "Windows.edb is inventoried directly with bounded ESE header/string pivots; export CSV/JSON rows with a trusted ESE/Search parser for full table decoding.",
+            "parser": "windows-search-edb-inventory",
+            "parser_confidence": 0.35,
+            "parser_version": "windows-search-index-import-v3",
             "path_candidates": [],
-            "url_candidates": [],
-            "suspicious_strings": [],
-            "risk_flags": [],
-            "risk_score": 0,
             "recommended_parsers": [
               "WinSearchDBAnalyzer",
               "ESEDatabaseView",
               "libesedb/esedbexport"
             ],
-            "note": "Windows.edb is inventoried directly with bounded ESE header/string pivots; export CSV/JSON rows with a trusted ESE/Search parser for full table decoding."
-          }
+            "reportability": "inventory-only",
+            "risk_flags": [],
+            "risk_score": 0,
+            "size": 25,
+            "source_format": "ese-edb",
+            "source_hashes": {
+              "sha256": "a9a209f53f1525135d35eb951d743f7931df271e7e0c9c2f39d3dead3adb6eee"
+            },
+            "source_path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+            "string_scan_bytes": 25,
+            "suspicious_strings": [],
+            "url_candidates": []
+          },
+          "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+          "provider": "windows-search-index",
+          "supported": false
         },
         {
-          "provider": "windows-search-index",
           "artifact_type": "windows-search-index-entry",
-          "path": "<ROOT>/analysis/windows-search-index.csv",
-          "supported": true,
           "details": {
+            "accessed_at": "",
+            "author": "",
+            "content_snippet": "rapid forensic case notes",
+            "coverage_status": "mapped",
+            "created_at": "",
+            "entry_id": "7",
+            "extension": ".docx",
+            "file_name": "Case Notes.docx",
+            "item_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+            "modified_at": "2024-03-05T06:07:08+00:00",
             "parser": "windows-search-index-import",
             "parser_version": "windows-search-index-import-v3",
-            "coverage_status": "mapped",
+            "raw": {
+              "DocID": "7",
+              "System.DateModified": "2024-03-05T06:07:08Z",
+              "System.FileName": "Case Notes.docx",
+              "System.ItemPathDisplay": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+              "System.Search.Contents": "rapid forensic case notes",
+              "System.Size": "2048",
+              "System.Title": "Case Notes"
+            },
+            "raw_preview": "{\"DocID\": \"7\", \"System.DateModified\": \"2024-03-05T06:07:08Z\", \"System.FileName\": \"Case Notes.docx\", \"System.ItemPathDisplay\": \"C:\\\\Users\\\\alice\\\\Documents\\\\Case Notes.docx\", \"System.Search.Contents\": \"rapid forensic case notes\", \"System.Size\": \"2048\", \"System.Title\": \"Case Notes\"}",
             "reportability": "triage",
-            "source_path": "<ROOT>/analysis/windows-search-index.csv",
+            "size": "2048",
             "source_format": "csv",
             "source_hashes": {
               "sha256": "13a3a3181d5d8859b9d506e6ed73ad23220683c060edab43ec41df69f03bccdb"
             },
             "source_index": 0,
-            "entry_id": "7",
-            "item_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
-            "file_name": "Case Notes.docx",
-            "extension": ".docx",
-            "url": "",
-            "title": "Case Notes",
-            "author": "",
-            "content_snippet": "rapid forensic case notes",
-            "created_at": "",
-            "modified_at": "2024-03-05T06:07:08+00:00",
-            "accessed_at": "",
-            "size": "2048",
+            "source_path": "<ROOT>/analysis/windows-search-index.csv",
             "store": "",
-            "raw": {
-              "DocID": "7",
-              "System.ItemPathDisplay": "C:\\Users\\alice\\Documents\\Case Notes.docx",
-              "System.FileName": "Case Notes.docx",
-              "System.Title": "Case Notes",
-              "System.Search.Contents": "rapid forensic case notes",
-              "System.DateModified": "2024-03-05T06:07:08Z",
-              "System.Size": "2048"
-            },
-            "raw_preview": "{\"DocID\": \"7\", \"System.DateModified\": \"2024-03-05T06:07:08Z\", \"System.FileName\": \"Case Notes.docx\", \"System.ItemPathDisplay\": \"C:\\\\Users\\\\alice\\\\Documents\\\\Case Notes.docx\", \"System.Search.Contents\": \"rapid forensic case notes\", \"System.Size\": \"2048\", \"System.Title\": \"Case Notes\"}"
-          }
+            "title": "Case Notes",
+            "url": ""
+          },
+          "path": "<ROOT>/analysis/windows-search-index.csv",
+          "provider": "windows-search-index",
+          "supported": true
         },
         {
-          "provider": "windows-search-index",
           "artifact_type": "windows-search-index-summary",
-          "path": "<ROOT>",
-          "supported": true,
           "details": {
+            "coverage_status": "summarized",
+            "edb_inventory": [
+              {
+                "extracted_string_count": 1,
+                "risk_flags": [],
+                "signature_valid": false,
+                "source_path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb"
+              }
+            ],
+            "edb_pivot_count": 0,
+            "edb_string_hit_count": 1,
+            "entry_count": 1,
+            "extension_counts": [
+              {
+                "count": 1,
+                "value": ".docx"
+              }
+            ],
+            "inventory_count": 1,
             "parser": "windows-search-index-summary",
             "parser_version": "windows-search-index-import-v3",
-            "coverage_status": "summarized",
             "reportability": "triage",
-            "source_path": "<ROOT>",
-            "entry_count": 1,
-            "inventory_count": 1,
-            "edb_pivot_count": 0,
             "source_files": [
               "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
               "<ROOT>/analysis/windows-search-index.csv"
             ],
-            "extension_counts": [
-              {
-                "value": ".docx",
-                "count": 1
-              }
-            ],
-            "edb_string_hit_count": 1,
-            "edb_inventory": [
-              {
-                "source_path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
-                "signature_valid": false,
-                "extracted_string_count": 1,
-                "risk_flags": []
-              }
-            ]
-          }
+            "source_path": "<ROOT>"
+          },
+          "path": "<ROOT>",
+          "provider": "windows-search-index",
+          "supported": true
         }
-      ]
+      ],
+      "description": "Windows Search index EDB inventory and CSV/JSON export imports",
+      "name": "windows-search-index",
+      "supported": true,
+      "target_platform": "windows"
     },
     {
-      "name": "windows-shellbags",
-      "description": "Windows Shellbags from Registry .reg exports",
-      "target_platform": "windows",
-      "supported": true,
       "artifacts": [
         {
-          "provider": "windows-shellbags",
           "artifact_type": "shellbag-key",
-          "path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
-          "supported": true,
           "details": {
-            "parser": "windows-shellbags-reg-export",
-            "parser_version": "registry-normalized-v4",
-            "coverage_status": "mapped-reg-export",
-            "reportability": "review",
-            "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
-            "source_format": "reg",
-            "source_hashes": {
-              "sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4"
-            },
-            "hive_hint": "HKEY_CURRENT_USER",
-            "user_hive_scope": "exported-user-hive",
-            "user_activity_category": "shellbag",
             "activity_label": "ShellBags BagMRU",
-            "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
-            "value_count": 2,
-            "value_names": [
-              "0",
-              "NodeSlot"
-            ],
+            "coverage_status": "mapped-reg-export",
             "decoded_values": {
               "0": {
                 "raw": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
@@ -1526,35 +1503,57 @@
                 "value": "dword:00000001"
               }
             },
-            "parser_confidence": 0.86,
             "evidence_strength": "registry-export-key",
+            "hive_hint": "HKEY_CURRENT_USER",
+            "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+            "parser": "windows-shellbags-reg-export",
+            "parser_confidence": 0.86,
+            "parser_version": "registry-normalized-v4",
+            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]",
+            "reportability": "review",
             "risk_flags": [
               "folder-view-history",
               "user-activity:shellbag"
             ],
             "risk_score": 60,
-            "validation_required": false,
-            "validation_guidance": "Registry export keys preserve explicit paths and values, but report-grade user activity should still be cross-checked against source hive hashes and collection context.",
-            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]"
-          }
-        },
-        {
-          "provider": "windows-shellbags",
-          "artifact_type": "shellbag-key",
-          "path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
-          "supported": true,
-          "details": {
-            "parser": "windows-shellbags-reg-export",
-            "parser_version": "registry-normalized-v4",
-            "coverage_status": "mapped",
-            "reportability": "triage",
-            "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
             "source_format": "reg",
             "source_hashes": {
               "sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4"
             },
-            "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+            "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+            "user_activity_category": "shellbag",
+            "user_hive_scope": "exported-user-hive",
+            "validation_guidance": "Registry export keys preserve explicit paths and values, but report-grade user activity should still be cross-checked against source hive hashes and collection context.",
+            "validation_required": false,
+            "value_count": 2,
+            "value_names": [
+              "0",
+              "NodeSlot"
+            ]
+          },
+          "path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+          "provider": "windows-shellbags",
+          "supported": true
+        },
+        {
+          "artifact_type": "shellbag-key",
+          "details": {
+            "coverage_status": "mapped",
             "hive_hint": "HKEY_CURRENT_USER",
+            "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+            "parser": "windows-shellbags-reg-export",
+            "parser_version": "registry-normalized-v4",
+            "persistence_values": [],
+            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]",
+            "reportability": "triage",
+            "risk_flags": [],
+            "risk_score": 0,
+            "source_format": "reg",
+            "source_hashes": {
+              "sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4"
+            },
+            "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+            "usb_device": {},
             "value_count": 2,
             "value_names": [
               "0",
@@ -1563,155 +1562,141 @@
             "values": {
               "0": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
               "NodeSlot": "dword:00000001"
-            },
-            "persistence_values": [],
-            "usb_device": {},
-            "risk_flags": [],
-            "risk_score": 0,
-            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]"
-          }
+            }
+          },
+          "path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+          "provider": "windows-shellbags",
+          "supported": true
         }
-      ]
+      ],
+      "description": "Windows Shellbags from Registry .reg exports",
+      "name": "windows-shellbags",
+      "supported": true,
+      "target_platform": "windows"
     },
     {
-      "name": "windows-prefetch",
-      "description": "Windows Prefetch execution artifact inventory",
-      "target_platform": "windows",
-      "supported": true,
       "artifacts": [
         {
-          "provider": "windows-prefetch",
           "artifact_type": "prefetch-file",
-          "path": "<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
-          "supported": true,
           "details": {
+            "binary_format_detected": false,
+            "coverage_status": "detected",
+            "entry_name": "POWERSHELL.EXE-12345678.pf",
+            "evidence_strength": "execution-indicator",
+            "executable_hint": "POWERSHELL.EXE",
+            "executable_hint_source": "filename",
+            "filename_executable_hint": "POWERSHELL.EXE",
+            "header_executable_name": "",
+            "last_run_at": "",
+            "last_run_times": [],
+            "modified_at": "2024-03-05T06:13:14+00:00",
+            "note": "Prefetch triage parser uses best-effort common-version offsets; validate critical findings with a dedicated parser such as PECmd.",
             "parser": "windows-prefetch-inventory",
             "parser_version": "prefetch-inventory-v5",
-            "coverage_status": "detected",
+            "prefetch_hash": "12345678",
+            "prefetch_parse_status": "inventory-only",
+            "prefetch_version": 0,
+            "referenced_path_count": 0,
+            "referenced_paths": [],
             "reportability": "triage",
-            "source_path": "<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
+            "run_count": 0,
+            "size": 17,
             "source_format": "pf",
             "source_hashes": {
               "sha256": "c2c89977424f5c67a309ad39d1bfc7545d0f39413e7db096805254edf7bb1d0a"
             },
-            "executable_hint": "POWERSHELL.EXE",
-            "executable_hint_source": "filename",
-            "filename_executable_hint": "POWERSHELL.EXE",
-            "binary_format_detected": false,
-            "prefetch_parse_status": "inventory-only",
-            "prefetch_version": 0,
-            "header_executable_name": "",
-            "run_count": 0,
-            "last_run_at": "",
-            "last_run_times": [],
-            "referenced_paths": [],
-            "referenced_path_count": 0,
-            "prefetch_hash": "12345678",
-            "entry_name": "POWERSHELL.EXE-12345678.pf",
-            "size": 17,
-            "modified_at": "2024-03-05T06:13:14+00:00",
+            "source_path": "<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
             "timestamp": "2024-03-05T06:13:14+00:00",
-            "timestamp_source": "prefetch_file_modified_at",
-            "evidence_strength": "execution-indicator",
-            "note": "Prefetch triage parser uses best-effort common-version offsets; validate critical findings with a dedicated parser such as PECmd."
-          }
+            "timestamp_source": "prefetch_file_modified_at"
+          },
+          "path": "<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
+          "provider": "windows-prefetch",
+          "supported": true
         }
-      ]
+      ],
+      "description": "Windows Prefetch execution artifact inventory",
+      "name": "windows-prefetch",
+      "supported": true,
+      "target_platform": "windows"
     },
     {
-      "name": "windows-system-artifacts",
-      "description": "Windows Task Scheduler, Defender, Firewall, WER, and Zone.Identifier artifacts",
-      "target_platform": "windows",
-      "supported": true,
       "artifacts": [
         {
-          "provider": "windows-system-artifacts",
           "artifact_type": "defender-support-log",
-          "path": "<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
-          "supported": true,
           "details": {
-            "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v4",
-            "source_path": "<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
-            "source_format": "text-log",
-            "source_size": 199,
             "entry_count": 3,
-            "interesting_entry_count": 3,
             "interesting_entries": [
               "2026-04-26T01:02:03.000Z Threat Name: Trojan:Win32/TestLoader",
               "2026-04-26T01:02:04.000Z Remediation action: Quarantine",
               "2026-04-26T01:02:05.000Z Exclusion path observed: C:\\Users\\alice\\AppData\\Roaming"
             ],
+            "interesting_entry_count": 3,
             "modified_at": "2024-03-05T06:15:16+00:00",
-            "raw_preview": "2026-04-26T01:02:03.000Z Threat Name: Trojan:Win32/TestLoader\n2026-04-26T01:02:04.000Z Remediation action: Quarantine\n2026-04-26T01:02:05.000Z Exclusion path observed: C:\\Users\\alice\\AppData\\Roaming"
-          }
-        },
-        {
-          "provider": "windows-system-artifacts",
-          "artifact_type": "firewall-log",
-          "path": "<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
-          "supported": true,
-          "details": {
             "parser": "windows-system-artifacts",
             "parser_version": "windows-system-v4",
-            "source_path": "<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
-            "source_format": "w3c-log",
-            "source_size": 216,
-            "entry_count": 2,
+            "raw_preview": "2026-04-26T01:02:03.000Z Threat Name: Trojan:Win32/TestLoader\n2026-04-26T01:02:04.000Z Remediation action: Quarantine\n2026-04-26T01:02:05.000Z Exclusion path observed: C:\\Users\\alice\\AppData\\Roaming",
+            "source_format": "text-log",
+            "source_path": "<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
+            "source_size": 199
+          },
+          "path": "<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
+          "provider": "windows-system-artifacts",
+          "supported": true
+        },
+        {
+          "artifact_type": "firewall-log",
+          "details": {
             "blocked_count": 1,
+            "entry_count": 2,
+            "modified_at": "2024-03-05T06:16:17+00:00",
+            "parser": "windows-system-artifacts",
+            "parser_version": "windows-system-v4",
+            "raw_preview": "#Version: 1.5\n#Fields: date time action protocol src-ip dst-ip src-port dst-port size\n2026-04-26 01:03:00 DROP TCP 10.0.0.5 203.0.113.9 51512 4444 60\n2026-04-26 01:03:05 ALLOW TCP 10.0.0.5 198.51.100.7 51513 443 120\n",
             "sample_entries": [
               {
-                "date": "2026-04-26",
-                "time": "01:03:00",
                 "action": "DROP",
-                "protocol": "TCP",
-                "src-ip": "10.0.0.5",
+                "date": "2026-04-26",
                 "dst-ip": "203.0.113.9",
-                "src-port": "51512",
                 "dst-port": "4444",
-                "size": "60"
+                "protocol": "TCP",
+                "size": "60",
+                "src-ip": "10.0.0.5",
+                "src-port": "51512",
+                "time": "01:03:00"
               },
               {
-                "date": "2026-04-26",
-                "time": "01:03:05",
                 "action": "ALLOW",
-                "protocol": "TCP",
-                "src-ip": "10.0.0.5",
+                "date": "2026-04-26",
                 "dst-ip": "198.51.100.7",
-                "src-port": "51513",
                 "dst-port": "443",
-                "size": "120"
+                "protocol": "TCP",
+                "size": "120",
+                "src-ip": "10.0.0.5",
+                "src-port": "51513",
+                "time": "01:03:05"
               }
             ],
-            "modified_at": "2024-03-05T06:16:17+00:00",
-            "raw_preview": "#Version: 1.5\n#Fields: date time action protocol src-ip dst-ip src-port dst-port size\n2026-04-26 01:03:00 DROP TCP 10.0.0.5 203.0.113.9 51512 4444 60\n2026-04-26 01:03:05 ALLOW TCP 10.0.0.5 198.51.100.7 51513 443 120\n"
-          }
+            "source_format": "w3c-log",
+            "source_path": "<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
+            "source_size": 216
+          },
+          "path": "<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
+          "provider": "windows-system-artifacts",
+          "supported": true
         },
         {
-          "provider": "windows-system-artifacts",
           "artifact_type": "task-scheduler-task",
-          "path": "<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
-          "supported": true,
           "details": {
+            "action_preview": "powershell.exe -ExecutionPolicy Bypass -File C:\\Users\\alice\\AppData\\Roaming\\updater.ps1",
+            "arguments": "-ExecutionPolicy Bypass -File C:\\Users\\alice\\AppData\\Roaming\\updater.ps1",
+            "author": "alice",
+            "command": "powershell.exe",
+            "hidden": null,
+            "logon_type": "",
+            "modified_at": "2024-03-05T06:14:15+00:00",
             "parser": "windows-system-artifacts",
             "parser_version": "windows-system-v4",
-            "source_path": "<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
-            "source_format": "task-xml",
-            "source_size": 685,
-            "task_uri": "\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater",
-            "command": "powershell.exe",
-            "arguments": "-ExecutionPolicy Bypass -File C:\\Users\\alice\\AppData\\Roaming\\updater.ps1",
-            "working_directory": "",
-            "action_preview": "powershell.exe -ExecutionPolicy Bypass -File C:\\Users\\alice\\AppData\\Roaming\\updater.ps1",
-            "author": "alice",
-            "user_id": "S-1-5-21-1000",
-            "run_level": "",
-            "logon_type": "",
-            "hidden": null,
-            "trigger_types": [
-              "LogonTrigger"
-            ],
-            "start_boundaries": [],
+            "raw_preview": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Task version=\"1.4\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n  <RegistrationInfo>\n    <Author>alice</Author>\n    <URI>\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater</URI>\n  </RegistrationInfo>\n  <Triggers>\n    <LogonTrigger>\n      <Enabled>true</Enabled>\n    </LogonTrigger>\n  </Triggers>\n  <Principals>\n    <Principal id=\"Author\">\n      <UserId>S-1-5-21-1000</UserId>\n    </Principal>\n  </Principals>\n  <Actions Context=\"Author\">\n    <Exec>\n      <Command>powershell.exe</Command>\n      <Arguments>-ExecutionPolicy Bypass -File C:\\",
             "risk_flags": [
               "task-string:powershell",
               "task-string:executionpolicy bypass",
@@ -1720,97 +1705,114 @@
               "task-microsoft-path-user-payload"
             ],
             "risk_score": 60,
-            "modified_at": "2024-03-05T06:14:15+00:00",
-            "raw_preview": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Task version=\"1.4\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n  <RegistrationInfo>\n    <Author>alice</Author>\n    <URI>\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater</URI>\n  </RegistrationInfo>\n  <Triggers>\n    <LogonTrigger>\n      <Enabled>true</Enabled>\n    </LogonTrigger>\n  </Triggers>\n  <Principals>\n    <Principal id=\"Author\">\n      <UserId>S-1-5-21-1000</UserId>\n    </Principal>\n  </Principals>\n  <Actions Context=\"Author\">\n    <Exec>\n      <Command>powershell.exe</Command>\n      <Arguments>-ExecutionPolicy Bypass -File C:\\"
-          }
+            "run_level": "",
+            "source_format": "task-xml",
+            "source_path": "<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
+            "source_size": 685,
+            "start_boundaries": [],
+            "task_uri": "\\Microsoft\\Windows\\UpdateOrchestrator\\SecurityUpdater",
+            "trigger_types": [
+              "LogonTrigger"
+            ],
+            "user_id": "S-1-5-21-1000",
+            "working_directory": ""
+          },
+          "path": "<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
+          "provider": "windows-system-artifacts",
+          "supported": true
         },
         {
-          "provider": "windows-system-artifacts",
           "artifact_type": "wer-report",
-          "path": "<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
-          "supported": true,
           "details": {
-            "parser": "windows-system-artifacts",
-            "parser_version": "windows-system-v4",
-            "source_path": "<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
-            "source_format": "wer",
-            "source_size": 94,
-            "event_type": "APPCRASH",
             "application": "powershell.exe",
-            "module": "evil.dll",
             "bucket": "123456789",
+            "event_type": "APPCRASH",
             "fields": {
-              "Version": "1",
-              "EventType": "APPCRASH",
               "AppName": "powershell.exe",
+              "Bucket": "123456789",
+              "EventType": "APPCRASH",
               "FaultModuleName": "evil.dll",
-              "Bucket": "123456789"
+              "Version": "1"
             },
             "modified_at": "2024-03-05T06:17:18+00:00",
-            "raw_preview": "Version=1\nEventType=APPCRASH\nAppName=powershell.exe\nFaultModuleName=evil.dll\nBucket=123456789\n"
-          }
-        },
-        {
-          "provider": "windows-system-artifacts",
-          "artifact_type": "wmi-repository-file",
-          "path": "<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
-          "supported": true,
-          "details": {
+            "module": "evil.dll",
             "parser": "windows-system-artifacts",
             "parser_version": "windows-system-v4",
-            "source_path": "<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
-            "source_format": "wmi-repository",
-            "source_size": 29,
-            "entry_name": "OBJECTS.DATA",
-            "relative_repository_path": "OBJECTS.DATA",
-            "size": 29,
-            "modified_at": "2024-03-05T06:07:14+00:00",
-            "timestamp": "2024-03-05T06:07:14+00:00",
-            "timestamp_source": "wmi_repository_modified_at",
-            "source_hashes": {
-              "sha256": "460fe33f8af0c81663b71e4c639af092c35bcc4b79c00e4574b1ea2a21741148"
-            },
+            "raw_preview": "Version=1\nEventType=APPCRASH\nAppName=powershell.exe\nFaultModuleName=evil.dll\nBucket=123456789\n",
+            "source_format": "wer",
+            "source_path": "<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
+            "source_size": 94
+          },
+          "path": "<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
+          "provider": "windows-system-artifacts",
+          "supported": true
+        },
+        {
+          "artifact_type": "wmi-repository-file",
+          "details": {
             "coverage_status": "bounded-string-pivot",
-            "scan_bytes": 29,
+            "entry_name": "OBJECTS.DATA",
             "extracted_string_count": 1,
             "interesting_strings": [],
+            "modified_at": "2024-03-05T06:07:14+00:00",
+            "note": "WMI repository file inventoried with bounded string pivots for persistence review; validate findings with a dedicated WMI repository parser.",
+            "parser": "windows-system-artifacts",
+            "parser_version": "windows-system-v4",
             "path_candidates": [],
-            "url_candidates": [],
-            "risk_flags": [],
-            "risk_score": 0,
             "recommended_parsers": [
               "PyWMIPersistenceFinder",
               "python-cim",
               "Velociraptor WMI artifacts"
             ],
-            "note": "WMI repository file inventoried with bounded string pivots for persistence review; validate findings with a dedicated WMI repository parser."
-          }
+            "relative_repository_path": "OBJECTS.DATA",
+            "risk_flags": [],
+            "risk_score": 0,
+            "scan_bytes": 29,
+            "size": 29,
+            "source_format": "wmi-repository",
+            "source_hashes": {
+              "sha256": "460fe33f8af0c81663b71e4c639af092c35bcc4b79c00e4574b1ea2a21741148"
+            },
+            "source_path": "<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
+            "source_size": 29,
+            "timestamp": "2024-03-05T06:07:14+00:00",
+            "timestamp_source": "wmi_repository_modified_at",
+            "url_candidates": []
+          },
+          "path": "<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
+          "provider": "windows-system-artifacts",
+          "supported": true
         },
         {
-          "provider": "windows-system-artifacts",
           "artifact_type": "zone-identifier",
-          "path": "<ROOT>/Users/alice/Downloads/report.zip.Zone.Identifier",
-          "supported": true,
           "details": {
+            "fields": {
+              "HostUrl": "https://download.example.com/report.zip",
+              "ReferrerUrl": "https://mail.example.com/message/1",
+              "ZoneId": "3"
+            },
+            "host_url": "https://download.example.com/report.zip",
+            "modified_at": "2024-03-05T06:18:19+00:00",
             "parser": "windows-system-artifacts",
             "parser_version": "windows-system-v4",
-            "source_path": "<ROOT>/Users/alice/Downloads/report.zip.Zone.Identifier",
+            "raw_preview": "[ZoneTransfer]\nZoneId=3\nReferrerUrl=https://mail.example.com/message/1\nHostUrl=https://download.example.com/report.zip\n",
+            "referrer_url": "https://mail.example.com/message/1",
             "source_format": "ini-ads-export",
+            "source_path": "<ROOT>/Users/alice/Downloads/report.zip.Zone.Identifier",
             "source_size": 119,
             "target_name": "report.zip",
-            "zone_id": "3",
-            "referrer_url": "https://mail.example.com/message/1",
-            "host_url": "https://download.example.com/report.zip",
-            "fields": {
-              "ZoneId": "3",
-              "ReferrerUrl": "https://mail.example.com/message/1",
-              "HostUrl": "https://download.example.com/report.zip"
-            },
-            "modified_at": "2024-03-05T06:18:19+00:00",
-            "raw_preview": "[ZoneTransfer]\nZoneId=3\nReferrerUrl=https://mail.example.com/message/1\nHostUrl=https://download.example.com/report.zip\n"
-          }
+            "zone_id": "3"
+          },
+          "path": "<ROOT>/Users/alice/Downloads/report.zip.Zone.Identifier",
+          "provider": "windows-system-artifacts",
+          "supported": true
         }
-      ]
+      ],
+      "description": "Windows Task Scheduler, Defender, Firewall, WER, and Zone.Identifier artifacts",
+      "name": "windows-system-artifacts",
+      "supported": true,
+      "target_platform": "windows"
     }
-  ]
+  ],
+  "root": "<ROOT>"
 }

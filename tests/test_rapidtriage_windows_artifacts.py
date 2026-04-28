@@ -195,7 +195,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_evtx["details"]["evtx_record_integrity"]["declared_size_valid"], True)
             self.assertEqual(native_evtx["details"]["evtx_record_integrity"]["trailing_size_valid"], True)
             self.assertEqual(native_evtx["details"]["evtx_file_header"]["signature_valid"], True)
+            self.assertEqual(native_evtx["details"]["evtx_file_header"]["major_version"], 3)
+            self.assertEqual(native_evtx["details"]["evtx_file_header"]["next_record_identifier"], 301)
             self.assertEqual(native_evtx["details"]["evtx_chunk_context"]["chunk_signature_valid"], False)
+            self.assertEqual(native_evtx["details"]["evtx_chunk_context"]["chunk_validation_status"], "missing-or-not-a-chunk-header")
+            self.assertEqual(native_evtx["details"]["evtx_binxml_status"], "not-decoded")
+            self.assertEqual(native_evtx["details"]["evtx_field_fidelity"], "partial-string-pivot")
+            self.assertTrue(native_evtx["details"]["evtx_validation_required"])
+            self.assertIn("command=powershell -enc NativeFixture", native_evtx["details"]["native_message_preview"])
             self.assertTrue(
                 any(item["name"] == "CommandLine" for item in native_evtx["details"]["parameter_candidates"])
             )
@@ -215,6 +222,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn({"value": "trailing-size-valid", "count": 1}, summary["native_integrity_counts"])
             self.assertIn({"value": "first-record", "count": 1}, summary["native_sequence_counts"])
             self.assertIn({"value": "record-string", "count": 1}, summary["native_channel_hint_counts"])
+            self.assertIn({"value": "not-decoded", "count": 1}, summary["native_binxml_status_counts"])
             self.assertTrue(any(item["event_id"] == "4104" for item in summary["high_risk_events"]))
             self.assertTrue(any(item["channel"] == "Microsoft-Windows-PowerShell/Operational" for item in summary["record_sequence_gaps"]))
 

@@ -83,11 +83,11 @@ On mounted or exported Windows evidence, RapidTriage now collects high-value sys
 
 Event log workflow:
 
-- Native `.evtx` files are inventoried with source hashes and parser guidance; recoverable binary record headers also emit partial `eventlog-event` rows with record ID, timestamp, record SHA256, record-size integrity checks, sequence-gap hints, extracted UTF-16 strings, channel/provider/computer/command/IP/user candidates, and suspicious-term flags.
+- Native `.evtx` files are inventoried with source hashes and parser guidance; recoverable binary record headers also emit partial `eventlog-event` rows with record ID, timestamp, record SHA256, record-size integrity checks, sequence-gap hints, extracted UTF-16 strings, channel/provider/computer/command/IP/user candidates, native message previews, explicit `evtx_binxml_status`, and suspicious-term flags. Treat native rows as triage pivots unless an EVTX-capable export validates complete Event/System/EventData fields.
 - XML/JSON/JSONL/CSV exports from EVTX-oriented tools such as EvtxECmd, Hayabusa, Chainsaw, and Velociraptor are normalized into event rows.
 - Important Event IDs such as logons, failed logons, privileged logons, process creation, scheduled task creation, service installation, log clearing, PowerShell script blocks, RDP sessions, WMI, Defender, Firewall, USB/device, share access, and Sysmon events are categorized with `event_family`, `channel_family`, `event_tags`, parser confidence, source hashes, and triage recommendations.
 - RapidTriage also emits built-in `eventlog-detection` rows for first-pass triage of log clearing, encoded PowerShell, RDP logons/sessions, privileged logons, services, tasks, account changes, group membership changes, suspicious process commands, Defender detections, WMI activity, VSC deletion commands, and Sysmon network/DNS/registry/image-load events.
-- `eventlog-summary` rows aggregate large exports by Event ID, event family, category, channel family, channel, user, source IP, process name, parser status, reportability, suspicious term, detection level, detection rule, native EVTX integrity, native sequence status, and native channel-hint source, with high-risk event samples and EventRecordID gap hints for review triage.
+- `eventlog-summary` rows aggregate large exports by Event ID, event family, category, channel family, channel, user, source IP, process name, parser status, reportability, suspicious term, detection level, detection rule, native EVTX integrity, native sequence status, native channel-hint source, and native BinXML status, with high-risk event samples and EventRecordID gap hints for review triage.
 
 Use:
 

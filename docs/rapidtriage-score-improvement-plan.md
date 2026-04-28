@@ -8,6 +8,8 @@ Estimated current score: 100/100 for the internal RapidTriage roadmap target.
 
 Estimated commercial-suite readiness: 68/100 versus AXIOM/WISDOM-class expectations.
 
+Detailed commercial parity tracking now lives in `docs/rapidtriage-commercial-parity-backlog.md`. That file is the numbered 1-121 implementation backlog and should be updated whenever a gap status changes.
+
 Why:
 
 - The tool now has a usable local web UI, sample case, doctor check, evidence preflight, processing plan preview, whole-case search, source viewer, review board, compare tray with text diff, hashes, local URL/domain/IP/hash indicator summaries, report templates, SQLite Case DB saved searches/batch review, fixture-backed Windows artifact parsers, high-value Windows system artifact coverage, exported APK triage, cloud export imports, image perceptual-hash triage, Volatility-style memory import, bounded direct memory dump indicator scanning, portable reviewer bundle, Windows quickstart, packaging tests, and a release validation package.
