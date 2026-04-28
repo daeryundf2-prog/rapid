@@ -390,6 +390,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 if item["artifact_type"] == "eventlog-event"
                 and item["details"]["parser"] == "windows-eventlog-evtx-native"
             )
+            chunk = next(item for item in artifacts if item["artifact_type"] == "eventlog-chunk")
             summary = next(item for item in artifacts if item["artifact_type"] == "eventlog-summary")["details"]
 
             self.assertEqual(native_evtx["details"]["record_id"], "889")
@@ -399,6 +400,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn(
                 "slack-or-deleted-record-candidate",
                 native_evtx["details"]["evtx_recovery_context"]["caution_labels"],
+            )
+            self.assertEqual(chunk["details"]["evtx_chunk_header"]["free_space_offset"], 512)
+            self.assertTrue(chunk["details"]["evtx_chunk_integrity"]["structure_plausible"])
+            self.assertEqual(summary["native_chunk_count"], 1)
+            self.assertIn(
+                {"value": "structure-plausible", "count": 1},
+                summary["native_chunk_integrity_counts"],
             )
             self.assertIn(
                 {"value": "slack-or-deleted-record-candidate", "count": 1},

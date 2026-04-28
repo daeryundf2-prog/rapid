@@ -70,7 +70,7 @@ WINDOWS_TARGETS: tuple[CollectTarget, ...] = (
         "directory",
         "windows-os-account",
         "scan-or-export",
-        "SYSTEM/SOFTWARE/SAM/SECURITY hives support computer/account/timezone exports plus bounded native key-tree and deleted-value candidate scans.",
+        "SYSTEM/SOFTWARE/SAM/SECURITY hives support computer/account/timezone exports plus bounded hbin-aware native key-tree and deleted key/value candidate scans.",
     ),
     CollectTarget(
         "AccountUsage",
@@ -79,7 +79,7 @@ WINDOWS_TARGETS: tuple[CollectTarget, ...] = (
         "glob",
         "windows-os-account",
         "scan-or-export",
-        "User hives are high value for UserAssist, Run keys, ShellBags, typed paths, account settings, native key-tree pivots, and deleted-value candidates.",
+        "User hives are high value for UserAssist, Run keys, ShellBags, typed paths, account settings, native key-tree pivots, and deleted key/value candidates.",
     ),
     CollectTarget(
         "BrowserHistory",

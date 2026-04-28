@@ -7,6 +7,7 @@ import html
 import json
 import re
 import xml.etree.ElementTree as ET
+import zlib
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Iterable, Mapping, NamedTuple, Sequence
@@ -14,7 +15,7 @@ from typing import Iterable, Mapping, NamedTuple, Sequence
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v11"
+PARSER_VERSION = "eventlog-normalized-v12"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
@@ -22,9 +23,11 @@ EVTX_FILE_SIGNATURE = b"ElfFile\x00"
 EVTX_CHUNK_SIGNATURE = b"ElfChnk\x00"
 EVTX_FILE_HEADER_SIZE = 4096
 EVTX_CHUNK_SIZE = 65536
+EVTX_CHUNK_HEADER_SIZE = 512
 EVTX_RECORD_MAGIC = b"**\x00\x00"
 EVTX_RECORD_HEADER_SIZE = 24
 MAX_NATIVE_EVTX_RECORDS = 10_000
+MAX_NATIVE_EVTX_CHUNKS = 4096
 MAX_NATIVE_EVTX_RECORD_SIZE = 16 * 1024 * 1024
 MAX_NATIVE_EVTX_STRINGS = 200
 MAX_NATIVE_EVTX_BINXML_TOKENS = 500
@@ -722,6 +725,9 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
         return
 
     source_hashes = file_hashes(path)
+    for chunk_index, chunk in enumerate(iter_native_evtx_chunks(blob)):
+        yield native_evtx_chunk_record(path, chunk_index, source_hashes, blob, chunk)
+
     previous_record_id: int | None = None
     for source_index, candidate in enumerate(iter_evtx_record_candidates(blob)):
         if not candidate.parseable:
@@ -823,6 +829,30 @@ def iter_evtx_record_blobs(blob: bytes) -> Iterable[tuple[int, bytes]]:
     for candidate in iter_evtx_record_candidates(blob):
         if candidate.parseable:
             yield candidate.offset, candidate.record_blob
+
+
+def iter_native_evtx_chunks(blob: bytes) -> Iterable[dict[str, object]]:
+    if not blob.startswith(EVTX_FILE_SIGNATURE):
+        return
+    declared_chunks = read_u16(blob, 42)
+    offset = EVTX_FILE_HEADER_SIZE
+    emitted = 0
+    while offset + len(EVTX_CHUNK_SIGNATURE) <= len(blob) and emitted < MAX_NATIVE_EVTX_CHUNKS:
+        chunk_blob = blob[offset : min(len(blob), offset + EVTX_CHUNK_SIZE)]
+        if not chunk_blob.startswith(EVTX_CHUNK_SIGNATURE):
+            next_signature = blob.find(EVTX_CHUNK_SIGNATURE, offset + 1)
+            if next_signature < 0:
+                return
+            offset = next_signature
+            continue
+        yield {
+            "chunk_offset": offset,
+            "chunk_blob": chunk_blob,
+            "declared_chunk_count": declared_chunks,
+            "chunk_index": emitted,
+        }
+        emitted += 1
+        offset += EVTX_CHUNK_SIZE
 
 
 def iter_evtx_record_candidates(blob: bytes) -> Iterable[NativeEvtxRecordCandidate]:
@@ -1024,6 +1054,44 @@ def native_evtx_record_candidate_record(
     return event_record(path, "eventlog-record-candidate", details)
 
 
+def native_evtx_chunk_record(
+    path: Path,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    blob: bytes,
+    chunk: Mapping[str, object],
+) -> ArtifactRecord:
+    chunk_offset = int(chunk.get("chunk_offset") or 0)
+    chunk_blob = chunk.get("chunk_blob") if isinstance(chunk.get("chunk_blob"), bytes) else b""
+    header = native_evtx_chunk_header(chunk_blob, chunk_offset)
+    integrity = native_evtx_chunk_integrity(chunk_blob, header)
+    details = {
+        "parser": "windows-eventlog-evtx-native-chunk",
+        "parser_version": PARSER_VERSION,
+        "coverage_status": "native-evtx-chunk-structure",
+        "reportability": "triage",
+        "evidence_strength": "evtx-chunk-header",
+        "source_path": str(path.resolve()),
+        "source_format": "evtx",
+        "source_index": source_index,
+        "source_hashes": dict(source_hashes),
+        "evtx_file_header": native_evtx_file_header(blob),
+        "evtx_chunk_header": header,
+        "evtx_chunk_integrity": integrity,
+        "chunk_offset": chunk_offset,
+        "chunk_size_observed": len(chunk_blob),
+        "declared_chunk_count": chunk.get("declared_chunk_count", 0),
+        "chunk_index": chunk.get("chunk_index", source_index),
+        "parser_confidence": 0.78 if integrity.get("signature_valid") else 0.25,
+        "validation_required": not integrity.get("structure_plausible", False),
+        "validation_guidance": "Chunk rows validate EVTX chunk structure and slack bounds; use a second EVTX parser for report-grade message rendering.",
+        "risk_flags": native_evtx_chunk_risk_flags(integrity),
+        "risk_score": 35 if not integrity.get("structure_plausible", False) else 0,
+        "raw_preview": f"chunk@0x{chunk_offset:x} records={header.get('first_event_record_identifier')}-{header.get('last_event_record_identifier')}",
+    }
+    return event_record(path, "eventlog-chunk", details)
+
+
 def native_evtx_file_header(blob: bytes) -> dict[str, object]:
     header_size = read_u32(blob, 32) or (EVTX_FILE_HEADER_SIZE if len(blob) >= EVTX_FILE_HEADER_SIZE else len(blob))
     checksum = read_u32(blob, 124)
@@ -1045,6 +1113,84 @@ def native_evtx_file_header(blob: bytes) -> dict[str, object]:
     }
 
 
+def native_evtx_chunk_header(chunk_blob: bytes, chunk_offset: int) -> dict[str, object]:
+    signature_valid = chunk_blob.startswith(EVTX_CHUNK_SIGNATURE)
+    header_size = read_u32(chunk_blob, 40) if signature_valid else 0
+    last_record_offset = read_u32(chunk_blob, 44) if signature_valid else 0
+    free_space_offset = read_u32(chunk_blob, 48) if signature_valid else 0
+    legacy_free_space_offset = read_u32(chunk_blob, 44) if signature_valid else 0
+    if not free_space_offset and legacy_free_space_offset >= EVTX_CHUNK_HEADER_SIZE:
+        free_space_offset = legacy_free_space_offset
+    return {
+        "signature_valid": signature_valid,
+        "chunk_offset": chunk_offset,
+        "first_event_record_number": read_u64(chunk_blob, 8) if signature_valid else 0,
+        "last_event_record_number": read_u64(chunk_blob, 16) if signature_valid else 0,
+        "first_event_record_identifier": read_u64(chunk_blob, 24) if signature_valid else 0,
+        "last_event_record_identifier": read_u64(chunk_blob, 32) if signature_valid else 0,
+        "header_size": header_size,
+        "last_record_offset": last_record_offset,
+        "free_space_offset": free_space_offset,
+        "events_checksum": read_u32(chunk_blob, 52) if signature_valid else 0,
+        "header_checksum": read_u32(chunk_blob, 124) if signature_valid else 0,
+        "flags": read_u32(chunk_blob, 120) if signature_valid else 0,
+        "computed_header_crc32": evtx_crc32(chunk_blob[:120]) if len(chunk_blob) >= 120 else 0,
+        "computed_records_crc32": evtx_crc32(chunk_blob[EVTX_CHUNK_HEADER_SIZE:free_space_offset])
+        if free_space_offset > EVTX_CHUNK_HEADER_SIZE and free_space_offset <= len(chunk_blob)
+        else 0,
+    }
+
+
+def native_evtx_chunk_integrity(chunk_blob: bytes, header: Mapping[str, object]) -> dict[str, object]:
+    signature_valid = bool(header.get("signature_valid"))
+    header_size = int(header.get("header_size") or 0)
+    last_record_offset = int(header.get("last_record_offset") or 0)
+    free_space_offset = int(header.get("free_space_offset") or 0)
+    first_record_id = int(header.get("first_event_record_identifier") or 0)
+    last_record_id = int(header.get("last_event_record_identifier") or 0)
+    header_size_plausible = header_size in {0, EVTX_CHUNK_HEADER_SIZE}
+    offsets_plausible = (
+        free_space_offset == 0
+        or EVTX_CHUNK_HEADER_SIZE <= free_space_offset <= len(chunk_blob) <= EVTX_CHUNK_SIZE
+    )
+    last_record_plausible = last_record_offset == 0 or EVTX_CHUNK_HEADER_SIZE <= last_record_offset <= max(free_space_offset, len(chunk_blob))
+    record_range_plausible = not first_record_id or not last_record_id or first_record_id <= last_record_id
+    expected_header_checksum = int(header.get("header_checksum") or 0)
+    expected_events_checksum = int(header.get("events_checksum") or 0)
+    computed_header = int(header.get("computed_header_crc32") or 0)
+    computed_events = int(header.get("computed_records_crc32") or 0)
+    return {
+        "signature_valid": signature_valid,
+        "header_size_plausible": header_size_plausible,
+        "offsets_plausible": offsets_plausible,
+        "last_record_offset_plausible": last_record_plausible,
+        "record_identifier_range_plausible": record_range_plausible,
+        "header_checksum_present": expected_header_checksum != 0,
+        "events_checksum_present": expected_events_checksum != 0,
+        "header_checksum_match": expected_header_checksum != 0 and expected_header_checksum == computed_header,
+        "events_checksum_match": expected_events_checksum != 0 and expected_events_checksum == computed_events,
+        "structure_plausible": signature_valid and header_size_plausible and offsets_plausible and last_record_plausible and record_range_plausible,
+        "checksum_status": "matched" if (expected_header_checksum and expected_header_checksum == computed_header) else ("present-unmatched-or-algorithm-variant" if expected_header_checksum else "not-present"),
+    }
+
+
+def native_evtx_chunk_risk_flags(integrity: Mapping[str, object]) -> list[str]:
+    flags: list[str] = []
+    if not integrity.get("signature_valid"):
+        flags.append("evtx-chunk-signature-invalid")
+    if not integrity.get("offsets_plausible"):
+        flags.append("evtx-chunk-offsets-invalid")
+    if not integrity.get("record_identifier_range_plausible"):
+        flags.append("evtx-chunk-record-range-invalid")
+    if integrity.get("header_checksum_present") and not integrity.get("header_checksum_match"):
+        flags.append("evtx-chunk-checksum-unmatched")
+    return flags
+
+
+def evtx_crc32(value: bytes) -> int:
+    return zlib.crc32(value) & 0xFFFFFFFF
+
+
 def native_evtx_chunk_context(blob: bytes, record_offset: int) -> dict[str, object]:
     if record_offset < EVTX_FILE_HEADER_SIZE:
         chunk_offset = 0
@@ -1052,19 +1198,23 @@ def native_evtx_chunk_context(blob: bytes, record_offset: int) -> dict[str, obje
         chunk_offset = EVTX_FILE_HEADER_SIZE + ((record_offset - EVTX_FILE_HEADER_SIZE) // EVTX_CHUNK_SIZE) * EVTX_CHUNK_SIZE
     signature = blob[chunk_offset : chunk_offset + len(EVTX_CHUNK_SIGNATURE)]
     signature_valid = signature == EVTX_CHUNK_SIGNATURE
+    header = native_evtx_chunk_header(blob[chunk_offset : min(len(blob), chunk_offset + EVTX_CHUNK_SIZE)], chunk_offset)
     return {
         "chunk_offset": chunk_offset,
         "chunk_signature_valid": signature_valid,
         "chunk_validation_status": "header-present" if signature_valid else "missing-or-not-a-chunk-header",
         "record_relative_offset": record_offset - chunk_offset,
-        "first_event_record_number": read_u64(blob, chunk_offset + 8) if signature_valid else 0,
-        "last_event_record_number": read_u64(blob, chunk_offset + 16) if signature_valid else 0,
-        "first_event_record_identifier": read_u64(blob, chunk_offset + 24) if signature_valid else 0,
-        "last_event_record_identifier": read_u64(blob, chunk_offset + 32) if signature_valid else 0,
-        "last_record_offset": read_u32(blob, chunk_offset + 40) if signature_valid else 0,
-        "free_space_offset": read_u32(blob, chunk_offset + 44) if signature_valid else 0,
-        "events_checksum": read_u32(blob, chunk_offset + 48) if signature_valid else 0,
-        "header_checksum": read_u32(blob, chunk_offset + 52) if signature_valid else 0,
+        "first_event_record_number": header.get("first_event_record_number", 0),
+        "last_event_record_number": header.get("last_event_record_number", 0),
+        "first_event_record_identifier": header.get("first_event_record_identifier", 0),
+        "last_event_record_identifier": header.get("last_event_record_identifier", 0),
+        "header_size": header.get("header_size", 0),
+        "last_record_offset": header.get("last_record_offset", 0),
+        "free_space_offset": header.get("free_space_offset", 0),
+        "events_checksum": header.get("events_checksum", 0),
+        "header_checksum": header.get("header_checksum", 0),
+        "computed_header_crc32": header.get("computed_header_crc32", 0),
+        "computed_records_crc32": header.get("computed_records_crc32", 0),
     }
 
 
@@ -2628,6 +2778,11 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         and isinstance(record.details, Mapping)
     ]
     inventory_rows = [record for record in records if record.artifact_type == "eventlog-file"]
+    chunk_rows = [
+        record
+        for record in records
+        if record.artifact_type == "eventlog-chunk" and isinstance(record.details, Mapping)
+    ]
     candidate_rows = [
         record
         for record in records
@@ -2653,6 +2808,7 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
     native_binxml_status_counts: Counter[str] = Counter()
     native_recovery_status_counts: Counter[str] = Counter()
     native_allocation_status_counts: Counter[str] = Counter()
+    native_chunk_integrity_counts: Counter[str] = Counter()
     source_paths: set[str] = set()
     timestamps: list[str] = []
     high_risk_events: list[dict[str, object]] = []
@@ -2770,6 +2926,21 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         increment_counter(native_recovery_status_counts, str(details.get("evtx_recovery_status") or "unknown"))
         increment_counter(native_allocation_status_counts, str(details.get("evtx_allocation_status") or "unknown"))
 
+    for record in chunk_rows:
+        details = record.details
+        source_paths.add(str(details.get("source_path") or record.path))
+        integrity = details.get("evtx_chunk_integrity") if isinstance(details.get("evtx_chunk_integrity"), Mapping) else {}
+        increment_counter(
+            native_chunk_integrity_counts,
+            "structure-plausible" if integrity.get("structure_plausible") else "structure-warning",
+        )
+        increment_counter(
+            native_chunk_integrity_counts,
+            str(integrity.get("checksum_status") or "checksum-unknown"),
+        )
+        increment_counter(parser_status_counts, str(details.get("coverage_status") or ""))
+        increment_counter(reportability_counts, str(details.get("reportability") or ""))
+
     timestamps.sort()
     details = {
         "parser": "windows-eventlog-summary",
@@ -2782,6 +2953,7 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "detection_count": len(detection_rows),
         "parsed_row_count": len(parsed_rows),
         "inventory_count": len(inventory_rows),
+        "native_chunk_count": len(chunk_rows),
         "record_candidate_count": len(candidate_rows),
         "source_files": sorted(source_paths),
         "detection_rule_counts": counter_items(detection_rule_counts),
@@ -2802,6 +2974,7 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "native_binxml_status_counts": counter_items(native_binxml_status_counts),
         "native_recovery_status_counts": counter_items(native_recovery_status_counts),
         "native_allocation_status_counts": counter_items(native_allocation_status_counts),
+        "native_chunk_integrity_counts": counter_items(native_chunk_integrity_counts),
         "detection_level_counts": counter_items(detection_level_counts),
         "first_event_at": timestamps[0] if timestamps else "",
         "last_event_at": timestamps[-1] if timestamps else "",
@@ -2811,6 +2984,7 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
             "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
             "Binary EVTX rows include partial native record scans when recoverable; native_binxml_status_counts shows whether BinXML field decoding is complete.",
             "eventlog-record-candidate rows and evtx_recovery_context mark slack/deleted/corrupt candidates that require independent validation.",
+            "eventlog-chunk rows expose native chunk bounds and checksum observations so recovery candidates can be reviewed against chunk slack/structure.",
             "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering.",
         ],
     }

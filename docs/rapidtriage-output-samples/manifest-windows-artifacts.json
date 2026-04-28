@@ -583,7 +583,7 @@
             "parent_command_line": "",
             "parent_process_name": "",
             "parser": "windows-eventlog-builtin-rulepack",
-            "parser_version": "eventlog-normalized-v11",
+            "parser_version": "eventlog-normalized-v12",
             "process_id": "",
             "process_name": "",
             "provider_name": "Microsoft-Windows-Security-Auditing",
@@ -691,7 +691,7 @@
             "parent_process_name": "",
             "parser": "windows-eventlog-xml",
             "parser_confidence": 0.9,
-            "parser_version": "eventlog-normalized-v11",
+            "parser_version": "eventlog-normalized-v12",
             "process_id": "",
             "process_name": "",
             "provider_name": "Microsoft-Windows-Security-Auditing",
@@ -820,6 +820,8 @@
             "native_allocation_status_counts": [],
             "native_binxml_status_counts": [],
             "native_channel_hint_counts": [],
+            "native_chunk_count": 0,
+            "native_chunk_integrity_counts": [],
             "native_integrity_counts": [],
             "native_recovery_status_counts": [],
             "native_sequence_counts": [],
@@ -835,7 +837,7 @@
                 "value": "detected-by-rule"
               }
             ],
-            "parser_version": "eventlog-normalized-v11",
+            "parser_version": "eventlog-normalized-v12",
             "process_counts": [],
             "record_candidate_count": 0,
             "record_sequence_gaps": [],
@@ -866,6 +868,7 @@
               "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
               "Binary EVTX rows include partial native record scans when recoverable; native_binxml_status_counts shows whether BinXML field decoding is complete.",
               "eventlog-record-candidate rows and evtx_recovery_context mark slack/deleted/corrupt candidates that require independent validation.",
+              "eventlog-chunk rows expose native chunk bounds and checksum observations so recovery candidates can be reviewed against chunk slack/structure.",
               "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering."
             ],
             "user_counts": [
@@ -894,7 +897,7 @@
             "hive_hint": "HKEY_CURRENT_USER",
             "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v5",
+            "parser_version": "registry-normalized-v6",
             "persistence_values": [],
             "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]",
             "reportability": "triage",
@@ -927,7 +930,7 @@
             "hive_hint": "HKEY_CURRENT_USER",
             "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50",
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v5",
+            "parser_version": "registry-normalized-v6",
             "persistence_values": [],
             "raw_preview": "[HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50]",
             "reportability": "triage",
@@ -958,7 +961,7 @@
             "hive_hint": "HKEY_LOCAL_MACHINE",
             "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v5",
+            "parser_version": "registry-normalized-v6",
             "persistence_values": [
               {
                 "command": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
@@ -1035,10 +1038,12 @@
             "hive_string_hits": [],
             "hive_string_row_count": 0,
             "key_count": 4,
+            "key_recovery_candidate_count": 0,
+            "key_recovery_candidates": [],
             "key_tree_node_count": 0,
             "key_tree_nodes": [],
             "parser": "windows-registry-summary",
-            "parser_version": "registry-normalized-v5",
+            "parser_version": "registry-normalized-v6",
             "persistence_entries": [
               {
                 "command": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
@@ -1066,7 +1071,7 @@
             ],
             "source_path": "<ROOT>",
             "summary_notes": [
-              "Registry hive rows use native regf header parsing, bounded string scanning, bounded nk/vk cell candidate scanning, best-effort key-tree rows, and separate deleted/free cell and value-recovery candidate rows; report-grade deleted-value testimony still requires validation with a dedicated hive parser.",
+              "Registry hive rows use native regf header parsing, bounded string scanning, hbin-aware nk/vk cell walking when possible, best-effort key-tree rows, and separate deleted/free key/value recovery candidate rows; report-grade deleted-value testimony still requires validation with a dedicated hive parser.",
               "Run-key command hints are triage pivots, not proof that a program executed."
             ],
             "suspicious_entries": [
@@ -1166,7 +1171,7 @@
             "hive_hint": "HKEY_LOCAL_MACHINE",
             "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890",
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v5",
+            "parser_version": "registry-normalized-v6",
             "persistence_values": [],
             "raw_preview": "[HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890]",
             "reportability": "triage",
@@ -1215,7 +1220,7 @@
             "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
             "parser": "windows-registry-user-hive-activity",
             "parser_confidence": 0.86,
-            "parser_version": "registry-normalized-v5",
+            "parser_version": "registry-normalized-v6",
             "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]",
             "reportability": "review",
             "risk_flags": [
@@ -1259,7 +1264,7 @@
             "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
             "parser": "windows-registry-user-hive-activity",
             "parser_confidence": 0.86,
-            "parser_version": "registry-normalized-v5",
+            "parser_version": "registry-normalized-v6",
             "raw_preview": "[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run]",
             "reportability": "review",
             "risk_flags": [
@@ -1529,7 +1534,7 @@
             "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
             "parser": "windows-shellbags-reg-export",
             "parser_confidence": 0.86,
-            "parser_version": "registry-normalized-v5",
+            "parser_version": "registry-normalized-v6",
             "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]",
             "reportability": "review",
             "risk_flags": [
@@ -1563,7 +1568,7 @@
             "hive_hint": "HKEY_CURRENT_USER",
             "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
             "parser": "windows-shellbags-reg-export",
-            "parser_version": "registry-normalized-v5",
+            "parser_version": "registry-normalized-v6",
             "persistence_values": [],
             "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]",
             "reportability": "triage",

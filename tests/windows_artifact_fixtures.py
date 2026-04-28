@@ -652,7 +652,7 @@ def build_minimal_registry_hive(timestamp: datetime, embedded_name: str, strings
     header[36:40] = (32).to_bytes(4, "little")
     header[40:44] = (4096).to_bytes(4, "little")
     header[44:48] = (1).to_bytes(4, "little")
-    header[48:112] = embedded_name.encode("utf-16le")[:64]
+    header[48:112] = embedded_name.encode("utf-16le")[:64].ljust(64, b"\x00")
     header[508:512] = (0x12345678).to_bytes(4, "little")
     cell_payload = b"".join(
         [
@@ -661,6 +661,11 @@ def build_minimal_registry_hive(timestamp: datetime, embedded_name: str, strings
                 timestamp,
                 allocated=True,
             ),
+            build_registry_nk_cell(
+                "DeletedRun" if any("Run" in value for value in strings) else f"Deleted{embedded_name[:16]}",
+                timestamp,
+                allocated=False,
+            ),
             build_registry_vk_cell(
                 "SecurityUpdater" if any("SecurityUpdater" in value for value in strings) else "SampleValue",
                 allocated=False,
@@ -668,7 +673,12 @@ def build_minimal_registry_hive(timestamp: datetime, embedded_name: str, strings
         ]
     )
     payload = cell_payload + b"".join(value.encode("utf-16le") + b"\x00\x00" for value in strings)
-    return bytes(header) + payload
+    hbin = bytearray(4096)
+    hbin[0:4] = b"hbin"
+    hbin[4:8] = (0).to_bytes(4, "little")
+    hbin[8:12] = len(hbin).to_bytes(4, "little")
+    hbin[32 : 32 + min(len(payload), len(hbin) - 32)] = payload[: len(hbin) - 32]
+    return bytes(header) + bytes(hbin)
 
 
 def build_registry_nk_cell(name: str, timestamp: datetime, *, allocated: bool) -> bytes:
@@ -696,9 +706,10 @@ def build_registry_vk_cell(name: str, *, allocated: bool) -> bytes:
 
 
 def _registry_cell(body: bytes, *, allocated: bool) -> bytes:
-    cell_size = len(body) + 4
+    unpadded_size = len(body) + 4
+    cell_size = unpadded_size + ((8 - (unpadded_size % 8)) % 8)
     signed_size = -cell_size if allocated else cell_size
-    return signed_size.to_bytes(4, "little", signed=True) + body
+    return signed_size.to_bytes(4, "little", signed=True) + body + (b"\x00" * (cell_size - unpadded_size))
 
 
 def _write_eventlog_fixtures(xml_path: Path, hayabusa_path: Path, evtx_path: Path) -> None:

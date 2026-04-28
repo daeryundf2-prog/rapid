@@ -99,6 +99,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("registry-hive", registry_types)
             self.assertIn("registry-hive-cell", registry_types)
             self.assertIn("registry-key-tree-node", registry_types)
+            self.assertIn("registry-key-recovery-candidate", registry_types)
             self.assertIn("registry-deleted-cell-candidate", registry_types)
             self.assertIn("registry-value-recovery-candidate", registry_types)
             self.assertIn("registry-hive-strings", registry_types)
@@ -122,6 +123,8 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertTrue(any(artifact["details"]["cell_kind"] == "key-node" for artifact in hive_cells))
             updater_value = next(artifact for artifact in hive_cells if artifact["details"]["name"] == "SecurityUpdater")
             self.assertEqual(updater_value["details"]["allocation_status"], "free-or-deleted-candidate")
+            self.assertEqual(updater_value["details"]["cell_scan_method"], "hbin-walk")
+            self.assertGreater(updater_value["details"]["hbin_offset"], 0)
             self.assertIn("deleted-or-free-cell-candidate", updater_value["details"]["risk_flags"])
             key_tree_nodes = [
                 artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-key-tree-node"
@@ -134,6 +137,11 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertGreaterEqual(len(deleted_cells), 2)
             self.assertTrue(all(artifact["details"]["validation_required"] for artifact in deleted_cells))
             self.assertTrue(any(artifact["details"]["name"] == "SecurityUpdater" for artifact in deleted_cells))
+            key_recovery = [
+                artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-key-recovery-candidate"
+            ]
+            self.assertTrue(any(artifact["details"]["name"] == "DeletedRun" for artifact in key_recovery))
+            self.assertTrue(all(artifact["details"]["validation_required"] for artifact in key_recovery))
             value_recovery = [
                 artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-value-recovery-candidate"
             ]
@@ -175,6 +183,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertGreaterEqual(summary["details"]["hive_cell_row_count"], 4)
             self.assertGreaterEqual(summary["details"]["key_tree_node_count"], 2)
             self.assertGreaterEqual(summary["details"]["deleted_cell_candidate_count"], 2)
+            self.assertGreaterEqual(summary["details"]["key_recovery_candidate_count"], 2)
             self.assertGreaterEqual(summary["details"]["value_recovery_candidate_count"], 2)
             self.assertGreaterEqual(summary["details"]["user_activity_count"], 5)
             self.assertEqual(summary["details"]["persistence_entries"][0]["value_name"], "SecurityUpdater")
@@ -183,6 +192,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertTrue(summary["details"]["hive_cell_hits"])
             self.assertTrue(summary["details"]["key_tree_nodes"])
             self.assertTrue(summary["details"]["deleted_cell_candidates"])
+            self.assertTrue(summary["details"]["key_recovery_candidates"])
             self.assertTrue(summary["details"]["value_recovery_candidates"])
             self.assertTrue(summary["details"]["user_activity_entries"])
 
