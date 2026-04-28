@@ -403,7 +403,9 @@ def filetime_reg_hex(value: datetime) -> str:
 
 
 def build_minimal_evtx(record_id: int, timestamp: datetime, strings: list[str]) -> bytes:
-    payload = b"".join(value.encode("utf-16le") + b"\x00\x00" for value in strings)
+    payload = build_minimal_binxml_fragment(strings) + b"".join(
+        value.encode("utf-16le") + b"\x00\x00" for value in strings
+    )
     size = 28 + len(payload)
     record = (
         b"**\x00\x00"
@@ -422,6 +424,47 @@ def build_minimal_evtx(record_id: int, timestamp: datetime, strings: list[str]) 
     header[40:42] = (4096).to_bytes(2, "little")
     header[42:44] = (1).to_bytes(2, "little")
     return bytes(header) + record
+
+
+def build_minimal_binxml_fragment(strings: list[str]) -> bytes:
+    provider = strings[0] if len(strings) > 0 else "Provider"
+    channel = strings[1] if len(strings) > 1 else "System"
+    computer = strings[2] if len(strings) > 2 else "WIN-FIXTURE"
+    command = strings[3] if len(strings) > 3 else "cmd.exe /c whoami"
+    event = (
+        _binxml_element(
+            "Event",
+            [
+                _binxml_element(
+                    "System",
+                    [
+                        _binxml_element("ProviderName", [_binxml_value(provider)]),
+                        _binxml_element("Channel", [_binxml_value(channel)]),
+                        _binxml_element("Computer", [_binxml_value(computer)]),
+                    ],
+                ),
+                _binxml_element(
+                    "EventData",
+                    [_binxml_element("CommandLine", [_binxml_value(command)])],
+                ),
+            ],
+        )
+    )
+    return b"\x0f\x01\x01\x00" + event + b"\x00"
+
+
+def _binxml_element(name: str, children: list[bytes]) -> bytes:
+    return b"\x01\xff\xff\x00\x00\x00\x00" + _binxml_name(name) + b"\x02" + b"".join(children) + b"\x04"
+
+
+def _binxml_value(value: str) -> bytes:
+    encoded = value.encode("utf-16le")
+    return b"\x05\x01" + len(value).to_bytes(2, "little") + encoded
+
+
+def _binxml_name(value: str) -> bytes:
+    encoded = value.encode("utf-16le")
+    return (0).to_bytes(2, "little") + len(value).to_bytes(2, "little") + encoded + b"\x00\x00"
 
 
 def build_minimal_registry_hive(timestamp: datetime, embedded_name: str, strings: list[str]) -> bytes:

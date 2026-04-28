@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import hashlib
+import html
 import json
 import re
 import xml.etree.ElementTree as ET
@@ -13,7 +14,7 @@ from typing import Iterable, Mapping, Sequence
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v5"
+PARSER_VERSION = "eventlog-normalized-v6"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
@@ -26,7 +27,8 @@ EVTX_RECORD_HEADER_SIZE = 24
 MAX_NATIVE_EVTX_RECORDS = 10_000
 MAX_NATIVE_EVTX_RECORD_SIZE = 16 * 1024 * 1024
 MAX_NATIVE_EVTX_STRINGS = 200
-NATIVE_EVTX_PARSE_SCOPE = "record-header-string-triage"
+MAX_NATIVE_EVTX_BINXML_TOKENS = 500
+NATIVE_EVTX_PARSE_SCOPE = "record-header-binxml-token-string-triage"
 NATIVE_EVTX_BINXML_STATUS = "not-decoded"
 
 EVENT_ID_CATEGORIES = {
@@ -661,24 +663,30 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
         record_id = read_u64(record_blob, 8)
         timestamp = filetime_to_iso(read_u64(record_blob, 16))
         payload = record_blob[EVTX_RECORD_HEADER_SIZE:]
+        binxml = parse_native_evtx_binxml(payload)
         extracted_strings = extract_utf16le_strings(payload)
-        native_indicators = native_evtx_indicators(extracted_strings, path)
+        binxml_strings = [str(item.get("text") or "") for item in binxml.get("value_fields", []) if item.get("text")]
+        searchable_strings = unique_texts([*binxml_strings, *extracted_strings])
+        native_indicators = native_evtx_indicators(searchable_strings, path)
         integrity = native_evtx_record_integrity(record_blob, offset)
         chunk_context = native_evtx_chunk_context(blob, offset)
         sequence = native_evtx_sequence(record_id, previous_record_id)
         previous_record_id = record_id or previous_record_id
-        parameter_candidates = native_evtx_parameter_candidates(native_indicators)
-        raw_preview = native_evtx_message_preview(native_indicators, extracted_strings)
+        parameter_candidates = native_evtx_parameter_candidates(native_indicators, binxml)
+        raw_preview = str(binxml.get("rendered_preview") or "") or native_evtx_message_preview(native_indicators, searchable_strings)
+        binxml_status = str(binxml.get("status") or NATIVE_EVTX_BINXML_STATUS)
+        field_fidelity = "partial-binxml-token-scan" if binxml_status != NATIVE_EVTX_BINXML_STATUS else "partial-string-pivot"
         data = {
             "evtx_parse_status": "native-binary-partial",
             "evtx_native_parse_scope": NATIVE_EVTX_PARSE_SCOPE,
-            "evtx_binxml_status": NATIVE_EVTX_BINXML_STATUS,
-            "evtx_field_fidelity": "partial-string-pivot",
-            "evtx_validation_required": True,
+            "evtx_binxml_status": binxml_status,
+            "evtx_field_fidelity": field_fidelity,
+            "evtx_validation_required": binxml_status != "basic-rendered",
             "evtx_validation_guidance": (
                 "Use an EVTX-capable parser export such as EvtxECmd, Hayabusa, Chainsaw, or "
                 "Velociraptor when report-grade Event/System/EventData field fidelity is required."
             ),
+            "evtx_binxml": binxml,
             "evtx_file_header": native_evtx_file_header(blob),
             "evtx_chunk_context": chunk_context,
             "evtx_record_offset": offset,
@@ -686,8 +694,8 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             "evtx_record_sha256": hashlib.sha256(record_blob).hexdigest(),
             "evtx_record_integrity": integrity,
             "evtx_record_sequence": sequence,
-            "extracted_strings": extracted_strings[:MAX_NATIVE_EVTX_STRINGS],
-            "extracted_string_count": len(extracted_strings),
+            "extracted_strings": searchable_strings[:MAX_NATIVE_EVTX_STRINGS],
+            "extracted_string_count": len(searchable_strings),
             "native_indicators": native_indicators,
             "ProviderName": native_indicators.get("provider_name", ""),
             "Channel": native_indicators.get("channel", ""),
@@ -847,7 +855,10 @@ def native_evtx_indicators(strings: Sequence[str], path: Path) -> dict[str, obje
     }
 
 
-def native_evtx_parameter_candidates(indicators: Mapping[str, object]) -> list[dict[str, object]]:
+def native_evtx_parameter_candidates(
+    indicators: Mapping[str, object],
+    binxml: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
     fields = (
         ("ProviderName", indicators.get("provider_name")),
         ("Channel", indicators.get("channel")),
@@ -862,11 +873,230 @@ def native_evtx_parameter_candidates(indicators: Mapping[str, object]) -> list[d
         for name, value in fields
         if value
     ]
+    binxml_fields = binxml.get("value_fields", []) if isinstance(binxml, Mapping) else []
+    if isinstance(binxml_fields, list):
+        for item in binxml_fields:
+            if not isinstance(item, Mapping):
+                continue
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            name = str(item.get("element_path") or item.get("element") or "BinXmlValue")
+            candidates.append({"name": name, "value": text, "confidence": "binxml-value-text"})
     for value in indicators.get("url_candidates", []) if isinstance(indicators.get("url_candidates"), list) else []:
         candidates.append({"name": "Url", "value": str(value), "confidence": "string-pivot"})
     for value in indicators.get("path_candidates", []) if isinstance(indicators.get("path_candidates"), list) else []:
         candidates.append({"name": "Path", "value": str(value), "confidence": "string-pivot"})
     return candidates[:50]
+
+
+def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
+    if len(payload) < 4 or payload[0] != 0x0F:
+        return {"status": NATIVE_EVTX_BINXML_STATUS, "reason": "missing-fragment-header"}
+
+    offset = 0
+    stack: list[dict[str, object]] = []
+    elements: list[dict[str, object]] = []
+    value_fields: list[dict[str, object]] = []
+    tokens: Counter[str] = Counter()
+    rendered: list[str] = []
+    version: dict[str, object] = {}
+    warnings: list[str] = []
+
+    while offset < len(payload) and sum(tokens.values()) < MAX_NATIVE_EVTX_BINXML_TOKENS:
+        token = payload[offset]
+        token_kind = token & 0xBF
+        more = bool(token & 0x40)
+        tokens[binxml_token_name(token)] += 1
+
+        if token == 0x00:
+            offset += 1
+            break
+        if token_kind == 0x0F:
+            if offset + 4 > len(payload):
+                warnings.append("truncated-fragment-header")
+                break
+            version = {
+                "major_version": payload[offset + 1],
+                "minor_version": payload[offset + 2],
+                "flags": payload[offset + 3],
+            }
+            offset += 4
+            continue
+        if token_kind == 0x01:
+            next_offset = offset + 1
+            dependency_id = read_u16(payload, next_offset)
+            byte_length = read_u32(payload, next_offset + 2)
+            name, after_name = read_binxml_name(payload, next_offset + 6)
+            if not name:
+                warnings.append(f"truncated-start-element:{offset}")
+                break
+            path = "/".join([str(item.get("name") or "") for item in stack] + [name])
+            stack.append({"name": name, "path": path, "open": False})
+            elements.append(
+                {
+                    "name": name,
+                    "path": path,
+                    "offset": offset,
+                    "dependency_id": dependency_id,
+                    "byte_length": byte_length,
+                    "has_attribute_list": more,
+                }
+            )
+            rendered.append(f"<{name}")
+            offset = after_name
+            continue
+        if token_kind == 0x06:
+            name, after_name = read_binxml_name(payload, offset + 1)
+            if not name:
+                warnings.append(f"truncated-attribute:{offset}")
+                break
+            text, after_value, value_type = read_inline_binxml_value_text(payload, after_name)
+            current_path = str(stack[-1].get("path") or "") if stack else ""
+            value_fields.append(
+                {
+                    "element": str(stack[-1].get("name") or "") if stack else "",
+                    "element_path": f"{current_path}/@{name}" if current_path else f"@{name}",
+                    "attribute": name,
+                    "text": text,
+                    "value_type": value_type,
+                    "offset": offset,
+                    "confidence": "binxml-attribute",
+                    "more": more,
+                }
+            )
+            rendered.append(f' {name}="{html.escape(text)}"')
+            offset = after_value
+            continue
+        if token_kind == 0x02:
+            if stack:
+                stack[-1]["open"] = True
+            rendered.append(">")
+            offset += 1
+            continue
+        if token_kind == 0x03:
+            rendered.append("/>")
+            if stack:
+                stack.pop()
+            offset += 1
+            continue
+        if token_kind == 0x04:
+            name = str(stack.pop().get("name") or "") if stack else ""
+            rendered.append(f"</{name}>")
+            offset += 1
+            continue
+        if token_kind == 0x05:
+            text, after_value, value_type = read_inline_binxml_value_text(payload, offset)
+            current = stack[-1] if stack else {}
+            current_path = str(current.get("path") or "")
+            value_fields.append(
+                {
+                    "element": str(current.get("name") or ""),
+                    "element_path": current_path,
+                    "text": text,
+                    "value_type": value_type,
+                    "offset": offset,
+                    "confidence": "binxml-value-text",
+                    "more": more,
+                }
+            )
+            rendered.append(html.escape(text))
+            offset = after_value
+            continue
+        if token_kind == 0x0C:
+            template = parse_binxml_template_header(payload, offset)
+            value_fields.append(template)
+            warnings.append("template-instance-detected-without-substitution-rendering")
+            offset = int(template.get("next_offset") or offset + 1)
+            continue
+
+        warnings.append(f"unsupported-token:0x{token:02x}@{offset}")
+        offset += 1
+
+    status = "basic-rendered" if elements or value_fields else NATIVE_EVTX_BINXML_STATUS
+    if warnings:
+        status = "partial-tokenized" if elements or value_fields else NATIVE_EVTX_BINXML_STATUS
+    return {
+        "status": status,
+        "version": version,
+        "token_counts": counter_items(tokens),
+        "elements": elements[:100],
+        "value_fields": value_fields[:100],
+        "rendered_preview": "".join(rendered)[:4000],
+        "token_count": sum(tokens.values()),
+        "warnings": warnings[:25],
+    }
+
+
+def read_binxml_name(blob: bytes, offset: int) -> tuple[str, int]:
+    if offset + 4 > len(blob):
+        return "", offset
+    char_count = read_u16(blob, offset + 2)
+    start = offset + 4
+    end = start + char_count * 2
+    terminator_end = end + 2
+    if terminator_end > len(blob):
+        return "", offset
+    name = decode_utf16le_string(blob[start:end])
+    return name, terminator_end
+
+
+def read_inline_binxml_value_text(blob: bytes, offset: int) -> tuple[str, int, str]:
+    if offset + 4 > len(blob):
+        return "", offset + 1, "truncated"
+    token = blob[offset]
+    token_kind = token & 0xBF
+    if token_kind != 0x05:
+        return "", offset, "missing-value-text-token"
+    value_type = blob[offset + 1]
+    if value_type != 0x01:
+        return "", offset + 2, f"unsupported-type-0x{value_type:02x}"
+    char_count = read_u16(blob, offset + 2)
+    start = offset + 4
+    end = start + char_count * 2
+    if end > len(blob):
+        return "", len(blob), "truncated-string"
+    text = decode_utf16le_string(blob[start:end])
+    return text, end, "StringType"
+
+
+def parse_binxml_template_header(blob: bytes, offset: int) -> dict[str, object]:
+    next_offset = offset + 1
+    template_marker = blob[next_offset] if next_offset < len(blob) else 0
+    template_id = blob[next_offset + 1 : next_offset + 17].hex() if next_offset + 17 <= len(blob) else ""
+    template_length = read_u32(blob, next_offset + 17) if next_offset + 21 <= len(blob) else 0
+    return {
+        "element": "TemplateInstance",
+        "element_path": "TemplateInstance",
+        "text": template_id,
+        "value_type": "TemplateInstance",
+        "offset": offset,
+        "confidence": "binxml-template-header",
+        "template_marker": f"0x{template_marker:02x}",
+        "template_id": template_id,
+        "template_definition_length": template_length,
+        "next_offset": next_offset + 21 if template_length == 0 else min(len(blob), next_offset + 21 + template_length),
+    }
+
+
+def binxml_token_name(token: int) -> str:
+    names = {
+        0x00: "EOFToken",
+        0x01: "OpenStartElementToken",
+        0x41: "OpenStartElementTokenMore",
+        0x02: "CloseStartElementToken",
+        0x03: "CloseEmptyElementToken",
+        0x04: "EndElementToken",
+        0x05: "ValueTextToken",
+        0x45: "ValueTextTokenMore",
+        0x06: "AttributeToken",
+        0x46: "AttributeTokenMore",
+        0x0C: "TemplateInstanceToken",
+        0x0D: "NormalSubstitutionToken",
+        0x0E: "OptionalSubstitutionToken",
+        0x0F: "FragmentHeaderToken",
+    }
+    return names.get(token, f"UnknownToken0x{token:02x}")
 
 
 def native_evtx_message_preview(indicators: Mapping[str, object], strings: Sequence[str]) -> str:
@@ -988,6 +1218,8 @@ def native_evtx_confidence(details: Mapping[str, object]) -> float:
     if integrity.get("trailing_size_valid"):
         score += 0.05
     if details.get("command_line") or details.get("source_ip") or details.get("user_name"):
+        score += 0.05
+    if details.get("evtx_binxml_status") in {"basic-rendered", "partial-tokenized"}:
         score += 0.05
     return min(0.82, round(score, 2))
 
@@ -1668,6 +1900,18 @@ def decode_utf16le_string(blob: bytes) -> str:
         return blob.decode("utf-16le", errors="ignore").strip("\x00\r\n\t ")
     except UnicodeError:
         return ""
+
+
+def unique_texts(values: Sequence[str]) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        output.append(text)
+    return output
 
 
 def first_matching_string(values: Sequence[str], *needles: str) -> str:
