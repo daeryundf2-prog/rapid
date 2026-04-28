@@ -455,10 +455,25 @@ def build_minimal_binxml_template_instance(command: str) -> bytes:
             "Event",
             [
                 _binxml_element(
+                    "System",
+                    [
+                        _binxml_element_with_attributes(
+                            "Provider",
+                            [("Name", "Microsoft-Windows-PowerShell")],
+                            [],
+                        ),
+                        _binxml_element("EventID", [_binxml_value("4104")]),
+                        _binxml_element("Level", [_binxml_value("3")]),
+                        _binxml_element("Channel", [_binxml_value("Microsoft-Windows-PowerShell/Operational")]),
+                        _binxml_element("Computer", [_binxml_value("WIN-TEMPLATE")]),
+                    ],
+                ),
+                _binxml_element(
                     "EventData",
                     [
-                        _binxml_element(
-                            "CommandLine",
+                        _binxml_element_with_attributes(
+                            "Data",
+                            [("Name", "CommandLine")],
                             [_binxml_substitution(0, 0x01)],
                         )
                     ],
@@ -490,7 +505,9 @@ def build_minimal_binxml_fragment(strings: list[str]) -> bytes:
                 _binxml_element(
                     "System",
                     [
-                        _binxml_element("ProviderName", [_binxml_value(provider)]),
+                        _binxml_element_with_attributes("Provider", [("Name", provider)], []),
+                        _binxml_element("EventID", [_binxml_value("4104")]),
+                        _binxml_element("Level", [_binxml_value("3")]),
                         _binxml_element("Channel", [_binxml_value(channel)]),
                         _binxml_element("Computer", [_binxml_value(computer)]),
                     ],
@@ -507,6 +524,21 @@ def build_minimal_binxml_fragment(strings: list[str]) -> bytes:
 
 def _binxml_element(name: str, children: list[bytes]) -> bytes:
     return b"\x01\xff\xff\x00\x00\x00\x00" + _binxml_name(name) + b"\x02" + b"".join(children) + b"\x04"
+
+
+def _binxml_element_with_attributes(name: str, attributes: list[tuple[str, str]], children: list[bytes]) -> bytes:
+    return (
+        b"\x41\xff\xff\x00\x00\x00\x00"
+        + _binxml_name(name)
+        + b"".join(_binxml_attribute(attribute_name, value) for attribute_name, value in attributes)
+        + b"\x02"
+        + b"".join(children)
+        + b"\x04"
+    )
+
+
+def _binxml_attribute(name: str, value: str) -> bytes:
+    return b"\x06" + _binxml_name(name) + _binxml_value(value)
 
 
 def _binxml_value(value: str) -> bytes:

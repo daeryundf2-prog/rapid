@@ -14,7 +14,7 @@ from typing import Iterable, Mapping, Sequence
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v7"
+PARSER_VERSION = "eventlog-normalized-v8"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
@@ -664,10 +664,14 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
         timestamp = filetime_to_iso(read_u64(record_blob, 16))
         payload = record_blob[EVTX_RECORD_HEADER_SIZE:]
         binxml = parse_native_evtx_binxml(payload)
+        binxml_promoted = native_evtx_promoted_fields(binxml)
         extracted_strings = extract_utf16le_strings(payload)
         binxml_strings = [str(item.get("text") or "") for item in binxml.get("value_fields", []) if item.get("text")]
         searchable_strings = unique_texts([*binxml_strings, *extracted_strings])
-        native_indicators = native_evtx_indicators(searchable_strings, path)
+        native_indicators = merge_native_evtx_promoted_fields(
+            native_evtx_indicators(searchable_strings, path),
+            binxml_promoted,
+        )
         integrity = native_evtx_record_integrity(record_blob, offset)
         chunk_context = native_evtx_chunk_context(blob, offset)
         sequence = native_evtx_sequence(record_id, previous_record_id)
@@ -687,6 +691,9 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
                 "Velociraptor when report-grade Event/System/EventData field fidelity is required."
             ),
             "evtx_binxml": binxml,
+            "binxml_system_fields": dict(binxml_promoted.get("system_fields") or {}),
+            "binxml_event_data_fields": dict(binxml_promoted.get("event_data_fields") or {}),
+            "binxml_user_data_fields": dict(binxml_promoted.get("user_data_fields") or {}),
             "evtx_file_header": native_evtx_file_header(blob),
             "evtx_chunk_context": chunk_context,
             "evtx_record_offset": offset,
@@ -706,6 +713,7 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             "parameter_candidates": parameter_candidates,
             "native_message_preview": raw_preview,
         }
+        data.update(dict(binxml_promoted.get("flat_fields") or {}))
         provider_name = str(native_indicators.get("provider_name") or "")
         channel = str(native_indicators.get("channel") or "")
         computer = str(native_indicators.get("computer") or "")
@@ -716,10 +724,10 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             source_index=source_index,
             source_hashes=source_hashes,
             provider_name=provider_name,
-            event_id="",
+            event_id=str((binxml_promoted.get("system_fields") or {}).get("EventID") or ""),
             record_id=str(record_id or ""),
             channel=channel,
-            level="",
+            level=str((binxml_promoted.get("system_fields") or {}).get("Level") or ""),
             computer=computer,
             event_created_at=timestamp,
             data=data,
@@ -896,6 +904,149 @@ def native_evtx_field_fidelity(binxml_status: str) -> str:
     if binxml_status != NATIVE_EVTX_BINXML_STATUS:
         return "partial-binxml-token-scan"
     return "partial-string-pivot"
+
+
+def native_evtx_promoted_fields(binxml: Mapping[str, object]) -> dict[str, object]:
+    value_fields = binxml.get("value_fields", []) if isinstance(binxml, Mapping) else []
+    system_fields: dict[str, str] = {}
+    event_data_fields: dict[str, str] = {}
+    user_data_fields: dict[str, str] = {}
+    flat_fields: dict[str, str] = {}
+    pending_event_data_name = ""
+    event_data_index = 0
+
+    if not isinstance(value_fields, list):
+        value_fields = []
+
+    for item in value_fields:
+        if not isinstance(item, Mapping):
+            continue
+        path = str(item.get("element_path") or "").strip()
+        text = str(item.get("text") or "").strip()
+        if not path or not text:
+            continue
+
+        if path.startswith("Event/System/"):
+            key = native_evtx_system_field_name(path.removeprefix("Event/System/"))
+            if key:
+                system_fields.setdefault(key, text)
+            continue
+
+        if path == "Event/EventData/Data/@Name":
+            pending_event_data_name = text
+            continue
+
+        if path == "Event/EventData/Data":
+            key = pending_event_data_name or f"Data{event_data_index}"
+            event_data_index += 1
+            pending_event_data_name = ""
+            event_data_fields.setdefault(key, text)
+            continue
+
+        if path.startswith("Event/EventData/"):
+            key = native_evtx_leaf_field_name(path.removeprefix("Event/EventData/"))
+            if key:
+                event_data_fields.setdefault(key, text)
+            continue
+
+        if path.startswith("Event/UserData/"):
+            key = native_evtx_leaf_field_name(path.removeprefix("Event/UserData/"))
+            if key:
+                user_data_fields.setdefault(f"UserData.{key}", text)
+
+    for key, value in system_fields.items():
+        flat_fields.setdefault(key, value)
+    for key, value in event_data_fields.items():
+        flat_fields.setdefault(key, value)
+    for key, value in user_data_fields.items():
+        flat_fields.setdefault(key, value)
+
+    return {
+        "system_fields": system_fields,
+        "event_data_fields": event_data_fields,
+        "user_data_fields": user_data_fields,
+        "flat_fields": flat_fields,
+    }
+
+
+def native_evtx_system_field_name(path_suffix: str) -> str:
+    normalized = path_suffix.strip("/")
+    if not normalized or normalized.startswith("@"):
+        return ""
+    aliases = {
+        "ProviderName": "ProviderName",
+        "Provider/Name": "ProviderName",
+        "Provider/@Name": "ProviderName",
+        "EventID": "EventID",
+        "EventID/Qualifiers": "EventIDQualifiers",
+        "EventID/@Qualifiers": "EventIDQualifiers",
+        "Version": "Version",
+        "Level": "Level",
+        "Task": "Task",
+        "Opcode": "Opcode",
+        "Keywords": "Keywords",
+        "TimeCreated/SystemTime": "TimeCreated",
+        "TimeCreated/@SystemTime": "TimeCreated",
+        "EventRecordID": "EventRecordID",
+        "Correlation/ActivityID": "CorrelationActivityID",
+        "Correlation/@ActivityID": "CorrelationActivityID",
+        "Correlation/RelatedActivityID": "CorrelationRelatedActivityID",
+        "Correlation/@RelatedActivityID": "CorrelationRelatedActivityID",
+        "Execution/ProcessID": "ProcessID",
+        "Execution/@ProcessID": "ProcessID",
+        "Execution/ThreadID": "ThreadID",
+        "Execution/@ThreadID": "ThreadID",
+        "Channel": "Channel",
+        "Computer": "Computer",
+        "Security/UserID": "UserID",
+        "Security/@UserID": "UserID",
+    }
+    return aliases.get(normalized, normalized.split("/")[-1])
+
+
+def native_evtx_leaf_field_name(path_suffix: str) -> str:
+    normalized = path_suffix.strip("/")
+    if not normalized or normalized.endswith("/@Name") or "/@" in normalized:
+        return ""
+    return normalized.rsplit("/", 1)[-1]
+
+
+def merge_native_evtx_promoted_fields(
+    indicators: Mapping[str, object],
+    promoted: Mapping[str, object],
+) -> dict[str, object]:
+    output = dict(indicators)
+    system = promoted.get("system_fields") if isinstance(promoted, Mapping) else {}
+    event_data = promoted.get("event_data_fields") if isinstance(promoted, Mapping) else {}
+    if not isinstance(system, Mapping):
+        system = {}
+    if not isinstance(event_data, Mapping):
+        event_data = {}
+
+    native_evtx_prefer(output, "provider_name", system.get("ProviderName"))
+    native_evtx_prefer(output, "channel", system.get("Channel"))
+    native_evtx_prefer(output, "computer", system.get("Computer"))
+    native_evtx_prefer(output, "command_line", first_promoted_value(event_data, "CommandLine", "ProcessCommandLine", "ScriptBlockText"))
+    native_evtx_prefer(output, "process_name", first_promoted_value(event_data, "NewProcessName", "ProcessName", "Image"))
+    native_evtx_prefer(output, "source_ip", first_promoted_value(event_data, "IpAddress", "SourceAddress", "SourceIp", "SourceNetworkAddress"))
+    native_evtx_prefer(output, "user_name", first_promoted_value(event_data, "TargetUserName", "SubjectUserName", "User", "AccountName"))
+    output["promoted_system_field_count"] = len(system)
+    output["promoted_event_data_field_count"] = len(event_data)
+    return output
+
+
+def first_promoted_value(fields: Mapping[str, object], *keys: str) -> str:
+    for key in keys:
+        value = str(fields.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def native_evtx_prefer(target: dict[str, object], key: str, value: object) -> None:
+    text = str(value or "").strip()
+    if text:
+        target[key] = text
 
 
 def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
@@ -1179,6 +1330,28 @@ def parse_binxml_fragment_tokens(
             )
             rendered.append(f"<{name}")
             offset = after_name
+            continue
+        if token_kind == 0x06:
+            name, after_name = read_binxml_name(payload, offset + 1)
+            if not name:
+                warnings.append(f"truncated-attribute:{offset}")
+                break
+            text, after_value, value_type = read_inline_binxml_value_text(payload, after_name)
+            current_path = str(stack[-1].get("path") or "") if stack else ""
+            value_fields.append(
+                {
+                    "element": str(stack[-1].get("name") or "") if stack else "",
+                    "element_path": f"{current_path}/@{name}" if current_path else f"@{name}",
+                    "attribute": name,
+                    "text": text,
+                    "value_type": value_type,
+                    "offset": offset,
+                    "confidence": "binxml-attribute",
+                    "more": more,
+                }
+            )
+            rendered.append(f' {name}="{html.escape(text)}"')
+            offset = after_value
             continue
         if token_kind == 0x02:
             if stack:

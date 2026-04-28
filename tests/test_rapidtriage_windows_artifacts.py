@@ -175,11 +175,20 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("high-value-event-id:4104", powershell["details"]["risk_flags"])
             self.assertIn("suspicious-term:powershell -enc", powershell["details"]["risk_flags"])
             rules_by_id = {item["details"]["rule"]["id"]: item for item in detection_rows}
+            encoded_powershell_rules = [
+                item for item in detection_rows if item["details"]["rule"]["id"] == "RT-EVTX-PS-ENCODED"
+            ]
             self.assertEqual(rules_by_id["RT-PS-001"]["details"]["rule"]["title"], "Suspicious Encoded PowerShell")
             self.assertEqual(rules_by_id["RT-PS-001"]["details"]["coverage_status"], "detected-by-rule")
-            self.assertEqual(rules_by_id["RT-EVTX-PS-ENCODED"]["details"]["parser"], "windows-eventlog-builtin-rulepack")
-            self.assertEqual(rules_by_id["RT-EVTX-PS-ENCODED"]["details"]["matched_event"]["record_id"], "202")
-            self.assertIn("script_block_text", rules_by_id["RT-EVTX-PS-ENCODED"]["details"]["matched_fields"])
+            self.assertTrue(
+                any(item["details"]["parser"] == "windows-eventlog-builtin-rulepack" for item in encoded_powershell_rules)
+            )
+            self.assertTrue(
+                any(item["details"]["matched_event"]["record_id"] == "202" for item in encoded_powershell_rules)
+            )
+            self.assertTrue(
+                any("script_block_text" in item["details"]["matched_fields"] for item in encoded_powershell_rules)
+            )
             self.assertEqual(rules_by_id["RT-EVTX-RDP-LOGON"]["details"]["logon_type"], "10")
             self.assertEqual(inventory_rows[0]["details"]["coverage_status"], "detected")
             self.assertEqual(inventory_rows[0]["details"]["source_path"], str(fixture.evtx_file.resolve()))
@@ -188,9 +197,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_evtx["details"]["coverage_status"], "native-binary-partial")
             self.assertEqual(native_evtx["details"]["reportability"], "triage")
             self.assertEqual(native_evtx["details"]["record_id"], "300")
+            self.assertEqual(native_evtx["details"]["event_id"], "4104")
+            self.assertEqual(native_evtx["details"]["level"], "3")
             self.assertEqual(native_evtx["details"]["timestamp"], "2024-04-01T03:04:05+00:00")
             self.assertIn("powershell -enc NativeFixture", native_evtx["details"]["extracted_strings"])
             self.assertEqual(native_evtx["details"]["command_line"], "powershell -enc NativeFixture")
+            self.assertEqual(native_evtx["details"]["provider_name"], "Microsoft-Windows-PowerShell")
+            self.assertEqual(native_evtx["details"]["binxml_system_fields"]["EventID"], "4104")
+            self.assertEqual(native_evtx["details"]["binxml_event_data_fields"]["CommandLine"], "powershell -enc NativeFixture")
             self.assertEqual(native_evtx["details"]["native_indicators"]["channel_hint_source"], "record-string")
             self.assertEqual(native_evtx["details"]["evtx_record_integrity"]["declared_size_valid"], True)
             self.assertEqual(native_evtx["details"]["evtx_record_integrity"]["trailing_size_valid"], True)
@@ -223,13 +237,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("suspicious-term:powershell -enc", native_evtx["details"]["risk_flags"])
             summary = summary_rows[0]["details"]
             self.assertEqual(summary["event_count"], 3)
-            self.assertEqual(summary["detection_count"], 3)
-            self.assertEqual(summary["parsed_row_count"], 6)
+            self.assertEqual(summary["detection_count"], 4)
+            self.assertEqual(summary["parsed_row_count"], 7)
             self.assertEqual(summary["first_event_at"], "2024-04-01T01:02:03.000000+00:00")
-            self.assertIn({"value": "4104", "count": 1}, summary["event_id_counts"])
+            self.assertIn({"value": "4104", "count": 2}, summary["event_id_counts"])
             self.assertIn({"value": "execution", "count": 2}, summary["event_family_counts"])
             self.assertIn({"value": "powershell -enc", "count": 2}, summary["risk_term_counts"])
-            self.assertIn({"value": "RT-EVTX-PS-ENCODED", "count": 1}, summary["detection_rule_counts"])
+            self.assertIn({"value": "RT-EVTX-PS-ENCODED", "count": 2}, summary["detection_rule_counts"])
             self.assertIn({"value": "trailing-size-valid", "count": 1}, summary["native_integrity_counts"])
             self.assertIn({"value": "first-record", "count": 1}, summary["native_sequence_counts"])
             self.assertIn({"value": "record-string", "count": 1}, summary["native_channel_hint_counts"])
@@ -290,15 +304,21 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
 
             self.assertEqual(native_evtx["details"]["record_id"], "888")
+            self.assertEqual(native_evtx["details"]["event_id"], "4104")
+            self.assertEqual(native_evtx["details"]["level"], "3")
+            self.assertEqual(native_evtx["details"]["provider_name"], "Microsoft-Windows-PowerShell")
+            self.assertEqual(native_evtx["details"]["channel"], "Microsoft-Windows-PowerShell/Operational")
             self.assertEqual(native_evtx["details"]["evtx_binxml_status"], "template-substituted-partial")
             self.assertEqual(native_evtx["details"]["evtx_field_fidelity"], "partial-binxml-template-substitution")
             self.assertIn("powershell -enc TemplateValue", native_evtx["details"]["command_line"])
             self.assertIn("powershell -enc TemplateValue", native_evtx["details"]["evtx_binxml"]["rendered_preview"])
+            self.assertEqual(native_evtx["details"]["binxml_system_fields"]["EventID"], "4104")
+            self.assertEqual(native_evtx["details"]["binxml_event_data_fields"]["CommandLine"], "powershell -enc TemplateValue")
             self.assertEqual(native_evtx["details"]["evtx_binxml"]["template_values"][0]["value_type"], "StringType")
             self.assertTrue(
                 any(
                     item["confidence"] == "binxml-template-substitution"
-                    and item["element_path"] == "Event/EventData/CommandLine"
+                    and item["element_path"] == "Event/EventData/Data"
                     and item["text"] == "powershell -enc TemplateValue"
                     for item in native_evtx["details"]["evtx_binxml"]["value_fields"]
                 )
