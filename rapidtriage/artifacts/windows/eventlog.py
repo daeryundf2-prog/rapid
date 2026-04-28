@@ -14,7 +14,7 @@ from typing import Iterable, Mapping, Sequence
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v6"
+PARSER_VERSION = "eventlog-normalized-v7"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
@@ -675,13 +675,13 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
         parameter_candidates = native_evtx_parameter_candidates(native_indicators, binxml)
         raw_preview = str(binxml.get("rendered_preview") or "") or native_evtx_message_preview(native_indicators, searchable_strings)
         binxml_status = str(binxml.get("status") or NATIVE_EVTX_BINXML_STATUS)
-        field_fidelity = "partial-binxml-token-scan" if binxml_status != NATIVE_EVTX_BINXML_STATUS else "partial-string-pivot"
+        field_fidelity = native_evtx_field_fidelity(binxml_status)
         data = {
             "evtx_parse_status": "native-binary-partial",
             "evtx_native_parse_scope": NATIVE_EVTX_PARSE_SCOPE,
             "evtx_binxml_status": binxml_status,
             "evtx_field_fidelity": field_fidelity,
-            "evtx_validation_required": binxml_status != "basic-rendered",
+            "evtx_validation_required": binxml_status not in {"basic-rendered", "template-substituted-partial"},
             "evtx_validation_guidance": (
                 "Use an EVTX-capable parser export such as EvtxECmd, Hayabusa, Chainsaw, or "
                 "Velociraptor when report-grade Event/System/EventData field fidelity is required."
@@ -890,6 +890,14 @@ def native_evtx_parameter_candidates(
     return candidates[:50]
 
 
+def native_evtx_field_fidelity(binxml_status: str) -> str:
+    if binxml_status == "template-substituted-partial":
+        return "partial-binxml-template-substitution"
+    if binxml_status != NATIVE_EVTX_BINXML_STATUS:
+        return "partial-binxml-token-scan"
+    return "partial-string-pivot"
+
+
 def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
     if len(payload) < 4 or payload[0] != 0x0F:
         return {"status": NATIVE_EVTX_BINXML_STATUS, "reason": "missing-fragment-header"}
@@ -898,6 +906,7 @@ def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
     stack: list[dict[str, object]] = []
     elements: list[dict[str, object]] = []
     value_fields: list[dict[str, object]] = []
+    template_values: list[dict[str, object]] = []
     tokens: Counter[str] = Counter()
     rendered: list[str] = []
     version: dict[str, object] = {}
@@ -1004,13 +1013,240 @@ def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
             offset = after_value
             continue
         if token_kind == 0x0C:
-            template = parse_binxml_template_header(payload, offset)
-            value_fields.append(template)
-            warnings.append("template-instance-detected-without-substitution-rendering")
+            template = parse_binxml_template_instance(payload, offset)
+            elements.extend(item for item in template.get("elements", []) if isinstance(item, Mapping))
+            value_fields.extend(item for item in template.get("value_fields", []) if isinstance(item, Mapping))
+            template_values.extend(item for item in template.get("template_values", []) if isinstance(item, Mapping))
+            rendered.append(str(template.get("rendered_preview") or ""))
+            warnings.extend(str(item) for item in template.get("warnings", []) if str(item))
+            template_counts = template.get("token_counts", [])
+            if isinstance(template_counts, list):
+                for item in template_counts:
+                    if isinstance(item, Mapping):
+                        tokens[str(item.get("value") or "unknown")] += int(item.get("count") or 0)
             offset = int(template.get("next_offset") or offset + 1)
             continue
 
         warnings.append(f"unsupported-token:0x{token:02x}@{offset}")
+        offset += 1
+
+    has_template_substitution = any(
+        isinstance(item, Mapping) and item.get("confidence") == "binxml-template-substitution"
+        for item in value_fields
+    )
+    status = "template-substituted-partial" if has_template_substitution else (
+        "basic-rendered" if elements or value_fields else NATIVE_EVTX_BINXML_STATUS
+    )
+    if warnings and not has_template_substitution:
+        status = "partial-tokenized" if elements or value_fields else NATIVE_EVTX_BINXML_STATUS
+    return {
+        "status": status,
+        "version": version,
+        "token_counts": counter_items(tokens),
+        "elements": elements[:100],
+        "value_fields": value_fields[:100],
+        "template_values": template_values[:100],
+        "template_value_count": len(template_values),
+        "rendered_preview": "".join(rendered)[:4000],
+        "token_count": sum(tokens.values()),
+        "warnings": warnings[:25],
+    }
+
+
+def parse_binxml_template_instance(blob: bytes, offset: int) -> dict[str, object]:
+    warnings: list[str] = []
+    cursor = offset + 1
+    if cursor >= len(blob) or blob[cursor] != 0xB0:
+        return {
+            "status": "template-header-invalid",
+            "offset": offset,
+            "next_offset": offset + 1,
+            "warnings": [f"template-marker-missing:{offset}"],
+            "elements": [],
+            "value_fields": [],
+            "rendered_preview": "",
+            "token_counts": [],
+        }
+    if cursor + 21 > len(blob):
+        return {
+            "status": "template-header-truncated",
+            "offset": offset,
+            "next_offset": len(blob),
+            "warnings": [f"template-header-truncated:{offset}"],
+            "elements": [],
+            "value_fields": [],
+            "rendered_preview": "",
+            "token_counts": [],
+        }
+
+    template_id = format_guid_le(blob[cursor + 1 : cursor + 17])
+    template_length = read_u32(blob, cursor + 17)
+    body_start = cursor + 21
+    body_end = min(len(blob), body_start + template_length)
+    if body_end <= body_start:
+        warnings.append("template-definition-empty")
+    if body_start + template_length > len(blob):
+        warnings.append("template-definition-truncated")
+
+    values, values_next_offset, value_warnings = read_binxml_template_values(blob, body_end)
+    warnings.extend(value_warnings)
+    fragment = parse_binxml_fragment_tokens(blob[body_start:body_end], substitutions=values)
+    warnings.extend(str(item) for item in fragment.get("warnings", []) if str(item))
+    value_fields = [
+        {
+            "element": "TemplateInstance",
+            "element_path": "TemplateInstance",
+            "text": template_id,
+            "value_type": "TemplateInstance",
+            "offset": offset,
+            "confidence": "binxml-template-header",
+            "template_marker": "0xb0",
+            "template_id": template_id,
+            "template_definition_length": template_length,
+        }
+    ]
+    value_fields.extend(values)
+    value_fields.extend(item for item in fragment.get("value_fields", []) if isinstance(item, Mapping))
+    return {
+        "status": "template-substituted-partial" if values else "template-tokenized",
+        "offset": offset,
+        "next_offset": values_next_offset,
+        "template_id": template_id,
+        "template_definition_length": template_length,
+        "template_value_count": len(values),
+        "template_values": values[:100],
+        "elements": list(fragment.get("elements", []))[:100],
+        "value_fields": value_fields[:150],
+        "rendered_preview": str(fragment.get("rendered_preview") or "")[:4000],
+        "token_counts": list(fragment.get("token_counts", [])),
+        "warnings": warnings[:25],
+    }
+
+
+def parse_binxml_fragment_tokens(
+    payload: bytes,
+    *,
+    substitutions: Sequence[Mapping[str, object]] | None = None,
+) -> dict[str, object]:
+    offset = 0
+    stack: list[dict[str, object]] = []
+    elements: list[dict[str, object]] = []
+    value_fields: list[dict[str, object]] = []
+    tokens: Counter[str] = Counter()
+    rendered: list[str] = []
+    version: dict[str, object] = {}
+    warnings: list[str] = []
+    substitution_values = list(substitutions or [])
+
+    while offset < len(payload) and sum(tokens.values()) < MAX_NATIVE_EVTX_BINXML_TOKENS:
+        token = payload[offset]
+        token_kind = token & 0xBF
+        more = bool(token & 0x40)
+        tokens[binxml_token_name(token)] += 1
+        if token == 0x00:
+            offset += 1
+            break
+        if token_kind == 0x0F:
+            if offset + 4 > len(payload):
+                warnings.append("truncated-fragment-header")
+                break
+            version = {
+                "major_version": payload[offset + 1],
+                "minor_version": payload[offset + 2],
+                "flags": payload[offset + 3],
+            }
+            offset += 4
+            continue
+        if token_kind == 0x01:
+            next_offset = offset + 1
+            dependency_id = read_u16(payload, next_offset)
+            byte_length = read_u32(payload, next_offset + 2)
+            name, after_name = read_binxml_name(payload, next_offset + 6)
+            if not name:
+                warnings.append(f"truncated-start-element:{offset}")
+                break
+            path = "/".join([str(item.get("name") or "") for item in stack] + [name])
+            stack.append({"name": name, "path": path, "open": False})
+            elements.append(
+                {
+                    "name": name,
+                    "path": path,
+                    "offset": offset,
+                    "dependency_id": dependency_id,
+                    "byte_length": byte_length,
+                    "has_attribute_list": more,
+                }
+            )
+            rendered.append(f"<{name}")
+            offset = after_name
+            continue
+        if token_kind == 0x02:
+            if stack:
+                stack[-1]["open"] = True
+            rendered.append(">")
+            offset += 1
+            continue
+        if token_kind == 0x03:
+            rendered.append("/>")
+            if stack:
+                stack.pop()
+            offset += 1
+            continue
+        if token_kind == 0x04:
+            name = str(stack.pop().get("name") or "") if stack else ""
+            rendered.append(f"</{name}>")
+            offset += 1
+            continue
+        if token_kind == 0x05:
+            text, after_value, value_type = read_inline_binxml_value_text(payload, offset)
+            current = stack[-1] if stack else {}
+            current_path = str(current.get("path") or "")
+            value_fields.append(
+                {
+                    "element": str(current.get("name") or ""),
+                    "element_path": current_path,
+                    "text": text,
+                    "value_type": value_type,
+                    "offset": offset,
+                    "confidence": "binxml-value-text",
+                    "more": more,
+                }
+            )
+            rendered.append(html.escape(text))
+            offset = after_value
+            continue
+        if token_kind in {0x0D, 0x0E}:
+            if offset + 4 > len(payload):
+                warnings.append(f"truncated-substitution:{offset}")
+                break
+            substitution_id = read_u16(payload, offset + 1)
+            expected_type = payload[offset + 3]
+            current = stack[-1] if stack else {}
+            current_path = str(current.get("path") or "")
+            value = substitution_values[substitution_id] if substitution_id < len(substitution_values) else {}
+            text = str(value.get("text") or "") if isinstance(value, Mapping) else ""
+            value_type = str(value.get("value_type") or binxml_value_type_name(expected_type)) if isinstance(value, Mapping) else binxml_value_type_name(expected_type)
+            optional = token_kind == 0x0E
+            if not text and optional:
+                offset += 4
+                continue
+            value_fields.append(
+                {
+                    "element": str(current.get("name") or ""),
+                    "element_path": current_path,
+                    "text": text,
+                    "value_type": value_type,
+                    "offset": offset,
+                    "confidence": "binxml-template-substitution",
+                    "substitution_id": substitution_id,
+                    "expected_value_type": binxml_value_type_name(expected_type),
+                    "optional": optional,
+                }
+            )
+            rendered.append(html.escape(text))
+            offset += 4
+            continue
+        warnings.append(f"unsupported-template-token:0x{token:02x}@{offset}")
         offset += 1
 
     status = "basic-rendered" if elements or value_fields else NATIVE_EVTX_BINXML_STATUS
@@ -1020,8 +1256,8 @@ def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
         "status": status,
         "version": version,
         "token_counts": counter_items(tokens),
-        "elements": elements[:100],
-        "value_fields": value_fields[:100],
+        "elements": elements,
+        "value_fields": value_fields,
         "rendered_preview": "".join(rendered)[:4000],
         "token_count": sum(tokens.values()),
         "warnings": warnings[:25],
@@ -1060,23 +1296,164 @@ def read_inline_binxml_value_text(blob: bytes, offset: int) -> tuple[str, int, s
     return text, end, "StringType"
 
 
-def parse_binxml_template_header(blob: bytes, offset: int) -> dict[str, object]:
-    next_offset = offset + 1
-    template_marker = blob[next_offset] if next_offset < len(blob) else 0
-    template_id = blob[next_offset + 1 : next_offset + 17].hex() if next_offset + 17 <= len(blob) else ""
-    template_length = read_u32(blob, next_offset + 17) if next_offset + 21 <= len(blob) else 0
-    return {
-        "element": "TemplateInstance",
-        "element_path": "TemplateInstance",
-        "text": template_id,
-        "value_type": "TemplateInstance",
-        "offset": offset,
-        "confidence": "binxml-template-header",
-        "template_marker": f"0x{template_marker:02x}",
-        "template_id": template_id,
-        "template_definition_length": template_length,
-        "next_offset": next_offset + 21 if template_length == 0 else min(len(blob), next_offset + 21 + template_length),
+def read_binxml_template_values(blob: bytes, offset: int) -> tuple[list[dict[str, object]], int, list[str]]:
+    warnings: list[str] = []
+    values: list[dict[str, object]] = []
+    if offset + 4 > len(blob):
+        return values, offset, ["template-instance-data-missing"]
+    value_count = read_u32(blob, offset)
+    if value_count > 1024:
+        return values, offset + 4, [f"template-value-count-too-large:{value_count}"]
+    spec_offset = offset + 4
+    value_offset = spec_offset + value_count * 4
+    if value_offset > len(blob):
+        return values, len(blob), ["template-value-spec-truncated"]
+
+    specs: list[dict[str, int]] = []
+    for index in range(value_count):
+        entry_offset = spec_offset + index * 4
+        length = read_u16(blob, entry_offset)
+        value_type = blob[entry_offset + 2]
+        reserved = blob[entry_offset + 3]
+        if reserved != 0:
+            warnings.append(f"template-value-spec-reserved-nonzero:{index}")
+        specs.append({"length": length, "value_type": value_type})
+
+    cursor = value_offset
+    for index, spec in enumerate(specs):
+        length = spec["length"]
+        value_type = spec["value_type"]
+        value_blob = blob[cursor : cursor + length]
+        if cursor + length > len(blob):
+            warnings.append(f"template-value-truncated:{index}")
+            value_blob = blob[cursor:]
+            cursor = len(blob)
+        else:
+            cursor += length
+        text, normalized_value = decode_binxml_template_value(value_blob, value_type)
+        values.append(
+            {
+                "element": "TemplateValue",
+                "element_path": f"TemplateInstance/Value[{index}]",
+                "text": text,
+                "value": normalized_value,
+                "value_type": binxml_value_type_name(value_type),
+                "value_type_id": value_type,
+                "value_length": length,
+                "offset": cursor - len(value_blob),
+                "confidence": "binxml-template-value",
+                "substitution_id": index,
+            }
+        )
+    return values, cursor, warnings
+
+
+def decode_binxml_template_value(value_blob: bytes, value_type: int) -> tuple[str, object]:
+    if value_type == 0x00:
+        return "", None
+    if value_type == 0x01:
+        text = decode_utf16le_string(value_blob).rstrip("\x00")
+        return text, text
+    if value_type == 0x02:
+        text = value_blob.rstrip(b"\x00").decode("latin-1", errors="replace")
+        return text, text
+    if value_type in {0x03, 0x04} and len(value_blob) >= 1:
+        signed = value_type == 0x03
+        value = int.from_bytes(value_blob[:1], "little", signed=signed)
+        return str(value), value
+    if value_type in {0x05, 0x06} and len(value_blob) >= 2:
+        signed = value_type == 0x05
+        value = int.from_bytes(value_blob[:2], "little", signed=signed)
+        return str(value), value
+    if value_type in {0x07, 0x08, 0x14} and len(value_blob) >= 4:
+        signed = value_type == 0x07
+        value = int.from_bytes(value_blob[:4], "little", signed=signed)
+        text = f"0x{value:08x}" if value_type == 0x14 else str(value)
+        return text, value
+    if value_type in {0x09, 0x0A, 0x15} and len(value_blob) >= 8:
+        signed = value_type == 0x09
+        value = int.from_bytes(value_blob[:8], "little", signed=signed)
+        text = f"0x{value:016x}" if value_type == 0x15 else str(value)
+        return text, value
+    if value_type == 0x0D and value_blob:
+        value = value_blob[0] != 0
+        return str(value).lower(), value
+    if value_type == 0x0F and len(value_blob) >= 16:
+        text = format_guid_le(value_blob[:16])
+        return text, text
+    if value_type == 0x11 and len(value_blob) >= 8:
+        text = filetime_to_iso(int.from_bytes(value_blob[:8], "little", signed=False))
+        return text, text
+    if value_type == 0x12 and len(value_blob) >= 16:
+        text = systime_to_iso(value_blob[:16])
+        return text, text
+    if value_type == 0x0E:
+        text = value_blob.hex()
+        return text, text
+    text = value_blob.hex()
+    return text, text
+
+
+def binxml_value_type_name(value_type: int) -> str:
+    names = {
+        0x00: "NullType",
+        0x01: "StringType",
+        0x02: "AnsiStringType",
+        0x03: "Int8Type",
+        0x04: "UInt8Type",
+        0x05: "Int16Type",
+        0x06: "UInt16Type",
+        0x07: "Int32Type",
+        0x08: "UInt32Type",
+        0x09: "Int64Type",
+        0x0A: "UInt64Type",
+        0x0D: "BoolType",
+        0x0E: "BinaryType",
+        0x0F: "GuidType",
+        0x11: "FileTimeType",
+        0x12: "SysTimeType",
+        0x13: "SidType",
+        0x14: "HexInt32Type",
+        0x15: "HexInt64Type",
+        0x21: "BinXmlType",
     }
+    return names.get(value_type, f"UnknownType0x{value_type:02x}")
+
+
+def format_guid_le(value: bytes) -> str:
+    if len(value) < 16:
+        return value.hex()
+    return (
+        f"{int.from_bytes(value[0:4], 'little'):08x}-"
+        f"{int.from_bytes(value[4:6], 'little'):04x}-"
+        f"{int.from_bytes(value[6:8], 'little'):04x}-"
+        f"{value[8:10].hex()}-{value[10:16].hex()}"
+    )
+
+
+def systime_to_iso(value: bytes) -> str:
+    if len(value) < 16:
+        return ""
+    year = int.from_bytes(value[0:2], "little")
+    month = int.from_bytes(value[2:4], "little")
+    day = int.from_bytes(value[6:8], "little")
+    hour = int.from_bytes(value[8:10], "little")
+    minute = int.from_bytes(value[10:12], "little")
+    second = int.from_bytes(value[12:14], "little")
+    millisecond = int.from_bytes(value[14:16], "little")
+    try:
+        return dt.datetime(
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            millisecond * 1000,
+            tzinfo=dt.timezone.utc,
+        ).isoformat()
+    except ValueError:
+        return ""
 
 
 def binxml_token_name(token: int) -> str:

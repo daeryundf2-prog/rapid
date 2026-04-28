@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
 from rapidtriage.cli import main
-from tests.windows_artifact_fixtures import build_minimal_evtx, build_windows_artifact_fixture
+from tests.windows_artifact_fixtures import build_minimal_evtx, build_template_evtx, build_windows_artifact_fixture
 
 
 class RapidTriageWindowsArtifactsTests(unittest.TestCase):
@@ -265,6 +265,44 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_rows[0]["details"]["source_path"], str(evtx_path.resolve()))
             self.assertEqual(native_rows[0]["details"]["channel"], "Security")
             self.assertEqual(native_rows[0]["details"]["command_line"], "wevtutil cl Security")
+
+    def test_eventlog_collector_decodes_native_evtx_template_substitution_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evtx_path = root / "Windows" / "System32" / "winevt" / "Logs" / "Template.evtx"
+            evtx_path.parent.mkdir(parents=True, exist_ok=True)
+            evtx_path.write_bytes(
+                build_template_evtx(
+                    record_id=888,
+                    timestamp=datetime(2024, 4, 3, 1, 2, 3, tzinfo=timezone.utc),
+                    command="powershell -enc TemplateValue",
+                )
+            )
+            output = root / "eventlog.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
+            native_evtx = next(
+                item
+                for item in artifacts
+                if item["artifact_type"] == "eventlog-event"
+                and item["details"]["parser"] == "windows-eventlog-evtx-native"
+            )
+
+            self.assertEqual(native_evtx["details"]["record_id"], "888")
+            self.assertEqual(native_evtx["details"]["evtx_binxml_status"], "template-substituted-partial")
+            self.assertEqual(native_evtx["details"]["evtx_field_fidelity"], "partial-binxml-template-substitution")
+            self.assertIn("powershell -enc TemplateValue", native_evtx["details"]["command_line"])
+            self.assertIn("powershell -enc TemplateValue", native_evtx["details"]["evtx_binxml"]["rendered_preview"])
+            self.assertEqual(native_evtx["details"]["evtx_binxml"]["template_values"][0]["value_type"], "StringType")
+            self.assertTrue(
+                any(
+                    item["confidence"] == "binxml-template-substitution"
+                    and item["element_path"] == "Event/EventData/CommandLine"
+                    and item["text"] == "powershell -enc TemplateValue"
+                    for item in native_evtx["details"]["evtx_binxml"]["value_fields"]
+                )
+            )
 
     def test_windows_os_account_collector_summarizes_profiles_and_reg_exports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

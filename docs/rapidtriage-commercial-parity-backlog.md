@@ -12,7 +12,7 @@ Work proceeds in number order unless a dependency makes a later item necessary f
 
 ## A. Core Forensic Capability
 
-1. Native EVTX BinXML full parsing. Status: Partial+. Acceptance: decode binary EVTX records into full Event/System/EventData/UserData fields without relying on external exports; current native rows expose record metadata, strings, integrity, explicit `evtx_binxml_status`, and a first-pass BinXML token scan for fragment headers, elements, attributes, value text, template headers, and rendered previews.
+1. Native EVTX BinXML full parsing. Status: Partial+. Acceptance: decode binary EVTX records into full Event/System/EventData/UserData fields without relying on external exports; current native rows expose record metadata, strings, integrity, explicit `evtx_binxml_status`, first-pass BinXML token scans for fragment headers/elements/attributes/value text/template headers, TemplateInstance value spec/value decoding for common scalar types, substitution value fields, and rendered previews.
 2. EVTX event template/message rendering. Status: Partial. Acceptance: render provider templates/messages where available and preserve unresolved template IDs with validation warnings.
 3. EVTX deleted/corrupt record recovery validation. Status: Planned. Acceptance: recover slack/deleted/corrupt candidate records with offset, integrity, confidence, and caution labels.
 4. Registry hive full key tree reconstruction. Status: Partial. Acceptance: reconstruct native hive key/value tree with last-write timestamps, source offsets, cell allocation state, and parser confidence.

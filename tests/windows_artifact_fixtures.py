@@ -426,6 +426,58 @@ def build_minimal_evtx(record_id: int, timestamp: datetime, strings: list[str]) 
     return bytes(header) + record
 
 
+def build_template_evtx(record_id: int, timestamp: datetime, command: str) -> bytes:
+    payload = b"\x0f\x01\x01\x00" + build_minimal_binxml_template_instance(command)
+    size = 28 + len(payload)
+    record = (
+        b"**\x00\x00"
+        + size.to_bytes(4, "little")
+        + record_id.to_bytes(8, "little")
+        + datetime_to_filetime(timestamp).to_bytes(8, "little")
+        + payload
+        + size.to_bytes(4, "little")
+    )
+    header = bytearray(4096)
+    header[0:8] = b"ElfFile\x00"
+    header[24:32] = (record_id + 1).to_bytes(8, "little")
+    header[32:36] = (4096).to_bytes(4, "little")
+    header[36:38] = (1).to_bytes(2, "little")
+    header[38:40] = (3).to_bytes(2, "little")
+    header[40:42] = (4096).to_bytes(2, "little")
+    header[42:44] = (1).to_bytes(2, "little")
+    return bytes(header) + record
+
+
+def build_minimal_binxml_template_instance(command: str) -> bytes:
+    template_body = (
+        b"\x0f\x01\x01\x00"
+        + _binxml_element(
+            "Event",
+            [
+                _binxml_element(
+                    "EventData",
+                    [
+                        _binxml_element(
+                            "CommandLine",
+                            [_binxml_substitution(0, 0x01)],
+                        )
+                    ],
+                )
+            ],
+        )
+        + b"\x00"
+    )
+    encoded_command = command.encode("utf-16le")
+    value_spec = (
+        (1).to_bytes(4, "little")
+        + len(encoded_command).to_bytes(2, "little")
+        + b"\x01\x00"
+        + encoded_command
+    )
+    template_id = bytes.fromhex("00112233445566778899aabbccddeeff")
+    return b"\x0c\xb0" + template_id + len(template_body).to_bytes(4, "little") + template_body + value_spec
+
+
 def build_minimal_binxml_fragment(strings: list[str]) -> bytes:
     provider = strings[0] if len(strings) > 0 else "Provider"
     channel = strings[1] if len(strings) > 1 else "System"
@@ -460,6 +512,10 @@ def _binxml_element(name: str, children: list[bytes]) -> bytes:
 def _binxml_value(value: str) -> bytes:
     encoded = value.encode("utf-16le")
     return b"\x05\x01" + len(value).to_bytes(2, "little") + encoded
+
+
+def _binxml_substitution(index: int, value_type: int) -> bytes:
+    return b"\x0d" + index.to_bytes(2, "little") + bytes([value_type])
 
 
 def _binxml_name(value: str) -> bytes:
