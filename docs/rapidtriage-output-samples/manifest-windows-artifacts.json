@@ -583,7 +583,7 @@
             "parent_command_line": "",
             "parent_process_name": "",
             "parser": "windows-eventlog-builtin-rulepack",
-            "parser_version": "eventlog-normalized-v10",
+            "parser_version": "eventlog-normalized-v11",
             "process_id": "",
             "process_name": "",
             "provider_name": "Microsoft-Windows-Security-Auditing",
@@ -691,7 +691,7 @@
             "parent_process_name": "",
             "parser": "windows-eventlog-xml",
             "parser_confidence": 0.9,
-            "parser_version": "eventlog-normalized-v10",
+            "parser_version": "eventlog-normalized-v11",
             "process_id": "",
             "process_name": "",
             "provider_name": "Microsoft-Windows-Security-Auditing",
@@ -817,9 +817,11 @@
             ],
             "inventory_count": 0,
             "last_event_at": "2024-04-01T12:34:56.000000+00:00",
+            "native_allocation_status_counts": [],
             "native_binxml_status_counts": [],
             "native_channel_hint_counts": [],
             "native_integrity_counts": [],
+            "native_recovery_status_counts": [],
             "native_sequence_counts": [],
             "parsed_row_count": 2,
             "parser": "windows-eventlog-summary",
@@ -833,8 +835,9 @@
                 "value": "detected-by-rule"
               }
             ],
-            "parser_version": "eventlog-normalized-v10",
+            "parser_version": "eventlog-normalized-v11",
             "process_counts": [],
+            "record_candidate_count": 0,
             "record_sequence_gaps": [],
             "reportability": "triage",
             "reportability_counts": [
@@ -862,6 +865,7 @@
             "summary_notes": [
               "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
               "Binary EVTX rows include partial native record scans when recoverable; native_binxml_status_counts shows whether BinXML field decoding is complete.",
+              "eventlog-record-candidate rows and evtx_recovery_context mark slack/deleted/corrupt candidates that require independent validation.",
               "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering."
             ],
             "user_counts": [

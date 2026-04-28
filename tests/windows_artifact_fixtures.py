@@ -448,6 +448,28 @@ def build_template_evtx(record_id: int, timestamp: datetime, command: str) -> by
     return bytes(header) + record
 
 
+def build_evtx_with_slack_record(record_id: int, timestamp: datetime, strings: list[str]) -> bytes:
+    source = build_minimal_evtx(record_id, timestamp, strings)
+    record = source[4096:]
+    header = bytearray(source[:4096])
+    chunk = bytearray(512)
+    chunk[0:8] = b"ElfChnk\x00"
+    chunk[8:16] = record_id.to_bytes(8, "little")
+    chunk[16:24] = record_id.to_bytes(8, "little")
+    chunk[24:32] = record_id.to_bytes(8, "little")
+    chunk[32:40] = record_id.to_bytes(8, "little")
+    chunk[40:44] = (512).to_bytes(4, "little")
+    chunk[44:48] = (512).to_bytes(4, "little")
+    return bytes(header) + bytes(chunk) + (b"\x00" * 128) + record
+
+
+def build_corrupt_evtx_record_candidate(record_id: int, timestamp: datetime, strings: list[str]) -> bytes:
+    blob = bytearray(build_minimal_evtx(record_id, timestamp, strings))
+    declared_size = len(blob) - 4096 + 2048
+    blob[4096 + 4 : 4096 + 8] = declared_size.to_bytes(4, "little")
+    return bytes(blob)
+
+
 def build_minimal_binxml_template_instance(command: str) -> bytes:
     template_body = (
         b"\x0f\x01\x01\x00"

@@ -7,7 +7,13 @@ from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
 from rapidtriage.cli import main
-from tests.windows_artifact_fixtures import build_minimal_evtx, build_template_evtx, build_windows_artifact_fixture
+from tests.windows_artifact_fixtures import (
+    build_corrupt_evtx_record_candidate,
+    build_evtx_with_slack_record,
+    build_minimal_evtx,
+    build_template_evtx,
+    build_windows_artifact_fixture,
+)
 
 
 class RapidTriageWindowsArtifactsTests(unittest.TestCase):
@@ -355,6 +361,89 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                     and item["text"] == "powershell -enc TemplateValue"
                     for item in native_evtx["details"]["evtx_binxml"]["value_fields"]
                 )
+            )
+
+    def test_eventlog_collector_labels_native_evtx_slack_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evtx_path = root / "Windows" / "System32" / "winevt" / "Logs" / "Slack.evtx"
+            evtx_path.parent.mkdir(parents=True, exist_ok=True)
+            evtx_path.write_bytes(
+                build_evtx_with_slack_record(
+                    record_id=889,
+                    timestamp=datetime(2024, 4, 3, 2, 3, 4, tzinfo=timezone.utc),
+                    strings=[
+                        "Microsoft-Windows-Security-Auditing",
+                        "Security",
+                        "WIN-SLACK",
+                        "powershell -enc SlackCandidate",
+                    ],
+                )
+            )
+            output = root / "eventlog.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
+            native_evtx = next(
+                item
+                for item in artifacts
+                if item["artifact_type"] == "eventlog-event"
+                and item["details"]["parser"] == "windows-eventlog-evtx-native"
+            )
+            summary = next(item for item in artifacts if item["artifact_type"] == "eventlog-summary")["details"]
+
+            self.assertEqual(native_evtx["details"]["record_id"], "889")
+            self.assertEqual(native_evtx["details"]["evtx_recovery_status"], "slack-or-deleted-record-candidate")
+            self.assertEqual(native_evtx["details"]["evtx_allocation_status"], "slack-or-deleted-candidate")
+            self.assertTrue(native_evtx["details"]["evtx_recovery_context"]["validation_required"])
+            self.assertIn(
+                "slack-or-deleted-record-candidate",
+                native_evtx["details"]["evtx_recovery_context"]["caution_labels"],
+            )
+            self.assertIn(
+                {"value": "slack-or-deleted-record-candidate", "count": 1},
+                summary["native_recovery_status_counts"],
+            )
+
+    def test_eventlog_collector_reports_corrupt_evtx_record_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evtx_path = root / "Windows" / "System32" / "winevt" / "Logs" / "Corrupt.evtx"
+            evtx_path.parent.mkdir(parents=True, exist_ok=True)
+            evtx_path.write_bytes(
+                build_corrupt_evtx_record_candidate(
+                    record_id=890,
+                    timestamp=datetime(2024, 4, 3, 3, 4, 5, tzinfo=timezone.utc),
+                    strings=[
+                        "Microsoft-Windows-Security-Auditing",
+                        "Security",
+                        "WIN-CORRUPT",
+                        "wevtutil cl Security",
+                    ],
+                )
+            )
+            output = root / "eventlog.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
+            candidates = [item for item in artifacts if item["artifact_type"] == "eventlog-record-candidate"]
+            inventory = next(item for item in artifacts if item["artifact_type"] == "eventlog-file")["details"]
+            summary = next(item for item in artifacts if item["artifact_type"] == "eventlog-summary")["details"]
+
+            self.assertEqual(len(candidates), 1)
+            candidate = candidates[0]["details"]
+            self.assertEqual(candidate["record_id"], "890")
+            self.assertEqual(candidate["evtx_recovery_status"], "corrupt-record-candidate")
+            self.assertEqual(candidate["evtx_record_integrity"]["candidate_reason"], "record-extends-past-eof")
+            self.assertTrue(candidate["validation_required"])
+            self.assertIn("do-not-report-without-validation", candidate["caution_labels"])
+            self.assertLess(candidate["parser_confidence"], 0.6)
+            self.assertEqual(inventory["native_record_count"], 0)
+            self.assertEqual(inventory["native_record_candidate_count"], 1)
+            self.assertEqual(summary["record_candidate_count"], 1)
+            self.assertIn(
+                {"value": "corrupt-record-candidate", "count": 1},
+                summary["native_recovery_status_counts"],
             )
 
     def test_windows_os_account_collector_summarizes_profiles_and_reg_exports(self) -> None:

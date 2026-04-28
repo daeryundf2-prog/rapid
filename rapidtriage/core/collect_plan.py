@@ -43,7 +43,7 @@ WINDOWS_TARGETS: tuple[CollectTarget, ...] = (
         "directory",
         "eventlog",
         "scan-or-import",
-        "Binary EVTX files emit bounded native triage rows when recoverable; export XML/JSON/CSV with EvtxECmd, Hayabusa, Chainsaw, or Velociraptor for report-grade provider message rendering.",
+        "Binary EVTX files emit bounded native triage and recovery-candidate rows when recoverable; export XML/JSON/CSV with EvtxECmd, Hayabusa, Chainsaw, or Velociraptor for report-grade provider message rendering.",
     ),
     CollectTarget(
         "EventLogs",

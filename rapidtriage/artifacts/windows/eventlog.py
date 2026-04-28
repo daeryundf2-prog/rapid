@@ -9,12 +9,12 @@ import re
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Mapping, NamedTuple, Sequence
 
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v10"
+PARSER_VERSION = "eventlog-normalized-v11"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
@@ -525,12 +525,54 @@ RULE_LEVEL_SCORES = {"info": 15, "low": 25, "medium": 45, "high": 70, "critical"
 EVENT_MESSAGE_TEMPLATES = {
     "4624": "An account successfully logged on. User={TargetUserName|SubjectUserName}; logon_type={LogonType}; source={IpAddress|SourceAddress|SourceIp|SourceNetworkAddress}.",
     "4625": "An account failed to log on. User={TargetUserName|SubjectUserName}; status={Status|SubStatus|ErrorCode}; source={IpAddress|SourceAddress|SourceIp|SourceNetworkAddress}.",
+    "4648": "A logon used explicit credentials. Account={SubjectUserName|TargetUserName}; target={TargetServerName|TargetInfo}; process={ProcessName}.",
     "4688": "A process was created. Process={NewProcessName|ProcessName|Image}; command={CommandLine|ProcessCommandLine}; parent={ParentProcessName|CreatorProcessName}.",
+    "4697": "A service was installed. Service={ServiceName}; image={ServiceFileName|ImagePath}.",
+    "4698": "A scheduled task was created. Task={TaskName}; content={TaskContent|CommandLine}.",
+    "4720": "A user account was created. User={TargetUserName|AccountName}; actor={SubjectUserName}.",
+    "4726": "A user account was deleted. User={TargetUserName|AccountName}; actor={SubjectUserName}.",
+    "4732": "A member was added to a local group. Member={MemberName|TargetUserName}; group={TargetUserName|GroupName}; actor={SubjectUserName}.",
+    "4738": "A user account was changed. User={TargetUserName|AccountName}; actor={SubjectUserName}.",
     "4103": "PowerShell module logging recorded command activity. Command={CommandLine|Payload|ScriptBlockText}.",
     "4104": "PowerShell script block was recorded. Script={ScriptBlockText|CommandLine|Payload}.",
+    "7045": "A service was installed. Service={ServiceName}; image={ServiceFileName|ImagePath}; account={AccountName|User}.",
+    "1149": "An RDP authentication succeeded. User={User|TargetUserName}; source={SourceNetworkAddress|IpAddress|SourceIp}.",
     "1102": "The Security audit log was cleared. Subject={SubjectUserName|User}.",
     "104": "An event log was cleared. Channel={Channel}; user={SubjectUserName|User}.",
 }
+
+PROVIDER_EVENT_MESSAGE_TEMPLATES = {
+    "sysmon": {
+        "1": "Sysmon process creation. Image={Image|ProcessName}; command={CommandLine}; parent={ParentImage|ParentProcessName}.",
+        "3": "Sysmon network connection. Image={Image|ProcessName}; destination={DestinationIp|DestinationHostname}:{DestinationPort}.",
+        "7": "Sysmon image loaded. Image={Image|ProcessName}; loaded={ImageLoaded}.",
+        "11": "Sysmon file created. Image={Image|ProcessName}; target={TargetFilename|FileName}.",
+        "13": "Sysmon registry value set. Image={Image|ProcessName}; target={TargetObject|ObjectName}.",
+        "22": "Sysmon DNS query. Image={Image|ProcessName}; query={QueryName|Query}.",
+    },
+    "defender": {
+        "1116": "Microsoft Defender detected malware. Threat={ThreatName}; path={Path|FileName}; action={ActionName}.",
+        "5007": "Microsoft Defender configuration changed. Setting={NewValue|OldValue|SettingName}; actor={User|SubjectUserName}.",
+    },
+    "wmi": {
+        "5857": "WMI provider activity was recorded. Provider={ProviderName}; operation={Operation|Query}.",
+        "5861": "WMI permanent event consumer activity was recorded. Consumer={Consumer|ConsumerName}; command={CommandLine|ExecutablePath}.",
+    },
+    "firewall": {
+        "2004": "Windows Firewall rule was added. Rule={RuleName|Name}; application={ApplicationPath|AppPath}; action={Action}.",
+        "2005": "Windows Firewall rule was modified. Rule={RuleName|Name}; application={ApplicationPath|AppPath}; action={Action}.",
+        "2006": "Windows Firewall rule was deleted. Rule={RuleName|Name}; application={ApplicationPath|AppPath}; action={Action}.",
+    },
+}
+
+
+class NativeEvtxRecordCandidate(NamedTuple):
+    offset: int
+    declared_size: int
+    record_blob: bytes
+    parseable: bool
+    reason: str
+    available_size: int
 
 
 class WindowsEventLogProvider:
@@ -560,7 +602,15 @@ class WindowsEventLogProvider:
             elif suffix == ".evtx":
                 native_records = list(collect_native_evtx_events(path))
                 records.extend(native_records)
-                records.append(build_eventlog_file_record(path, native_record_count=len(native_records)))
+                native_event_count = sum(1 for record in native_records if record.artifact_type == "eventlog-event")
+                native_candidate_count = sum(1 for record in native_records if record.artifact_type == "eventlog-record-candidate")
+                records.append(
+                    build_eventlog_file_record(
+                        path,
+                        native_record_count=native_event_count,
+                        native_record_candidate_count=native_candidate_count,
+                    )
+                )
         records.extend(build_builtin_detection_records(records))
         yield from records
         summary = build_eventlog_summary(root, records)
@@ -673,7 +723,12 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
 
     source_hashes = file_hashes(path)
     previous_record_id: int | None = None
-    for source_index, (offset, record_blob) in enumerate(iter_evtx_record_blobs(blob)):
+    for source_index, candidate in enumerate(iter_evtx_record_candidates(blob)):
+        if not candidate.parseable:
+            yield native_evtx_record_candidate_record(path, source_index, source_hashes, blob, candidate)
+            continue
+        offset = candidate.offset
+        record_blob = candidate.record_blob
         record_id = read_u64(record_blob, 8)
         timestamp = filetime_to_iso(read_u64(record_blob, 16))
         payload = record_blob[EVTX_RECORD_HEADER_SIZE:]
@@ -688,11 +743,12 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
         )
         integrity = native_evtx_record_integrity(record_blob, offset)
         chunk_context = native_evtx_chunk_context(blob, offset)
+        binxml_status = str(binxml.get("status") or NATIVE_EVTX_BINXML_STATUS)
+        recovery_context = native_evtx_recovery_context(candidate, integrity, chunk_context, binxml_status)
         sequence = native_evtx_sequence(record_id, previous_record_id)
         previous_record_id = record_id or previous_record_id
         parameter_candidates = native_evtx_parameter_candidates(native_indicators, binxml)
         raw_preview = str(binxml.get("rendered_preview") or "") or native_evtx_message_preview(native_indicators, searchable_strings)
-        binxml_status = str(binxml.get("status") or NATIVE_EVTX_BINXML_STATUS)
         field_fidelity = native_evtx_field_fidelity(binxml_status)
         data = {
             "evtx_parse_status": "native-binary-partial",
@@ -714,6 +770,9 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             "evtx_record_size": len(record_blob),
             "evtx_record_sha256": hashlib.sha256(record_blob).hexdigest(),
             "evtx_record_integrity": integrity,
+            "evtx_recovery_context": recovery_context,
+            "evtx_recovery_status": recovery_context["status"],
+            "evtx_allocation_status": recovery_context["allocation_status"],
             "evtx_record_sequence": sequence,
             "extracted_strings": searchable_strings[:MAX_NATIVE_EVTX_STRINGS],
             "extracted_string_count": len(searchable_strings),
@@ -761,19 +820,49 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
 
 
 def iter_evtx_record_blobs(blob: bytes) -> Iterable[tuple[int, bytes]]:
+    for candidate in iter_evtx_record_candidates(blob):
+        if candidate.parseable:
+            yield candidate.offset, candidate.record_blob
+
+
+def iter_evtx_record_candidates(blob: bytes) -> Iterable[NativeEvtxRecordCandidate]:
     offset = 0
     emitted = 0
     while emitted < MAX_NATIVE_EVTX_RECORDS:
         offset = blob.find(EVTX_RECORD_MAGIC, offset)
         if offset < 0:
             return
-        size = read_u32(blob, offset + 4)
-        if size < EVTX_RECORD_HEADER_SIZE or size > MAX_NATIVE_EVTX_RECORD_SIZE or offset + size > len(blob):
+        declared_size = read_u32(blob, offset + 4)
+        available_size = len(blob) - offset
+        if declared_size < EVTX_RECORD_HEADER_SIZE:
+            record_blob = blob[offset : min(len(blob), offset + max(available_size, EVTX_RECORD_HEADER_SIZE))]
+            yield NativeEvtxRecordCandidate(
+                offset, declared_size, record_blob[:4096], False, "declared-size-too-small", available_size
+            )
+            emitted += 1
             offset += len(EVTX_RECORD_MAGIC)
             continue
-        yield offset, blob[offset : offset + size]
+        if declared_size > MAX_NATIVE_EVTX_RECORD_SIZE:
+            record_blob = blob[offset : min(len(blob), offset + 4096)]
+            yield NativeEvtxRecordCandidate(
+                offset, declared_size, record_blob, False, "declared-size-too-large", available_size
+            )
+            emitted += 1
+            offset += len(EVTX_RECORD_MAGIC)
+            continue
+        if offset + declared_size > len(blob):
+            record_blob = blob[offset : min(len(blob), offset + min(declared_size, 4096))]
+            yield NativeEvtxRecordCandidate(
+                offset, declared_size, record_blob, False, "record-extends-past-eof", available_size
+            )
+            emitted += 1
+            offset += len(EVTX_RECORD_MAGIC)
+            continue
+        yield NativeEvtxRecordCandidate(
+            offset, declared_size, blob[offset : offset + declared_size], True, "record-size-plausible", available_size
+        )
         emitted += 1
-        offset += size
+        offset += declared_size
 
 
 def native_evtx_record_integrity(record_blob: bytes, offset: int) -> dict[str, object]:
@@ -790,6 +879,149 @@ def native_evtx_record_integrity(record_blob: bytes, offset: int) -> dict[str, o
         "offset": offset,
         "alignment": offset % 8,
     }
+
+
+def native_evtx_candidate_integrity(candidate: NativeEvtxRecordCandidate) -> dict[str, object]:
+    trailing_size = (
+        read_u32(candidate.record_blob, len(candidate.record_blob) - 4)
+        if len(candidate.record_blob) >= EVTX_RECORD_HEADER_SIZE + 4
+        else 0
+    )
+    return {
+        "magic_valid": candidate.record_blob.startswith(EVTX_RECORD_MAGIC),
+        "declared_size": candidate.declared_size,
+        "actual_size": len(candidate.record_blob),
+        "available_size": candidate.available_size,
+        "declared_size_valid": candidate.parseable and candidate.declared_size == len(candidate.record_blob),
+        "trailing_size": trailing_size,
+        "trailing_size_valid": candidate.parseable and trailing_size == candidate.declared_size,
+        "offset": candidate.offset,
+        "alignment": candidate.offset % 8,
+        "candidate_reason": candidate.reason,
+    }
+
+
+def native_evtx_recovery_context(
+    candidate: NativeEvtxRecordCandidate,
+    integrity: Mapping[str, object],
+    chunk_context: Mapping[str, object],
+    binxml_status: str,
+) -> dict[str, object]:
+    allocation_status = native_evtx_allocation_status(chunk_context)
+    caution_labels: list[str] = []
+    if allocation_status in {"slack-or-deleted-candidate", "after-last-record-candidate"}:
+        caution_labels.append("slack-or-deleted-record-candidate")
+    if not integrity.get("trailing_size_valid"):
+        caution_labels.append("trailing-size-mismatch")
+    if candidate.reason != "record-size-plausible":
+        caution_labels.append(candidate.reason)
+    if binxml_status == NATIVE_EVTX_BINXML_STATUS:
+        caution_labels.append("binxml-not-decoded")
+
+    if not candidate.parseable:
+        status = "corrupt-record-candidate"
+    elif allocation_status in {"slack-or-deleted-candidate", "after-last-record-candidate"}:
+        status = "slack-or-deleted-record-candidate"
+    elif not integrity.get("trailing_size_valid"):
+        status = "corrupt-record-candidate"
+    else:
+        status = "recoverable-record"
+
+    validation_required = status != "recoverable-record" or binxml_status == NATIVE_EVTX_BINXML_STATUS
+    if validation_required:
+        caution_labels.append("do-not-report-without-validation")
+    return {
+        "status": status,
+        "allocation_status": allocation_status,
+        "candidate_reason": candidate.reason,
+        "confidence": native_evtx_recovery_confidence(status, integrity, chunk_context, binxml_status),
+        "validation_required": validation_required,
+        "caution_labels": sorted(set(caution_labels)),
+    }
+
+
+def native_evtx_allocation_status(chunk_context: Mapping[str, object]) -> str:
+    if not chunk_context.get("chunk_signature_valid"):
+        return "unknown-no-valid-chunk-header"
+    relative_offset = int(chunk_context.get("record_relative_offset") or 0)
+    free_space_offset = int(chunk_context.get("free_space_offset") or 0)
+    last_record_offset = int(chunk_context.get("last_record_offset") or 0)
+    if free_space_offset and relative_offset >= free_space_offset:
+        return "slack-or-deleted-candidate"
+    if last_record_offset and relative_offset > last_record_offset:
+        return "after-last-record-candidate"
+    return "allocated-or-live-record"
+
+
+def native_evtx_recovery_confidence(
+    status: str,
+    integrity: Mapping[str, object],
+    chunk_context: Mapping[str, object],
+    binxml_status: str,
+) -> float:
+    score = 0.35 if status == "corrupt-record-candidate" else 0.55
+    if integrity.get("magic_valid"):
+        score += 0.05
+    if integrity.get("declared_size_valid"):
+        score += 0.1
+    if integrity.get("trailing_size_valid"):
+        score += 0.1
+    if chunk_context.get("chunk_signature_valid"):
+        score += 0.05
+    if binxml_status in {"basic-rendered", "template-substituted-partial"}:
+        score += 0.1
+    elif binxml_status == "partial-tokenized":
+        score += 0.05
+    return min(0.9, round(score, 2))
+
+
+def native_evtx_record_candidate_record(
+    path: Path,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    blob: bytes,
+    candidate: NativeEvtxRecordCandidate,
+) -> ArtifactRecord:
+    record_id = read_u64(candidate.record_blob, 8) if len(candidate.record_blob) >= 16 else 0
+    timestamp = filetime_to_iso(read_u64(candidate.record_blob, 16)) if len(candidate.record_blob) >= 24 else ""
+    strings = extract_utf16le_strings(candidate.record_blob)
+    indicators = native_evtx_indicators(strings, path)
+    integrity = native_evtx_candidate_integrity(candidate)
+    chunk_context = native_evtx_chunk_context(blob, candidate.offset)
+    recovery_context = native_evtx_recovery_context(candidate, integrity, chunk_context, NATIVE_EVTX_BINXML_STATUS)
+    details = {
+        "parser": "windows-eventlog-evtx-native-candidate",
+        "parser_version": PARSER_VERSION,
+        "coverage_status": "corrupt-or-deleted-candidate",
+        "reportability": "triage",
+        "evidence_strength": "evtx-record-candidate",
+        "source_path": str(path.resolve()),
+        "source_format": "evtx",
+        "source_index": source_index,
+        "source_hashes": dict(source_hashes),
+        "record_id": str(record_id or ""),
+        "timestamp": timestamp,
+        "evtx_record_offset": candidate.offset,
+        "evtx_declared_size": candidate.declared_size,
+        "evtx_available_size": candidate.available_size,
+        "evtx_record_sha256": hashlib.sha256(candidate.record_blob).hexdigest(),
+        "evtx_record_integrity": integrity,
+        "evtx_chunk_context": chunk_context,
+        "evtx_recovery_context": recovery_context,
+        "evtx_recovery_status": recovery_context["status"],
+        "evtx_allocation_status": recovery_context["allocation_status"],
+        "parser_confidence": recovery_context["confidence"],
+        "validation_required": True,
+        "caution_labels": recovery_context["caution_labels"],
+        "extracted_strings": strings[:MAX_NATIVE_EVTX_STRINGS],
+        "extracted_string_count": len(strings),
+        "native_indicators": indicators,
+        "triage_recommendation": (
+            "Treat this as a recovery candidate only. Validate with a second EVTX parser and adjacent chunk/file "
+            "context before relying on it in a report."
+        ),
+    }
+    return event_record(path, "eventlog-record-candidate", details)
 
 
 def native_evtx_file_header(blob: bytes) -> dict[str, object]:
@@ -1876,6 +2108,9 @@ def native_evtx_confidence(details: Mapping[str, object]) -> float:
         score += 0.05
     if details.get("evtx_binxml_status") in {"basic-rendered", "partial-tokenized"}:
         score += 0.05
+    recovery = details.get("evtx_recovery_context") if isinstance(details.get("evtx_recovery_context"), Mapping) else {}
+    if recovery.get("status") in {"slack-or-deleted-record-candidate", "corrupt-record-candidate"}:
+        score = min(score, float(recovery.get("confidence") or 0.6))
     return min(0.82, round(score, 2))
 
 
@@ -1978,7 +2213,7 @@ def render_event_message(
             "warnings": [],
         }
 
-    template = EVENT_MESSAGE_TEMPLATES.get(event_id)
+    template = event_message_template(provider_name, event_id)
     if template:
         message, missing_fields = render_message_template(template, data)
         return {
@@ -2025,6 +2260,14 @@ def render_message_template(template: str, data: Mapping[str, object]) -> tuple[
 
     rendered = re.sub(r"\{([^{}]+)\}", replace, template)
     return re.sub(r"\s+", " ", rendered).strip(), missing_fields
+
+
+def event_message_template(provider_name: str, event_id: str) -> str:
+    provider_key = provider_name.lower()
+    for marker, templates in PROVIDER_EVENT_MESSAGE_TEMPLATES.items():
+        if marker in provider_key and event_id in templates:
+            return templates[event_id]
+    return EVENT_MESSAGE_TEMPLATES.get(event_id, "")
 
 
 def native_evtx_template_ids(data: Mapping[str, object]) -> list[str]:
@@ -2206,7 +2449,12 @@ def normalize_event_details(
     }
 
 
-def build_eventlog_file_record(path: Path, *, native_record_count: int = 0) -> ArtifactRecord:
+def build_eventlog_file_record(
+    path: Path,
+    *,
+    native_record_count: int = 0,
+    native_record_candidate_count: int = 0,
+) -> ArtifactRecord:
     stat_result = path.stat()
     return ArtifactRecord(
         provider=WindowsEventLogProvider.name,
@@ -2224,7 +2472,12 @@ def build_eventlog_file_record(path: Path, *, native_record_count: int = 0) -> A
             "size": stat_result.st_size,
             "channel_hint": channel_hint_from_path(path),
             "native_record_count": native_record_count,
-            "native_parse_status": "partial-record-scan" if native_record_count else "no-records-emitted",
+            "native_record_candidate_count": native_record_candidate_count,
+            "native_parse_status": (
+                "partial-record-scan"
+                if native_record_count
+                else ("candidate-record-scan" if native_record_candidate_count else "no-records-emitted")
+            ),
             "native_parser_scope": NATIVE_EVTX_PARSE_SCOPE,
             "native_binxml_status": NATIVE_EVTX_BINXML_STATUS,
             "native_validation_required": True,
@@ -2371,9 +2624,15 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
     parsed_rows = [
         record
         for record in records
-        if record.artifact_type in {"eventlog-event", "eventlog-detection"} and isinstance(record.details, Mapping)
+        if record.artifact_type in {"eventlog-event", "eventlog-detection", "eventlog-record-candidate"}
+        and isinstance(record.details, Mapping)
     ]
     inventory_rows = [record for record in records if record.artifact_type == "eventlog-file"]
+    candidate_rows = [
+        record
+        for record in records
+        if record.artifact_type == "eventlog-record-candidate" and isinstance(record.details, Mapping)
+    ]
     if not parsed_rows and not inventory_rows:
         return None
 
@@ -2392,6 +2651,8 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
     native_sequence_counts: Counter[str] = Counter()
     native_channel_hint_counts: Counter[str] = Counter()
     native_binxml_status_counts: Counter[str] = Counter()
+    native_recovery_status_counts: Counter[str] = Counter()
+    native_allocation_status_counts: Counter[str] = Counter()
     source_paths: set[str] = set()
     timestamps: list[str] = []
     high_risk_events: list[dict[str, object]] = []
@@ -2434,6 +2695,8 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
             increment_counter(native_sequence_counts, str(sequence.get("status") or "unknown"))
             increment_counter(native_channel_hint_counts, str(native_indicators.get("channel_hint_source") or "unknown"))
             increment_counter(native_binxml_status_counts, str(details.get("evtx_binxml_status") or "unknown"))
+            increment_counter(native_recovery_status_counts, str(details.get("evtx_recovery_status") or "unknown"))
+            increment_counter(native_allocation_status_counts, str(details.get("evtx_allocation_status") or "unknown"))
         for flag in details.get("risk_flags") or []:
             text = str(flag)
             if text.startswith("suspicious-term:"):
@@ -2495,6 +2758,18 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
                 }
             )
 
+    for record in candidate_rows:
+        details = record.details
+        source_path = str(details.get("source_path") or record.path)
+        timestamp = str(details.get("timestamp") or "")
+        source_paths.add(source_path)
+        if timestamp:
+            timestamps.append(timestamp)
+        increment_counter(parser_status_counts, str(details.get("coverage_status") or ""))
+        increment_counter(reportability_counts, str(details.get("reportability") or ""))
+        increment_counter(native_recovery_status_counts, str(details.get("evtx_recovery_status") or "unknown"))
+        increment_counter(native_allocation_status_counts, str(details.get("evtx_allocation_status") or "unknown"))
+
     timestamps.sort()
     details = {
         "parser": "windows-eventlog-summary",
@@ -2507,6 +2782,7 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "detection_count": len(detection_rows),
         "parsed_row_count": len(parsed_rows),
         "inventory_count": len(inventory_rows),
+        "record_candidate_count": len(candidate_rows),
         "source_files": sorted(source_paths),
         "detection_rule_counts": counter_items(detection_rule_counts),
         "event_id_counts": counter_items(event_id_counts),
@@ -2524,6 +2800,8 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "native_sequence_counts": counter_items(native_sequence_counts),
         "native_channel_hint_counts": counter_items(native_channel_hint_counts),
         "native_binxml_status_counts": counter_items(native_binxml_status_counts),
+        "native_recovery_status_counts": counter_items(native_recovery_status_counts),
+        "native_allocation_status_counts": counter_items(native_allocation_status_counts),
         "detection_level_counts": counter_items(detection_level_counts),
         "first_event_at": timestamps[0] if timestamps else "",
         "last_event_at": timestamps[-1] if timestamps else "",
@@ -2532,6 +2810,7 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "summary_notes": [
             "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
             "Binary EVTX rows include partial native record scans when recoverable; native_binxml_status_counts shows whether BinXML field decoding is complete.",
+            "eventlog-record-candidate rows and evtx_recovery_context mark slack/deleted/corrupt candidates that require independent validation.",
             "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering.",
         ],
     }
