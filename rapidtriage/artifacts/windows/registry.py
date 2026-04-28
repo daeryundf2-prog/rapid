@@ -9,7 +9,7 @@ from typing import Iterable, Mapping, Sequence
 
 from ...core.models import ArtifactRecord
 
-PARSER_VERSION = "registry-normalized-v4"
+PARSER_VERSION = "registry-normalized-v5"
 REGISTRY_EXPORT_PATTERN = re.compile(r"^\[(?P<key>.+)]$")
 REGISTRY_VALUE_PATTERN = re.compile(r'^(?P<name>@|"[^"]+")=(?P<value>.*)$')
 REGISTRY_HIVE_SIGNATURE = b"regf"
@@ -19,6 +19,7 @@ MAX_HIVE_STRINGS = 250
 MAX_HIVE_CELL_SCAN_BYTES = 16 * 1024 * 1024
 MAX_HIVE_CELL_RECORDS = 500
 MAX_HIVE_CELL_SIZE = 1024 * 1024
+HIVE_BIN_BASE_OFFSET = 4096
 PERSISTENCE_TERMS = ("run\\", "\\runonce", "\\policies\\explorer\\run", "\\services\\")
 SUSPICIOUS_VALUE_TERMS = (
     "powershell",
@@ -158,10 +159,13 @@ def collect_registry_hive(path: Path) -> Iterable[ArtifactRecord]:
     if strings:
         yield build_registry_hive_strings_record(path, strings, metadata, source_hashes)
         yield from build_registry_user_activity_from_hive_strings(path, strings, metadata, source_hashes)
-    for candidate in iter_registry_cell_candidates(scan_blob):
+    cell_candidates = iter_registry_cell_candidates(scan_blob)
+    for candidate in cell_candidates:
         yield build_registry_hive_cell_record(path, candidate, metadata, source_hashes)
         if candidate.get("allocation_status") == "free-or-deleted-candidate":
             yield build_registry_deleted_cell_record(path, candidate, metadata, source_hashes)
+    yield from build_registry_key_tree_records(path, scan_blob, cell_candidates, metadata, source_hashes)
+    yield from build_registry_value_recovery_records(path, scan_blob, cell_candidates, metadata, source_hashes)
 
 
 def parse_registry_hive_header(header: bytes) -> dict[str, object]:
@@ -306,9 +310,14 @@ def build_registry_hive_cell_record(
             "name": name,
             "name_encoding": candidate.get("name_encoding", ""),
             "last_written_at": candidate.get("last_written_at", ""),
+            "parent_cell_offset": candidate.get("parent_cell_offset", 0),
+            "subkey_count": candidate.get("subkey_count", 0),
+            "value_count": candidate.get("value_count", 0),
+            "value_list_offset": candidate.get("value_list_offset", 0),
             "value_type": candidate.get("value_type", ""),
             "value_data_size": candidate.get("value_data_size", 0),
             "value_data_offset": candidate.get("value_data_offset", 0),
+            "value_data_inline": candidate.get("value_data_inline", False),
             "risk_flags": risk_flags,
             "risk_score": min(100, len(risk_flags) * 20 + (20 if candidate.get("allocation_status") == "free-or-deleted-candidate" else 0)),
             "raw_preview": f"{candidate.get('cell_kind', 'cell')} {name}".strip(),
@@ -351,14 +360,142 @@ def build_registry_deleted_cell_record(
             "name": name,
             "name_encoding": candidate.get("name_encoding", ""),
             "last_written_at": candidate.get("last_written_at", ""),
+            "parent_cell_offset": candidate.get("parent_cell_offset", 0),
+            "subkey_count": candidate.get("subkey_count", 0),
+            "value_count": candidate.get("value_count", 0),
+            "value_list_offset": candidate.get("value_list_offset", 0),
             "value_type": candidate.get("value_type", ""),
             "value_data_size": candidate.get("value_data_size", 0),
             "value_data_offset": candidate.get("value_data_offset", 0),
+            "value_data_inline": candidate.get("value_data_inline", False),
             "risk_flags": risk_flags,
             "risk_score": min(100, 40 + len(risk_flags) * 20),
             "raw_preview": f"deleted/free {candidate.get('cell_kind', 'cell')} {name}".strip(),
         },
     )
+
+
+def build_registry_key_tree_records(
+    path: Path,
+    blob: bytes,
+    candidates: Sequence[Mapping[str, object]],
+    metadata: Mapping[str, object],
+    source_hashes: Mapping[str, str],
+) -> Iterable[ArtifactRecord]:
+    key_nodes = [candidate for candidate in candidates if candidate.get("cell_kind") == "key-node"]
+    if not key_nodes:
+        return
+    key_by_offset = {int(candidate.get("cell_offset") or 0): candidate for candidate in key_nodes}
+    value_by_offset = {
+        int(candidate.get("cell_offset") or 0): candidate
+        for candidate in candidates
+        if candidate.get("cell_kind") == "value"
+    }
+    for index, key_node in enumerate(key_nodes):
+        value_offsets = registry_value_offsets_for_key(blob, key_node)
+        value_cells = [value_by_offset[offset] for offset in value_offsets if offset in value_by_offset]
+        key_path, path_confidence = registry_key_path_for_node(key_node, key_by_offset)
+        allocation_status = str(key_node.get("allocation_status") or "")
+        validation_required = allocation_status != "allocated" or path_confidence != "parent-chain"
+        yield ArtifactRecord(
+            provider=WindowsRegistryProvider.name,
+            artifact_type="registry-key-tree-node",
+            path=str(path.resolve()),
+            supported=bool(metadata.get("regf_valid")),
+            details={
+                "parser": "windows-registry-hive-key-tree",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "native-hive-key-tree-partial",
+                "reportability": "review",
+                "source_path": str(path.resolve()),
+                "source_format": "registry-hive",
+                "source_hashes": dict(source_hashes),
+                "hive_name": path.name,
+                "hive_hint": hive_hint_from_path(path),
+                "parser_confidence": registry_key_tree_confidence(key_node, path_confidence, bool(metadata.get("regf_valid"))),
+                "evidence_strength": "registry-hive-key-tree-node",
+                "tree_node_index": index,
+                "key_path": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+                "key_path_confidence": path_confidence,
+                "name": key_node.get("name", ""),
+                "name_encoding": key_node.get("name_encoding", ""),
+                "cell_offset": key_node.get("cell_offset", 0),
+                "cell_size": key_node.get("cell_size", 0),
+                "allocation_status": allocation_status,
+                "parent_cell_offset": key_node.get("parent_cell_offset", 0),
+                "subkey_count": key_node.get("subkey_count", 0),
+                "value_count": key_node.get("value_count", 0),
+                "value_list_offset": key_node.get("value_list_offset", 0),
+                "value_names": sorted(str(value.get("name") or "") for value in value_cells if value.get("name")),
+                "value_cell_offsets": value_offsets,
+                "last_written_at": key_node.get("last_written_at", ""),
+                "validation_required": validation_required,
+                "validation_guidance": "Native key-tree reconstruction is best-effort from nk parent/value-list metadata; validate important paths with a dedicated registry parser.",
+                "risk_flags": registry_cell_risk_flags(key_node),
+                "risk_score": min(100, 20 + len(registry_cell_risk_flags(key_node)) * 20),
+                "raw_preview": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else str(key_node.get("name") or ""),
+            },
+        )
+
+
+def build_registry_value_recovery_records(
+    path: Path,
+    blob: bytes,
+    candidates: Sequence[Mapping[str, object]],
+    metadata: Mapping[str, object],
+    source_hashes: Mapping[str, str],
+) -> Iterable[ArtifactRecord]:
+    key_by_offset = {
+        int(candidate.get("cell_offset") or 0): candidate
+        for candidate in candidates
+        if candidate.get("cell_kind") == "key-node"
+    }
+    for candidate in candidates:
+        if candidate.get("cell_kind") != "value" or candidate.get("allocation_status") != "free-or-deleted-candidate":
+            continue
+        parent = nearest_preceding_key(candidate, key_by_offset)
+        parent_path = ""
+        if parent is not None:
+            parent_key_path, _ = registry_key_path_for_node(parent, key_by_offset)
+            parent_path = f"{hive_hint_from_path(path)}\\{parent_key_path}" if parent_key_path else hive_hint_from_path(path)
+        decoded_data = registry_value_data_preview(blob, candidate)
+        yield ArtifactRecord(
+            provider=WindowsRegistryProvider.name,
+            artifact_type="registry-value-recovery-candidate",
+            path=str(path.resolve()),
+            supported=bool(metadata.get("regf_valid")),
+            details={
+                "parser": "windows-registry-hive-value-recovery",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "native-deleted-value-candidate",
+                "reportability": "review",
+                "source_path": str(path.resolve()),
+                "source_format": "registry-hive",
+                "source_hashes": dict(source_hashes),
+                "hive_name": path.name,
+                "hive_hint": hive_hint_from_path(path),
+                "parser_confidence": 0.54 if metadata.get("regf_valid") else 0.22,
+                "evidence_strength": "registry-deleted-value-candidate",
+                "validation_required": True,
+                "validation_guidance": "Recovered free vk cells may be stale, partially overwritten, or unrelated to the nearest key; validate with a second parser and surrounding hive context.",
+                "candidate_kind": "deleted-or-free-value-cell",
+                "name": candidate.get("name", ""),
+                "value_type": candidate.get("value_type", ""),
+                "value_data_size": candidate.get("value_data_size", 0),
+                "value_data_offset": candidate.get("value_data_offset", 0),
+                "value_data_inline": candidate.get("value_data_inline", False),
+                "decoded_data_preview": decoded_data,
+                "parent_key_path_candidate": parent_path,
+                "parent_key_confidence": "nearest-preceding-key" if parent is not None else "unknown",
+                "cell_offset": candidate.get("cell_offset", 0),
+                "cell_size": candidate.get("cell_size", 0),
+                "allocation_status": candidate.get("allocation_status", ""),
+                "caution_labels": ["deleted-or-free-cell-candidate", "do-not-report-without-validation"],
+                "risk_flags": registry_cell_risk_flags(candidate),
+                "risk_score": min(100, 45 + len(registry_cell_risk_flags(candidate)) * 20),
+                "raw_preview": f"deleted/free value {candidate.get('name', '')}".strip(),
+            },
+        )
 
 
 def build_registry_record(
@@ -508,7 +645,9 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
     hive_files: list[dict[str, object]] = []
     hive_string_hits: list[dict[str, object]] = []
     hive_cell_hits: list[dict[str, object]] = []
+    key_tree_nodes: list[dict[str, object]] = []
     deleted_cell_candidates: list[dict[str, object]] = []
+    value_recovery_candidates: list[dict[str, object]] = []
     user_activity_entries: list[dict[str, object]] = []
 
     for record in records:
@@ -568,6 +707,35 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
                     "validation_required": details.get("validation_required", True),
                 }
             )
+        if record.artifact_type == "registry-key-tree-node":
+            key_tree_nodes.append(
+                {
+                    "source_path": details.get("source_path", record.path),
+                    "hive_hint": details.get("hive_hint", ""),
+                    "key_path": details.get("key_path", ""),
+                    "key_path_confidence": details.get("key_path_confidence", ""),
+                    "cell_offset": details.get("cell_offset", 0),
+                    "parent_cell_offset": details.get("parent_cell_offset", 0),
+                    "allocation_status": details.get("allocation_status", ""),
+                    "value_names": list(details.get("value_names") or []),
+                    "last_written_at": details.get("last_written_at", ""),
+                    "validation_required": details.get("validation_required", False),
+                }
+            )
+        if record.artifact_type == "registry-value-recovery-candidate":
+            value_recovery_candidates.append(
+                {
+                    "source_path": details.get("source_path", record.path),
+                    "hive_hint": details.get("hive_hint", ""),
+                    "parent_key_path_candidate": details.get("parent_key_path_candidate", ""),
+                    "name": details.get("name", ""),
+                    "value_type": details.get("value_type", ""),
+                    "decoded_data_preview": details.get("decoded_data_preview", ""),
+                    "cell_offset": details.get("cell_offset", 0),
+                    "risk_flags": list(details.get("risk_flags") or []),
+                    "validation_required": details.get("validation_required", True),
+                }
+            )
         if record.artifact_type == "registry-user-activity":
             user_activity_entries.append(
                 {
@@ -613,7 +781,9 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "hive_file_count": sum(1 for record in records if record.artifact_type == "registry-hive"),
         "hive_string_row_count": sum(1 for record in records if record.artifact_type == "registry-hive-strings"),
         "hive_cell_row_count": sum(1 for record in records if record.artifact_type == "registry-hive-cell"),
+        "key_tree_node_count": sum(1 for record in records if record.artifact_type == "registry-key-tree-node"),
         "deleted_cell_candidate_count": sum(1 for record in records if record.artifact_type == "registry-deleted-cell-candidate"),
+        "value_recovery_candidate_count": sum(1 for record in records if record.artifact_type == "registry-value-recovery-candidate"),
         "user_activity_count": sum(1 for record in records if record.artifact_type == "registry-user-activity"),
         "source_files": sorted(source_paths),
         "artifact_type_counts": counter_items(artifact_type_counts),
@@ -626,10 +796,18 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
             key=lambda item: int(item.get("risk_score") or 0),
             reverse=True,
         )[:100],
+        "key_tree_nodes": sorted(
+            key_tree_nodes,
+            key=lambda item: (str(item.get("hive_hint") or ""), str(item.get("key_path") or "")),
+        )[:100],
         "deleted_cell_candidates": sorted(
             deleted_cell_candidates,
             key=lambda item: int(item.get("risk_score") or 0),
             reverse=True,
+        )[:100],
+        "value_recovery_candidates": sorted(
+            value_recovery_candidates,
+            key=lambda item: str(item.get("parent_key_path_candidate") or ""),
         )[:100],
         "user_activity_entries": sorted(
             user_activity_entries,
@@ -643,7 +821,7 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
             reverse=True,
         )[:100],
         "summary_notes": [
-            "Registry hive rows use native regf header parsing, bounded string scanning, bounded nk/vk cell candidate scanning, and separate deleted/free cell candidate rows; full key-tree reconstruction and deleted-value testimony require validation with a dedicated hive parser.",
+            "Registry hive rows use native regf header parsing, bounded string scanning, bounded nk/vk cell candidate scanning, best-effort key-tree rows, and separate deleted/free cell and value-recovery candidate rows; report-grade deleted-value testimony still requires validation with a dedicated hive parser.",
             "Run-key command hints are triage pivots, not proof that a program executed.",
         ],
     }
@@ -793,6 +971,13 @@ def parse_registry_nk_cell(
 ) -> dict[str, object] | None:
     flags = read_u16(blob, signature_offset + 2)
     last_written_at = filetime_to_iso(read_u64(blob, signature_offset + 4))
+    parent_cell_relative_offset = read_u32(blob, signature_offset + 0x10)
+    stable_subkey_count = read_u32(blob, signature_offset + 0x14)
+    volatile_subkey_count = read_u32(blob, signature_offset + 0x18)
+    stable_subkey_list_offset = read_u32(blob, signature_offset + 0x1C)
+    volatile_subkey_list_offset = read_u32(blob, signature_offset + 0x20)
+    value_count = read_u32(blob, signature_offset + 0x24)
+    value_list_offset = read_u32(blob, signature_offset + 0x28)
     name_length = read_u16(blob, signature_offset + 0x48)
     name_start = signature_offset + 0x4C
     name_end = min(name_start + name_length, cell_offset + cell_size)
@@ -809,6 +994,16 @@ def parse_registry_nk_cell(
         "name": name,
         "name_encoding": encoding,
         "last_written_at": last_written_at,
+        "parent_cell_offset": registry_relative_to_file_offset(parent_cell_relative_offset),
+        "parent_cell_relative_offset": parent_cell_relative_offset,
+        "subkey_count": stable_subkey_count + volatile_subkey_count,
+        "stable_subkey_count": stable_subkey_count,
+        "volatile_subkey_count": volatile_subkey_count,
+        "stable_subkey_list_offset": registry_relative_to_file_offset(stable_subkey_list_offset),
+        "volatile_subkey_list_offset": registry_relative_to_file_offset(volatile_subkey_list_offset),
+        "value_count": value_count,
+        "value_list_offset": registry_relative_to_file_offset(value_list_offset),
+        "value_list_relative_offset": value_list_offset,
     }
 
 
@@ -829,6 +1024,7 @@ def parse_registry_vk_cell(
     name, encoding = decode_registry_cell_name(blob[name_start:name_end], compressed=bool(flags & 0x0001))
     if not is_plausible_registry_cell_name(name):
         return None
+    value_data_inline = bool(data_size & 0x80000000)
     return {
         "cell_kind": "value",
         "cell_signature": "vk",
@@ -840,8 +1036,105 @@ def parse_registry_vk_cell(
         "name_encoding": encoding,
         "value_type": registry_value_type_name(value_type),
         "value_data_size": data_size & 0x7FFFFFFF,
-        "value_data_offset": data_offset,
+        "value_data_offset": registry_relative_to_file_offset(data_offset) if not value_data_inline else data_offset,
+        "value_data_relative_offset": data_offset,
+        "value_data_inline": value_data_inline,
+        "value_data_raw_size": data_size,
     }
+
+
+def registry_relative_to_file_offset(relative_offset: int) -> int:
+    if relative_offset in {0, 0xFFFFFFFF}:
+        return 0
+    return HIVE_BIN_BASE_OFFSET + relative_offset
+
+
+def registry_value_offsets_for_key(blob: bytes, key_node: Mapping[str, object]) -> list[int]:
+    value_count = int(key_node.get("value_count") or 0)
+    value_list_offset = int(key_node.get("value_list_offset") or 0)
+    if value_count <= 0 or value_count > 4096 or value_list_offset <= 0:
+        return []
+    end = value_list_offset + value_count * 4
+    if end > len(blob):
+        return []
+    offsets: list[int] = []
+    for index in range(value_count):
+        relative = read_u32(blob, value_list_offset + index * 4)
+        file_offset = registry_relative_to_file_offset(relative)
+        if file_offset:
+            offsets.append(file_offset)
+    return offsets
+
+
+def registry_key_path_for_node(
+    key_node: Mapping[str, object],
+    key_by_offset: Mapping[int, Mapping[str, object]],
+) -> tuple[str, str]:
+    names = [str(key_node.get("name") or "")]
+    current = key_node
+    seen = {int(key_node.get("cell_offset") or 0)}
+    confidence = "orphan-name"
+    for _ in range(32):
+        parent_offset = int(current.get("parent_cell_offset") or 0)
+        if not parent_offset or parent_offset in seen or parent_offset not in key_by_offset:
+            break
+        parent = key_by_offset[parent_offset]
+        parent_name = str(parent.get("name") or "")
+        if parent_name:
+            names.append(parent_name)
+        seen.add(parent_offset)
+        current = parent
+        confidence = "parent-chain"
+    names = [name for name in reversed(names) if name]
+    return "\\".join(names), confidence
+
+
+def nearest_preceding_key(
+    value_cell: Mapping[str, object],
+    key_by_offset: Mapping[int, Mapping[str, object]],
+) -> Mapping[str, object] | None:
+    value_offset = int(value_cell.get("cell_offset") or 0)
+    preceding = [offset for offset in key_by_offset if offset < value_offset]
+    if not preceding:
+        return None
+    nearest_offset = max(preceding)
+    if value_offset - nearest_offset > 1024 * 1024:
+        return None
+    return key_by_offset[nearest_offset]
+
+
+def registry_key_tree_confidence(key_node: Mapping[str, object], path_confidence: str, hive_valid: bool) -> float:
+    score = 0.42 if hive_valid else 0.2
+    if key_node.get("allocation_status") == "allocated":
+        score += 0.12
+    if key_node.get("last_written_at"):
+        score += 0.08
+    if path_confidence == "parent-chain":
+        score += 0.18
+    if key_node.get("value_count"):
+        score += 0.05
+    return min(0.82, round(score, 2))
+
+
+def registry_value_data_preview(blob: bytes, value_cell: Mapping[str, object]) -> str:
+    value_size = int(value_cell.get("value_data_size") or 0)
+    if value_size <= 0 or value_size > 4096:
+        return ""
+    if value_cell.get("value_data_inline"):
+        raw = int(value_cell.get("value_data_relative_offset") or 0).to_bytes(4, "little")[:value_size]
+    else:
+        data_offset = int(value_cell.get("value_data_offset") or 0)
+        if data_offset <= 0 or data_offset + value_size > len(blob):
+            return ""
+        raw = blob[data_offset : data_offset + value_size]
+    value_type = str(value_cell.get("value_type") or "")
+    if value_type in {"REG_SZ", "REG_EXPAND_SZ"}:
+        return decode_utf16le_string(raw) or raw.decode("latin-1", errors="replace").rstrip("\x00")
+    if value_type == "REG_DWORD" and len(raw) >= 4:
+        return str(int.from_bytes(raw[:4], "little", signed=False))
+    if value_type == "REG_QWORD" and len(raw) >= 8:
+        return str(int.from_bytes(raw[:8], "little", signed=False))
+    return raw[:64].hex()
 
 
 def decode_registry_cell_name(raw_name: bytes, *, compressed: bool) -> tuple[str, str]:

@@ -98,7 +98,9 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             registry_types = {artifact["artifact_type"] for artifact in registry_provider["artifacts"]}
             self.assertIn("registry-hive", registry_types)
             self.assertIn("registry-hive-cell", registry_types)
+            self.assertIn("registry-key-tree-node", registry_types)
             self.assertIn("registry-deleted-cell-candidate", registry_types)
+            self.assertIn("registry-value-recovery-candidate", registry_types)
             self.assertIn("registry-hive-strings", registry_types)
             self.assertIn("registry-run-key", registry_types)
             self.assertIn("registry-usb", registry_types)
@@ -121,12 +123,22 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             updater_value = next(artifact for artifact in hive_cells if artifact["details"]["name"] == "SecurityUpdater")
             self.assertEqual(updater_value["details"]["allocation_status"], "free-or-deleted-candidate")
             self.assertIn("deleted-or-free-cell-candidate", updater_value["details"]["risk_flags"])
+            key_tree_nodes = [
+                artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-key-tree-node"
+            ]
+            self.assertTrue(any(artifact["details"]["key_path"].endswith("\\Run") for artifact in key_tree_nodes))
+            self.assertTrue(all("cell_offset" in artifact["details"] for artifact in key_tree_nodes))
             deleted_cells = [
                 artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-deleted-cell-candidate"
             ]
             self.assertGreaterEqual(len(deleted_cells), 2)
             self.assertTrue(all(artifact["details"]["validation_required"] for artifact in deleted_cells))
             self.assertTrue(any(artifact["details"]["name"] == "SecurityUpdater" for artifact in deleted_cells))
+            value_recovery = [
+                artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-value-recovery-candidate"
+            ]
+            self.assertTrue(any(artifact["details"]["name"] == "SecurityUpdater" for artifact in value_recovery))
+            self.assertTrue(all(artifact["details"]["validation_required"] for artifact in value_recovery))
             run_key = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-run-key")
             self.assertIn("SecurityUpdater", run_key["details"]["values"])
             self.assertEqual(run_key["details"]["persistence_values"][0]["value_name"], "SecurityUpdater")
@@ -161,13 +173,17 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(summary["details"]["hive_file_count"], 2)
             self.assertEqual(summary["details"]["hive_string_row_count"], 2)
             self.assertGreaterEqual(summary["details"]["hive_cell_row_count"], 4)
+            self.assertGreaterEqual(summary["details"]["key_tree_node_count"], 2)
             self.assertGreaterEqual(summary["details"]["deleted_cell_candidate_count"], 2)
+            self.assertGreaterEqual(summary["details"]["value_recovery_candidate_count"], 2)
             self.assertGreaterEqual(summary["details"]["user_activity_count"], 5)
             self.assertEqual(summary["details"]["persistence_entries"][0]["value_name"], "SecurityUpdater")
             self.assertEqual(summary["details"]["usb_devices"][0]["friendly_name"], "Test USB Device")
             self.assertTrue(summary["details"]["hive_string_hits"])
             self.assertTrue(summary["details"]["hive_cell_hits"])
+            self.assertTrue(summary["details"]["key_tree_nodes"])
             self.assertTrue(summary["details"]["deleted_cell_candidates"])
+            self.assertTrue(summary["details"]["value_recovery_candidates"])
             self.assertTrue(summary["details"]["user_activity_entries"])
 
             shellbags_provider = providers["windows-shellbags"]

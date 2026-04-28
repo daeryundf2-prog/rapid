@@ -894,7 +894,7 @@
             "hive_hint": "HKEY_CURRENT_USER",
             "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v4",
+            "parser_version": "registry-normalized-v5",
             "persistence_values": [],
             "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]",
             "reportability": "triage",
@@ -927,7 +927,7 @@
             "hive_hint": "HKEY_CURRENT_USER",
             "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50",
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v4",
+            "parser_version": "registry-normalized-v5",
             "persistence_values": [],
             "raw_preview": "[HKEY_CURRENT_USER\\Software\\Microsoft\\Terminal Server Client\\Default\\10.0.0.50]",
             "reportability": "triage",
@@ -958,7 +958,7 @@
             "hive_hint": "HKEY_LOCAL_MACHINE",
             "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v4",
+            "parser_version": "registry-normalized-v5",
             "persistence_values": [
               {
                 "command": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
@@ -1035,8 +1035,10 @@
             "hive_string_hits": [],
             "hive_string_row_count": 0,
             "key_count": 4,
+            "key_tree_node_count": 0,
+            "key_tree_nodes": [],
             "parser": "windows-registry-summary",
-            "parser_version": "registry-normalized-v4",
+            "parser_version": "registry-normalized-v5",
             "persistence_entries": [
               {
                 "command": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
@@ -1064,7 +1066,7 @@
             ],
             "source_path": "<ROOT>",
             "summary_notes": [
-              "Registry hive rows use native regf header parsing, bounded string scanning, bounded nk/vk cell candidate scanning, and separate deleted/free cell candidate rows; full key-tree reconstruction and deleted-value testimony require validation with a dedicated hive parser.",
+              "Registry hive rows use native regf header parsing, bounded string scanning, bounded nk/vk cell candidate scanning, best-effort key-tree rows, and separate deleted/free cell and value-recovery candidate rows; report-grade deleted-value testimony still requires validation with a dedicated hive parser.",
               "Run-key command hints are triage pivots, not proof that a program executed."
             ],
             "suspicious_entries": [
@@ -1149,7 +1151,9 @@
                   "NodeSlot"
                 ]
               }
-            ]
+            ],
+            "value_recovery_candidate_count": 0,
+            "value_recovery_candidates": []
           },
           "path": "<ROOT>",
           "provider": "windows-registry",
@@ -1162,7 +1166,7 @@
             "hive_hint": "HKEY_LOCAL_MACHINE",
             "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890",
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v4",
+            "parser_version": "registry-normalized-v5",
             "persistence_values": [],
             "raw_preview": "[HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890]",
             "reportability": "triage",
@@ -1211,7 +1215,7 @@
             "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
             "parser": "windows-registry-user-hive-activity",
             "parser_confidence": 0.86,
-            "parser_version": "registry-normalized-v4",
+            "parser_version": "registry-normalized-v5",
             "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]",
             "reportability": "review",
             "risk_flags": [
@@ -1255,7 +1259,7 @@
             "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
             "parser": "windows-registry-user-hive-activity",
             "parser_confidence": 0.86,
-            "parser_version": "registry-normalized-v4",
+            "parser_version": "registry-normalized-v5",
             "raw_preview": "[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run]",
             "reportability": "review",
             "risk_flags": [
@@ -1525,7 +1529,7 @@
             "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
             "parser": "windows-shellbags-reg-export",
             "parser_confidence": 0.86,
-            "parser_version": "registry-normalized-v4",
+            "parser_version": "registry-normalized-v5",
             "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]",
             "reportability": "review",
             "risk_flags": [
@@ -1559,7 +1563,7 @@
             "hive_hint": "HKEY_CURRENT_USER",
             "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
             "parser": "windows-shellbags-reg-export",
-            "parser_version": "registry-normalized-v4",
+            "parser_version": "registry-normalized-v5",
             "persistence_values": [],
             "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]",
             "reportability": "triage",

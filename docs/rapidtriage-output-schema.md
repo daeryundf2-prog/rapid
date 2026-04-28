@@ -308,6 +308,8 @@ The collector interface is intentionally narrow so additional Windows-specific c
 
 Event log artifact rows use open-ended `details` so parser-specific fields can evolve. Current normalized event rows include `event_id`, `provider_name`, `channel`, `event_family`, typed user/process/network pivots, `event_message`, and `message_rendering`. The `message_rendering` object records whether the message came from an imported export field, a RapidTriage built-in fallback template, or an unresolved native provider template, and native EVTX fallback rows carry validation warnings plus preserved TemplateInstance IDs when available. Native EVTX rows can also include `evtx_recovery_context`; invalid record headers are emitted as `eventlog-record-candidate` rows with offset, integrity, confidence, and caution-label fields.
 
+Registry artifact rows also keep parser-specific `details` open-ended. Native hive rows can include `registry-key-tree-node` for best-effort key reconstruction and `registry-value-recovery-candidate` for free/deleted `vk` value cells, both with source offsets, allocation state, confidence, validation guidance, and cautious recovery metadata.
+
 ## `run-summary` JSON
 
 `run` produces:
