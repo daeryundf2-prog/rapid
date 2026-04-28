@@ -101,7 +101,7 @@ OS/account workflow:
 - User profile directories are inventoried.
 - `.reg` exports can provide computer name, timezone, ProfileList SID, admin-group hints, last boot/shutdown timestamps, and exported account lifecycle fields such as created time, last logon, password-last-set, disabled, and admin hints.
 - Native `SAM` hives emit bounded `windows-sam-account-candidate` rows for account-name and RID key candidates with source hashes, offsets, and last-write hints. Treat these as review pivots; full F/V account attributes still need validation with a dedicated SAM parser before final testimony.
-- `windows-registry` summarizes Run-key persistence values, suspicious command/value hints, and USBSTOR device metadata from `.reg` exports. It also inventories native hive candidates such as `NTUSER.DAT`, `UsrClass.dat`, `SYSTEM`, and `SOFTWARE` with source hashes, `regf` header fields, sequence/dirty hints, last-write timestamp, bounded string pivots, bounded `nk`/`vk` hive cell candidates, and separate deleted/free-cell candidate rows for review.
+- `windows-registry` summarizes Run-key persistence values, suspicious command/value hints, and USBSTOR device metadata from `.reg` exports. It also inventories native hive candidates such as `NTUSER.DAT`, `UsrClass.dat`, `SYSTEM`, and `SOFTWARE` with source hashes, `regf` header fields, sequence/dirty hints, last-write timestamp, bounded string pivots, bounded `nk`/`vk` hive cell candidates, and separate deleted/free-cell candidate rows for review. NTUSER/UsrClass user-hive activity pivots are promoted as `registry-user-activity` rows for UserAssist, TypedURLs/TypedPaths, RecentDocs, Run/RunOnce, Explorer/MRU, ShellBags, MountPoints2, Network, and ComDlg32/OpenSavePidlMRU review.
 
 Use:
 

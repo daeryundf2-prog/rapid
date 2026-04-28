@@ -38,6 +38,24 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                     [r"Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\BagMRU"],
                 )
             )
+            ntuser_activity = root / "Users" / "alice" / "NTUSER-activity.reg"
+            ntuser_activity.write_text(
+                """Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\UserAssist\\{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}\\Count]
+"P:\\Hfref\\nyvpr\\NccQngn\\Ebnzvat\\rivy.rkr"=hex:01,00,00,00
+
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Internet Explorer\\TypedURLs]
+"url1"="https://example.test/login"
+
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\TypedPaths]
+"url1"="C:\\\\Users\\\\alice\\\\Documents"
+
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce]
+"OneShot"="C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\oneshot.exe"
+""",
+                encoding="utf-16",
+            )
             output = Path(tmp_dir) / "manifest.json"
 
             exit_code = main(["manifest", str(root), "--output", str(output)])
@@ -84,6 +102,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("registry-hive-strings", registry_types)
             self.assertIn("registry-run-key", registry_types)
             self.assertIn("registry-usb", registry_types)
+            self.assertIn("registry-user-activity", registry_types)
             self.assertIn("registry-summary", registry_types)
             hive = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-hive")
             self.assertEqual(hive["details"]["native_header"]["regf_valid"], True)
@@ -112,19 +131,44 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("SecurityUpdater", run_key["details"]["values"])
             self.assertEqual(run_key["details"]["persistence_values"][0]["value_name"], "SecurityUpdater")
             self.assertIn("suspicious-value:appdata", run_key["details"]["risk_flags"])
+            user_activity = [
+                artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-user-activity"
+            ]
+            categories = {artifact["details"]["user_activity_category"] for artifact in user_activity}
+            self.assertIn("execution", categories)
+            self.assertIn("browser-typed-url", categories)
+            self.assertIn("typed-path", categories)
+            self.assertIn("persistence", categories)
+            self.assertIn("shellbag", categories)
+            userassist = next(artifact for artifact in user_activity if artifact["details"]["user_activity_category"] == "execution")
+            self.assertEqual(
+                userassist["details"]["decoded_values"][r"P:\Hfref\nyvpr\NccQngn\Ebnzvat\rivy.rkr"]["decoded_name"],
+                r"C:\Users\alice\AppData\Roaming\evil.exe",
+            )
+            typed_url = next(artifact for artifact in user_activity if artifact["details"]["user_activity_category"] == "browser-typed-url")
+            self.assertEqual(typed_url["details"]["decoded_values"]["url1"]["typed_value"], "https://example.test/login")
+            hive_shellbag = next(
+                artifact
+                for artifact in user_activity
+                if artifact["details"]["coverage_status"] == "native-hive-string-pivot"
+                and artifact["details"]["user_activity_category"] == "shellbag"
+            )
+            self.assertTrue(hive_shellbag["details"]["validation_required"])
             usb_key = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-usb")
             self.assertEqual(usb_key["details"]["usb_device"]["serial_hint"], "1234567890")
             summary = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-summary")
-            self.assertEqual(summary["details"]["key_count"], 3)
+            self.assertEqual(summary["details"]["key_count"], 7)
             self.assertEqual(summary["details"]["hive_file_count"], 2)
             self.assertEqual(summary["details"]["hive_string_row_count"], 2)
             self.assertGreaterEqual(summary["details"]["hive_cell_row_count"], 4)
             self.assertGreaterEqual(summary["details"]["deleted_cell_candidate_count"], 2)
+            self.assertGreaterEqual(summary["details"]["user_activity_count"], 5)
             self.assertEqual(summary["details"]["persistence_entries"][0]["value_name"], "SecurityUpdater")
             self.assertEqual(summary["details"]["usb_devices"][0]["friendly_name"], "Test USB Device")
             self.assertTrue(summary["details"]["hive_string_hits"])
             self.assertTrue(summary["details"]["hive_cell_hits"])
             self.assertTrue(summary["details"]["deleted_cell_candidates"])
+            self.assertTrue(summary["details"]["user_activity_entries"])
 
             shellbags_provider = providers["windows-shellbags"]
             self.assertEqual(shellbags_provider["artifacts"][0]["artifact_type"], "shellbag-key")

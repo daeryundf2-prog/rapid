@@ -9,7 +9,7 @@ from typing import Iterable, Mapping, Sequence
 
 from ...core.models import ArtifactRecord
 
-PARSER_VERSION = "registry-normalized-v3"
+PARSER_VERSION = "registry-normalized-v4"
 REGISTRY_EXPORT_PATTERN = re.compile(r"^\[(?P<key>.+)]$")
 REGISTRY_VALUE_PATTERN = re.compile(r'^(?P<name>@|"[^"]+")=(?P<value>.*)$')
 REGISTRY_HIVE_SIGNATURE = b"regf"
@@ -40,6 +40,28 @@ HIVE_PIVOT_TERMS = SUSPICIOUS_VALUE_TERMS + (
     "terminal server client",
     "typedurls",
     "userassist",
+)
+USER_HIVE_NAMES = {"NTUSER.DAT", "USRCLASS.DAT"}
+USER_ACTIVITY_KEY_PATTERNS: tuple[tuple[str, str, str], ...] = (
+    ("userassist", "execution", "UserAssist execution/activity"),
+    ("typedurls", "browser-typed-url", "Typed browser URL"),
+    ("typedpaths", "typed-path", "Typed Explorer path"),
+    ("recentdocs", "recent-document", "RecentDocs MRU"),
+    ("\\currentversion\\run", "persistence", "CurrentVersion Run persistence"),
+    ("\\currentversion\\runonce", "persistence", "CurrentVersion RunOnce persistence"),
+    ("\\policies\\explorer\\run", "persistence", "Explorer policy Run persistence"),
+    ("\\explorer\\comdlg32\\opensavepidlmru", "file-dialog-mru", "OpenSavePidlMRU file dialog history"),
+    ("\\explorer\\comdlg32\\lastvisitedpidlmru", "file-dialog-mru", "LastVisitedPidlMRU file dialog history"),
+    ("\\explorer\\runmru", "run-dialog-mru", "Run dialog MRU"),
+    ("\\explorer\\recentdocs", "recent-document", "Explorer RecentDocs"),
+    ("\\shell\\bagmru", "shellbag", "ShellBags BagMRU"),
+    ("\\shell\\bags", "shellbag", "ShellBags Bags"),
+    ("mountpoints2", "mounted-device", "MountPoints2 device history"),
+    ("\\network\\", "network-share", "Mapped network share"),
+)
+ROT13_TRANS = str.maketrans(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+    "NOPQRSTUVWXYZABCDEFGHIJKLMnopqrstuvwxyzabcdefghijklm",
 )
 
 
@@ -100,6 +122,9 @@ def collect_reg_export(path: Path) -> Iterable[ArtifactRecord]:
         if key_match:
             if current_key:
                 yield build_registry_record(path, current_key, values, source_hashes)
+                activity = build_registry_user_activity_from_reg(path, current_key, values, source_hashes)
+                if activity is not None:
+                    yield activity
             current_key = key_match.group("key")
             values = {}
             continue
@@ -110,6 +135,9 @@ def collect_reg_export(path: Path) -> Iterable[ArtifactRecord]:
             values[name] = value_match.group("value")
     if current_key:
         yield build_registry_record(path, current_key, values, source_hashes)
+        activity = build_registry_user_activity_from_reg(path, current_key, values, source_hashes)
+        if activity is not None:
+            yield activity
 
 
 def collect_registry_hive(path: Path) -> Iterable[ArtifactRecord]:
@@ -129,6 +157,7 @@ def collect_registry_hive(path: Path) -> Iterable[ArtifactRecord]:
     strings = extract_utf16le_strings(scan_blob)
     if strings:
         yield build_registry_hive_strings_record(path, strings, metadata, source_hashes)
+        yield from build_registry_user_activity_from_hive_strings(path, strings, metadata, source_hashes)
     for candidate in iter_registry_cell_candidates(scan_blob):
         yield build_registry_hive_cell_record(path, candidate, metadata, source_hashes)
         if candidate.get("allocation_status") == "free-or-deleted-candidate":
@@ -374,6 +403,98 @@ def build_registry_record(
     )
 
 
+def build_registry_user_activity_from_reg(
+    path: Path,
+    key: str,
+    values: Mapping[str, str],
+    source_hashes: Mapping[str, str],
+) -> ArtifactRecord | None:
+    classification = classify_user_activity_key(key)
+    if classification is None:
+        return None
+    decoded_values = decode_user_activity_values(key, values)
+    risk_flags = user_activity_risk_flags(classification["category"], key, decoded_values)
+    return ArtifactRecord(
+        provider=WindowsRegistryProvider.name,
+        artifact_type="registry-user-activity",
+        path=str(path.resolve()),
+        supported=True,
+        details={
+            "parser": "windows-registry-user-hive-activity",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "mapped-reg-export",
+            "reportability": "review",
+            "source_path": str(path.resolve()),
+            "source_format": "reg",
+            "source_hashes": dict(source_hashes),
+            "hive_hint": key.split("\\", 1)[0],
+            "user_hive_scope": "exported-user-hive" if key.upper().startswith("HKEY_CURRENT_USER") else "registry-export",
+            "user_activity_category": classification["category"],
+            "activity_label": classification["label"],
+            "key": key,
+            "value_count": len(values),
+            "value_names": sorted(values),
+            "decoded_values": decoded_values,
+            "parser_confidence": 0.86,
+            "evidence_strength": "registry-export-key",
+            "risk_flags": risk_flags,
+            "risk_score": min(100, 20 + len(risk_flags) * 20),
+            "validation_required": False,
+            "validation_guidance": "Registry export keys preserve explicit paths and values, but report-grade user activity should still be cross-checked against source hive hashes and collection context.",
+            "raw_preview": f"[{key}]",
+        },
+    )
+
+
+def build_registry_user_activity_from_hive_strings(
+    path: Path,
+    strings: Sequence[str],
+    metadata: Mapping[str, object],
+    source_hashes: Mapping[str, str],
+) -> Iterable[ArtifactRecord]:
+    if path.name.upper() not in USER_HIVE_NAMES:
+        return
+    emitted: set[tuple[str, str]] = set()
+    for index, value in enumerate(strings):
+        classification = classify_user_activity_key(value)
+        if classification is None:
+            continue
+        key = (classification["category"], value)
+        if key in emitted:
+            continue
+        emitted.add(key)
+        risk_flags = user_activity_risk_flags(classification["category"], value, {})
+        yield ArtifactRecord(
+            provider=WindowsRegistryProvider.name,
+            artifact_type="registry-user-activity",
+            path=str(path.resolve()),
+            supported=bool(metadata.get("regf_valid")),
+            details={
+                "parser": "windows-registry-user-hive-activity",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "native-hive-string-pivot",
+                "reportability": "triage",
+                "source_path": str(path.resolve()),
+                "source_format": "registry-hive",
+                "source_hashes": dict(source_hashes),
+                "hive_name": path.name,
+                "hive_hint": hive_hint_from_path(path),
+                "user_hive_scope": "ntuser" if path.name.upper() == "NTUSER.DAT" else "usrclass",
+                "user_activity_category": classification["category"],
+                "activity_label": classification["label"],
+                "string_index": index,
+                "string_value": value,
+                "parser_confidence": 0.52 if metadata.get("regf_valid") else 0.25,
+                "evidence_strength": "registry-hive-string-candidate",
+                "risk_flags": risk_flags,
+                "risk_score": min(100, 10 + len(risk_flags) * 20),
+                "validation_required": True,
+                "validation_guidance": "Native NTUSER/UsrClass string pivots identify likely user-activity keys only; validate with a full registry hive parser before final testimony.",
+                "raw_preview": value[:1000],
+            },
+        )
+
+
 def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> ArtifactRecord | None:
     if not records:
         return None
@@ -388,6 +509,7 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
     hive_string_hits: list[dict[str, object]] = []
     hive_cell_hits: list[dict[str, object]] = []
     deleted_cell_candidates: list[dict[str, object]] = []
+    user_activity_entries: list[dict[str, object]] = []
 
     for record in records:
         details = record.details
@@ -446,6 +568,22 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
                     "validation_required": details.get("validation_required", True),
                 }
             )
+        if record.artifact_type == "registry-user-activity":
+            user_activity_entries.append(
+                {
+                    "source_path": details.get("source_path", record.path),
+                    "source_format": details.get("source_format", ""),
+                    "coverage_status": details.get("coverage_status", ""),
+                    "hive_hint": details.get("hive_hint", ""),
+                    "user_hive_scope": details.get("user_hive_scope", ""),
+                    "user_activity_category": details.get("user_activity_category", ""),
+                    "activity_label": details.get("activity_label", ""),
+                    "key": details.get("key", details.get("string_value", "")),
+                    "value_names": list(details.get("value_names") or []),
+                    "risk_flags": list(details.get("risk_flags") or []),
+                    "validation_required": details.get("validation_required", False),
+                }
+            )
         for item in details.get("persistence_values") or []:
             if isinstance(item, Mapping):
                 persistence_entries.append({"key": details.get("key", ""), **dict(item)})
@@ -476,6 +614,7 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "hive_string_row_count": sum(1 for record in records if record.artifact_type == "registry-hive-strings"),
         "hive_cell_row_count": sum(1 for record in records if record.artifact_type == "registry-hive-cell"),
         "deleted_cell_candidate_count": sum(1 for record in records if record.artifact_type == "registry-deleted-cell-candidate"),
+        "user_activity_count": sum(1 for record in records if record.artifact_type == "registry-user-activity"),
         "source_files": sorted(source_paths),
         "artifact_type_counts": counter_items(artifact_type_counts),
         "source_format_counts": counter_items(source_format_counts),
@@ -491,6 +630,10 @@ def build_registry_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
             deleted_cell_candidates,
             key=lambda item: int(item.get("risk_score") or 0),
             reverse=True,
+        )[:100],
+        "user_activity_entries": sorted(
+            user_activity_entries,
+            key=lambda item: (str(item.get("user_activity_category") or ""), str(item.get("key") or "")),
         )[:100],
         "persistence_entries": persistence_entries[:100],
         "usb_devices": usb_devices[:100],
@@ -542,6 +685,56 @@ def registry_usb_device(key: str, values: Mapping[str, str]) -> dict[str, object
         "friendly_name": clean_reg_value(values.get("FriendlyName", "")),
         "parent_id_prefix": clean_reg_value(values.get("ParentIdPrefix", "")),
     }
+
+
+def classify_user_activity_key(value: str) -> dict[str, str] | None:
+    lowered = value.lower()
+    normalized = lowered.replace("/", "\\")
+    for pattern, category, label in USER_ACTIVITY_KEY_PATTERNS:
+        if pattern in normalized:
+            return {"category": category, "label": label, "matched_pattern": pattern}
+    return None
+
+
+def decode_user_activity_values(key: str, values: Mapping[str, str]) -> dict[str, object]:
+    decoded: dict[str, object] = {}
+    lowered_key = key.lower()
+    for name, raw_value in sorted(values.items()):
+        cleaned = clean_reg_value(raw_value)
+        item: dict[str, object] = {"raw": cleaned}
+        if "userassist" in lowered_key:
+            item["decoded_name"] = decode_rot13_registry_value_name(name)
+            item["note"] = "UserAssist value names are ROT13 encoded; binary counters require a dedicated parser for run counts and timestamps."
+        elif "typedurls" in lowered_key or "typedpaths" in lowered_key:
+            item["typed_value"] = cleaned
+        elif "runmru" in lowered_key:
+            item["command"] = cleaned
+        elif "run" in lowered_key:
+            item["command"] = cleaned
+            item["executable_hint"] = executable_hint(cleaned)
+        else:
+            item["value"] = cleaned
+        decoded[name] = item
+    return decoded
+
+
+def decode_rot13_registry_value_name(value: str) -> str:
+    return value.translate(ROT13_TRANS)
+
+
+def user_activity_risk_flags(category: object, key: str, decoded_values: Mapping[str, object]) -> list[str]:
+    flags = [f"user-activity:{category}"] if category else []
+    lowered = " ".join([key, " ".join(str(value) for value in decoded_values.values())]).lower()
+    if category == "persistence":
+        flags.append("user-hive-persistence")
+    if category in {"browser-typed-url", "typed-path", "recent-document", "file-dialog-mru", "run-dialog-mru"}:
+        flags.append("user-interaction-history")
+    if category == "shellbag":
+        flags.append("folder-view-history")
+    if category == "mounted-device":
+        flags.append("mounted-device-history")
+    flags.extend(suspicious_value_flags(lowered))
+    return sorted(set(flags))
 
 
 def registry_risk_flags(key: str, values: Mapping[str, str]) -> list[str]:
@@ -760,27 +953,33 @@ def registry_url_candidates(strings: Sequence[str]) -> list[str]:
 
 def extract_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> list[str]:
     strings: list[str] = []
-    start: int | None = None
-    cursor = 0
-    while cursor + 1 < len(blob):
-        value = int.from_bytes(blob[cursor : cursor + 2], "little", signed=False)
-        printable = value in (9, 10, 13) or 32 <= value <= 0xD7FF or 0xE000 <= value <= 0xFFFD
-        if printable and value != 0:
-            if start is None:
-                start = cursor
-        else:
-            if start is not None:
-                text = decode_utf16le_string(blob[start:cursor])
-                if len(text) >= min_chars:
-                    strings.append(text)
-                    if len(strings) >= MAX_HIVE_STRINGS:
-                        return strings
-                start = None
-        cursor += 2
-    if start is not None:
-        text = decode_utf16le_string(blob[start:cursor])
-        if len(text) >= min_chars:
-            strings.append(text)
+    seen: set[str] = set()
+    for alignment in (0, 1):
+        start: int | None = None
+        cursor = alignment
+        while cursor + 1 < len(blob):
+            value = int.from_bytes(blob[cursor : cursor + 2], "little", signed=False)
+            printable = value in (9, 10, 13) or 32 <= value <= 0xD7FF or 0xE000 <= value <= 0xFFFD
+            if printable and value != 0:
+                if start is None:
+                    start = cursor
+            else:
+                if start is not None:
+                    text = decode_utf16le_string(blob[start:cursor])
+                    if len(text) >= min_chars and text not in seen:
+                        strings.append(text)
+                        seen.add(text)
+                        if len(strings) >= MAX_HIVE_STRINGS:
+                            return strings
+                    start = None
+            cursor += 2
+        if start is not None:
+            text = decode_utf16le_string(blob[start:cursor])
+            if len(text) >= min_chars and text not in seen:
+                strings.append(text)
+                seen.add(text)
+                if len(strings) >= MAX_HIVE_STRINGS:
+                    return strings
     return strings
 
 

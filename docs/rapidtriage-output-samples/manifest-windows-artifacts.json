@@ -880,7 +880,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v3",
+            "parser_version": "registry-normalized-v4",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
@@ -913,7 +913,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v3",
+            "parser_version": "registry-normalized-v4",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/rdp.reg",
@@ -944,7 +944,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v3",
+            "parser_version": "registry-normalized-v4",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/software.reg",
@@ -987,17 +987,18 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-summary",
-            "parser_version": "registry-normalized-v3",
+            "parser_version": "registry-normalized-v4",
             "coverage_status": "summarized",
             "reportability": "triage",
             "source_path": "<ROOT>",
             "source_format": "summary",
-            "record_count": 4,
+            "record_count": 6,
             "key_count": 4,
             "hive_file_count": 0,
             "hive_string_row_count": 0,
             "hive_cell_row_count": 0,
             "deleted_cell_candidate_count": 0,
+            "user_activity_count": 2,
             "source_files": [
               "<ROOT>/Users/alice/NTUSER-shellbags.reg",
               "<ROOT>/Windows/System32/config/rdp.reg",
@@ -1006,6 +1007,10 @@
             "artifact_type_counts": [
               {
                 "value": "registry-key",
+                "count": 2
+              },
+              {
+                "value": "registry-user-activity",
                 "count": 2
               },
               {
@@ -1020,23 +1025,63 @@
             "source_format_counts": [
               {
                 "value": "reg",
-                "count": 4
+                "count": 6
               }
             ],
             "hive_counts": [
               {
                 "value": "HKEY_CURRENT_USER",
-                "count": 2
+                "count": 3
               },
               {
                 "value": "HKEY_LOCAL_MACHINE",
-                "count": 2
+                "count": 3
               }
             ],
             "hive_files": [],
             "hive_string_hits": [],
             "hive_cell_hits": [],
             "deleted_cell_candidates": [],
+            "user_activity_entries": [
+              {
+                "source_path": "<ROOT>/Windows/System32/config/software.reg",
+                "source_format": "reg",
+                "coverage_status": "mapped-reg-export",
+                "hive_hint": "HKEY_LOCAL_MACHINE",
+                "user_hive_scope": "registry-export",
+                "user_activity_category": "persistence",
+                "activity_label": "CurrentVersion Run persistence",
+                "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                "value_names": [
+                  "SecurityUpdater"
+                ],
+                "risk_flags": [
+                  "suspicious-value:appdata",
+                  "user-activity:persistence",
+                  "user-hive-persistence"
+                ],
+                "validation_required": false
+              },
+              {
+                "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+                "source_format": "reg",
+                "coverage_status": "mapped-reg-export",
+                "hive_hint": "HKEY_CURRENT_USER",
+                "user_hive_scope": "exported-user-hive",
+                "user_activity_category": "shellbag",
+                "activity_label": "ShellBags BagMRU",
+                "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+                "value_names": [
+                  "0",
+                  "NodeSlot"
+                ],
+                "risk_flags": [
+                  "folder-view-history",
+                  "user-activity:shellbag"
+                ],
+                "validation_required": false
+              }
+            ],
             "persistence_entries": [
               {
                 "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
@@ -1060,6 +1105,17 @@
             "suspicious_entries": [
               {
                 "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                "artifact_type": "registry-user-activity",
+                "risk_flags": [
+                  "suspicious-value:appdata",
+                  "user-activity:persistence",
+                  "user-hive-persistence"
+                ],
+                "risk_score": 80,
+                "source_path": "<ROOT>/Windows/System32/config/software.reg"
+              },
+              {
+                "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
                 "artifact_type": "registry-run-key",
                 "risk_flags": [
                   "persistence-key",
@@ -1067,6 +1123,16 @@
                 ],
                 "risk_score": 70,
                 "source_path": "<ROOT>/Windows/System32/config/software.reg"
+              },
+              {
+                "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+                "artifact_type": "registry-user-activity",
+                "risk_flags": [
+                  "folder-view-history",
+                  "user-activity:shellbag"
+                ],
+                "risk_score": 60,
+                "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg"
               }
             ],
             "summary_notes": [
@@ -1082,7 +1148,7 @@
           "supported": true,
           "details": {
             "parser": "windows-registry-reg-export",
-            "parser_version": "registry-normalized-v3",
+            "parser_version": "registry-normalized-v4",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Windows/System32/config/software.reg",
@@ -1109,6 +1175,97 @@
             "risk_flags": [],
             "risk_score": 0,
             "raw_preview": "[HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890]"
+          }
+        },
+        {
+          "provider": "windows-registry",
+          "artifact_type": "registry-user-activity",
+          "path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+          "supported": true,
+          "details": {
+            "parser": "windows-registry-user-hive-activity",
+            "parser_version": "registry-normalized-v4",
+            "coverage_status": "mapped-reg-export",
+            "reportability": "review",
+            "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+            "source_format": "reg",
+            "source_hashes": {
+              "sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4"
+            },
+            "hive_hint": "HKEY_CURRENT_USER",
+            "user_hive_scope": "exported-user-hive",
+            "user_activity_category": "shellbag",
+            "activity_label": "ShellBags BagMRU",
+            "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+            "value_count": 2,
+            "value_names": [
+              "0",
+              "NodeSlot"
+            ],
+            "decoded_values": {
+              "0": {
+                "raw": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
+                "value": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00"
+              },
+              "NodeSlot": {
+                "raw": "dword:00000001",
+                "value": "dword:00000001"
+              }
+            },
+            "parser_confidence": 0.86,
+            "evidence_strength": "registry-export-key",
+            "risk_flags": [
+              "folder-view-history",
+              "user-activity:shellbag"
+            ],
+            "risk_score": 60,
+            "validation_required": false,
+            "validation_guidance": "Registry export keys preserve explicit paths and values, but report-grade user activity should still be cross-checked against source hive hashes and collection context.",
+            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]"
+          }
+        },
+        {
+          "provider": "windows-registry",
+          "artifact_type": "registry-user-activity",
+          "path": "<ROOT>/Windows/System32/config/software.reg",
+          "supported": true,
+          "details": {
+            "parser": "windows-registry-user-hive-activity",
+            "parser_version": "registry-normalized-v4",
+            "coverage_status": "mapped-reg-export",
+            "reportability": "review",
+            "source_path": "<ROOT>/Windows/System32/config/software.reg",
+            "source_format": "reg",
+            "source_hashes": {
+              "sha256": "bdd4195a9ef353c5742507127c1d80ed88b28e24a7038f5797582bb5258ba764"
+            },
+            "hive_hint": "HKEY_LOCAL_MACHINE",
+            "user_hive_scope": "registry-export",
+            "user_activity_category": "persistence",
+            "activity_label": "CurrentVersion Run persistence",
+            "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            "value_count": 1,
+            "value_names": [
+              "SecurityUpdater"
+            ],
+            "decoded_values": {
+              "SecurityUpdater": {
+                "raw": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                "command": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                "executable_hint": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe"
+              }
+            },
+            "parser_confidence": 0.86,
+            "evidence_strength": "registry-export-key",
+            "risk_flags": [
+              "suspicious-value:appdata",
+              "user-activity:persistence",
+              "user-hive-persistence"
+            ],
+            "risk_score": 80,
+            "validation_required": false,
+            "validation_guidance": "Registry export keys preserve explicit paths and values, but report-grade user activity should still be cross-checked against source hive hashes and collection context.",
+            "raw_preview": "[HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run]"
           }
         }
       ]
@@ -1341,7 +1498,54 @@
           "supported": true,
           "details": {
             "parser": "windows-shellbags-reg-export",
-            "parser_version": "registry-normalized-v3",
+            "parser_version": "registry-normalized-v4",
+            "coverage_status": "mapped-reg-export",
+            "reportability": "review",
+            "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+            "source_format": "reg",
+            "source_hashes": {
+              "sha256": "0f139d73d428d6766d10fca441717b54de3ef17f11947d296c2ba37d5c5cafb4"
+            },
+            "hive_hint": "HKEY_CURRENT_USER",
+            "user_hive_scope": "exported-user-hive",
+            "user_activity_category": "shellbag",
+            "activity_label": "ShellBags BagMRU",
+            "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+            "value_count": 2,
+            "value_names": [
+              "0",
+              "NodeSlot"
+            ],
+            "decoded_values": {
+              "0": {
+                "raw": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
+                "value": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00"
+              },
+              "NodeSlot": {
+                "raw": "dword:00000001",
+                "value": "dword:00000001"
+              }
+            },
+            "parser_confidence": 0.86,
+            "evidence_strength": "registry-export-key",
+            "risk_flags": [
+              "folder-view-history",
+              "user-activity:shellbag"
+            ],
+            "risk_score": 60,
+            "validation_required": false,
+            "validation_guidance": "Registry export keys preserve explicit paths and values, but report-grade user activity should still be cross-checked against source hive hashes and collection context.",
+            "raw_preview": "[HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0]"
+          }
+        },
+        {
+          "provider": "windows-shellbags",
+          "artifact_type": "shellbag-key",
+          "path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
+          "supported": true,
+          "details": {
+            "parser": "windows-shellbags-reg-export",
+            "parser_version": "registry-normalized-v4",
             "coverage_status": "mapped",
             "reportability": "triage",
             "source_path": "<ROOT>/Users/alice/NTUSER-shellbags.reg",
