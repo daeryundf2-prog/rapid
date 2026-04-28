@@ -1,145 +1,149 @@
 # RapidTriage Commercial Parity Backlog
 
-This backlog is the ordered 1-121 gap list for moving RapidTriage toward AXIOM/WISDOM-class usefulness. It is intentionally conservative: an item is not "Done" unless it is implemented, fixture-backed where practical, documented, and safe to explain to a forensic user without overstating evidence strength.
+This is the current 120-item commercial parity backlog for moving RapidTriage toward AXIOM/WISDOM-class usefulness. It is intentionally strict: an item is not `Done` unless it is implemented, fixture-backed where practical, documented, and safe to explain to a forensic user without overstating evidence strength.
 
 Status legend: `Done`, `Partial+`, `Partial`, `Planned`, `External`.
+
+Compatibility note: the earlier historical item 121, NTUSER.DAT and UsrClass.dat deep analysis, is now folded into items 4, 5, 6, 15, 18, 65, 90, and 91 so the active execution list follows the user's latest 120-item structure.
 
 ## Execution Rule
 
 Work proceeds in number order unless a dependency makes a later item necessary first. Each commit should update this file when the status or acceptance evidence changes.
 
-## 1-25 Native Evidence And Windows Core
+## A. Core Forensic Capability
 
-1. Native EVTX field fidelity. Status: Partial+. Acceptance: emit native record ID, timestamp, hash, integrity, sequence, file/chunk metadata, searchable strings, parameter candidates, explicit BinXML status, and guidance for report-grade validation.
-2. EVTX BinXML template decoding. Status: Planned. Acceptance: decode Event/System/EventData/UserData nodes from binary EVTX without external exports.
-3. EVTX deleted/slack record recovery. Status: Planned. Acceptance: identify recovered records separately with offset, integrity, confidence, and caution labels.
-4. EVTX semantic tagging. Status: Partial+. Acceptance: map high-value IDs and channels to analyst categories, families, risk flags, and review recommendations.
-5. EVTX timeline correlation. Status: Partial. Acceptance: correlate logon, process, PowerShell, service, task, RDP, WMI, Defender, and firewall events into scenario pivots.
-6. Windows account and OS profile parsing. Status: Partial+. Acceptance: hostname, timezone, boot/shutdown, profiles, account hints, RID/name candidates, admin/disabled hints where available.
-7. SAM binary account decoding. Status: Planned. Acceptance: decode SAM user records, RID, flags, timestamps, and group membership from native hives.
-8. SECURITY hive policy and secrets triage. Status: Planned. Acceptance: inventory policy, LSA, audit, and sensitive-key presence without unsafe secret disclosure by default.
-9. SYSTEM hive control set reconstruction. Status: Planned. Acceptance: resolve current control set, mounted devices, services, timezone, USB, and computer metadata.
-10. SOFTWARE hive application inventory. Status: Planned. Acceptance: installed programs, uninstall keys, App Paths, Run keys, shell extensions, and policy pivots.
-11. Registry key-tree reconstruction. Status: Partial. Acceptance: native hive key/value tree with last-write timestamps and source offsets.
-12. Registry deleted cell testimony. Status: Partial. Acceptance: distinguish allocated/free/deleted key/value candidates with confidence and validation warnings.
-13. Registry value binary decoding. Status: Planned. Acceptance: decode common REG_BINARY/FILETIME/MRUListEx/ShellBag/UserAssist value structures.
-14. Registry timeline export. Status: Partial. Acceptance: unified key/value/user-activity timeline with source hive, path, value, timestamp, and confidence.
-15. Prefetch binary parsing. Status: Partial. Acceptance: executable name, run count, last run times, volume info, referenced files, hash, and version handling.
-16. Amcache parsing. Status: Planned. Acceptance: app execution/install records, SHA1, paths, publisher, timestamps, and source hive provenance.
-17. Shimcache/AppCompatCache parsing. Status: Planned. Acceptance: parse SYSTEM hive cache entries with path, timestamps, flags, and OS-version caution.
-18. BAM/DAM execution parsing. Status: Planned. Acceptance: user SID, executable path, last execution timestamp, and confidence.
-19. SRUM table decoding. Status: Partial. Acceptance: native SRUDB app/network/resource tables with app, user, bytes, energy, and timestamps.
-20. Windows Search EDB table decoding. Status: Partial. Acceptance: native index entries with paths, URLs, content snippets, metadata, and deleted/index status.
-21. MFT attribute decoding. Status: Partial. Acceptance: native FILE records, filenames, timestamps, resident data hints, deleted/in-use status, and sequence validation.
-22. USN journal native parsing. Status: Partial+. Acceptance: v2/v3 records, reasons, FRN/parent FRN, file names, timestamps, and validation warnings.
-23. Volume Shadow Copy orchestration. Status: Partial+. Acceptance: compare, extract, hash, and report deleted/changed files across snapshots.
-24. BitLocker evidence handling. Status: Planned. Acceptance: identify encrypted volumes, metadata, recovery-key candidates, and safe mount/decrypt workflow guidance.
-25. Windows recycle bin parsing. Status: Planned. Acceptance: parse `$I`/`$R` pairs with original path, deletion time, size, hashes, and user SID.
+1. Native EVTX BinXML full parsing. Status: Partial+. Acceptance: decode binary EVTX records into full Event/System/EventData/UserData fields without relying on external exports; current native rows expose record metadata, strings, integrity, and explicit `evtx_binxml_status`.
+2. EVTX event template/message rendering. Status: Partial. Acceptance: render provider templates/messages where available and preserve unresolved template IDs with validation warnings.
+3. EVTX deleted/corrupt record recovery validation. Status: Planned. Acceptance: recover slack/deleted/corrupt candidate records with offset, integrity, confidence, and caution labels.
+4. Registry hive full key tree reconstruction. Status: Partial. Acceptance: reconstruct native hive key/value tree with last-write timestamps, source offsets, cell allocation state, and parser confidence.
+5. Registry deleted key/value recovery. Status: Partial. Acceptance: distinguish allocated/free/deleted key/value candidates and report recovery confidence without overstating testimony.
+6. SAM/SECURITY/SYSTEM account and permission deep parser. Status: Planned. Acceptance: decode users, groups, privileges, current control set, LSA/policy-sensitive locations, services, mounted devices, and timezone/boot metadata.
+7. Amcache parser. Status: Planned. Acceptance: extract application execution/install records, hashes, paths, publisher metadata, and timestamps.
+8. ShimCache/AppCompatCache parser. Status: Planned. Acceptance: parse SYSTEM hive cache entries with OS-version handling, paths, timestamps, flags, and caveats.
+9. BAM/DAM execution parser. Status: Planned. Acceptance: parse user SID, executable path, last execution timestamp, and confidence.
+10. SRUM full ESE table parser. Status: Partial. Acceptance: decode native SRUDB tables for app, network, resource, user, bytes, energy, and timestamps.
+11. Windows.edb full ESE parser. Status: Partial. Acceptance: decode native Windows Search tables into paths, URLs, content snippets, metadata, deleted/index state, and timestamps.
+12. `$MFT` full attribute parser. Status: Partial. Acceptance: decode FILE records, attributes, filenames, timestamps, resident/nonresident data hints, deleted/in-use status, and sequence validation.
+13. `$UsnJrnl` large-scale timeline parser. Status: Partial+. Acceptance: parse v2/v3 records at scale with FRN/parent FRN, reason flags, timestamps, and pagination-friendly output.
+14. JumpList DestList deep parser. Status: Partial. Acceptance: decode DestList MRU/account metadata, embedded LNK streams, timestamps, and source stream provenance.
+15. ShellBags native hive parser. Status: Partial. Acceptance: decode ShellBag folder nodes, paths, timestamps, bag IDs, source key paths, and confidence from native user hives.
+16. Prefetch full version parser. Status: Partial. Acceptance: support common Prefetch versions with run count, last run times, volume info, file references, and hash metadata.
+17. LNK full metadata parser. Status: Partial+. Acceptance: parse target path, working dir, arguments, timestamps, drive/network metadata, tracker data, and shell item metadata.
+18. WER/Defender/Firewall/Task Scheduler/WMI deep parser. Status: Partial+. Acceptance: parse high-value logs/configs with normalized fields, risk flags, source hashes, and report-ready pivots.
+19. Browser cache/session/extension/sync artifacts. Status: Planned. Acceptance: parse cache, sessions, extensions, sync metadata, cookies, and sensitive browser artifacts with strict legal warnings.
+20. Chrome/Edge/Firefox/Safari unified browser timeline. Status: Partial+. Acceptance: normalize cross-browser history, downloads, typed URLs, visits, and source profile metadata into one timeline.
+21. AI service transcript parser for ChatGPT/Claude/Gemini/Perplexity. Status: Partial+. Acceptance: recover service-labeled question/answer candidates, pairing confidence, source storage, and validation status.
+22. E01/Ex01 fully integrated workflow. Status: Partial+. Acceptance: run libewf/Sleuth Kit workflow where installed, record tool versions, mount/extract safely, and show actionable fallback guidance.
+23. RAW/split image robust partition/filesystem handling. Status: Partial+. Acceptance: enumerate partitions/filesystems, recover supported content read-only, and preserve extraction audit metadata.
+24. VHD/VHDX/VMDK/VDI/QCOW direct handling polish. Status: Partial+. Acceptance: route through qemu-img/Sleuth Kit safely with clear progress, errors, hashes, and warnings.
+25. AD1/L01/Lx01/AFF/AFF4/XVA support. Status: Planned. Acceptance: detect, route, import, or document export-first workflows with evidence hashes and limitation warnings.
 
-## 26-50 User Activity, Browser, Internet, And AI
+## B. Mobile, Cloud, And Apps
 
-26. Unified browser history. Status: Done. Acceptance: Chrome, Edge, Brave, Firefox history/download rows and internet category pivots.
-27. Browser cache inventory. Status: Planned. Acceptance: cache entries with URL, timestamps, MIME, size, hashes, and preview-safe extraction.
-28. Browser cookies and sessions. Status: Planned. Acceptance: cookie/session metadata with redaction controls and secure handling.
-29. Browser autofill and logins inventory. Status: Planned. Acceptance: identify presence and metadata without dumping secrets by default.
-30. Browser extension inventory. Status: Planned. Acceptance: extension IDs, names, versions, permissions, install paths, and risk flags.
-31. AI service usage detection. Status: Partial+. Acceptance: ChatGPT and common assistant/search visits, prompts, storage candidates, and service labels.
-32. AI question/answer transcript reconstruction. Status: Partial+. Acceptance: pair candidate user/assistant messages with completeness and validation status.
-33. Per-file search within viewer. Status: Partial. Acceptance: search current file preview separately from whole-case search.
-34. Whole-case keyword search. Status: Done. Acceptance: indexed case search across paths, text previews, metadata, and artifact rows.
-35. OCR queue and OCR sidecar import. Status: Partial. Acceptance: queue images/PDFs, import OCR text sidecars, preserve language and confidence hints.
-36. Korean OCR execution. Status: Planned. Acceptance: optional OCR runtime path with Korean language support and reproducible confidence metadata.
-37. Translation workflow. Status: Planned. Acceptance: mark translation-needed items and import translated sidecars without changing original evidence.
-38. Web artifact threat intelligence. Status: Planned. Acceptance: optional URL/IP/hash enrichment with offline-safe mode and source/version metadata.
-39. Download provenance. Status: Partial+. Acceptance: browser downloads, Zone.Identifier, paths, URLs, timestamps, and hashes correlated.
-40. Email container parsing. Status: Planned. Acceptance: PST/OST/MBOX/EML/MSG inventory, messages, attachments, headers, hashes, and search text.
-41. Chat exports. Status: Partial. Acceptance: normalize common JSON/CSV chat exports with participants, timestamps, messages, attachments.
-42. Cloud account export imports. Status: Partial+. Acceptance: Google/Apple/general JSON exports normalized with source hashes and bounded schemas.
-43. Social media export imports. Status: Planned. Acceptance: normalize posts, messages, media references, account metadata, and timestamps.
-44. Remote desktop artifacts. Status: Partial+. Acceptance: Default.rdp, cache inventory, RDP registry exports, and event correlations.
-45. VPN and remote access clients. Status: Planned. Acceptance: known config/log locations, connection history candidates, and credential-safe metadata.
-46. Shell history. Status: Partial+. Acceptance: PowerShell PSReadLine and command history rows with risk flags.
-47. ConsoleHost and PowerShell module pivots. Status: Planned. Acceptance: module/log/profile/script artifacts with paths, commands, and timestamps.
-48. UserAssist deep decoding. Status: Partial. Acceptance: ROT13 names, run counts/timestamps from native/exported user hives.
-49. ShellBags deep decoding. Status: Partial. Acceptance: folder paths, node timestamps, source key paths, and confidence.
-50. RecentDocs/OpenSave/LastVisited MRUs. Status: Partial. Acceptance: user activity pivots with key path, value, decoded target, and source.
+26. Cellebrite/XRY/GrayKey/AXIOM export deep import. Status: Partial. Acceptance: normalize vendor export messages, contacts, calls, files, apps, accounts, media, source IDs, and hashes.
+27. iOS backup parser. Status: Planned. Acceptance: parse authorized iOS backup files, domains, manifest DBs, app data, messages, media, accounts, and timestamps.
+28. iOS keychain/artifact parser. Status: Planned. Acceptance: inventory keychain/artifact records with strict authorization, redaction, and legal warnings.
+29. Android backup/artifact parser. Status: Partial. Acceptance: normalize Android backup/export app, file, SMS, call, contact, browser, and media artifacts.
+30. Android app package/data parser. Status: Partial+. Acceptance: parse APK metadata, permissions, manifests, strings, native libraries, app data exports, and risk flags.
+31. KakaoTalk parser. Status: Planned. Acceptance: parse authorized exports/backups for chats, participants, media references, timestamps, and schema versions.
+32. WhatsApp parser. Status: Planned. Acceptance: parse authorized exports/backups for chats, contacts, media, calls, and timestamps.
+33. Telegram parser. Status: Planned. Acceptance: parse Telegram desktop/mobile exports with chats, media references, contacts, and account metadata.
+34. Signal parser. Status: Planned. Acceptance: parse authorized Signal exports/backups where technically and legally feasible with strong limitations.
+35. WeChat/LINE/Discord/Instagram parser. Status: Planned. Acceptance: normalize authorized exports for messages, users, media, reactions, and timestamps.
+36. Email PST/OST full mailbox parser. Status: Planned. Acceptance: parse mailbox folders, messages, headers, attachments, conversation threading, hashes, and search text.
+37. Gmail/Google Takeout deep parser. Status: Partial. Acceptance: normalize mail, account activity, location, Drive metadata, photos, browser/account events, and timestamps.
+38. Apple iCloud export parser. Status: Partial. Acceptance: normalize Apple account exports, device/account metadata, photos/files references, and timestamps.
+39. Microsoft 365/OneDrive/Teams export parser. Status: Planned. Acceptance: parse M365 exports for mail, Teams chats, files, sharing, audit logs, and account metadata.
+40. Cloud API acquisition workflow. Status: Partial. Acceptance: authorized request manifests, bounded API collection, redacted credentials, response hashes, and audit output.
+41. Cloud token/credential secure handling. Status: Planned. Acceptance: redact secrets by default, store tokens safely, log access, and support controlled reveal/export.
+42. Browser password/cookie/session artifact handling with strict legal warning. Status: Planned. Acceptance: sensitive artifacts are opt-in, redacted by default, audited, and legally warned.
+43. Mobile app media/message timeline correlation. Status: Planned. Acceptance: correlate chats, media, contacts, app events, and filesystem timestamps.
+44. Contact/call/SMS unified mobile view. Status: Partial. Acceptance: show normalized contacts, calls, SMS/messages, participants, timestamps, and source app/export.
+45. App-specific known schema version management. Status: Planned. Acceptance: track parser schema versions, app DB versions, compatibility notes, and migration tests.
 
-## 51-75 Viewer, Review, Reporting, And Case Workflow
+## C. Search, Analysis, And UX
 
-51. Large-case virtualized viewer. Status: Partial. Acceptance: paged result rendering without loading all rows into browser memory.
-52. Side-by-side comparison. Status: Done. Acceptance: compare tray and text diff for selected evidence.
-53. Evidence pinning and review board. Status: Done. Acceptance: mark, verify, reject, candidate, and report states persist in Case DB.
-54. Batch review actions. Status: Done. Acceptance: apply review status to selected search results.
-55. Keyboard shortcuts. Status: Partial. Acceptance: documented next/previous, open, pin, verify, reject, search, compare shortcuts.
-56. Saved searches and keyword packs. Status: Done. Acceptance: persist searches and reuse per case.
-57. Review audit trail. Status: Partial. Acceptance: who/when/action/source fields for review changes and report inclusion.
-58. Evidence hash appendix. Status: Done. Acceptance: export source/item hashes in report and reviewer bundle.
-59. Chain-of-custody package. Status: Partial. Acceptance: evidence IDs, source hashes, tool versions, run profile, warnings, and audit links.
-60. Report templates. Status: Done. Acceptance: executive, technical, legal handoff, and hash-only modes.
-61. Report citation model. Status: Partial. Acceptance: every report item cites source path, hash, parser, offset when available, and review status.
-62. PDF/DOCX report validation. Status: Partial. Acceptance: exported reports render consistently and include manifest hashes.
-63. Portable reviewer bundle. Status: Done. Acceptance: static HTML/JSON/report/hash package without original image data.
-64. Redaction workflow. Status: Planned. Acceptance: mark and export redacted previews while preserving original hashes.
-65. Evidence notes and annotations. Status: Partial. Acceptance: notes attach to artifact rows and appear in reports when selected.
-66. Cross-case search. Status: Planned. Acceptance: search multiple Case DBs with clear case/evidence boundaries.
-67. Case merge/split. Status: Planned. Acceptance: import/export selected evidence and review state safely between cases.
-68. Case backup/restore. Status: Planned. Acceptance: portable archive with DB, reports, manifests, and integrity verification.
-69. Multi-user collaboration. Status: Planned. Acceptance: users, roles, locks, conflict handling, and audit trail.
-70. Role-based permissions. Status: Planned. Acceptance: analyst/reviewer/admin permissions for case, export, and settings.
-71. Dashboard triage. Status: Partial. Acceptance: high-risk summaries, source warnings, parser gaps, and next actions.
-72. Timeline view. Status: Partial. Acceptance: unified artifact/event timeline with filtering and pivots.
-73. Entity pivots. Status: Partial. Acceptance: user, host, IP, URL, hash, process, file, and service pivot pages.
-74. Parser transparency view. Status: Partial+. Acceptance: show processed/skipped/capped/failed parsers and warnings.
-75. Unsupported evidence guidance. Status: Done. Acceptance: unsupported images/formats show mount/export guidance instead of silent failure.
+46. Large-result clustering. Status: Planned. Acceptance: cluster similar search hits, files, media, entities, and repeated artifacts for review efficiency.
+47. Entity view: people, accounts, email, phone, IP, and domain. Status: Partial. Acceptance: pivot by normalized entities with linked evidence, counts, first/last seen, and risk indicators.
+48. Graph view: account-file-URL-time relationships. Status: Planned. Acceptance: visualize entities and evidence relationships with filters and source citations.
+49. Unified timeline correlation. Status: Partial. Acceptance: correlate filesystem, event logs, browser, mobile, cloud, and review annotations into one scalable timeline.
+50. Incident hypothesis/workbook feature. Status: Planned. Acceptance: let analysts create hypotheses, attach evidence, track questions, and export workbook sections.
+51. Reviewer assignment/status workflow. Status: Partial. Acceptance: assign items, track status, priorities, reviewer notes, and report candidate state.
+52. A/B/C multi-evidence compare. Status: Partial. Acceptance: compare more than two evidence items with diff, metadata, hash, and note panels.
+53. Raw/source hex viewer. Status: Planned. Acceptance: safe bounded hex/bytes view with offsets, search, copy-safe snippets, and source hash.
+54. SQLite/table specialized viewer. Status: Partial. Acceptance: browse tables, schemas, rows, FTS hits, and source DB metadata without loading all rows.
+55. Email conversation viewer. Status: Planned. Acceptance: render threaded mail conversations, attachments, headers, and citations.
+56. Image gallery review mode. Status: Partial. Acceptance: review thumbnails, similarity buckets, perceptual hashes, tags, and report selections.
+57. Video/audio preview and transcript. Status: Planned. Acceptance: preview bounded media metadata, transcripts/sidecars, hashes, and review marks.
+58. OCR queue manager. Status: Partial. Acceptance: queue files, show OCR state, import sidecars, preserve confidence/language metadata, and retry failures.
+59. Korean OCR/translation workflow hardening. Status: Partial. Acceptance: support Korean OCR/translation sidecars, language hints, confidence, and unchanged originals.
+60. Search hit deduplication. Status: Partial. Acceptance: deduplicate repeated hits by source hash, normalized text, entity, artifact ID, and preview.
+61. Fuzzy search/stemming/regex proximity search. Status: Planned. Acceptance: support analyst-grade query modes with performance warnings and tested syntax.
+62. Saved keyword pack library. Status: Partial+. Acceptance: reusable keyword packs, saved searches, recent searches, and case-scoped history.
+63. IOC/TI enrichment plugin. Status: Planned. Acceptance: optional offline-safe enrichment for IPs, domains, URLs, hashes, rule IDs, and source/version metadata.
+64. Report citation manager. Status: Partial. Acceptance: manage citations, source paths, hashes, parser versions, offsets, reviewer state, and exhibit numbers.
+65. Evidence selection/version history. Status: Partial. Acceptance: preserve selection changes, notes, review state changes, and report inclusion history.
 
-## 76-100 Evidence Adapters, Performance, Packaging, And Validation
+## D. Performance And Large Scale
 
-76. E01/Ex01 adapter. Status: Partial+. Acceptance: libewf/Sleuth Kit extraction when installed, otherwise clear guidance.
-77. Raw/dd/split image adapter. Status: Partial+. Acceptance: recover through Sleuth Kit where available and record tool versions.
-78. ISO/DMG/WIM/SWM adapter. Status: Partial+. Acceptance: safe read-only extraction through available archive tools.
-79. VHD/VHDX/VMDK/VDI/QCOW adapter. Status: Partial+. Acceptance: qemu-img conversion plus extraction where available.
-80. AFF/AFF4 adapter. Status: Planned. Acceptance: detect and route through supported tooling with hashes and warnings.
-81. AD1/L01/Lx01 adapter. Status: Planned. Acceptance: detect, document export-first path, and parse trusted exported folders.
-82. XVA adapter. Status: Planned. Acceptance: detect Xen exports and route to extraction/conversion path.
-83. Mobile extraction imports. Status: Partial. Acceptance: Cellebrite/XRY/GrayKey/AXIOM-style export normalization where legally feasible.
-84. APK malware triage. Status: Partial+. Acceptance: APK manifest, permissions, strings, URLs/IPs, hashes, and risk flags.
-85. iOS backup import. Status: Planned. Acceptance: parse authorized backup/export metadata, messages, files, apps, and accounts.
-86. Android backup/export import. Status: Partial. Acceptance: normalize exported app/message/file artifacts and APKs.
-87. Memory dump imports. Status: Partial+. Acceptance: Volatility JSON/JSONL plus bounded direct string/indicator scans.
-88. Memory process tree and malfind view. Status: Partial. Acceptance: normalize process, cmdline, netscan, malfind, and risk flags.
-89. BitLocker key candidates from memory. Status: Partial+. Acceptance: redacted candidate detection with group validation and source offsets.
-90. YARA/Sigma rule execution. Status: Planned. Acceptance: optional rule packs, versioning, matches, false-positive notes, and report links.
-91. Malware sandbox/export import. Status: Planned. Acceptance: ingest sandbox JSON/CSV reports and correlate hashes/URLs/IPs.
-92. Image perceptual hash. Status: Done. Acceptance: pHash buckets and image similarity hints.
-93. Visual similarity grouping. Status: Partial. Acceptance: perceptual hash clusters and reviewer workflow.
-94. Deepfake/media authenticity triage. Status: Planned. Acceptance: metadata and optional classifier output with model/version cautions.
-95. Thumbnail generation. Status: Partial. Acceptance: bounded safe previews with no full evidence exposure in reviewer bundle.
-96. Document text extraction. Status: Partial. Acceptance: PDFs/Office/text/logs indexed with limits, source hashes, and error reporting.
-97. Archive recursion. Status: Partial. Acceptance: bounded ZIP/7z/tar extraction/indexing with bomb protections and provenance.
-98. Carving workflow. Status: Planned. Acceptance: optional, explicit deep mode with file signatures, offsets, hashes, and time/cap warnings.
-99. Incremental indexing. Status: Partial. Acceptance: resume/reuse completed outputs and avoid duplicate Case DB imports.
-100. Large-case benchmarks. Status: Partial. Acceptance: 10k/100k/1M synthetic and existing-root modes with published latency/resource targets.
+66. 100k/1M/10M record benchmark. Status: Partial. Acceptance: benchmark index/search/report behavior at these scales with documented latency/resource targets.
+67. 1TB-10TB evidence stress test. Status: Planned. Acceptance: publish repeatable stress runs, bottlenecks, resource caps, and known failure thresholds.
+68. Incremental indexing. Status: Partial. Acceptance: reuse completed outputs, detect changed sources, and avoid duplicate Case DB imports.
+69. Background job queue. Status: Partial. Acceptance: run jobs asynchronously with progress, state, warnings, cancellation, and retry.
+70. Stage checkpoint/resume hardening. Status: Partial. Acceptance: checkpoint each stage, safely resume skipped/failed/capped work, and preserve previous outputs.
+71. Parser crash isolation. Status: Planned. Acceptance: isolate parser failures so one bad artifact cannot crash a whole case run.
+72. Memory cap enforcement. Status: Partial. Acceptance: enforce bounded reads/previews/extractions and record cap warnings.
+73. Preview sandboxing. Status: Planned. Acceptance: render previews safely without executing active content or exposing host paths unnecessarily.
+74. Large SQLite/FTS optimization. Status: Partial. Acceptance: tune indexes, pagination, inserts, FTS queries, and vacuum/maintenance for large cases.
+75. Parallel parser scheduler. Status: Planned. Acceptance: schedule independent parsers with CPU/I/O limits, progress, and deterministic output ordering.
+76. File hash cache. Status: Planned. Acceptance: cache hashes by path/size/mtime/inode where safe and invalidate on change.
+77. Duplicate file/content detection. Status: Partial. Acceptance: group duplicate hashes, similar names, near-duplicate media/text, and source occurrences.
+78. Artifact pagination/cursor API. Status: Partial. Acceptance: return cursor-paged artifacts/search results for massive datasets.
+79. UI virtualization for massive result tables. Status: Partial. Acceptance: display large result sets without loading all rows in browser memory.
+80. Long-running job cancellation/retry. Status: Partial. Acceptance: cancel/retry jobs safely and record partial outputs/warnings.
 
-## 101-121 Cross-Platform, Security, Release, And Final Parser Depth
+## E. Validation And Legal Defensibility
 
-101. Windows launcher and quickstart. Status: Done. Acceptance: non-developer Windows user can start web UI with documented steps.
-102. macOS launcher and quickstart. Status: Done. Acceptance: macOS user can start web UI with documented steps.
-103. Linux support. Status: Partial+. Acceptance: CLI/web flow works on common Linux environments with documented optional tools.
-104. Signed Windows installer. Status: External. Acceptance: repeatable build plus code-signing certificate and verification evidence.
-105. macOS notarization. Status: External. Acceptance: notarized package with Gatekeeper validation evidence.
-106. Portable/offline release bundle. Status: Partial. Acceptance: dependency-light reviewer/operator package with checksums.
-107. Schema versioning. Status: Partial+. Acceptance: parser/output schema versions and changelog for breaking changes.
-108. Release validation package. Status: Partial+. Acceptance: validation command emits required checks, docs, limitations, and evidence fields.
-109. Independent validation corpus. Status: Planned. Acceptance: public or controlled corpus with expected parser counts and false-negative notes.
-110. Parser fuzz/safety tests. Status: Planned. Acceptance: malformed files do not crash or escape configured bounds.
-111. Local-only security default. Status: Done. Acceptance: remote bind requires explicit auth/guardrails.
-112. Export/report sanitization. Status: Done. Acceptance: HTML escaping, CSP/no-referrer, path traversal protections.
-113. Secrets handling policy. Status: Partial. Acceptance: redact secrets by default, expose controlled reveal/export workflow, and audit access.
-114. Plugin/parser SDK. Status: Planned. Acceptance: documented parser interface, fixtures, schema checks, and compatibility tests.
-115. External parser import contracts. Status: Partial+. Acceptance: EvtxECmd/Hayabusa/Chainsaw/Velociraptor and common CSV/JSON imports documented/tested.
-116. Training materials. Status: Partial. Acceptance: guided sample case, analyst workflow, and known limitations.
-117. Support/SLA package. Status: External. Acceptance: staffed support model, escalation, and release/patch expectations.
-118. Legal defensibility notes. Status: Partial. Acceptance: evidence-strength labels, validation warnings, hash provenance, and limitation disclosure.
-119. Commercial comparison scoring. Status: Partial+. Acceptance: cold score against AXIOM/WISDOM expectations is documented and updated per milestone.
-120. End-to-end forensic scenario tests. Status: Partial. Acceptance: sample cases cover intrusion, insider, malware, browser/AI usage, and report handoff.
-121. NTUSER.DAT and UsrClass.dat deep user-hive analysis. Status: Partial+. Acceptance: user activity pivots for UserAssist, TypedURLs/TypedPaths, RecentDocs, Run/RunOnce, Explorer/MRU, ShellBags, MountPoints2, Network, and ComDlg32/OpenSavePidlMRU; full key-tree, binary values, deleted values, and per-key last-write testimony remain to be completed.
+81. NIST CFReDS/CFTT based known-answer tests. Status: Planned. Acceptance: run known-answer validation against public corpora and document results.
+82. Parser-specific fixture corpus. Status: Partial. Acceptance: each parser has fixtures, expected counts, edge cases, and regression tests.
+83. Parser-specific false positive/false negative documentation. Status: Partial. Acceptance: document known misses, noise, unsupported structures, and validation needs.
+84. Independent validation report. Status: Planned. Acceptance: produce third-party or independent validation evidence per release.
+85. Tool validation package automation hardening. Status: Partial+. Acceptance: generate validation JSON/Markdown with commands, checks, docs, limitations, and artifacts.
+86. Chain-of-custody full workflow. Status: Partial. Acceptance: evidence IDs, acquisition/source hashes, custody events, tool versions, and report links.
+87. Evidence acquisition hash workflow. Status: Partial. Acceptance: hash source images/exports, extracted files, reports, bundles, and acquisition metadata.
+88. Analyst action immutable audit log. Status: Partial. Acceptance: append-only audit for review, tagging, export, report, and settings changes.
+89. Report reproducibility: same input, same output. Status: Partial. Acceptance: deterministic ordering, timestamps normalization, schema versions, and reproducibility tests.
+90. Report item source provenance completeness. Status: Partial. Acceptance: every report item cites source path, hash, parser, offset/index where available, and review status.
+91. Parser confidence scoring. Status: Partial+. Acceptance: every normalized artifact has evidence strength, parser confidence, reportability, and validation warnings.
+92. Validation-required warning UX. Status: Partial. Acceptance: UI and reports clearly show partial/native/unsupported/parser-required states.
+93. Legal limitation statement per artifact. Status: Partial. Acceptance: artifact-specific limitations appear in reports and reviewer views.
+94. Court exhibit export package. Status: Planned. Acceptance: export selected evidence, reports, hashes, audit, and provenance in a court-ready bundle.
+95. External tool version capture. Status: Partial. Acceptance: capture versions and command evidence for ewfmount, Sleuth Kit, qemu-img, OCR, and parser imports.
+96. Write-blocker/acquisition metadata recording. Status: Planned. Acceptance: record acquisition device, write-blocker, operator, time, source, and notes.
+97. Timezone normalization validation. Status: Partial. Acceptance: preserve original timestamps, normalized UTC, source timezone, and parser assumptions.
+98. Clock skew analysis. Status: Planned. Acceptance: detect host/device time skew and annotate timelines/reports.
+99. Evidence contamination warning. Status: Planned. Acceptance: warn on writable sources, changed mtimes, generated files inside evidence, and unsafe output paths.
+100. Tamper-evident audit bundle. Status: Planned. Acceptance: hash-chain or manifest-sign audit/report/export packages for tamper evidence.
+
+## F. Deployment, Operations, And Commercialization
+
+101. Windows signed installer. Status: External. Acceptance: signed installer, verification evidence, reproducible build steps, and fresh-machine smoke test.
+102. macOS notarized package. Status: External. Acceptance: notarized package, Gatekeeper validation, reproducible build steps, and smoke test.
+103. Linux package/deb/rpm/AppImage. Status: Planned. Acceptance: installable Linux packages with dependency handling and smoke tests.
+104. Auto-update channel. Status: Planned. Acceptance: controlled update channel with signed artifacts, release notes, rollback, and enterprise disable option.
+105. Crash reporting. Status: Planned. Acceptance: local-first crash logs with opt-in export and no evidence exfiltration.
+106. Telemetry-free/local-only enterprise mode. Status: Partial+. Acceptance: local-only default, explicit remote bind/auth, and no hidden telemetry.
+107. License/activation system, if needed. Status: Planned. Acceptance: license flow does not touch evidence and supports offline enterprise workflows.
+108. Role-based access control. Status: Planned. Acceptance: roles, permissions, case access, export controls, and audit logs.
+109. Multi-user case server. Status: Planned. Acceptance: shared case server with auth, locking/conflict handling, and scalable search/review.
+110. Collaboration audit trail. Status: Planned. Acceptance: immutable user/action/time/source audit for collaboration workflows.
+111. Backup/restore/migration. Status: Planned. Acceptance: versioned backups, restore validation, schema migrations, and integrity checks.
+112. Release notes/changelog discipline. Status: Partial. Acceptance: every release has changes, known limits, validation state, migration notes, and checksums.
+113. LTS branch/hotfix policy. Status: Planned. Acceptance: documented support windows, patch policy, branch rules, and backport criteria.
+114. Support SLA documentation. Status: External. Acceptance: staffed response targets, severity levels, escalation, and patch delivery expectations.
+115. Training curriculum. Status: Partial. Acceptance: structured analyst/admin training, labs, examples, and validation exercises.
+116. Analyst quickstart lab. Status: Partial. Acceptance: guided sample case from ingest to search, review, report, and export.
+117. Admin deployment guide. Status: Planned. Acceptance: enterprise install, update, backup, auth, network, logging, and policy guidance.
+118. Security hardening review. Status: Partial. Acceptance: periodic security review for auth, path handling, export rendering, dependencies, and parser safety.
+119. Malicious evidence sandboxing. Status: Planned. Acceptance: isolate previews/parsers for hostile files and active content.
+120. Dependency vulnerability monitoring. Status: Planned. Acceptance: scan dependencies, track advisories, patch cadence, and release-blocking severity policy.

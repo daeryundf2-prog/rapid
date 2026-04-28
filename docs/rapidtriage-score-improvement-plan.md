@@ -8,7 +8,7 @@ Estimated current score: 100/100 for the internal RapidTriage roadmap target.
 
 Estimated commercial-suite readiness: 68/100 versus AXIOM/WISDOM-class expectations.
 
-Detailed commercial parity tracking now lives in `docs/rapidtriage-commercial-parity-backlog.md`. That file is the numbered 1-121 implementation backlog and should be updated whenever a gap status changes.
+Detailed commercial parity tracking now lives in `docs/rapidtriage-commercial-parity-backlog.md`. That file is the current numbered 120-item implementation backlog and should be updated whenever a gap status changes.
 
 Why:
 
