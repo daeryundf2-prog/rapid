@@ -583,7 +583,7 @@
             "parent_command_line": "",
             "parent_process_name": "",
             "parser": "windows-eventlog-builtin-rulepack",
-            "parser_version": "eventlog-normalized-v9",
+            "parser_version": "eventlog-normalized-v10",
             "process_id": "",
             "process_name": "",
             "provider_name": "Microsoft-Windows-Security-Auditing",
@@ -659,6 +659,7 @@
             "event_description": "Authentication success",
             "event_family": "authentication",
             "event_id": "4624",
+            "event_message": "An account successfully logged on. User=alice; logon_type=10; source=10.0.0.5.",
             "event_tags": [
               "category:logon-success",
               "channel:security",
@@ -672,13 +673,25 @@
             "level": "0",
             "logon_process_name": "",
             "logon_type": "10",
+            "message_rendering": {
+              "event_category": "logon-success",
+              "event_id": "4624",
+              "message": "An account successfully logged on. User=alice; logon_type=10; source=10.0.0.5.",
+              "message_source": "rapidtriage-builtin-event-template",
+              "missing_fields": [],
+              "provider_name": "Microsoft-Windows-Security-Auditing",
+              "status": "rendered-builtin-template",
+              "template_ids": [],
+              "validation_required": false,
+              "warnings": []
+            },
             "new_process_name": "",
             "opcode": "",
             "parent_command_line": "",
             "parent_process_name": "",
             "parser": "windows-eventlog-xml",
             "parser_confidence": 0.9,
-            "parser_version": "eventlog-normalized-v9",
+            "parser_version": "eventlog-normalized-v10",
             "process_id": "",
             "process_name": "",
             "provider_name": "Microsoft-Windows-Security-Auditing",
@@ -820,7 +833,7 @@
                 "value": "detected-by-rule"
               }
             ],
-            "parser_version": "eventlog-normalized-v9",
+            "parser_version": "eventlog-normalized-v10",
             "process_counts": [],
             "record_sequence_gaps": [],
             "reportability": "triage",
@@ -849,7 +862,7 @@
             "summary_notes": [
               "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
               "Binary EVTX rows include partial native record scans when recoverable; native_binxml_status_counts shows whether BinXML field decoding is complete.",
-              "Use external parser exports for complete Event/System/EventData BinXML field fidelity before report-grade conclusions."
+              "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering."
             ],
             "user_counts": [
               {

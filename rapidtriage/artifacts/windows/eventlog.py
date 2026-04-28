@@ -14,7 +14,7 @@ from typing import Iterable, Mapping, Sequence
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v9"
+PARSER_VERSION = "eventlog-normalized-v10"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
@@ -522,6 +522,16 @@ BUILTIN_EVENT_RULES = (
 
 RULE_LEVEL_SCORES = {"info": 15, "low": 25, "medium": 45, "high": 70, "critical": 90}
 
+EVENT_MESSAGE_TEMPLATES = {
+    "4624": "An account successfully logged on. User={TargetUserName|SubjectUserName}; logon_type={LogonType}; source={IpAddress|SourceAddress|SourceIp|SourceNetworkAddress}.",
+    "4625": "An account failed to log on. User={TargetUserName|SubjectUserName}; status={Status|SubStatus|ErrorCode}; source={IpAddress|SourceAddress|SourceIp|SourceNetworkAddress}.",
+    "4688": "A process was created. Process={NewProcessName|ProcessName|Image}; command={CommandLine|ProcessCommandLine}; parent={ParentProcessName|CreatorProcessName}.",
+    "4103": "PowerShell module logging recorded command activity. Command={CommandLine|Payload|ScriptBlockText}.",
+    "4104": "PowerShell script block was recorded. Script={ScriptBlockText|CommandLine|Payload}.",
+    "1102": "The Security audit log was cleared. Subject={SubjectUserName|User}.",
+    "104": "An event log was cleared. Channel={Channel}; user={SubjectUserName|User}.",
+}
+
 
 class WindowsEventLogProvider:
     name = "windows-eventlog"
@@ -586,9 +596,13 @@ def collect_xml_events(path: Path) -> Iterable[ArtifactRecord]:
         system = child_by_name(event, "System")
         event_data = child_by_name(event, "EventData")
         user_data = child_by_name(event, "UserData")
+        rendering = child_by_name(event, "RenderingInfo")
         data = event_data_values(event_data)
         if user_data is not None:
             data.update(prefixed_xml_values(user_data, "UserData"))
+        rendered_message = text_from_child(rendering, "Message")
+        if rendered_message:
+            data.setdefault("Message", rendered_message)
         details = normalize_event_details(
             parser="windows-eventlog-xml",
             source_format="xml",
@@ -734,6 +748,7 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             event_created_at=event_created_at,
             data=data,
             raw_preview=raw_preview,
+            user_sid=str(system_fields.get("UserID") or ""),
             user_name=str(native_indicators.get("user_name") or ""),
             process_id=str(system_fields.get("ProcessID") or ""),
             thread_id=str(system_fields.get("ThreadID") or ""),
@@ -1062,6 +1077,7 @@ def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
     elements: list[dict[str, object]] = []
     value_fields: list[dict[str, object]] = []
     template_values: list[dict[str, object]] = []
+    template_ids: list[str] = []
     tokens: Counter[str] = Counter()
     rendered: list[str] = []
     version: dict[str, object] = {}
@@ -1169,6 +1185,9 @@ def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
             continue
         if token_kind == 0x0C:
             template = parse_binxml_template_instance(payload, offset)
+            template_id = str(template.get("template_id") or "")
+            if template_id:
+                template_ids.append(template_id)
             elements.extend(item for item in template.get("elements", []) if isinstance(item, Mapping))
             value_fields.extend(item for item in template.get("value_fields", []) if isinstance(item, Mapping))
             template_values.extend(item for item in template.get("template_values", []) if isinstance(item, Mapping))
@@ -1201,6 +1220,7 @@ def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
         "elements": elements[:100],
         "value_fields": value_fields[:100],
         "template_values": template_values[:100],
+        "template_ids": sorted(set(template_ids)),
         "template_value_count": len(template_values),
         "rendered_preview": "".join(rendered)[:4000],
         "token_count": sum(tokens.values()),
@@ -1496,6 +1516,17 @@ def read_inline_binxml_value_text(blob: bytes, offset: int) -> tuple[str, int, s
             return "", len(blob), "truncated-binary"
         text, _ = decode_binxml_template_value(blob[start:end], value_type)
         return text, end, value_type_name
+    if value_type == 0x13:
+        start = offset + 2
+        if start + 8 > len(blob):
+            return "", len(blob), "truncated-sid"
+        sub_authority_count = blob[start + 1]
+        byte_count = 8 + sub_authority_count * 4
+        end = start + byte_count
+        if end > len(blob):
+            return "", len(blob), "truncated-sid"
+        text, _ = decode_binxml_template_value(blob[start:end], value_type)
+        return text, end, value_type_name
 
     fixed_lengths = {
         0x03: 1,
@@ -1615,6 +1646,9 @@ def decode_binxml_template_value(value_blob: bytes, value_type: int) -> tuple[st
     if value_type == 0x12 and len(value_blob) >= 16:
         text = systime_to_iso(value_blob[:16])
         return text, text
+    if value_type == 0x13:
+        text = sid_to_string(value_blob)
+        return text, text
     if value_type == 0x0E:
         text = value_blob.hex()
         return text, text
@@ -1657,6 +1691,22 @@ def format_guid_le(value: bytes) -> str:
         f"{int.from_bytes(value[6:8], 'little'):04x}-"
         f"{value[8:10].hex()}-{value[10:16].hex()}"
     )
+
+
+def sid_to_string(value: bytes) -> str:
+    if len(value) < 8:
+        return value.hex()
+    revision = value[0]
+    sub_authority_count = value[1]
+    expected_length = 8 + sub_authority_count * 4
+    if len(value) < expected_length:
+        return value.hex()
+    authority = int.from_bytes(value[2:8], "big", signed=False)
+    sub_authorities = [
+        str(int.from_bytes(value[8 + index * 4 : 12 + index * 4], "little", signed=False))
+        for index in range(sub_authority_count)
+    ]
+    return "-".join([f"S-{revision}", str(authority), *sub_authorities])
 
 
 def systime_to_iso(value: bytes) -> str:
@@ -1904,6 +1954,95 @@ def details_from_mapping(
     return details
 
 
+def render_event_message(
+    *,
+    provider_name: str,
+    event_id: str,
+    category: str,
+    data: Mapping[str, object],
+    raw_preview: str,
+    is_native_evtx: bool,
+) -> dict[str, object]:
+    external_message = first_data_text(data, "RenderedMessage", "Message", "MapDescription", "EventMessage")
+    template_ids = native_evtx_template_ids(data)
+    if external_message:
+        return {
+            "status": "external-message",
+            "message": external_message[:4000],
+            "message_source": "imported-export-field",
+            "provider_name": provider_name,
+            "event_id": event_id,
+            "event_category": category,
+            "template_ids": template_ids,
+            "validation_required": False,
+            "warnings": [],
+        }
+
+    template = EVENT_MESSAGE_TEMPLATES.get(event_id)
+    if template:
+        message, missing_fields = render_message_template(template, data)
+        return {
+            "status": "rendered-builtin-template",
+            "message": message[:4000],
+            "message_source": "rapidtriage-builtin-event-template",
+            "provider_name": provider_name,
+            "event_id": event_id,
+            "event_category": category,
+            "template_ids": template_ids,
+            "missing_fields": missing_fields,
+            "validation_required": is_native_evtx,
+            "warnings": ["validate-against-provider-message-resource"] if is_native_evtx else [],
+        }
+
+    preview = str(data.get("native_message_preview") or raw_preview or "")
+    warnings = ["provider-message-resource-not-resolved"] if is_native_evtx else []
+    if template_ids and is_native_evtx:
+        warnings.append("native-template-id-preserved")
+    return {
+        "status": "unresolved-provider-template" if is_native_evtx else "no-template-available",
+        "message": preview[:4000],
+        "message_source": "binxml-rendered-preview" if preview else "unavailable",
+        "provider_name": provider_name,
+        "event_id": event_id,
+        "event_category": category,
+        "template_ids": template_ids,
+        "validation_required": is_native_evtx,
+        "warnings": warnings,
+    }
+
+
+def render_message_template(template: str, data: Mapping[str, object]) -> tuple[str, list[str]]:
+    missing_fields: list[str] = []
+
+    def replace(match: re.Match[str]) -> str:
+        expression = match.group(1)
+        keys = [key.strip() for key in expression.split("|") if key.strip()]
+        value = first_data_text(data, *keys)
+        if value:
+            return value
+        missing_fields.append(expression)
+        return ""
+
+    rendered = re.sub(r"\{([^{}]+)\}", replace, template)
+    return re.sub(r"\s+", " ", rendered).strip(), missing_fields
+
+
+def native_evtx_template_ids(data: Mapping[str, object]) -> list[str]:
+    binxml = data.get("evtx_binxml") if isinstance(data, Mapping) else {}
+    if not isinstance(binxml, Mapping):
+        return []
+    candidates: list[str] = []
+    if isinstance(binxml.get("template_ids"), list):
+        candidates.extend(str(item) for item in binxml.get("template_ids", []) if str(item))
+    template_id = str(binxml.get("template_id") or "")
+    if template_id:
+        candidates.append(template_id)
+    for item in binxml.get("value_fields", []) if isinstance(binxml.get("value_fields"), list) else []:
+        if isinstance(item, Mapping) and item.get("template_id"):
+            candidates.append(str(item.get("template_id")))
+    return sorted(set(candidates))
+
+
 def normalize_event_details(
     *,
     parser: str,
@@ -1984,6 +2123,14 @@ def normalize_event_details(
     reportability = "triage" if is_native_evtx else ("reportable" if source_format != "evtx" else "inventory-only")
     parser_confidence = parser_confidence_score(parser, source_format)
     normalized_timestamp = normalize_timestamp(event_created_at)
+    message_rendering = render_event_message(
+        provider_name=provider_name,
+        event_id=normalized_event_id,
+        category=category,
+        data=data,
+        raw_preview=raw_preview,
+        is_native_evtx=is_native_evtx,
+    )
     return {
         "parser": parser,
         "parser_version": PARSER_VERSION,
@@ -2001,6 +2148,8 @@ def normalize_event_details(
         "event_family": event_family,
         "event_tags": event_tags(normalized_event_id, category, event_family, channel_family_value, detected_terms),
         "event_description": description,
+        "event_message": message_rendering.get("message") or "",
+        "message_rendering": message_rendering,
         "record_id": str(record_id or ""),
         "channel": channel,
         "channel_family": channel_family_value,
@@ -2080,7 +2229,7 @@ def build_eventlog_file_record(path: Path, *, native_record_count: int = 0) -> A
             "native_binxml_status": NATIVE_EVTX_BINXML_STATUS,
             "native_validation_required": True,
             "recommended_parsers": ["EvtxECmd", "Hayabusa", "Chainsaw", "Velociraptor Windows.EventLogs.Evtx"],
-            "note": "Binary EVTX detected. RapidTriage emits partial native record rows when record headers and UTF-16 strings are recoverable; import EvtxECmd/Hayabusa/Chainsaw/Velociraptor JSONL/CSV/XML output for full BinXML field mapping.",
+            "note": "Binary EVTX detected. RapidTriage emits partial native record rows when record headers and BinXML fields are recoverable; import EvtxECmd/Hayabusa/Chainsaw/Velociraptor JSONL/CSV/XML output for report-grade provider message rendering.",
         },
     )
 
@@ -2383,7 +2532,7 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "summary_notes": [
             "Review record_sequence_gaps as triage hints only; filtered exports may naturally contain non-contiguous EventRecordID values.",
             "Binary EVTX rows include partial native record scans when recoverable; native_binxml_status_counts shows whether BinXML field decoding is complete.",
-            "Use external parser exports for complete Event/System/EventData BinXML field fidelity before report-grade conclusions.",
+            "Use message_rendering.validation_required and external parser exports to separate built-in fallback messages from report-grade provider resource rendering.",
         ],
     }
     return ArtifactRecord(

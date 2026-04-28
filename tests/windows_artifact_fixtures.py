@@ -520,12 +520,18 @@ def build_minimal_binxml_fragment(strings: list[str]) -> bytes:
                         ),
                         _binxml_element("Channel", [_binxml_value(channel)]),
                         _binxml_element("Computer", [_binxml_value(computer)]),
+                        _binxml_element_with_raw_attributes(
+                            "Security",
+                            [("UserID", _binxml_sid(5, [21, 111, 222, 333, 1001]))],
+                            [],
+                        ),
                     ],
                 ),
                 _binxml_element(
                     "EventData",
                     [
                         _binxml_element("CommandLine", [_binxml_value(command)]),
+                        _binxml_element("SubjectUserSid", [_binxml_sid(5, [21, 111, 222, 333, 1001])]),
                         _binxml_element("ProcessId", [_binxml_uint32(4321)]),
                         _binxml_element("IsElevated", [_binxml_bool(True)]),
                         _binxml_element("ActivityGuid", [_binxml_guid(bytes.fromhex("00112233445566778899aabbccddeeff"))]),
@@ -588,6 +594,16 @@ def _binxml_filetime(value: datetime) -> bytes:
 
 def _binxml_guid(value: bytes) -> bytes:
     return b"\x05\x0f" + value[:16].ljust(16, b"\x00")
+
+
+def _binxml_sid(identifier_authority: int, sub_authorities: list[int]) -> bytes:
+    sid = (
+        b"\x01"
+        + len(sub_authorities).to_bytes(1, "little")
+        + identifier_authority.to_bytes(6, "big")
+        + b"".join(value.to_bytes(4, "little") for value in sub_authorities)
+    )
+    return b"\x05\x13" + sid
 
 
 def _binxml_binary(value: bytes) -> bytes:
@@ -688,6 +704,9 @@ def _write_eventlog_fixtures(xml_path: Path, hayabusa_path: Path, evtx_path: Pat
       <Data Name="LogonType">10</Data>
       <Data Name="IpAddress">10.0.0.5</Data>
     </EventData>
+    <RenderingInfo>
+      <Message>An account was successfully logged on.</Message>
+    </RenderingInfo>
   </Event>
   <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
     <System>

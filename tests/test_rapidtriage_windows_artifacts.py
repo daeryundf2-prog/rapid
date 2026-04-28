@@ -163,6 +163,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(logon["details"]["subject_user_name"], "SYSTEM")
             self.assertEqual(logon["details"]["logon_type"], "10")
             self.assertEqual(logon["details"]["source_ip"], "10.0.0.5")
+            self.assertEqual(logon["details"]["event_message"], "An account was successfully logged on.")
+            self.assertEqual(logon["details"]["message_rendering"]["status"], "external-message")
             self.assertEqual(logon["details"]["event_family"], "authentication")
             self.assertEqual(logon["details"]["channel_family"], "security")
             self.assertIn("event-id:4624", logon["details"]["event_tags"])
@@ -207,13 +209,19 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_evtx["details"]["binxml_system_fields"]["TimeCreated"], "2024-04-01T03:04:05+00:00")
             self.assertEqual(native_evtx["details"]["binxml_system_fields"]["ProcessID"], "4321")
             self.assertEqual(native_evtx["details"]["binxml_system_fields"]["ThreadID"], "8765")
+            self.assertEqual(native_evtx["details"]["binxml_system_fields"]["UserID"], "S-1-5-21-111-222-333-1001")
             self.assertEqual(native_evtx["details"]["binxml_event_data_fields"]["CommandLine"], "powershell -enc NativeFixture")
+            self.assertEqual(native_evtx["details"]["binxml_event_data_fields"]["SubjectUserSid"], "S-1-5-21-111-222-333-1001")
             self.assertEqual(native_evtx["details"]["binxml_event_data_fields"]["ProcessId"], "4321")
             self.assertEqual(native_evtx["details"]["binxml_event_data_fields"]["IsElevated"], "true")
             self.assertEqual(native_evtx["details"]["binxml_event_data_fields"]["ActivityGuid"], "33221100-5544-7766-8899-aabbccddeeff")
             self.assertEqual(native_evtx["details"]["binxml_event_data_fields"]["PayloadHash"], "feedface")
             self.assertEqual(native_evtx["details"]["process_id"], "4321")
             self.assertEqual(native_evtx["details"]["thread_id"], "8765")
+            self.assertEqual(native_evtx["details"]["user_sid"], "S-1-5-21-111-222-333-1001")
+            self.assertEqual(native_evtx["details"]["message_rendering"]["status"], "rendered-builtin-template")
+            self.assertTrue(native_evtx["details"]["message_rendering"]["validation_required"])
+            self.assertIn("PowerShell script block", native_evtx["details"]["event_message"])
             self.assertEqual(native_evtx["details"]["native_indicators"]["channel_hint_source"], "record-string")
             self.assertEqual(native_evtx["details"]["evtx_record_integrity"]["declared_size_valid"], True)
             self.assertEqual(native_evtx["details"]["evtx_record_integrity"]["trailing_size_valid"], True)
@@ -329,6 +337,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_evtx["details"]["evtx_field_fidelity"], "partial-binxml-template-substitution")
             self.assertIn("powershell -enc TemplateValue", native_evtx["details"]["command_line"])
             self.assertIn("powershell -enc TemplateValue", native_evtx["details"]["evtx_binxml"]["rendered_preview"])
+            self.assertIn(
+                "33221100-5544-7766-8899-aabbccddeeff",
+                native_evtx["details"]["evtx_binxml"]["template_ids"],
+            )
+            self.assertIn(
+                "33221100-5544-7766-8899-aabbccddeeff",
+                native_evtx["details"]["message_rendering"]["template_ids"],
+            )
             self.assertEqual(native_evtx["details"]["binxml_system_fields"]["EventID"], "4104")
             self.assertEqual(native_evtx["details"]["binxml_event_data_fields"]["CommandLine"], "powershell -enc TemplateValue")
             self.assertEqual(native_evtx["details"]["evtx_binxml"]["template_values"][0]["value_type"], "StringType")

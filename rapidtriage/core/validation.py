@@ -171,7 +171,7 @@ def build_commercial_gap_assessment() -> list[dict[str, object]]:
         {
             "area": "binary-windows-artifact-depth",
             "severity": "high",
-            "current_status": "EVTX native scanning is partial; MFT/USN support includes imports plus bounded native inventory/USN record recovery; registry support includes exports, inventory-level native hive parsing, and first-pass NTUSER/UsrClass user-activity pivots; SRUDB/Windows.edb include direct ESE header and bounded string-pivot inventory but not full table decoding.",
+            "current_status": "EVTX native scanning is partial but now preserves common BinXML scalar values, SIDs, TemplateInstance IDs, and message-rendering provenance; MFT/USN support includes imports plus bounded native inventory/USN record recovery; registry support includes exports, inventory-level native hive parsing, and first-pass NTUSER/UsrClass user-activity pivots; SRUDB/Windows.edb include direct ESE header and bounded string-pivot inventory but not full table decoding.",
             "needed_for_commercial_parity": "Full EVTX BinXML, native Registry hive key-tree reconstruction, deep NTUSER.DAT/UsrClass.dat binary value decoding and deleted-value recovery, SRUDB ESE, Windows.edb ESE, $MFT, $UsnJrnl, JumpList, ShellBags, Amcache, ShimCache, and Prefetch parsers with validation corpora.",
             "operator_workaround": "Import exports from trusted tools such as EvtxECmd, Hayabusa, Chainsaw, Velociraptor, PECmd, MFTECmd, and SRUM/EDB export utilities.",
         },
