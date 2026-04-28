@@ -47,6 +47,7 @@ class WindowsArtifactFixture:
     user_profile: Path
     execution_reg: Path
     powershell_history: Path
+    amcache_hive: Path
     prefetch_file: Path
     srum_csv: Path
     srum_db: Path
@@ -114,6 +115,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     user_profile = root / "Users" / "alice"
     execution_reg = root / "Windows" / "System32" / "config" / "execution.reg"
     powershell_history = root / "Users" / "alice" / "AppData" / "Roaming" / "Microsoft" / "Windows" / "PowerShell" / "PSReadLine" / "ConsoleHost_history.txt"
+    amcache_hive = root / "Windows" / "AppCompat" / "Programs" / "Amcache.hve"
     prefetch_file = root / "Windows" / "Prefetch" / "POWERSHELL.EXE-12345678.pf"
     srum_csv = root / "analysis" / "srum.csv"
     srum_db = root / "Windows" / "System32" / "sru" / "SRUDB.dat"
@@ -143,7 +145,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
     _write_recent_shortcuts(recent_dir, [recent_shortcut])
     _write_eventlog_fixtures(eventlog_xml, hayabusa_jsonl, evtx_file)
     _write_user_profile_fixtures(user_profile, root / "Windows" / "System32" / "config" / "SYSTEM.reg")
-    _write_execution_fixtures(execution_reg, powershell_history)
+    _write_execution_fixtures(execution_reg, powershell_history, amcache_hive)
     _write_prefetch_fixture(prefetch_file)
     _write_srum_fixture(srum_csv)
     _write_srum_database_fixture(srum_db)
@@ -167,6 +169,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         user_profile=user_profile,
         execution_reg=execution_reg,
         powershell_history=powershell_history,
+        amcache_hive=amcache_hive,
         prefetch_file=prefetch_file,
         srum_csv=srum_csv,
         srum_db=srum_db,
@@ -823,6 +826,29 @@ def _write_user_profile_fixtures(profile_path: Path, reg_path: Path) -> None:
 [HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Windows]
 "ShutdownTime"=hex(b):{filetime_reg_hex(datetime(2024, 4, 1, 0, 55, 1, tzinfo=timezone.utc))}
 
+[HKEY_LOCAL_MACHINE\\SYSTEM\\Select]
+"Current"=dword:00000001
+"Default"=dword:00000001
+
+[HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\SecurityUpdater]
+"ImagePath"="C:\\Users\\alice\\AppData\\Roaming\\SecurityUpdater.exe"
+"DisplayName"="Security Updater"
+"ObjectName"="LocalSystem"
+"Start"=dword:00000002
+"Type"=dword:00000010
+
+[HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\MountedDevices]
+"\\DosDevices\\E:"=hex:01,02,03,04
+
+[HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Enum\\USBSTOR\\Disk&Ven_Test&Prod_USB&Rev_1.00\\1234567890]
+"FriendlyName"="Test USB Device"
+
+[HKEY_LOCAL_MACHINE\\SECURITY\\Policy\\Secrets\\_SC_SecurityUpdater]
+"CurrVal"=hex:00,01
+
+[HKEY_LOCAL_MACHINE\\SECURITY\\Policy\\PolPrDmN\\Privilege Rights]
+"SeDebugPrivilege"="S-1-5-32-544"
+
 [HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion]
 "LastBootUpTime"="2024-04-01T01:02:03Z"
 
@@ -844,7 +870,7 @@ def _write_user_profile_fixtures(profile_path: Path, reg_path: Path) -> None:
     )
 
 
-def _write_execution_fixtures(reg_path: Path, powershell_history: Path) -> None:
+def _write_execution_fixtures(reg_path: Path, powershell_history: Path, amcache_hive: Path) -> None:
     reg_path.parent.mkdir(parents=True, exist_ok=True)
     reg_path.write_text(
         """Windows Registry Editor Version 5.00
@@ -857,6 +883,16 @@ def _write_execution_fixtures(reg_path: Path, powershell_history: Path) -> None:
 
 [HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\AppCompatCache]
 "C:\\Users\\alice\\AppData\\Roaming\\legacy.exe"="LastModified=2024-04-01T03:04:05Z"
+
+[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppCompatFlags\\Compatibility Assistant\\Store]
+"C:\\Users\\alice\\AppData\\Roaming\\compat.exe"=hex:01,02,03,04
+
+[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Amcache\\InventoryApplicationFile\\app.exe]
+"Path"="C:\\Program Files\\Example\\app.exe"
+"Name"="Example App"
+"Publisher"="Example Publisher"
+"SHA1"="0123456789abcdef0123456789abcdef01234567"
+"LinkDate"="2024-04-01T02:03:04Z"
 """,
         encoding="utf-16",
     )
@@ -864,6 +900,18 @@ def _write_execution_fixtures(reg_path: Path, powershell_history: Path) -> None:
     powershell_history.write_text(
         "Get-Process\npowershell -enc SQBFAFgA\nvssadmin delete shadows /all /quiet\n",
         encoding="utf-8",
+    )
+    amcache_hive.parent.mkdir(parents=True, exist_ok=True)
+    amcache_hive.write_bytes(
+        build_minimal_registry_hive(
+            datetime(2024, 4, 1, 2, 3, 4, tzinfo=timezone.utc),
+            "Amcache.hve",
+            [
+                r"C:\Program Files\Example\app.exe",
+                "0123456789abcdef0123456789abcdef01234567",
+                "Example Publisher",
+            ],
+        )
     )
 
 
@@ -883,8 +931,8 @@ def _write_prefetch_fixture(path: Path) -> None:
 def _write_srum_fixture(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        "Timestamp,Application,User,BytesSent,BytesReceived,EnergyUsage\n"
-        "2024-04-01T05:06:07Z,powershell.exe,alice,512,2048,3\n",
+        "Timestamp,Application,User,BytesSent,BytesReceived,EnergyUsage,InterfaceLuid,NetworkProfile\n"
+        "2024-04-01T05:06:07Z,powershell.exe,alice,512,2048,3,12,CorpWiFi\n",
         encoding="utf-8",
     )
 

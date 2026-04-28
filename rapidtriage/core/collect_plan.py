@@ -70,7 +70,7 @@ WINDOWS_TARGETS: tuple[CollectTarget, ...] = (
         "directory",
         "windows-os-account",
         "scan-or-export",
-        "SYSTEM/SOFTWARE/SAM/SECURITY hives support computer/account/timezone exports plus bounded hbin-aware native key-tree and deleted key/value candidate scans.",
+        "SYSTEM/SOFTWARE/SAM/SECURITY hives support computer/account/timezone/current-control-set/service/mounted-device/LSA/privilege exports plus bounded hbin-aware native key-tree and deleted key/value candidate scans.",
     ),
     CollectTarget(
         "AccountUsage",
@@ -124,7 +124,7 @@ WINDOWS_TARGETS: tuple[CollectTarget, ...] = (
         "file",
         "windows-execution",
         "export-or-import",
-        "Export with a trusted parser for normalized execution rows.",
+        "RapidTriage emits bounded native path/hash candidates and can import Amcache registry exports; export with a trusted parser for exact timestamps, hashes, publisher fields, and normalized execution rows.",
     ),
     CollectTarget(
         "EvidenceOfExecution",
@@ -133,7 +133,7 @@ WINDOWS_TARGETS: tuple[CollectTarget, ...] = (
         "file",
         "windows-execution",
         "inventory-or-export",
-        "Preserve SRUDB.dat for ESE header/hash/string pivots; export with SrumECmd or libesedb/esedbexport for full application resource and network usage rows.",
+        "Preserve SRUDB.dat for ESE header/hash/string/table-family pivots; export with SrumECmd or libesedb/esedbexport for full application resource and network usage rows.",
     ),
     CollectTarget(
         "SearchIndex",

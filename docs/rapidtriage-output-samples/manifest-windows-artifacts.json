@@ -501,7 +501,7 @@
             "ntuser_dat_hashes": {},
             "ntuser_dat_present": false,
             "parser": "windows-user-profile-inventory",
-            "parser_version": "windows-os-account-v3",
+            "parser_version": "windows-os-account-v4",
             "profile_modified_at": "2024-03-05T06:06:06+00:00",
             "profile_path": "<ROOT>/Users/alice",
             "reportability": "triage",

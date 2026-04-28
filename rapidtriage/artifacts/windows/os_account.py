@@ -9,7 +9,7 @@ from typing import Iterable
 from ...core.models import ArtifactRecord
 from .registry import MAX_HIVE_CELL_SCAN_BYTES, iter_registry_cell_candidates, parse_registry_hive_header
 
-PARSER_VERSION = "windows-os-account-v3"
+PARSER_VERSION = "windows-os-account-v4"
 USER_PROFILE_ROOT = "Users"
 REGISTRY_EXPORT_EXT = ".reg"
 SAM_HIVE_NAME = "SAM"
@@ -17,9 +17,15 @@ SAM_BUILTIN_KEY_NAMES = {"SAM", "Domains", "Account", "Users", "Names", "Builtin
 ACCOUNT_HINT_KEYS = (
     "Microsoft\\Windows NT\\CurrentVersion\\ProfileList",
     "Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
+    "SYSTEM\\Select",
     "ControlSet001\\Control\\ComputerName",
     "ControlSet001\\Control\\TimeZoneInformation",
     "ControlSet001\\Control\\Windows",
+    "CurrentControlSet\\Services",
+    "CurrentControlSet\\Enum\\USBSTOR",
+    "CurrentControlSet\\MountedDevices",
+    "Policy\\Secrets",
+    "Privilege Rights",
     "LastBootUpTime",
     "ShutdownTime",
     "SAM\\Domains\\Account\\Users",
@@ -88,6 +94,7 @@ def collect_registry_export_hints(root: Path) -> Iterable[ArtifactRecord]:
         hints = parse_registry_hints(text)
         if not any(hints.values()):
             continue
+        source_hashes = file_hashes(path)
         details = {
             "parser": "windows-os-account-reg-export",
             "parser_version": PARSER_VERSION,
@@ -95,13 +102,18 @@ def collect_registry_export_hints(root: Path) -> Iterable[ArtifactRecord]:
             "reportability": "triage",
             "source_path": str(path.resolve()),
             "source_format": "reg",
-            "source_hashes": file_hashes(path),
+            "source_hashes": source_hashes,
             "computer_names": sorted(hints["computer_names"]),
             "time_zones": sorted(hints["time_zones"]),
             "profile_sids": sorted(hints["profile_sids"]),
             "admin_group_hints": sorted(hints["admin_group_hints"]),
             "last_boot_times": sorted(hints["last_boot_times"]),
             "shutdown_times": sorted(hints["shutdown_times"]),
+            "current_control_sets": sorted(hints["current_control_sets"]),
+            "service_count": len(hints["services"]),
+            "mounted_device_count": len(hints["mounted_devices"]),
+            "lsa_secret_count": len(hints["lsa_policy_locations"]),
+            "privilege_assignment_count": len(hints["privilege_assignments"]),
             "account_lifecycle_hints": sorted(
                 hints["account_lifecycle_hints"].values(),
                 key=lambda item: (str(item.get("user_name") or ""), str(item.get("rid") or "")),
@@ -115,6 +127,8 @@ def collect_registry_export_hints(root: Path) -> Iterable[ArtifactRecord]:
             supported=True,
             details=details,
         )
+        for record in build_system_security_records(path, hints, source_hashes):
+            yield record
 
 
 def collect_sam_hive_candidates(root: Path) -> Iterable[ArtifactRecord]:
@@ -260,6 +274,11 @@ def parse_registry_hints(text: str) -> dict[str, object]:
         "admin_group_hints": set(),
         "last_boot_times": set(),
         "shutdown_times": set(),
+        "current_control_sets": set(),
+        "services": {},
+        "mounted_devices": {},
+        "lsa_policy_locations": {},
+        "privilege_assignments": {},
         "account_lifecycle_hints": {},
     }
     current_key = ""
@@ -277,6 +296,7 @@ def parse_registry_hints(text: str) -> dict[str, object]:
             account_name = account_name_from_key(current_key)
             if account_name:
                 account_hint_for_key(hints, current_key)["user_name"] = account_name
+            register_structural_key_hint(hints, current_key)
             continue
         name, value = parse_reg_value(line)
         if not name:
@@ -301,7 +321,259 @@ def parse_registry_hints(text: str) -> dict[str, object]:
                 hints["shutdown_times"].add(parsed)
         if is_account_lifecycle_key(current_key):
             add_account_lifecycle_value(hints, current_key, name, value)
+        add_structural_value_hint(hints, current_key, name, value)
     return hints
+
+
+def build_system_security_records(path: Path, hints: dict[str, object], source_hashes: dict[str, str]) -> Iterable[ArtifactRecord]:
+    for index, service in enumerate(sorted(hints["services"].values(), key=lambda item: str(item.get("service_name") or ""))):
+        risk_flags = service_risk_flags(service)
+        yield ArtifactRecord(
+            provider=WindowsOsAccountProvider.name,
+            artifact_type="windows-service-config",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-system-service-reg-export",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "mapped-reg-export",
+                "reportability": "review",
+                "source_path": str(path.resolve()),
+                "source_format": "reg",
+                "source_hashes": dict(source_hashes),
+                "source_index": index,
+                "service_name": service.get("service_name", ""),
+                "key": service.get("key", ""),
+                "image_path": service.get("image_path", ""),
+                "display_name": service.get("display_name", ""),
+                "object_name": service.get("object_name", ""),
+                "start_type": service.get("start_type", ""),
+                "start_type_label": service_start_type_label(service.get("start_type", "")),
+                "service_type": service.get("service_type", ""),
+                "parser_confidence": 0.86,
+                "evidence_strength": "system-service-configuration",
+                "validation_required": False,
+                "risk_flags": risk_flags,
+                "risk_score": min(100, len(risk_flags) * 25),
+                "raw_preview": str(service.get("key", "")),
+            },
+        )
+    for index, device in enumerate(sorted(hints["mounted_devices"].values(), key=lambda item: str(item.get("key") or ""))):
+        yield ArtifactRecord(
+            provider=WindowsOsAccountProvider.name,
+            artifact_type="windows-mounted-device",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-mounted-device-reg-export",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "mapped-reg-export",
+                "reportability": "review",
+                "source_path": str(path.resolve()),
+                "source_format": "reg",
+                "source_hashes": dict(source_hashes),
+                "source_index": index,
+                "key": device.get("key", ""),
+                "device_id": device.get("device_id", ""),
+                "volume_guid": device.get("volume_guid", ""),
+                "drive_letter": device.get("drive_letter", ""),
+                "friendly_name": device.get("friendly_name", ""),
+                "parser_confidence": 0.78,
+                "evidence_strength": "mounted-device-registry-key",
+                "validation_required": False,
+                "risk_flags": ["mounted-device-history"],
+                "risk_score": 20,
+                "raw_preview": str(device.get("key", "")),
+            },
+        )
+    for index, item in enumerate(sorted(hints["lsa_policy_locations"].values(), key=lambda row: str(row.get("key") or ""))):
+        yield ArtifactRecord(
+            provider=WindowsOsAccountProvider.name,
+            artifact_type="windows-lsa-policy-location",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-security-lsa-reg-export",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "sensitive-location-present",
+                "reportability": "review",
+                "source_path": str(path.resolve()),
+                "source_format": "reg",
+                "source_hashes": dict(source_hashes),
+                "source_index": index,
+                "key": item.get("key", ""),
+                "secret_name": item.get("secret_name", ""),
+                "parser_confidence": 0.72,
+                "evidence_strength": "security-policy-sensitive-location",
+                "validation_required": True,
+                "validation_guidance": "This row identifies sensitive LSA/SECURITY policy locations only; secrets are not decrypted and must be handled under legal authorization.",
+                "risk_flags": ["security-sensitive-registry-location"],
+                "risk_score": 45,
+                "raw_preview": str(item.get("key", "")),
+            },
+        )
+    for index, item in enumerate(sorted(hints["privilege_assignments"].values(), key=lambda row: str(row.get("privilege") or ""))):
+        yield ArtifactRecord(
+            provider=WindowsOsAccountProvider.name,
+            artifact_type="windows-privilege-assignment",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-security-privilege-reg-export",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "mapped-reg-export",
+                "reportability": "review",
+                "source_path": str(path.resolve()),
+                "source_format": "reg",
+                "source_hashes": dict(source_hashes),
+                "source_index": index,
+                "key": item.get("key", ""),
+                "privilege": item.get("privilege", ""),
+                "assigned_sids": list(item.get("assigned_sids") or []),
+                "parser_confidence": 0.74,
+                "evidence_strength": "security-privilege-assignment",
+                "validation_required": True,
+                "validation_guidance": "Validate privilege assignments against secedit/LSA policy exports before final testimony.",
+                "risk_flags": privilege_risk_flags(item),
+                "risk_score": min(100, 30 + len(privilege_risk_flags(item)) * 25),
+                "raw_preview": str(item.get("key", "")),
+            },
+        )
+
+
+def register_structural_key_hint(hints: dict[str, object], key: str) -> None:
+    service_name = service_name_from_key(key)
+    if service_name:
+        service_hint_for_key(hints, key, service_name)
+    mounted = mounted_device_from_key(key)
+    if mounted:
+        hints["mounted_devices"].setdefault(mounted["key"], mounted)
+    secret_name = lsa_secret_name_from_key(key)
+    if secret_name:
+        hints["lsa_policy_locations"].setdefault(key, {"key": key, "secret_name": secret_name})
+
+
+def add_structural_value_hint(hints: dict[str, object], key: str, name: str, value: str) -> None:
+    lowered_name = name.lower()
+    service_name = service_name_from_key(key)
+    if service_name:
+        service = service_hint_for_key(hints, key, service_name)
+        if lowered_name == "imagepath":
+            service["image_path"] = value
+        elif lowered_name == "displayname":
+            service["display_name"] = value
+        elif lowered_name == "objectname":
+            service["object_name"] = value
+        elif lowered_name == "start":
+            service["start_type"] = value
+        elif lowered_name == "type":
+            service["service_type"] = value
+    mounted = mounted_device_from_key(key)
+    if mounted:
+        device = hints["mounted_devices"].setdefault(mounted["key"], mounted)
+        if lowered_name in {"friendlyname", "deviceDesc".lower(), "mfg"}:
+            device["friendly_name"] = value
+        if "\\mounteddevices" in key.lower() and name:
+            value_device = mounted_device_from_value_name(key, name)
+            hints["mounted_devices"].setdefault(value_device["key"], value_device)
+    if "privilege rights" in key.lower():
+        privilege = name if name else key.rsplit("\\", 1)[-1]
+        hints["privilege_assignments"][privilege] = {
+            "key": key,
+            "privilege": privilege,
+            "assigned_sids": split_sid_list(value),
+        }
+    if key.lower().endswith("\\select") and lowered_name in {"current", "default", "lastknowngood"}:
+        parsed = parse_int(value)
+        if parsed is not None:
+            hints["current_control_sets"].add(f"ControlSet{parsed:03d}:{name}")
+
+
+def service_hint_for_key(hints: dict[str, object], key: str, service_name: str) -> dict[str, object]:
+    services = hints["services"]
+    if not isinstance(services, dict):
+        return {}
+    return services.setdefault(
+        service_name,
+        {
+            "key": key,
+            "service_name": service_name,
+            "image_path": "",
+            "display_name": "",
+            "object_name": "",
+            "start_type": "",
+            "service_type": "",
+        },
+    )
+
+
+def service_name_from_key(key: str) -> str:
+    match = re.search(r"\\CurrentControlSet\\Services\\([^\\\]]+)$", key, flags=re.IGNORECASE)
+    if not match:
+        match = re.search(r"\\ControlSet\d{3}\\Services\\([^\\\]]+)$", key, flags=re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def mounted_device_from_key(key: str) -> dict[str, object]:
+    lowered = key.lower()
+    if "\\mounteddevices" in lowered:
+        tail = key.rsplit("\\", 1)[-1]
+        drive_letter = tail if re.fullmatch(r"\\DosDevices\\[A-Z]:", tail, flags=re.IGNORECASE) else ""
+        volume_guid = tail if "volume{" in tail.lower() else ""
+        return {"key": key, "device_id": tail, "drive_letter": drive_letter, "volume_guid": volume_guid, "friendly_name": ""}
+    if "\\enum\\usbstor\\" in lowered:
+        return {"key": key, "device_id": key.split("\\Enum\\", 1)[-1] if "\\Enum\\" in key else key, "drive_letter": "", "volume_guid": "", "friendly_name": ""}
+    return {}
+
+
+def mounted_device_from_value_name(key: str, name: str) -> dict[str, object]:
+    drive_letter = name if re.fullmatch(r"\\DosDevices\\[A-Z]:", name, flags=re.IGNORECASE) else ""
+    volume_guid = name if "volume{" in name.lower() else ""
+    return {
+        "key": f"{key}\\{name}",
+        "device_id": name,
+        "drive_letter": drive_letter,
+        "volume_guid": volume_guid,
+        "friendly_name": "",
+    }
+
+
+def lsa_secret_name_from_key(key: str) -> str:
+    match = re.search(r"\\Policy\\Secrets\\([^\\\]]+)", key, flags=re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def split_sid_list(value: str) -> list[str]:
+    return sorted(set(re.findall(r"S-\d(?:-\d+)+", value)))
+
+
+def service_risk_flags(service: dict[str, object]) -> list[str]:
+    image = str(service.get("image_path") or "").lower()
+    flags: list[str] = []
+    if any(term in image for term in ("appdata", "\\temp\\", "powershell", "cmd.exe", "rundll32", "regsvr32", "mshta")):
+        flags.append("suspicious-service-image-path")
+    if str(service.get("start_type") or "") in {"2", "0x2"}:
+        flags.append("service-auto-start")
+    return sorted(set(flags))
+
+
+def service_start_type_label(value: object) -> str:
+    labels = {"0": "boot", "1": "system", "2": "automatic", "3": "manual", "4": "disabled"}
+    text = str(value or "").strip().lower()
+    if text.startswith("0x"):
+        try:
+            text = str(int(text, 16))
+        except ValueError:
+            pass
+    return labels.get(text, "")
+
+
+def privilege_risk_flags(item: dict[str, object]) -> list[str]:
+    privilege = str(item.get("privilege") or "").lower()
+    flags = ["privilege-assignment"]
+    if privilege in {"sedebugprivilege", "setcbprivilege", "seimpersonateprivilege", "seloadriverprivilege"}:
+        flags.append("high-risk-privilege")
+    return flags
 
 
 def account_name_from_key(key: str) -> str:

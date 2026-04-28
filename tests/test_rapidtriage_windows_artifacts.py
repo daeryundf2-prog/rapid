@@ -466,6 +466,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             profiles = [item for item in artifacts if item["artifact_type"] == "windows-user-profile"]
             summaries = [item for item in artifacts if item["artifact_type"] == "windows-os-account-summary"]
             sam_candidates = [item for item in artifacts if item["artifact_type"] == "windows-sam-account-candidate"]
+            service_rows = [item for item in artifacts if item["artifact_type"] == "windows-service-config"]
+            mounted_devices = [item for item in artifacts if item["artifact_type"] == "windows-mounted-device"]
+            lsa_locations = [item for item in artifacts if item["artifact_type"] == "windows-lsa-policy-location"]
+            privileges = [item for item in artifacts if item["artifact_type"] == "windows-privilege-assignment"]
 
             self.assertTrue(profiles)
             self.assertEqual(profiles[0]["details"]["user_name"], "alice")
@@ -476,6 +480,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("Korea Standard Time", summaries[0]["details"]["time_zones"])
             self.assertIn("2024-04-01T01:02:03+00:00", summaries[0]["details"]["last_boot_times"])
             self.assertIn("2024-04-01T00:55:01+00:00", summaries[0]["details"]["shutdown_times"])
+            self.assertIn("ControlSet001:Current", summaries[0]["details"]["current_control_sets"])
+            self.assertGreaterEqual(summaries[0]["details"]["service_count"], 1)
+            self.assertGreaterEqual(summaries[0]["details"]["mounted_device_count"], 2)
+            self.assertGreaterEqual(summaries[0]["details"]["lsa_secret_count"], 1)
+            self.assertGreaterEqual(summaries[0]["details"]["privilege_assignment_count"], 1)
             account_hints = {
                 item["user_name"]: item
                 for item in summaries[0]["details"]["account_lifecycle_hints"]
@@ -492,6 +501,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(alice_sam["details"]["rid_decimal"], 1001)
             self.assertTrue(alice_sam["details"]["validation_required"])
             self.assertEqual(len(alice_sam["details"]["source_hashes"]["sha256"]), 64)
+            service = next(item for item in service_rows if item["details"]["service_name"] == "SecurityUpdater")
+            self.assertEqual(service["details"]["start_type_label"], "automatic")
+            self.assertIn("suspicious-service-image-path", service["details"]["risk_flags"])
+            self.assertTrue(any(item["details"]["drive_letter"] == r"\DosDevices\E:" for item in mounted_devices))
+            self.assertTrue(any(item["details"]["secret_name"] == "_SC_SecurityUpdater" for item in lsa_locations))
+            privilege = next(item for item in privileges if item["details"]["privilege"] == "SeDebugPrivilege")
+            self.assertIn("S-1-5-32-544", privilege["details"]["assigned_sids"])
+            self.assertIn("high-risk-privilege", privilege["details"]["risk_flags"])
 
     def test_windows_execution_collector_maps_registry_and_powershell_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -505,13 +522,19 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             artifact_types = {item["artifact_type"] for item in artifacts}
 
             self.assertIn("bam-entry", artifact_types)
+            self.assertIn("amcache-hive", artifact_types)
+            self.assertIn("amcache-entry", artifact_types)
             self.assertIn("userassist-entry", artifact_types)
             self.assertIn("shimcache-entry", artifact_types)
             self.assertIn("powershell-history-command", artifact_types)
             self.assertIn("srum-network-usage", artifact_types)
             self.assertIn("srum-database-file", artifact_types)
             self.assertIn("srum-database-pivot", artifact_types)
+            self.assertIn("srum-table-candidate", artifact_types)
             self.assertIn("windows-execution-summary", artifact_types)
+            amcache_rows = [item for item in artifacts if item["artifact_type"] == "amcache-entry"]
+            bam = next(item for item in artifacts if item["artifact_type"] == "bam-entry")
+            shimcache = next(item for item in artifacts if item["artifact_type"] == "shimcache-entry")
             ps_rows = [item for item in artifacts if item["artifact_type"] == "powershell-history-command"]
             srum_rows = [item for item in artifacts if item["artifact_type"] == "srum-network-usage"]
             srum_database_rows = [item for item in artifacts if item["artifact_type"] == "srum-database-file"]
@@ -519,8 +542,16 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(any("suspicious-command:powershell -enc" in row["details"]["risk_flags"] for row in ps_rows))
             self.assertTrue(any("vssadmin delete shadows" in row["details"]["command_line"] for row in ps_rows))
             self.assertEqual(ps_rows[0]["details"]["source_path"], str(fixture.powershell_history.resolve()))
+            self.assertTrue(any(row["details"]["source_path"] == str(fixture.amcache_hive.resolve()) for row in amcache_rows))
+            self.assertTrue(any(row["details"]["executable_path"].endswith(r"Example\app.exe") for row in amcache_rows))
+            self.assertEqual(bam["details"]["user_sid"], "S-1-5-21-1000")
+            self.assertIn("bam-execution-indicator", bam["details"]["risk_flags"])
+            self.assertTrue(shimcache["details"]["validation_required"])
+            self.assertEqual(shimcache["details"]["execution_caveat"], "Presence in ShimCache is not proof the executable ran.")
             self.assertEqual(srum_rows[0]["details"]["app_id"], "powershell.exe")
             self.assertEqual(srum_rows[0]["details"]["bytes_received"], 2048)
+            self.assertEqual(srum_rows[0]["details"]["bytes_total"], 2560)
+            self.assertEqual(srum_rows[0]["details"]["network_profile"], "CorpWiFi")
             self.assertEqual(srum_rows[0]["details"]["source_path"], str(fixture.srum_csv.resolve()))
             self.assertEqual(srum_database_rows[0]["details"]["source_path"], str(fixture.srum_db.resolve()))
             self.assertTrue(srum_database_rows[0]["details"]["ese_header"]["signature_valid"])
@@ -528,6 +559,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(any(item["details"]["app_id"] == "powershell.exe" for item in srum_pivots))
             self.assertTrue(any(item["details"]["url"] == "https://download.example/tools/installer.exe" for item in srum_pivots))
             self.assertTrue(all(item["details"]["validation_required"] for item in srum_pivots))
+            self.assertTrue(any(item["details"]["table_family"] == "network-usage" for item in artifacts if item["artifact_type"] == "srum-table-candidate"))
             summary = next(item for item in artifacts if item["artifact_type"] == "windows-execution-summary")
             groups = {item["display_name"]: item for item in summary["details"]["groups"]}
             self.assertIn("evil.exe", groups)

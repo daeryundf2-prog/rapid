@@ -310,6 +310,8 @@ Event log artifact rows use open-ended `details` so parser-specific fields can e
 
 Registry artifact rows also keep parser-specific `details` open-ended. Native hive rows can include `registry-key-tree-node` for best-effort key reconstruction, `registry-key-recovery-candidate` for free/deleted `nk` key cells, and `registry-value-recovery-candidate` for free/deleted `vk` value cells, with source offsets, hbin scan method, allocation state, confidence, validation guidance, and cautious recovery metadata.
 
+Windows OS/account and execution rows use the same open-ended `details` model. OS/account rows may include service configuration, mounted-device, LSA-sensitive-location, privilege-assignment, SAM account-candidate, and profile summary records. Execution rows may include Amcache export/native-hive candidates, ShimCache caveated entries, BAM/DAM user-SID/device-path entries, PowerShell history commands, SRUM imports, SRUDB string pivots, and SRUM table-family candidates.
+
 ## `run-summary` JSON
 
 `run` produces:

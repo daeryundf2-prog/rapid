@@ -101,8 +101,9 @@ rapidtriage artifacts ./evtx-tool-output --kind eventlog --output eventlog-impor
 OS/account workflow:
 
 - User profile directories are inventoried.
-- `.reg` exports can provide computer name, timezone, ProfileList SID, admin-group hints, last boot/shutdown timestamps, and exported account lifecycle fields such as created time, last logon, password-last-set, disabled, and admin hints.
+- `.reg` exports can provide computer name, timezone, ProfileList SID, admin-group hints, current control set, service configuration, mounted devices, SECURITY/LSA sensitive locations, privilege assignments, last boot/shutdown timestamps, and exported account lifecycle fields such as created time, last logon, password-last-set, disabled, and admin hints.
 - Native `SAM` hives emit bounded `windows-sam-account-candidate` rows for account-name and RID key candidates with source hashes, offsets, and last-write hints. Treat these as review pivots; full F/V account attributes still need validation with a dedicated SAM parser before final testimony.
+- Service, mounted-device, LSA-sensitive-location, and privilege-assignment rows are emitted separately so analysts can review persistence, device history, and permission risk without opening raw registry text first.
 - `windows-registry` summarizes Run-key persistence values, suspicious command/value hints, and USBSTOR device metadata from `.reg` exports. It also inventories native hive candidates such as `NTUSER.DAT`, `UsrClass.dat`, `SYSTEM`, and `SOFTWARE` with source hashes, `regf` header fields, sequence/dirty hints, last-write timestamp, bounded string pivots, hbin-aware `nk`/`vk` hive cell candidates, best-effort `registry-key-tree-node` rows, separate deleted/free-cell candidate rows, key-specific `registry-key-recovery-candidate` rows, and value-specific `registry-value-recovery-candidate` rows for review. NTUSER/UsrClass user-hive activity pivots are promoted as `registry-user-activity` rows for UserAssist, TypedURLs/TypedPaths, RecentDocs, Run/RunOnce, Explorer/MRU, ShellBags, MountPoints2, Network, and ComDlg32/OpenSavePidlMRU review.
 
 Use:
@@ -125,10 +126,10 @@ Remote access workflow:
 
 Execution and filesystem workflow:
 
-- `windows-execution` imports Amcache/ShimCache/UserAssist/BAM-style `.reg` exports and PowerShell console history.
+- `windows-execution` imports Amcache/ShimCache/UserAssist/BAM-style `.reg` exports, scans native `Amcache.hve` for bounded path/hash candidates, and imports PowerShell console history.
 - `windows-execution-summary` groups execution-related signals by executable path or command subject so the analyst can pivot from one program to all related BAM/UserAssist/ShimCache/PowerShell rows.
 - `windows-prefetch` parses SCCA Prefetch headers for executable hints, best-effort run counts, last run timestamps, referenced path pivots, and separate `prefetch-reference` rows. Treat these as triage leads and validate important claims with a dedicated Prefetch parser.
-- SRUM CSV/JSON/JSONL/NDJSON exports from trusted tools can be imported as app resource or network usage rows with bytes, energy, user, timestamp, and source hashes; `SRUDB.dat` is also preserved with ESE header metadata, bounded string/path/URL pivots, and separate native `srum-database-pivot` rows for app/URL review.
+- SRUM CSV/JSON/JSONL/NDJSON exports from trusted tools can be imported as app resource or network usage rows with bytes totals, interface/profile, energy, user, timestamp, and source hashes; `SRUDB.dat` is also preserved with ESE header metadata, bounded string/path/URL pivots, native `srum-database-pivot` rows, and `srum-table-candidate` rows for app/network/energy/user review.
 - `windows-search-index` inventories `Windows.edb` with ESE header metadata, bounded string/path/URL pivots, and separate `windows-search-edb-pivot` rows. It also imports Windows Search CSV/JSON exports so indexed filenames, paths, URLs, titles, and content snippets can be searched alongside documents and artifacts.
 - `windows-filesystem` imports MFT/USN CSV, JSON, JSONL, or NDJSON exports from trusted external tools; it also inventories native `$MFT` and `$J`/USN journal files with hashes, bounded record/header samples, path pivots, separate native MFT FILE-header rows, and recoverable native USN rows.
 - These rows are labeled as triage/reportability hints so weak artifacts such as ShimCache are not overclaimed as proof of execution.

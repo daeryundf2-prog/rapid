@@ -14,9 +14,10 @@ from .common import iter_windows_user_homes
 from .ese import build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
 
-PARSER_VERSION = "windows-execution-v4"
+PARSER_VERSION = "windows-execution-v5"
 REGISTRY_EXPORT_EXT = ".reg"
 SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
+AMCACHE_HIVE_NAME = "AMCACHE.HVE"
 POWERSHELL_HISTORY = ("AppData", "Roaming", "Microsoft", "Windows", "PowerShell", "PSReadLine", "ConsoleHost_history.txt")
 
 EXECUTION_KEYWORDS = {
@@ -52,6 +53,7 @@ class WindowsExecutionProvider:
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         records = [
             *collect_execution_reg_exports(root),
+            *collect_native_amcache_hives(root),
             *collect_powershell_history(root),
             *collect_srum_imports(root),
             *collect_srum_dat_inventory(root),
@@ -119,6 +121,9 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
 
     executable_path = extract_executable_path(key, decoded_values)
     timestamp = extract_timestamp(decoded_values)
+    user_sid = user_sid_from_key(key)
+    execution_metadata = execution_artifact_metadata(artifact_type, key, decoded_values)
+    risk_flags = execution_risk_flags(artifact_type, executable_path, decoded_values)
     return ArtifactRecord(
         provider=WindowsExecutionProvider.name,
         artifact_type=artifact_type,
@@ -135,12 +140,103 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
             "key": key,
             "hive_hint": key.split("\\", 1)[0],
             "executable_path": executable_path,
+            "device_path": executable_path if executable_path.lower().startswith("\\device\\") else "",
+            "user_sid": user_sid,
             "timestamp": timestamp,
+            "timestamp_source": execution_metadata.get("timestamp_source", "registry_value") if timestamp else "",
             "evidence_strength": evidence_strength,
+            "parser_confidence": execution_metadata.get("parser_confidence", 0.76),
+            "validation_required": execution_metadata.get("validation_required", artifact_type == "shimcache-entry"),
+            "validation_guidance": execution_metadata.get("validation_guidance", ""),
+            "artifact_family": execution_metadata.get("artifact_family", ""),
+            "execution_caveat": execution_metadata.get("execution_caveat", ""),
             "values": dict(sorted(decoded_values.items())),
+            "risk_flags": risk_flags,
+            "risk_score": min(100, len(risk_flags) * 25),
             "raw_preview": f"[{key}]",
         },
     )
+
+
+def collect_native_amcache_hives(root: Path) -> Iterable[ArtifactRecord]:
+    seen: set[Path] = set()
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.name.upper() != AMCACHE_HIVE_NAME:
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        yield from build_native_amcache_records(path)
+
+
+def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
+    try:
+        stat_result = path.stat()
+        with path.open("rb") as handle:
+            blob = handle.read(min(stat_result.st_size, 8 * 1024 * 1024))
+    except OSError:
+        return
+    source_hashes = file_hashes(path)
+    strings = list(unique_preserve_order(iter_registry_like_strings(blob)))
+    path_candidates = [value for value in strings if looks_like_executable_path(value)][:100]
+    sha1_candidates = sorted(set(re.findall(r"(?i)\b[0-9a-f]{40}\b", "\n".join(strings))))[:100]
+    yield ArtifactRecord(
+        provider=WindowsExecutionProvider.name,
+        artifact_type="amcache-hive",
+        path=str(path.resolve()),
+        supported=True,
+        details={
+            "parser": "windows-amcache-native-hive-scan",
+            "parser_version": PARSER_VERSION,
+            "coverage_status": "native-hive-string-pivot",
+            "reportability": "triage",
+            "source_path": str(path.resolve()),
+            "source_format": "amcache-hive",
+            "source_hashes": source_hashes,
+            "size": stat_result.st_size,
+            "extracted_string_count": len(strings),
+            "path_candidates": path_candidates,
+            "sha1_candidates": sha1_candidates,
+            "parser_confidence": 0.46,
+            "evidence_strength": "amcache-native-string-pivot",
+            "validation_required": True,
+            "validation_guidance": "Native Amcache.hve string pivots identify program/hash candidates only; validate install/execution timestamps with a dedicated Amcache parser.",
+            "risk_flags": sorted({flag for value in path_candidates for flag in execution_path_risk_flags(value)}),
+            "risk_score": min(100, len(path_candidates) * 5),
+            "raw_preview": " ".join(strings[:25])[:2000],
+        },
+    )
+    for index, candidate in enumerate(path_candidates[:100]):
+        yield ArtifactRecord(
+            provider=WindowsExecutionProvider.name,
+            artifact_type="amcache-entry",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-amcache-native-hive-scan",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "native-hive-string-pivot",
+                "reportability": "review",
+                "source_path": str(path.resolve()),
+                "source_format": "amcache-hive",
+                "source_hashes": source_hashes,
+                "source_index": index,
+                "executable_path": candidate,
+                "program_name": display_name_for_execution_key(candidate),
+                "sha1_candidates": sha1_candidates,
+                "timestamp": "",
+                "timestamp_source": "not_available_native_string_pivot",
+                "artifact_family": "amcache",
+                "evidence_strength": "program-presence-or-execution-candidate",
+                "parser_confidence": 0.44,
+                "validation_required": True,
+                "validation_guidance": "Validate native Amcache string-pivot rows with AmcacheParser/RECmd before report-grade install/execution claims.",
+                "risk_flags": execution_path_risk_flags(candidate),
+                "risk_score": min(100, len(execution_path_risk_flags(candidate)) * 25),
+                "raw_preview": candidate,
+            },
+        )
 
 
 def collect_powershell_history(root: Path) -> Iterable[ArtifactRecord]:
@@ -294,6 +390,48 @@ def build_srum_database_pivot_records(path: Path, inventory_details: Mapping[str
                 "raw_preview": candidate_value[:2000],
             },
         )
+    yield from build_srum_database_table_candidate_records(path, inventory_details)
+
+
+def build_srum_database_table_candidate_records(path: Path, inventory_details: Mapping[str, object]) -> Iterable[ArtifactRecord]:
+    strings = [str(value) for value in inventory_details.get("extracted_strings") or []]
+    table_markers = {
+        "network-usage": ("networkusage", "bytes received", "bytessent", "bytesreceived"),
+        "app-resource": ("application", "appresource", "cputime", "energyusage"),
+        "energy": ("energy", "battery", "foregroundcycle"),
+        "user": ("user", "sid", "username"),
+    }
+    source_hashes = file_hashes(path)
+    lowered_blob = "\n".join(strings).lower()
+    for index, (table_family, markers) in enumerate(table_markers.items()):
+        matched = sorted({marker for marker in markers if marker in lowered_blob})
+        if not matched:
+            continue
+        yield ArtifactRecord(
+            provider=WindowsExecutionProvider.name,
+            artifact_type="srum-table-candidate",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-srum-ese-table-candidate",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "native-ese-table-string-candidate",
+                "reportability": "triage",
+                "source_path": str(path.resolve()),
+                "source_format": "ese-srum",
+                "source_hashes": source_hashes,
+                "source_index": index,
+                "table_family": table_family,
+                "matched_markers": matched,
+                "parser_confidence": 0.38 + min(0.24, len(matched) * 0.06),
+                "evidence_strength": "srum-table-presence-candidate",
+                "validation_required": True,
+                "validation_guidance": "This row identifies likely SRUM table families from native ESE strings only; validate rows, counters, and timestamps with a full ESE/SRUM parser.",
+                "risk_flags": [f"srum-table:{table_family}"],
+                "risk_score": 20,
+                "raw_preview": " ".join(strings[:20])[:2000],
+            },
+        )
 
 
 def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> ArtifactRecord:
@@ -303,8 +441,11 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
     timestamp = str(first_value(lowered, "timestamp", "eventtime", "starttime", "endtime", "time") or "").replace("Z", "+00:00")
     bytes_sent = number_value(first_value(lowered, "bytessent", "sendbytes", "sentbytes", "networkbytessent"))
     bytes_received = number_value(first_value(lowered, "bytesreceived", "receivebytes", "receivedbytes", "networkbytesreceived"))
+    bytes_total = numeric_total(bytes_sent, bytes_received)
     cpu_time = number_value(first_value(lowered, "cputime", "cpu", "cpucycletime"))
     energy = number_value(first_value(lowered, "energy", "energyusage", "energyusagemwh"))
+    interface_luid = str(first_value(lowered, "interfaceluid", "interface", "networkinterface") or "")
+    network_profile = str(first_value(lowered, "networkprofile", "profile", "ssid") or "")
     artifact_type = "srum-network-usage" if bytes_sent or bytes_received else "srum-app-resource-usage"
     risk_flags = [f"suspicious-app:{term}" for term in SUSPICIOUS_COMMAND_TERMS if term.split()[0] in app_id.lower()]
     details = {
@@ -323,8 +464,13 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
         "timestamp_source": "srum_import_timestamp",
         "bytes_sent": bytes_sent,
         "bytes_received": bytes_received,
+        "bytes_total": bytes_total,
         "cpu_time": cpu_time,
         "energy_usage": energy,
+        "interface_luid": interface_luid,
+        "network_profile": network_profile,
+        "srum_table_family": "network-usage" if artifact_type == "srum-network-usage" else "app-resource",
+        "parser_confidence": 0.82,
         "evidence_strength": "application-resource-usage-indicator",
         "risk_flags": risk_flags,
         "risk_score": min(100, len(risk_flags) * 20),
@@ -412,6 +558,70 @@ def execution_group_key(artifact_type: str, details: Mapping[str, object]) -> st
     if key:
         return normalize_execution_path(key.rsplit("\\", 1)[-1])
     return artifact_type
+
+
+def execution_artifact_metadata(artifact_type: str, key: str, values: Mapping[str, str]) -> dict[str, object]:
+    if artifact_type == "amcache-entry":
+        return {
+            "artifact_family": "amcache",
+            "parser_confidence": 0.82,
+            "validation_required": True,
+            "validation_guidance": "Amcache indicates program presence/install/execution-related metadata depending on source fields; validate timestamps and hashes with a dedicated parser.",
+            "execution_caveat": "Amcache is not always direct proof of execution.",
+        }
+    if artifact_type == "shimcache-entry":
+        return {
+            "artifact_family": "shimcache",
+            "parser_confidence": 0.78,
+            "validation_required": True,
+            "validation_guidance": "ShimCache/AppCompatCache is useful for program presence/order and sometimes timestamps, but it is not direct proof of execution.",
+            "execution_caveat": "Presence in ShimCache is not proof the executable ran.",
+        }
+    if artifact_type == "bam-entry":
+        return {
+            "artifact_family": "bam-dam",
+            "parser_confidence": 0.86,
+            "validation_required": False,
+            "validation_guidance": "BAM/DAM values commonly indicate recent execution by user SID; correlate with Prefetch, SRUM, UserAssist, and event logs.",
+            "execution_caveat": "BAM/DAM should be correlated with other execution artifacts for final conclusions.",
+        }
+    return {"artifact_family": artifact_type, "parser_confidence": 0.74, "validation_required": False}
+
+
+def execution_risk_flags(artifact_type: str, executable_path: str, values: Mapping[str, str]) -> list[str]:
+    haystack = " ".join([executable_path, *values.keys(), *values.values()]).lower()
+    flags = [f"suspicious-command:{term}" for term in SUSPICIOUS_COMMAND_TERMS if term in haystack]
+    flags.extend(execution_path_risk_flags(executable_path))
+    if artifact_type == "shimcache-entry":
+        flags.append("shimcache-not-proof-of-execution")
+    if artifact_type == "bam-entry":
+        flags.append("bam-execution-indicator")
+    return sorted(set(flags))
+
+
+def execution_path_risk_flags(path: str) -> list[str]:
+    lowered = path.lower()
+    flags: list[str] = []
+    if "\\appdata\\" in lowered or "\\temp\\" in lowered:
+        flags.append("user-writable-execution-path")
+    if any(term.split()[0] in lowered for term in SUSPICIOUS_COMMAND_TERMS):
+        flags.append("suspicious-executable-name")
+    return flags
+
+
+def user_sid_from_key(key: str) -> str:
+    match = re.search(r"S-\d(?:-\d+)+", key)
+    return match.group(0) if match else ""
+
+
+def numeric_total(*values: object) -> int | float | str:
+    total = 0.0
+    for value in values:
+        if isinstance(value, (int, float)):
+            total += float(value)
+        elif value not in ("", 0):
+            return ""
+    return int(total) if total.is_integer() else total
 
 
 def normalize_command_execution_key(command_line: str) -> str:
@@ -536,6 +746,16 @@ def parse_reg_value(line: str) -> tuple[str, str]:
     value = raw_value.strip()
     if value.startswith('"') and value.endswith('"'):
         value = value[1:-1]
+    elif value.lower().startswith("hex(b):"):
+        parsed_time = parse_timestamp_value(value)
+        value = parsed_time or value
+    elif value.lower().startswith("hex:"):
+        value = parse_hex_bytes(value.split(":", 1)[1]).hex()
+    elif value.lower().startswith("dword:"):
+        try:
+            value = str(int(value.split(":", 1)[1], 16))
+        except ValueError:
+            pass
     return name, value
 
 
@@ -562,6 +782,48 @@ def extract_executable_path(key: str, values: Mapping[str, str]) -> str:
 def looks_like_executable_path(value: str) -> bool:
     lowered = value.lower()
     return any(token in lowered for token in (".exe", ".dll", ".ps1", ".bat", ".cmd", ".scr"))
+
+
+def iter_registry_like_strings(blob: bytes) -> Iterable[str]:
+    yield from iter_ascii_strings(blob)
+    yield from iter_utf16le_strings(blob)
+
+
+def iter_ascii_strings(blob: bytes, *, min_chars: int = 5) -> Iterable[str]:
+    current = bytearray()
+    for byte in blob:
+        if 32 <= byte <= 126:
+            current.append(byte)
+            continue
+        if len(current) >= min_chars:
+            yield current.decode("ascii", errors="ignore")
+        current.clear()
+    if len(current) >= min_chars:
+        yield current.decode("ascii", errors="ignore")
+
+
+def iter_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> Iterable[str]:
+    current = bytearray()
+    for index in range(0, len(blob) - 1, 2):
+        value = int.from_bytes(blob[index : index + 2], "little", signed=False)
+        if 32 <= value <= 126 or value in {9, 10, 13}:
+            current.extend(blob[index : index + 2])
+            continue
+        if len(current) >= min_chars * 2:
+            yield current.decode("utf-16le", errors="ignore").strip()
+        current.clear()
+    if len(current) >= min_chars * 2:
+        yield current.decode("utf-16le", errors="ignore").strip()
+
+
+def unique_preserve_order(values: Iterable[str]) -> Iterable[str]:
+    seen: set[str] = set()
+    for value in values:
+        cleaned = " ".join(str(value).split()).strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        yield cleaned
 
 
 def extract_timestamp(values: Mapping[str, str]) -> str:
