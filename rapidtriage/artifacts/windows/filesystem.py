@@ -6,15 +6,17 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
 from ...core.models import ArtifactRecord
 
-PARSER_VERSION = "windows-filesystem-v4"
+PARSER_VERSION = "windows-filesystem-v5"
 SUPPORTED_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 MFT_HINTS = ("mft", "mftexcmd", "$mft")
 USN_HINTS = ("usn", "usnjrnl", "$j")
 NATIVE_SCAN_LIMIT = 16 * 1024 * 1024
+USN_RECORD_SCAN_LIMIT = 5000
+USN_LARGE_RECORD_THRESHOLD = 512
 WINDOWS_PATH_RE = re.compile(r"(?i)(?:[a-z]:\\|\\\\|\\device\\)[^\x00\r\n\t\"'<>|]{4,260}")
 USN_REASON_FLAGS = {
     0x00000001: "DATA_OVERWRITE",
@@ -58,6 +60,56 @@ NTFS_FILE_ATTRIBUTE_NAMES = {
     0x00000800: "COMPRESSED",
     0x00001000: "OFFLINE",
     0x00004000: "ENCRYPTED",
+}
+MFT_ATTRIBUTE_TYPE_NAMES = {
+    0x10: "$STANDARD_INFORMATION",
+    0x20: "$ATTRIBUTE_LIST",
+    0x30: "$FILE_NAME",
+    0x40: "$OBJECT_ID",
+    0x50: "$SECURITY_DESCRIPTOR",
+    0x60: "$VOLUME_NAME",
+    0x70: "$VOLUME_INFORMATION",
+    0x80: "$DATA",
+    0x90: "$INDEX_ROOT",
+    0xA0: "$INDEX_ALLOCATION",
+    0xB0: "$BITMAP",
+    0xC0: "$REPARSE_POINT",
+    0xD0: "$EA_INFORMATION",
+    0xE0: "$EA",
+    0x100: "$LOGGED_UTILITY_STREAM",
+}
+NTFS_FILESYSTEM_CAPABILITIES = {
+    "mft_export_import": True,
+    "mft_native_file_record_scan": True,
+    "mft_update_sequence_validation": True,
+    "mft_standard_information_decode": True,
+    "mft_file_name_attribute_decode": True,
+    "mft_resident_data_hash": True,
+    "mft_nonresident_runlist_preview": True,
+    "usn_export_import": True,
+    "usn_native_v2_v3_record_decode": True,
+    "usn_reason_flag_decode": True,
+    "usn_large_record_detection": True,
+    "mft_attribute_list_resolution": False,
+    "mft_full_nonresident_runlist_decode": False,
+    "usn_full_journal_replay": False,
+    "full_volume_path_reconstruction": False,
+}
+MFT_REPORT_GRADE_BLOCKERS = [
+    "bounded-native-mft-scan-not-full-volume-validated",
+    "attribute-list-extension-record-resolution-not-implemented",
+    "nonresident-data-run-decoding-not-report-grade-validated",
+]
+USN_REPORT_GRADE_BLOCKERS = [
+    "bounded-native-usn-scan-not-full-journal-validated",
+    "full-usn-replay-correlation-not-implemented",
+    "large-corpus-pagination-validation-required",
+]
+FILE_NAME_NAMESPACE_NAMES = {
+    0: "POSIX",
+    1: "WIN32",
+    2: "DOS",
+    3: "WIN32_AND_DOS",
 }
 
 
@@ -113,6 +165,21 @@ def build_mft_inventory_record(path: Path) -> ArtifactRecord:
     mft_records = parse_mft_record_headers(blob)
     strings = extract_utf16_strings(blob)
     path_candidates = extract_path_candidates(strings)
+    validation_checks = {
+        "has_native_records": bool(mft_records),
+        "has_valid_record_headers": any(record.get("validation_status") == "valid" for record in mft_records),
+        "has_sequence_validation": any((record.get("sequence_validation") or {}).get("status") for record in mft_records if isinstance(record.get("sequence_validation"), Mapping)),
+        "has_timestamp_validation": any((record.get("timestamp_validation") or {}).get("status") for record in mft_records if isinstance(record.get("timestamp_validation"), Mapping)),
+        "attribute_list_resolution_available": False,
+        "full_nonresident_runlist_decode_available": False,
+        "full_volume_path_reconstruction_available": False,
+    }
+    report_grade = ntfs_report_grade_assessment(
+        ntfs_validation_matrix(validation_checks),
+        validation_required=True,
+        gap_ids=["#12"],
+        blockers=MFT_REPORT_GRADE_BLOCKERS,
+    )
     return ArtifactRecord(
         provider=WindowsFilesystemProvider.name,
         artifact_type="mft-file",
@@ -130,11 +197,30 @@ def build_mft_inventory_record(path: Path) -> ArtifactRecord:
             "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
             "scan_bytes": len(blob),
             "native_record_count": len(mft_records),
+            "record_validation_counts": count_values(record.get("validation_status") for record in mft_records),
+            "sequence_validation_counts": count_values(
+                (record.get("sequence_validation") or {}).get("status")
+                for record in mft_records
+                if isinstance(record.get("sequence_validation"), Mapping)
+            ),
+            "timestamp_validation_counts": count_values(
+                (record.get("timestamp_validation") or {}).get("status")
+                for record in mft_records
+                if isinstance(record.get("timestamp_validation"), Mapping)
+            ),
+            "native_attribute_type_counts": count_many(record.get("attribute_types") for record in mft_records),
             "record_header_samples": mft_records[:50],
             "extracted_string_count": len(strings),
             "path_candidates": path_candidates[:50],
             "recommended_parsers": ["MFTECmd", "analyzeMFT", "The Sleuth Kit/fls-icat"],
-            "note": "Native $MFT is inventoried with bounded record-header and string pivots; use a dedicated parser for full attribute decoding.",
+            "validation_required": True,
+            "validation_checks": validation_checks,
+            "ntfs_validation_matrix": ntfs_validation_matrix(validation_checks),
+            "ntfs_report_grade_assessment": report_grade,
+            "ntfs_native_capabilities": NTFS_FILESYSTEM_CAPABILITIES,
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": report_grade["blockers"],
+            "note": "Native $MFT is inventoried with bounded FILE record, attribute, timestamp, sequence-fixup, and string pivots; validate report findings with a dedicated parser.",
         },
     )
 
@@ -142,8 +228,24 @@ def build_mft_inventory_record(path: Path) -> ArtifactRecord:
 def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
     stat_result = path.stat()
     blob = read_prefix(path, NATIVE_SCAN_LIMIT)
-    records = parse_usn_records(blob)
+    scan = parse_usn_record_scan(blob)
+    records = list(scan["records"])
+    scan_metadata = {key: value for key, value in scan.items() if key != "records"}
     strings = extract_utf16_strings(blob)
+    validation_checks = {
+        "has_native_records": bool(records),
+        "record_limit_not_reached": not bool(scan_metadata["record_limit_reached"]),
+        "cursor_progress_validated": bool(records) and scan_metadata["trailing_unparsed_bytes"] >= 0,
+        "has_timestamp_range": bool(scan_metadata["timestamp_range"].get("latest")),
+        "full_usn_replay_available": False,
+        "full_journal_pagination_validated": not bool(scan_metadata["next_cursor_available"]),
+    }
+    report_grade = ntfs_report_grade_assessment(
+        ntfs_validation_matrix(validation_checks),
+        validation_required=True,
+        gap_ids=["#13"],
+        blockers=USN_REPORT_GRADE_BLOCKERS,
+    )
     return ArtifactRecord(
         provider=WindowsFilesystemProvider.name,
         artifact_type="usn-journal-file",
@@ -160,14 +262,33 @@ def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
             "size": stat_result.st_size,
             "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
             "scan_bytes": len(blob),
+            "scan_metadata": scan_metadata,
+            "record_limit": USN_RECORD_SCAN_LIMIT,
+            "record_limit_reached": scan_metadata["record_limit_reached"],
+            "next_cursor_offset": scan_metadata["next_cursor_offset"],
+            "next_cursor_available": scan_metadata["next_cursor_available"],
+            "skipped_bytes_before_records": scan_metadata["skipped_bytes_before_records"],
+            "skipped_bytes_during_scan": scan_metadata["skipped_bytes_during_scan"],
+            "trailing_unparsed_bytes": scan_metadata["trailing_unparsed_bytes"],
             "native_record_count": len(records),
             "record_validation_counts": count_values(record.get("validation_status") for record in records),
             "record_version_counts": count_values(str(record.get("major_version") or "") for record in records),
             "reason_flag_counts": count_many(record.get("reason_flags") for record in records),
+            "record_size_class_counts": count_values(record.get("record_size_class") for record in records),
+            "large_record_count": scan_metadata["large_record_count"],
+            "largest_record_length": scan_metadata["largest_record_length"],
+            "timestamp_range": scan_metadata["timestamp_range"],
             "record_samples": records[:50],
             "extracted_string_count": len(strings),
             "recommended_parsers": ["MFTECmd", "UsnJrnl2Csv", "The Sleuth Kit"],
-            "note": "Native USN records are decoded when bounded v2/v3 record structures are recoverable; validation counts summarize structural and timestamp confidence. Validate critical timelines with a dedicated parser.",
+            "validation_required": True,
+            "validation_checks": validation_checks,
+            "ntfs_validation_matrix": ntfs_validation_matrix(validation_checks),
+            "ntfs_report_grade_assessment": report_grade,
+            "ntfs_native_capabilities": NTFS_FILESYSTEM_CAPABILITIES,
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": report_grade["blockers"],
+            "note": "Native USN records are decoded when bounded v2/v3 record structures are recoverable; validation counts summarize structural, cursor, size, and timestamp confidence. Validate critical timelines with a dedicated parser.",
         },
     )
 
@@ -175,10 +296,18 @@ def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
 def build_native_mft_record(path: Path, record: Mapping[str, object], index: int) -> ArtifactRecord:
     path_candidates = list(record.get("path_candidates") or [])
     file_path = str(path_candidates[0]) if path_candidates else ""
+    standard_information = record.get("standard_information") if isinstance(record.get("standard_information"), Mapping) else {}
+    file_name_entries = list(record.get("file_name_entries") or [])
+    primary_file_name = file_name_entries[0] if file_name_entries and isinstance(file_name_entries[0], Mapping) else {}
+    timestamps = standard_information.get("timestamps") if isinstance(standard_information.get("timestamps"), Mapping) else {}
+    timestamp = str(timestamps.get("modified_at") or timestamps.get("created_at") or "")
+    timestamp_source = "$STANDARD_INFORMATION" if timestamp else "not_available_native_mft_attributes"
+    parent_reference = primary_file_name.get("parent_reference_raw") if isinstance(primary_file_name, Mapping) else ""
+    file_path = file_path or str(primary_file_name.get("file_name") or "")
     details = {
         "parser": "windows-mft-native",
         "parser_version": PARSER_VERSION,
-        "coverage_status": "native-file-record-header",
+        "coverage_status": "native-file-record-attributes-partial",
         "reportability": "triage",
         "source_path": str(path.resolve()),
         "source_format": "ntfs-mft",
@@ -186,11 +315,14 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
         "source_index": index,
         "artifact_family": "mft",
         "record_number": str(record.get("record_number_candidate", "")),
-        "parent_reference": "",
+        "parent_reference": str(parent_reference or ""),
+        "parent_reference_decoded": dict(primary_file_name.get("parent_reference") or {})
+        if isinstance(primary_file_name.get("parent_reference"), Mapping)
+        else {},
         "file_path": file_path,
         "path_candidates": path_candidates[:10],
-        "timestamp": "",
-        "timestamp_source": "not_available_native_header_scan",
+        "timestamp": timestamp,
+        "timestamp_source": timestamp_source,
         "deleted_hint": not bool(record.get("in_use")),
         "sequence_number": record.get("sequence_number", 0),
         "hard_link_count": record.get("hard_link_count", 0),
@@ -202,13 +334,40 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
         "allocated_size": record.get("allocated_size", 0),
         "base_file_reference": record.get("base_file_reference", 0),
         "record_offset": record.get("record_offset", 0),
-        "parser_confidence": 0.55,
-        "evidence_strength": "ntfs-mft-file-record-header",
+        "sequence_validation": dict(record.get("sequence_validation") or {}),
+        "attribute_count": record.get("attribute_count", 0),
+        "attribute_types": list(record.get("attribute_types") or []),
+        "attribute_type_counts": count_values(record.get("attribute_types") or []),
+        "attributes": list(record.get("attributes") or [])[:25],
+        "standard_information": dict(standard_information),
+        "file_name_entries": file_name_entries[:10],
+        "data_attributes": list(record.get("data_attributes") or [])[:10],
+        "timestamp_validation": dict(record.get("timestamp_validation") or {}),
+        "validation_status": str(record.get("validation_status") or "unknown"),
+        "validation_warnings": list(record.get("validation_warnings") or []),
+        "validation_checks": dict(record.get("validation_checks") or {}),
+        "parser_confidence": record.get("parser_confidence", 0.0),
+        "evidence_strength": "ntfs-mft-native-attribute-metadata",
         "validation_required": True,
-        "validation_guidance": "Native MFT rows decode bounded FILE record headers and nearby path strings only; validate full attributes, parent paths, and timestamps with MFTECmd/analyzeMFT before final testimony.",
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "bounded-native-mft-scan-not-full-volume-validated",
+            "attribute-list-extension-record-resolution-not-implemented",
+            "nonresident-data-run-decoding-not-report-grade-validated",
+        ],
+        "validation_guidance": "Native MFT rows decode bounded FILE record headers, common attributes, FILETIME fields, and update-sequence fixup metadata for triage. Validate parent paths, attribute-list extension records, data runs, and critical timestamps with MFTECmd/analyzeMFT or another dedicated parser before final testimony.",
         "raw": dict(record),
         "raw_preview": json.dumps(record, ensure_ascii=False, sort_keys=True)[:2000],
     }
+    details["ntfs_validation_matrix"] = ntfs_validation_matrix(details["validation_checks"])
+    details["ntfs_report_grade_assessment"] = ntfs_report_grade_assessment(
+        details["ntfs_validation_matrix"],
+        validation_required=True,
+        gap_ids=["#12"],
+        blockers=MFT_REPORT_GRADE_BLOCKERS,
+    )
+    details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
+    details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
     return ArtifactRecord(
         provider=WindowsFilesystemProvider.name,
         artifact_type="mft-record",
@@ -245,19 +404,50 @@ def build_native_usn_record(path: Path, record: Mapping[str, object], index: int
         "file_attributes": record.get("file_attributes", 0),
         "file_attribute_names": list(record.get("file_attribute_names") or []),
         "usn": record.get("usn", 0),
+        "record_cursor": record.get("record_cursor", record.get("record_offset", 0)),
+        "next_record_cursor": record.get("next_record_cursor", 0),
+        "record_end_offset": record.get("record_end_offset", 0),
         "record_offset": record.get("record_offset", 0),
         "record_length": record.get("record_length", 0),
+        "record_payload_bytes": record.get("record_payload_bytes", 0),
+        "record_padding_bytes": record.get("record_padding_bytes", 0),
+        "record_size_class": str(record.get("record_size_class") or ""),
         "major_version": record.get("major_version", 0),
         "minor_version": record.get("minor_version", 0),
+        "file_reference_number_decoded": dict(record.get("file_reference_number_decoded") or {}),
+        "parent_file_reference_number_decoded": dict(record.get("parent_file_reference_number_decoded") or {}),
+        "file_name_length": record.get("file_name_length", 0),
+        "file_name_character_count": record.get("file_name_character_count", 0),
+        "file_name_offset": record.get("file_name_offset", 0),
+        "file_name_decode_status": str(record.get("file_name_decode_status") or ""),
+        "unknown_reason_mask": record.get("unknown_reason_mask", 0),
+        "unknown_source_info_mask": record.get("unknown_source_info_mask", 0),
+        "unknown_file_attribute_mask": record.get("unknown_file_attribute_mask", 0),
         "validation_status": str(record.get("validation_status") or "unknown"),
         "validation_warnings": list(record.get("validation_warnings") or []),
+        "validation_checks": dict(record.get("validation_checks") or {}),
         "parser_confidence": record.get("parser_confidence", 0.0),
         "evidence_strength": "ntfs-usn-native-record",
         "validation_required": True,
-        "validation_guidance": "Native USN rows validate record layout, length, name bounds, version, and FILETIME plausibility, but critical timelines should still be cross-checked with MFTECmd/UsnJrnl2Csv or another dedicated parser.",
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "bounded-native-usn-scan-not-full-journal-validated",
+            "full-usn-replay-correlation-not-implemented",
+            "large-corpus-pagination-validation-required",
+        ],
+        "validation_guidance": "Native USN rows validate record layout, length, cursor bounds, name bounds/UTF-16 decoding, version, and FILETIME plausibility, but critical timelines should still be cross-checked with MFTECmd/UsnJrnl2Csv or another dedicated parser.",
         "raw": dict(record),
         "raw_preview": json.dumps(record, ensure_ascii=False, sort_keys=True)[:2000],
     }
+    details["ntfs_validation_matrix"] = ntfs_validation_matrix(details["validation_checks"])
+    details["ntfs_report_grade_assessment"] = ntfs_report_grade_assessment(
+        details["ntfs_validation_matrix"],
+        validation_required=True,
+        gap_ids=["#13"],
+        blockers=USN_REPORT_GRADE_BLOCKERS,
+    )
+    details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
+    details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
     return ArtifactRecord(
         provider=WindowsFilesystemProvider.name,
         artifact_type="usn-record",
@@ -274,6 +464,74 @@ def artifact_family(path: Path) -> str:
     if any(hint in lowered for hint in USN_HINTS):
         return "usn"
     return ""
+
+
+def ntfs_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, object]]:
+    labels = {
+        "has_native_records": ("Native records", "high"),
+        "has_valid_record_headers": ("Valid record headers", "critical"),
+        "has_sequence_validation": ("Sequence validation", "high"),
+        "has_timestamp_validation": ("Timestamp validation", "high"),
+        "attribute_list_resolution_available": ("Attribute-list resolution", "critical"),
+        "full_nonresident_runlist_decode_available": ("Full nonresident runlist decode", "critical"),
+        "full_volume_path_reconstruction_available": ("Full volume path reconstruction", "critical"),
+        "record_limit_not_reached": ("Record limit not reached", "medium"),
+        "cursor_progress_validated": ("Cursor progress validated", "high"),
+        "has_timestamp_range": ("Timestamp range", "medium"),
+        "full_usn_replay_available": ("Full USN replay", "critical"),
+        "full_journal_pagination_validated": ("Journal pagination validated", "high"),
+        "magic_valid": ("MFT magic", "critical"),
+        "sequence_fixup_valid": ("MFT sequence fixup", "critical"),
+        "has_standard_information_attribute": ("$STANDARD_INFORMATION", "high"),
+        "has_file_name_attribute": ("$FILE_NAME", "high"),
+        "has_data_attribute": ("$DATA", "medium"),
+        "attribute_end_marker_seen": ("Attribute end marker", "medium"),
+        "timestamp_fields_present": ("Timestamp fields", "high"),
+        "record_length_aligned": ("USN record length aligned", "high"),
+        "record_cursor_progresses": ("USN cursor progresses", "critical"),
+        "filename_bounds_valid": ("USN filename bounds", "high"),
+        "filename_utf16_valid": ("USN filename UTF-16", "high"),
+        "filetime_plausible": ("USN FILETIME plausible", "high"),
+        "version_supported": ("USN version supported", "high"),
+        "known_reason_bits_only": ("Known USN reason bits", "medium"),
+        "has_record_number": ("Record number", "medium"),
+        "has_file_path": ("File path", "high"),
+        "has_timestamp": ("Timestamp", "high"),
+        "source_tool_export_validation_required": ("Source tool export validation", "high"),
+    }
+    matrix: list[dict[str, object]] = []
+    for key, value in checks.items():
+        if key == "large_record":
+            continue
+        label, severity = labels.get(key, (key.replace("_", " "), "medium"))
+        negative_requirement = key.endswith("_required")
+        passed = bool(value)
+        if negative_requirement:
+            passed = not bool(value)
+        matrix.append({"id": key.replace("_", "-"), "label": label, "passed": passed, "severity": severity, "detail": value})
+    return matrix
+
+
+def ntfs_report_grade_assessment(
+    validation_matrix: list[dict[str, object]],
+    *,
+    validation_required: bool,
+    gap_ids: list[str],
+    blockers: Sequence[str],
+) -> dict[str, object]:
+    failed = [str(item.get("id")) for item in validation_matrix if not item.get("passed")]
+    all_blockers = set(blockers)
+    all_blockers.update(f"validation-check-failed:{item}" for item in failed)
+    if validation_required:
+        all_blockers.add("ntfs-validation-required")
+    return {
+        "report_grade_ready": False,
+        "status": "validation-required" if failed else "triage-validated-report-grade-blocked",
+        "blockers": sorted(all_blockers),
+        "validated_strengths": [str(item.get("id")) for item in validation_matrix if item.get("passed")],
+        "commercial_gap_ids": gap_ids,
+        "next_validation_step": "Validate NTFS timelines and paths with a full-volume parser, attribute-list resolution, and known-answer fixtures before report-grade use.",
+    }
 
 
 def iter_csv_rows(path: Path) -> Iterable[Mapping[str, object]]:
@@ -350,6 +608,24 @@ def build_filesystem_record(path: Path, family: str, row: Mapping[str, object], 
         "raw": dict(row),
         "raw_preview": json.dumps(row, ensure_ascii=False, sort_keys=True)[:2000],
     }
+    validation_checks = {
+        "has_record_number": bool(record_number),
+        "has_file_path": bool(file_path),
+        "has_timestamp": bool(timestamp),
+        "source_tool_export_validation_required": True,
+    }
+    details["validation_required"] = False
+    details["validation_checks"] = validation_checks
+    details["ntfs_validation_matrix"] = ntfs_validation_matrix(validation_checks)
+    details["ntfs_report_grade_assessment"] = ntfs_report_grade_assessment(
+        details["ntfs_validation_matrix"],
+        validation_required=False,
+        gap_ids=["#12"] if family == "mft" else ["#13"],
+        blockers=["source-tool-export-validation-required"],
+    )
+    details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
+    details["commercial_grade_ready"] = False
+    details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
     return ArtifactRecord(
         provider=WindowsFilesystemProvider.name,
         artifact_type=artifact_type,
@@ -412,19 +688,54 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
             record_size = allocated_size if 48 <= allocated_size <= 4096 and offset + allocated_size <= len(blob) else 1024
             record_blob = blob[offset : min(len(blob), offset + record_size)]
             path_candidates = extract_path_candidates(extract_utf16_strings(record_blob))
+            first_attribute_offset = int_from(blob, offset + 0x14, 2)
+            used_size = int_from(blob, offset + 0x18, 4)
+            sequence_validation = validate_mft_update_sequence(record_blob)
+            attributes = parse_mft_attributes(record_blob, first_attribute_offset, used_size)
+            timestamp_validation = mft_timestamp_validation(attributes)
+            validation_warnings = mft_validation_warnings(
+                record_blob=record_blob,
+                first_attribute_offset=first_attribute_offset,
+                used_size=used_size,
+                allocated_size=allocated_size,
+                sequence_validation=sequence_validation,
+                attributes=attributes,
+                timestamp_validation=timestamp_validation,
+            )
+            validation_status = "valid" if not validation_warnings else "valid-with-warnings"
             records.append(
                 {
                     "record_offset": offset,
                     "record_number_candidate": offset // 1024,
                     "sequence_number": int_from(blob, offset + 0x10, 2),
                     "hard_link_count": int_from(blob, offset + 0x12, 2),
-                    "first_attribute_offset": int_from(blob, offset + 0x14, 2),
+                    "first_attribute_offset": first_attribute_offset,
                     "flags": flags,
                     "in_use": bool(flags & 0x01),
                     "directory": bool(flags & 0x02),
-                    "used_size": int_from(blob, offset + 0x18, 4),
+                    "used_size": used_size,
                     "allocated_size": allocated_size,
                     "base_file_reference": int_from(blob, offset + 0x20, 8),
+                    "sequence_validation": sequence_validation,
+                    "attribute_count": len(attributes["attributes"]),
+                    "attribute_types": attributes["attribute_types"],
+                    "attributes": attributes["attributes"],
+                    "standard_information": attributes["standard_information"],
+                    "file_name_entries": attributes["file_name_entries"],
+                    "data_attributes": attributes["data_attributes"],
+                    "timestamp_validation": timestamp_validation,
+                    "validation_status": validation_status,
+                    "validation_warnings": validation_warnings,
+                    "validation_checks": {
+                        "magic_valid": record_blob[:4] == b"FILE",
+                        "sequence_fixup_valid": sequence_validation.get("status") == "valid",
+                        "has_standard_information_attribute": bool(attributes["standard_information"]),
+                        "has_file_name_attribute": bool(attributes["file_name_entries"]),
+                        "has_data_attribute": bool(attributes["data_attributes"]),
+                        "attribute_end_marker_seen": bool(attributes["end_marker_seen"]),
+                        "timestamp_fields_present": bool(timestamp_validation.get("timestamp_count")),
+                    },
+                    "parser_confidence": mft_parser_confidence(validation_status, attributes, sequence_validation),
                     "path_candidates": path_candidates[:10],
                 }
             )
@@ -433,19 +744,347 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
             return records
 
 
+def validate_mft_update_sequence(record_blob: bytes, *, sector_size: int = 512) -> dict[str, object]:
+    usa_offset = int_from(record_blob, 0x04, 2)
+    usa_count = int_from(record_blob, 0x06, 2)
+    warnings: list[str] = []
+    if not usa_offset or not usa_count:
+        return {
+            "status": "missing",
+            "warnings": ["missing-update-sequence-array"],
+            "update_sequence_offset": usa_offset,
+            "update_sequence_count": usa_count,
+        }
+    if usa_offset + usa_count * 2 > len(record_blob):
+        return {
+            "status": "invalid",
+            "warnings": ["update-sequence-array-out-of-bounds"],
+            "update_sequence_offset": usa_offset,
+            "update_sequence_count": usa_count,
+        }
+    sector_count = len(record_blob) // sector_size
+    if sector_count and usa_count != sector_count + 1:
+        warnings.append("update-sequence-count-sector-mismatch")
+    update_sequence_number = record_blob[usa_offset : usa_offset + 2]
+    repaired_trailers = 0
+    for sector_index in range(1, usa_count):
+        trailer_offset = sector_index * sector_size - 2
+        if trailer_offset + 2 > len(record_blob):
+            warnings.append(f"sector-trailer-out-of-bounds:{sector_index}")
+            continue
+        if record_blob[trailer_offset : trailer_offset + 2] != update_sequence_number:
+            warnings.append(f"sector-trailer-update-sequence-mismatch:{sector_index}")
+            continue
+        repaired_trailers += 1
+    return {
+        "status": "valid" if not warnings else "valid-with-warnings",
+        "warnings": warnings,
+        "update_sequence_offset": usa_offset,
+        "update_sequence_count": usa_count,
+        "update_sequence_number": update_sequence_number.hex(),
+        "sector_size": sector_size,
+        "sector_count": sector_count,
+        "repaired_sector_trailer_count": repaired_trailers,
+    }
+
+
+def parse_mft_attributes(record_blob: bytes, first_attribute_offset: int, used_size: int) -> dict[str, object]:
+    attributes: list[dict[str, object]] = []
+    attribute_types: list[str] = []
+    file_name_entries: list[dict[str, object]] = []
+    data_attributes: list[dict[str, object]] = []
+    standard_information: dict[str, object] = {}
+    warnings: list[str] = []
+    end_marker_seen = False
+    limit = used_size if first_attribute_offset < used_size <= len(record_blob) else len(record_blob)
+    offset = first_attribute_offset
+    seen = 0
+    while offset + 8 <= limit and seen < 256:
+        attribute_type = int_from(record_blob, offset, 4)
+        if attribute_type == 0xFFFFFFFF:
+            end_marker_seen = True
+            break
+        length = int_from(record_blob, offset + 4, 4)
+        if length < 24:
+            warnings.append(f"invalid-attribute-length:{offset}")
+            break
+        if offset + length > limit:
+            warnings.append(f"attribute-overruns-record:{offset}")
+            break
+        attribute_blob = record_blob[offset : offset + length]
+        parsed = parse_mft_attribute(attribute_blob, offset)
+        attributes.append(parsed)
+        attribute_types.append(str(parsed["attribute_type_name"]))
+        if parsed["attribute_type"] == 0x10 and isinstance(parsed.get("standard_information"), Mapping):
+            standard_information = dict(parsed["standard_information"])
+        elif parsed["attribute_type"] == 0x30 and isinstance(parsed.get("file_name"), Mapping):
+            file_name_entries.append(dict(parsed["file_name"]))
+        elif parsed["attribute_type"] == 0x80 and isinstance(parsed.get("data"), Mapping):
+            data_attributes.append(dict(parsed["data"]))
+        offset += align8(length)
+        seen += 1
+    if seen >= 256:
+        warnings.append("attribute-iteration-limit-reached")
+    return {
+        "attributes": attributes,
+        "attribute_types": attribute_types,
+        "standard_information": standard_information,
+        "file_name_entries": file_name_entries,
+        "data_attributes": data_attributes,
+        "end_marker_seen": end_marker_seen,
+        "warnings": warnings,
+    }
+
+
+def parse_mft_attribute(attribute_blob: bytes, record_relative_offset: int) -> dict[str, object]:
+    attribute_type = int_from(attribute_blob, 0, 4)
+    length = int_from(attribute_blob, 4, 4)
+    nonresident = bool(int_from(attribute_blob, 8, 1))
+    name_length = int_from(attribute_blob, 9, 1)
+    name_offset = int_from(attribute_blob, 10, 2)
+    name = ""
+    if name_length and name_offset + name_length * 2 <= len(attribute_blob):
+        name = attribute_blob[name_offset : name_offset + name_length * 2].decode("utf-16le", errors="ignore")
+    parsed: dict[str, object] = {
+        "record_relative_offset": record_relative_offset,
+        "attribute_type": attribute_type,
+        "attribute_type_name": MFT_ATTRIBUTE_TYPE_NAMES.get(attribute_type, f"0x{attribute_type:08x}"),
+        "length": length,
+        "nonresident": nonresident,
+        "name": name,
+        "flags": int_from(attribute_blob, 12, 2),
+        "attribute_id": int_from(attribute_blob, 14, 2),
+    }
+    if nonresident:
+        runlist_offset = int_from(attribute_blob, 32, 2)
+        parsed["nonresident_metadata"] = {
+            "lowest_vcn": int_from(attribute_blob, 16, 8),
+            "highest_vcn": int_from(attribute_blob, 24, 8),
+            "runlist_offset": runlist_offset,
+            "compression_unit": int_from(attribute_blob, 34, 2),
+            "allocated_size": int_from(attribute_blob, 40, 8),
+            "real_size": int_from(attribute_blob, 48, 8),
+            "initialized_size": int_from(attribute_blob, 56, 8),
+            "data_runs_preview": attribute_blob[runlist_offset : min(len(attribute_blob), runlist_offset + 32)].hex()
+            if runlist_offset < len(attribute_blob)
+            else "",
+            "runlist_decode_status": "preview-only",
+        }
+        if attribute_type == 0x80:
+            parsed["data"] = {
+                "resident": False,
+                "allocated_size": int_from(attribute_blob, 40, 8),
+                "real_size": int_from(attribute_blob, 48, 8),
+                "initialized_size": int_from(attribute_blob, 56, 8),
+                "runlist_decode_status": "preview-only",
+            }
+        return parsed
+
+    value_length = int_from(attribute_blob, 16, 4)
+    value_offset = int_from(attribute_blob, 20, 2)
+    value = attribute_blob[value_offset : value_offset + value_length] if value_offset + value_length <= len(attribute_blob) else b""
+    parsed["resident_metadata"] = {
+        "value_length": value_length,
+        "value_offset": value_offset,
+        "indexed_flag": int_from(attribute_blob, 22, 1),
+    }
+    if attribute_type == 0x10:
+        parsed["standard_information"] = parse_standard_information(value)
+    elif attribute_type == 0x30:
+        parsed["file_name"] = parse_file_name_attribute(value)
+    elif attribute_type == 0x80:
+        parsed["data"] = {
+            "resident": True,
+            "resident_size": value_length,
+            "sha256": hashlib.sha256(value).hexdigest() if value else "",
+        }
+    return parsed
+
+
+def parse_standard_information(value: bytes) -> dict[str, object]:
+    timestamps = {
+        "created_at": filetime_to_iso(int_from(value, 0, 8)),
+        "modified_at": filetime_to_iso(int_from(value, 8, 8)),
+        "mft_modified_at": filetime_to_iso(int_from(value, 16, 8)),
+        "accessed_at": filetime_to_iso(int_from(value, 24, 8)),
+    }
+    file_attributes = int_from(value, 32, 4) if len(value) >= 36 else 0
+    return {
+        "timestamps": timestamps,
+        "file_attributes": file_attributes,
+        "file_attribute_names": flag_names(file_attributes, NTFS_FILE_ATTRIBUTE_NAMES),
+    }
+
+
+def parse_file_name_attribute(value: bytes) -> dict[str, object]:
+    parent_reference_raw = int_from(value, 0, 8)
+    name_length = int_from(value, 64, 1)
+    namespace = int_from(value, 65, 1)
+    name_bytes = value[66 : 66 + name_length * 2] if 66 + name_length * 2 <= len(value) else b""
+    file_attributes = int_from(value, 56, 4)
+    return {
+        "parent_reference": split_mft_reference(parent_reference_raw),
+        "parent_reference_raw": parent_reference_raw,
+        "timestamps": {
+            "created_at": filetime_to_iso(int_from(value, 8, 8)),
+            "modified_at": filetime_to_iso(int_from(value, 16, 8)),
+            "mft_modified_at": filetime_to_iso(int_from(value, 24, 8)),
+            "accessed_at": filetime_to_iso(int_from(value, 32, 8)),
+        },
+        "allocated_size": int_from(value, 40, 8),
+        "real_size": int_from(value, 48, 8),
+        "file_attributes": file_attributes,
+        "file_attribute_names": flag_names(file_attributes, NTFS_FILE_ATTRIBUTE_NAMES),
+        "name_length": name_length,
+        "namespace": FILE_NAME_NAMESPACE_NAMES.get(namespace, str(namespace)),
+        "file_name": name_bytes.decode("utf-16le", errors="ignore"),
+    }
+
+
+def split_mft_reference(value: int) -> dict[str, int]:
+    return {
+        "record_number": value & 0x0000FFFFFFFFFFFF,
+        "sequence_number": (value >> 48) & 0xFFFF,
+    }
+
+
+def mft_timestamp_validation(attributes: Mapping[str, object]) -> dict[str, object]:
+    timestamp_sources: list[dict[str, str]] = []
+    invalid_sources: list[str] = []
+    standard_information = attributes.get("standard_information")
+    if isinstance(standard_information, Mapping):
+        collect_mft_timestamps(timestamp_sources, invalid_sources, "$STANDARD_INFORMATION", standard_information.get("timestamps"))
+    for index, entry in enumerate(attributes.get("file_name_entries") or []):
+        if isinstance(entry, Mapping):
+            collect_mft_timestamps(timestamp_sources, invalid_sources, f"$FILE_NAME[{index}]", entry.get("timestamps"))
+    status = "valid" if timestamp_sources and not invalid_sources else "valid-with-warnings" if timestamp_sources else "missing"
+    values = sorted({item["value"] for item in timestamp_sources})
+    return {
+        "status": status,
+        "timestamp_count": len(timestamp_sources),
+        "sources": timestamp_sources[:32],
+        "invalid_sources": invalid_sources[:32],
+        "earliest": values[0] if values else "",
+        "latest": values[-1] if values else "",
+    }
+
+
+def collect_mft_timestamps(
+    timestamp_sources: list[dict[str, str]],
+    invalid_sources: list[str],
+    prefix: str,
+    timestamps: object,
+) -> None:
+    if not isinstance(timestamps, Mapping):
+        return
+    for name, value in timestamps.items():
+        text = str(value or "")
+        source = f"{prefix}.{name}"
+        if text:
+            timestamp_sources.append({"source": source, "value": text})
+        else:
+            invalid_sources.append(source)
+
+
+def mft_validation_warnings(
+    *,
+    record_blob: bytes,
+    first_attribute_offset: int,
+    used_size: int,
+    allocated_size: int,
+    sequence_validation: Mapping[str, object],
+    attributes: Mapping[str, object],
+    timestamp_validation: Mapping[str, object],
+) -> list[str]:
+    warnings: list[str] = []
+    if record_blob[:4] != b"FILE":
+        warnings.append("invalid-file-record-magic")
+    if first_attribute_offset < 0x30 or first_attribute_offset >= len(record_blob):
+        warnings.append("first-attribute-offset-out-of-range")
+    if first_attribute_offset % 8:
+        warnings.append("first-attribute-offset-not-8-byte-aligned")
+    if used_size and allocated_size and used_size > allocated_size:
+        warnings.append("used-size-exceeds-allocated-size")
+    if sequence_validation.get("status") != "valid":
+        warnings.extend(str(item) for item in sequence_validation.get("warnings") or ["sequence-validation-not-valid"])
+    if not attributes.get("end_marker_seen"):
+        warnings.append("attribute-end-marker-not-seen")
+    warnings.extend(str(item) for item in attributes.get("warnings") or [])
+    if not attributes.get("standard_information"):
+        warnings.append("missing-standard-information-attribute")
+    if not attributes.get("file_name_entries"):
+        warnings.append("missing-file-name-attribute")
+    if timestamp_validation.get("status") != "valid":
+        warnings.extend(str(item) for item in timestamp_validation.get("invalid_sources") or ["timestamp-validation-not-valid"])
+    return warnings
+
+
+def mft_parser_confidence(
+    validation_status: str,
+    attributes: Mapping[str, object],
+    sequence_validation: Mapping[str, object],
+) -> float:
+    confidence = 0.55
+    if attributes.get("standard_information"):
+        confidence += 0.1
+    if attributes.get("file_name_entries"):
+        confidence += 0.1
+    if attributes.get("data_attributes"):
+        confidence += 0.05
+    if sequence_validation.get("status") == "valid":
+        confidence += 0.1
+    if validation_status == "valid":
+        confidence += 0.05
+    return min(confidence, 0.9)
+
+
+def align8(value: int) -> int:
+    return (value + 7) & ~7
+
+
 def parse_usn_records(blob: bytes) -> list[dict[str, object]]:
+    return list(parse_usn_record_scan(blob)["records"])
+
+
+def parse_usn_record_scan(blob: bytes, *, record_limit: int = USN_RECORD_SCAN_LIMIT) -> dict[str, object]:
     records: list[dict[str, object]] = []
     offset = 0
+    skipped_bytes = 0
     while offset + 60 <= len(blob):
         record = parse_usn_record_at(blob, offset)
         if record is None:
+            skipped_bytes += 1
             offset += 1
             continue
         records.append(record)
-        offset += int(record["record_length"])
-        if len(records) >= 5000:
-            return records
-    return records
+        offset = int(record["next_record_cursor"])
+        if len(records) >= record_limit:
+            break
+    timestamps = sorted(str(record.get("timestamp")) for record in records if record.get("timestamp"))
+    next_cursor_available = offset < len(blob) and bool(records)
+    large_record_count = sum(1 for record in records if record.get("record_size_class") == "large")
+    first_record_offset = int(records[0]["record_offset"]) if records else None
+    return {
+        "records": records,
+        "scan_start_offset": 0,
+        "scan_end_offset": len(blob),
+        "last_scanned_offset": offset,
+        "first_record_offset": first_record_offset,
+        "last_record_offset": records[-1]["record_offset"] if records else None,
+        "next_cursor_offset": offset if next_cursor_available else None,
+        "next_cursor_available": next_cursor_available,
+        "record_limit": record_limit,
+        "record_limit_reached": len(records) >= record_limit and offset < len(blob),
+        "skipped_bytes_before_records": first_record_offset if first_record_offset is not None else skipped_bytes,
+        "skipped_bytes_during_scan": skipped_bytes,
+        "trailing_unparsed_bytes": max(len(blob) - offset, 0),
+        "large_record_count": large_record_count,
+        "largest_record_length": max((int(record.get("record_length", 0)) for record in records), default=0),
+        "timestamp_range": {
+            "earliest": timestamps[0] if timestamps else "",
+            "latest": timestamps[-1] if timestamps else "",
+        },
+    }
 
 
 def parse_usn_record_at(blob: bytes, offset: int) -> dict[str, object] | None:
@@ -496,6 +1135,16 @@ def parse_usn_record_at(blob: bytes, offset: int) -> dict[str, object] | None:
     source_info = int_from(record_blob, int(layout["source_info_offset"]), 4)
     file_attributes = int_from(record_blob, int(layout["file_attributes_offset"]), 4)
     reason_flag_names = reason_flags(reason)
+    unknown_reason_mask = unknown_flag_mask(reason, USN_REASON_FLAGS)
+    unknown_source_info_mask = unknown_flag_mask(source_info, USN_SOURCE_INFO_FLAGS)
+    unknown_file_attribute_mask = unknown_flag_mask(file_attributes, NTFS_FILE_ATTRIBUTE_NAMES)
+    file_name_blob = record_blob[name_offset : name_offset + name_length]
+    try:
+        file_name = file_name_blob.decode("utf-16le")
+        file_name_decode_status = "valid"
+    except UnicodeDecodeError:
+        file_name = file_name_blob.decode("utf-16le", errors="ignore")
+        file_name_decode_status = "invalid-utf16"
     validation_warnings = usn_validation_warnings(
         length=length,
         name_length=name_length,
@@ -504,34 +1153,65 @@ def parse_usn_record_at(blob: bytes, offset: int) -> dict[str, object] | None:
         timestamp=timestamp,
         reason=reason,
         reason_flag_names=reason_flag_names,
+        unknown_reason_mask=unknown_reason_mask,
+        file_name_decode_status=file_name_decode_status,
     )
     validation_status = "valid" if not validation_warnings else "valid-with-warnings"
     parser_confidence = 0.85 if validation_status == "valid" else 0.7
+    file_reference_number = int_from(record_blob, int(layout["file_reference_offset"]), int(layout["reference_size"]))
+    parent_file_reference_number = int_from(record_blob, int(layout["parent_reference_offset"]), int(layout["reference_size"]))
+    record_end_offset = offset + length
+    record_payload_bytes = name_offset + name_length
     return {
         "record_offset": offset,
+        "record_cursor": offset,
+        "next_record_cursor": record_end_offset,
+        "record_end_offset": record_end_offset,
         "record_length": length,
+        "record_payload_bytes": record_payload_bytes,
+        "record_padding_bytes": max(length - record_payload_bytes, 0),
+        "record_size_class": usn_record_size_class(length),
         "major_version": major,
         "minor_version": int_from(record_blob, 6, 2),
-        "file_reference_number": int_from(record_blob, int(layout["file_reference_offset"]), int(layout["reference_size"])),
-        "parent_file_reference_number": int_from(record_blob, int(layout["parent_reference_offset"]), int(layout["reference_size"])),
+        "file_reference_number": file_reference_number,
+        "parent_file_reference_number": parent_file_reference_number,
+        "file_reference_number_decoded": decode_usn_file_reference(file_reference_number, int(layout["reference_size"])),
+        "parent_file_reference_number_decoded": decode_usn_file_reference(
+            parent_file_reference_number, int(layout["reference_size"])
+        ),
         "usn": int_from(record_blob, int(layout["usn_offset"]), 8),
         "timestamp": timestamp,
         "timestamp_filetime": filetime_value,
         "reason": reason_string(reason),
         "reason_raw": reason,
         "reason_flags": reason_flag_names,
+        "unknown_reason_mask": unknown_reason_mask,
         "source_info": source_info,
         "source_info_flags": flag_names(source_info, USN_SOURCE_INFO_FLAGS),
+        "unknown_source_info_mask": unknown_source_info_mask,
         "security_id": int_from(record_blob, int(layout["security_id_offset"]), 4),
         "file_attributes": file_attributes,
         "file_attribute_names": flag_names(file_attributes, NTFS_FILE_ATTRIBUTE_NAMES),
+        "unknown_file_attribute_mask": unknown_file_attribute_mask,
         "file_name_length": name_length,
         "file_name_offset": name_offset,
-        "file_name": record_blob[name_offset : name_offset + name_length].decode("utf-16le", errors="ignore"),
+        "file_name_character_count": len(file_name),
+        "file_name_decode_status": file_name_decode_status,
+        "file_name": file_name,
         "deleted_hint": "FILE_DELETE" in reason_flag_names,
         "rename_hint": rename_hint(reason_flag_names),
         "validation_status": validation_status,
         "validation_warnings": validation_warnings,
+        "validation_checks": {
+            "record_length_aligned": length % 8 == 0,
+            "record_cursor_progresses": record_end_offset > offset,
+            "filename_bounds_valid": name_offset >= int(layout["minimum_length"]) and name_offset + name_length <= length,
+            "filename_utf16_valid": file_name_decode_status == "valid",
+            "filetime_plausible": bool(timestamp),
+            "version_supported": major in {2, 3},
+            "known_reason_bits_only": unknown_reason_mask == 0,
+            "large_record": length >= USN_LARGE_RECORD_THRESHOLD,
+        },
         "parser_confidence": parser_confidence,
     }
 
@@ -545,6 +1225,8 @@ def usn_validation_warnings(
     timestamp: str,
     reason: int,
     reason_flag_names: list[str],
+    unknown_reason_mask: int,
+    file_name_decode_status: str,
 ) -> list[str]:
     warnings: list[str] = []
     if major not in {2, 3}:
@@ -559,9 +1241,38 @@ def usn_validation_warnings(
         warnings.append("invalid-filetime")
     if reason and not reason_flag_names:
         warnings.append("unknown-reason-flags")
+    if unknown_reason_mask:
+        warnings.append("reason-has-unknown-bits")
     if reason == 0:
         warnings.append("empty-reason")
+    if file_name_decode_status != "valid":
+        warnings.append("filename-invalid-utf16")
     return warnings
+
+
+def usn_record_size_class(length: int) -> str:
+    return "large" if length >= USN_LARGE_RECORD_THRESHOLD else "standard"
+
+
+def decode_usn_file_reference(value: int, size: int) -> dict[str, object]:
+    if size == 8:
+        decoded = split_mft_reference(value)
+        return {
+            "format": "mft-reference-64",
+            "record_number": decoded["record_number"],
+            "sequence_number": decoded["sequence_number"],
+        }
+    return {
+        "format": "file-id-128",
+        "hex": f"{value:032x}",
+    }
+
+
+def unknown_flag_mask(value: int, names: Mapping[int, str]) -> int:
+    known = 0
+    for flag in names:
+        known |= flag
+    return value & ~known
 
 
 def rename_hint(reason_flag_names: list[str]) -> str:

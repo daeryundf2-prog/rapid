@@ -13,8 +13,9 @@ from ...core.models import ArtifactRecord
 from .common import iter_windows_user_homes
 from .ese import build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
+from .srum_ese import analyze_srudb_native
 
-PARSER_VERSION = "windows-execution-v5"
+PARSER_VERSION = "windows-execution-v7"
 REGISTRY_EXPORT_EXT = ".reg"
 SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 AMCACHE_HIVE_NAME = "AMCACHE.HVE"
@@ -39,6 +40,30 @@ SUSPICIOUS_COMMAND_TERMS = (
     "schtasks",
     "vssadmin delete shadows",
 )
+EXECUTION_NATIVE_CAPABILITIES = {
+    "amcache_export_mapping": True,
+    "amcache_native_string_pivots": True,
+    "shimcache_export_mapping": True,
+    "bam_export_mapping": True,
+    "srum_export_mapping": True,
+    "srum_ese_header_probe": True,
+    "srum_native_string_pivots": True,
+    "srum_table_marker_candidates": True,
+    "srum_row_string_candidates": True,
+    "native_amcache_schema_decode": False,
+    "native_shimcache_binary_decode": False,
+    "native_bam_system_hive_decode": False,
+    "native_ese_catalog_decode": False,
+    "native_srum_page_row_decode": False,
+}
+EXECUTION_REPORT_GRADE_BLOCKERS = [
+    "native-amcache-schema-decoding-required",
+    "native-appcompatcache-layout-decoding-required",
+    "native-system-hive-bam-decoding-required",
+    "native-ese-catalog-decoding-required",
+    "native-ese-page-row-decoding-required",
+    "known-answer-execution-artifact-validation-required",
+]
 
 
 class WindowsExecutionProvider:
@@ -120,10 +145,20 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
         return None
 
     executable_path = extract_executable_path(key, decoded_values)
-    timestamp = extract_timestamp(decoded_values)
+    timestamp, timestamp_source = extract_execution_timestamp(artifact_type, decoded_values)
     user_sid = user_sid_from_key(key)
     execution_metadata = execution_artifact_metadata(artifact_type, key, decoded_values)
+    execution_fields = extract_execution_fields(artifact_type, key, decoded_values)
+    if not executable_path and execution_fields.get("executable_path"):
+        executable_path = str(execution_fields.get("executable_path") or "")
     risk_flags = execution_risk_flags(artifact_type, executable_path, decoded_values)
+    validation_checks = execution_validation_checks(artifact_type, executable_path, timestamp, decoded_values)
+    report_grade = execution_report_grade_assessment(
+        execution_validation_matrix(validation_checks),
+        validation_required=bool(execution_metadata.get("validation_required", artifact_type == "shimcache-entry")),
+        gap_ids=execution_gap_ids(artifact_type),
+        extra_blockers=[str(item) for item in execution_metadata.get("commercial_grade_blockers", [])],
+    )
     return ArtifactRecord(
         provider=WindowsExecutionProvider.name,
         artifact_type=artifact_type,
@@ -143,11 +178,22 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
             "device_path": executable_path if executable_path.lower().startswith("\\device\\") else "",
             "user_sid": user_sid,
             "timestamp": timestamp,
-            "timestamp_source": execution_metadata.get("timestamp_source", "registry_value") if timestamp else "",
+            "timestamp_source": timestamp_source or (execution_metadata.get("timestamp_source", "registry_value") if timestamp else ""),
+            "program_name": execution_fields.get("program_name", ""),
+            "publisher": execution_fields.get("publisher", ""),
+            "sha1": execution_fields.get("sha1", ""),
+            "file_description": execution_fields.get("file_description", ""),
+            "product_name": execution_fields.get("product_name", ""),
             "evidence_strength": evidence_strength,
             "parser_confidence": execution_metadata.get("parser_confidence", 0.76),
             "validation_required": execution_metadata.get("validation_required", artifact_type == "shimcache-entry"),
             "validation_guidance": execution_metadata.get("validation_guidance", ""),
+            "validation_checks": validation_checks,
+            "execution_validation_matrix": execution_validation_matrix(validation_checks),
+            "execution_report_grade_assessment": report_grade,
+            "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
+            "commercial_grade_ready": execution_metadata.get("commercial_grade_ready", False),
+            "commercial_grade_blockers": report_grade["blockers"],
             "artifact_family": execution_metadata.get("artifact_family", ""),
             "execution_caveat": execution_metadata.get("execution_caveat", ""),
             "values": dict(sorted(decoded_values.items())),
@@ -181,6 +227,18 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
     strings = list(unique_preserve_order(iter_registry_like_strings(blob)))
     path_candidates = [value for value in strings if looks_like_executable_path(value)][:100]
     sha1_candidates = sorted(set(re.findall(r"(?i)\b[0-9a-f]{40}\b", "\n".join(strings))))[:100]
+    hive_validation_checks = {
+        "has_path_candidates": bool(path_candidates),
+        "has_sha1_candidates": bool(sha1_candidates),
+        "native_schema_decoding_available": False,
+        "requires_second_parser_validation": True,
+    }
+    hive_report_grade = execution_report_grade_assessment(
+        execution_validation_matrix(hive_validation_checks),
+        validation_required=True,
+        gap_ids=["#7"],
+        extra_blockers=["native-amcache-schema-decoding-required", "install-and-execution-timestamp-validation-required"],
+    )
     yield ArtifactRecord(
         provider=WindowsExecutionProvider.name,
         artifact_type="amcache-hive",
@@ -201,13 +259,32 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
             "parser_confidence": 0.46,
             "evidence_strength": "amcache-native-string-pivot",
             "validation_required": True,
+            "validation_checks": hive_validation_checks,
+            "execution_validation_matrix": execution_validation_matrix(hive_validation_checks),
+            "execution_report_grade_assessment": hive_report_grade,
+            "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
             "validation_guidance": "Native Amcache.hve string pivots identify program/hash candidates only; validate install/execution timestamps with a dedicated Amcache parser.",
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": hive_report_grade["blockers"],
             "risk_flags": sorted({flag for value in path_candidates for flag in execution_path_risk_flags(value)}),
             "risk_score": min(100, len(path_candidates) * 5),
             "raw_preview": " ".join(strings[:25])[:2000],
         },
     )
     for index, candidate in enumerate(path_candidates[:100]):
+        entry_validation_checks = {
+            "has_executable_path": bool(candidate),
+            "has_hash_candidates": bool(sha1_candidates),
+            "native_schema_decoding_available": False,
+            "requires_second_parser_validation": True,
+            "correlation_targets": execution_correlation_targets("amcache-entry"),
+        }
+        entry_report_grade = execution_report_grade_assessment(
+            execution_validation_matrix(entry_validation_checks),
+            validation_required=True,
+            gap_ids=["#7"],
+            extra_blockers=["native-amcache-schema-decoding-required", "row-level-timestamp-extraction-required"],
+        )
         yield ArtifactRecord(
             provider=WindowsExecutionProvider.name,
             artifact_type="amcache-entry",
@@ -231,7 +308,13 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "evidence_strength": "program-presence-or-execution-candidate",
                 "parser_confidence": 0.44,
                 "validation_required": True,
+                "validation_checks": entry_validation_checks,
+                "execution_validation_matrix": execution_validation_matrix(entry_validation_checks),
+                "execution_report_grade_assessment": entry_report_grade,
+                "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
                 "validation_guidance": "Validate native Amcache string-pivot rows with AmcacheParser/RECmd before report-grade install/execution claims.",
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": entry_report_grade["blockers"],
                 "risk_flags": execution_path_risk_flags(candidate),
                 "risk_score": min(100, len(execution_path_risk_flags(candidate)) * 25),
                 "raw_preview": candidate,
@@ -314,6 +397,34 @@ def build_srum_database_inventory_record(path: Path) -> ArtifactRecord:
     stat_result = path.stat()
     ese_header = probe_ese_database(path)
     pivots = build_ese_string_pivots(path)
+    native_srudb = analyze_srudb_native(path, ese_header=ese_header)
+    native_validation = native_srudb["native_srudb_validation"]
+    table_candidates = native_srudb["native_srum_table_candidates"]
+    row_candidates = native_srudb["native_srum_row_candidates"]
+    validation_checks = {
+        "ese_header_readable": bool(ese_header.get("header_readable")),
+        "ese_signature_valid": bool(ese_header.get("signature_valid")),
+        "native_srudb_page_size_plausible": bool(dict(native_validation).get("page_size_plausible")),
+        "native_srudb_file_size_page_aligned": bool(dict(native_validation).get("file_size_page_aligned")),
+        "has_path_pivots": bool(pivots.get("path_candidates")),
+        "has_url_pivots": bool(pivots.get("url_candidates")),
+        "has_native_srum_table_candidates": bool(table_candidates),
+        "has_native_srum_row_candidates": bool(row_candidates),
+        "row_level_decoding_available": False,
+        "native_table_catalog_decoding_available": False,
+        "requires_srum_parser": True,
+    }
+    report_grade = execution_report_grade_assessment(
+        execution_validation_matrix(validation_checks),
+        validation_required=True,
+        gap_ids=["#10"],
+        extra_blockers=[
+            "native-ese-catalog-decoding-required",
+            "native-ese-page-row-decoding-required",
+            "native-srum-row-decoding-required",
+            "large-known-answer-validation-required",
+        ],
+    )
     return ArtifactRecord(
         provider=WindowsExecutionProvider.name,
         artifact_type="srum-database-file",
@@ -330,8 +441,20 @@ def build_srum_database_inventory_record(path: Path) -> ArtifactRecord:
             "size": stat_result.st_size,
             "modified_at": stat_result.st_mtime,
             "ese_header": ese_header,
+            "native_srudb_validation": native_validation,
+            "native_srum_table_candidates": table_candidates,
+            "native_srum_table_candidate_count": len(table_candidates),
+            "native_srum_row_candidate_count": len(row_candidates),
+            "native_srum_row_candidates": row_candidates[:20],
             "parser_confidence": 0.65 if ese_header.get("signature_valid") else 0.35,
             "evidence_strength": "application-resource-usage-database-presence",
+            "validation_required": True,
+            "validation_checks": validation_checks,
+            "execution_validation_matrix": execution_validation_matrix(validation_checks),
+            "execution_report_grade_assessment": report_grade,
+            "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": report_grade["blockers"],
             **pivots,
             "recommended_parsers": ["SrumECmd", "ESEDatabaseView", "libesedb/esedbexport"],
             "note": "SRUDB.dat is inventoried directly with bounded ESE header/string pivots; use a dedicated SRUM parser for full table decoding and timeline-grade rows.",
@@ -357,9 +480,22 @@ def build_srum_database_pivot_records(path: Path, inventory_details: Mapping[str
         seen.add(key)
         executable_path = executable_path_from_candidate(candidate_value)
         url = candidate_value if candidate_kind == "url" else first_url(candidate_value)
-        risk_flags = [f"srum-pivot:{term}" for term in SUSPICIOUS_COMMAND_TERMS if term.split()[0] in candidate_value.lower()]
+        risk_flags = srum_candidate_risk_flags("srum-pivot", candidate_value)
         if url:
             risk_flags.append("srum-network-url-pivot")
+        validation_checks = {
+            "has_app_id": bool(executable_path),
+            "has_url": bool(url),
+            "row_level_decoding_available": False,
+            "native_table_catalog_decoding_available": False,
+            "requires_srum_parser": True,
+        }
+        report_grade = execution_report_grade_assessment(
+            execution_validation_matrix(validation_checks),
+            validation_required=True,
+            gap_ids=["#10"],
+            extra_blockers=["native-ese-catalog-decoding-required", "native-srum-row-decoding-required"],
+        )
         yield ArtifactRecord(
             provider=WindowsExecutionProvider.name,
             artifact_type="srum-database-pivot",
@@ -384,29 +520,47 @@ def build_srum_database_pivot_records(path: Path, inventory_details: Mapping[str
                 "parser_confidence": 0.4,
                 "evidence_strength": "application-resource-usage-string-pivot",
                 "validation_required": True,
+                "validation_checks": validation_checks,
+                "execution_validation_matrix": execution_validation_matrix(validation_checks),
+                "execution_report_grade_assessment": report_grade,
+                "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
                 "validation_guidance": "SRUDB.dat native string pivots identify apps/URLs present in the database; validate row timestamps and counters with SrumECmd or another dedicated SRUM parser.",
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": report_grade["blockers"],
                 "risk_flags": sorted(set(risk_flags)),
                 "risk_score": min(100, len(set(risk_flags)) * 20),
                 "raw_preview": candidate_value[:2000],
             },
         )
     yield from build_srum_database_table_candidate_records(path, inventory_details)
+    yield from build_srum_database_row_candidate_records(path, inventory_details)
 
 
 def build_srum_database_table_candidate_records(path: Path, inventory_details: Mapping[str, object]) -> Iterable[ArtifactRecord]:
-    strings = [str(value) for value in inventory_details.get("extracted_strings") or []]
-    table_markers = {
-        "network-usage": ("networkusage", "bytes received", "bytessent", "bytesreceived"),
-        "app-resource": ("application", "appresource", "cputime", "energyusage"),
-        "energy": ("energy", "battery", "foregroundcycle"),
-        "user": ("user", "sid", "username"),
-    }
     source_hashes = file_hashes(path)
-    lowered_blob = "\n".join(strings).lower()
-    for index, (table_family, markers) in enumerate(table_markers.items()):
-        matched = sorted({marker for marker in markers if marker in lowered_blob})
+    table_candidates = [item for item in inventory_details.get("native_srum_table_candidates") or [] if isinstance(item, Mapping)]
+    strings = [str(value) for value in inventory_details.get("extracted_strings") or []]
+    for index, candidate in enumerate(table_candidates):
+        table_family = str(candidate.get("table_family") or "unknown")
+        matched = [str(value) for value in candidate.get("matched_markers") or []]
         if not matched:
             continue
+        validation_checks = {
+            "table_family_marker_count": len(matched),
+            "has_source_offsets": bool(candidate.get("source_offsets")),
+            "row_level_decoding_available": False,
+            "requires_srum_parser": True,
+        }
+        report_grade = execution_report_grade_assessment(
+            execution_validation_matrix(validation_checks),
+            validation_required=True,
+            gap_ids=["#10"],
+            extra_blockers=[
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+            ],
+        )
         yield ArtifactRecord(
             provider=WindowsExecutionProvider.name,
             artifact_type="srum-table-candidate",
@@ -423,13 +577,103 @@ def build_srum_database_table_candidate_records(path: Path, inventory_details: M
                 "source_index": index,
                 "table_family": table_family,
                 "matched_markers": matched,
-                "parser_confidence": 0.38 + min(0.24, len(matched) * 0.06),
+                "matched_marker_count": len(matched),
+                "candidate_basis": str(candidate.get("candidate_basis") or "bounded-native-string-marker-scan"),
+                "candidate_strings": [str(value) for value in candidate.get("candidate_strings") or []],
+                "source_offsets": [int(value) for value in candidate.get("source_offsets") or []],
+                "parser_confidence": float(candidate.get("candidate_confidence") or (0.38 + min(0.24, len(matched) * 0.06))),
                 "evidence_strength": "srum-table-presence-candidate",
                 "validation_required": True,
                 "validation_guidance": "This row identifies likely SRUM table families from native ESE strings only; validate rows, counters, and timestamps with a full ESE/SRUM parser.",
+                "validation_checks": validation_checks,
+                "execution_validation_matrix": execution_validation_matrix(validation_checks),
+                "execution_report_grade_assessment": report_grade,
+                "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": report_grade["blockers"],
                 "risk_flags": [f"srum-table:{table_family}"],
                 "risk_score": 20,
                 "raw_preview": " ".join(strings[:20])[:2000],
+            },
+        )
+
+
+def build_srum_database_row_candidate_records(path: Path, inventory_details: Mapping[str, object]) -> Iterable[ArtifactRecord]:
+    source_hashes = file_hashes(path)
+    row_candidates = [item for item in inventory_details.get("native_srum_row_candidates") or [] if isinstance(item, Mapping)]
+    for index, candidate in enumerate(row_candidates):
+        app_id = str(candidate.get("app_id") or "")
+        executable_path = str(candidate.get("executable_path") or "")
+        url = str(candidate.get("url") or "")
+        raw_candidate = str(candidate.get("raw_candidate") or "")
+        risk_flags = srum_candidate_risk_flags("srum-row-candidate", raw_candidate)
+        if url:
+            risk_flags.append("srum-network-url-pivot")
+        validation_checks = {
+            "has_app_id": bool(app_id),
+            "has_executable_path": bool(executable_path),
+            "has_user_or_sid": bool(candidate.get("user") or candidate.get("user_sid")),
+            "has_timestamp_candidate": bool(candidate.get("timestamp")),
+            "has_counter_candidates": bool(candidate.get("counter_candidates")),
+            "row_level_decoding_available": False,
+            "requires_srum_parser": True,
+        }
+        report_grade = execution_report_grade_assessment(
+            execution_validation_matrix(validation_checks),
+            validation_required=True,
+            gap_ids=["#10"],
+            extra_blockers=[
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "known-answer-row-validation-required",
+            ],
+        )
+        yield ArtifactRecord(
+            provider=WindowsExecutionProvider.name,
+            artifact_type="srum-row-candidate",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-srum-ese-row-candidate",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "native-ese-string-row-candidate",
+                "reportability": "review",
+                "source_path": str(path.resolve()),
+                "source_format": "ese-srum",
+                "source_hashes": source_hashes,
+                "source_index": index,
+                "candidate_basis": str(candidate.get("candidate_basis") or "bounded-native-string-row-cluster"),
+                "source_offset": int(candidate.get("source_offset") or 0),
+                "source_encoding": str(candidate.get("source_encoding") or ""),
+                "table_family": str(candidate.get("table_family") or "unknown"),
+                "app_id": app_id,
+                "executable_path": executable_path,
+                "user": str(candidate.get("user") or ""),
+                "user_sid": str(candidate.get("user_sid") or ""),
+                "timestamp": str(candidate.get("timestamp") or ""),
+                "timestamp_source": "native-string-candidate-not-row-decoded" if candidate.get("timestamp") else "",
+                "url": url,
+                "bytes_sent": candidate.get("bytes_sent", 0),
+                "bytes_received": candidate.get("bytes_received", 0),
+                "energy_usage": candidate.get("energy_usage", 0),
+                "cpu_time": candidate.get("cpu_time", 0),
+                "counter_candidates": dict(candidate.get("counter_candidates") or {}),
+                "interface_luid": str(candidate.get("interface_luid") or ""),
+                "network_profile": str(candidate.get("network_profile") or ""),
+                "parser_confidence": float(candidate.get("candidate_confidence") or 0.42),
+                "evidence_strength": "srum-native-row-string-candidate",
+                "validation_required": True,
+                "validation_guidance": "This bounded native SRUDB row candidate is extracted from nearby strings only; validate ESE catalog/page/row decoding, counters, and timestamps with a dedicated SRUM parser before reporting conclusions.",
+                "validation_checks": validation_checks,
+                "execution_validation_matrix": execution_validation_matrix(validation_checks),
+                "execution_report_grade_assessment": report_grade,
+                "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": report_grade["blockers"],
+                "risk_flags": sorted(set(risk_flags)),
+                "risk_score": min(100, len(set(risk_flags)) * 20),
+                "raw_preview": raw_candidate[:2000],
             },
         )
 
@@ -448,6 +692,21 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
     network_profile = str(first_value(lowered, "networkprofile", "profile", "ssid") or "")
     artifact_type = "srum-network-usage" if bytes_sent or bytes_received else "srum-app-resource-usage"
     risk_flags = [f"suspicious-app:{term}" for term in SUSPICIOUS_COMMAND_TERMS if term.split()[0] in app_id.lower()]
+    validation_checks = {
+        "has_timestamp": bool(timestamp),
+        "has_app_id": bool(app_id),
+        "has_user": bool(user),
+        "has_network_counters": bool(bytes_sent or bytes_received),
+        "has_resource_counters": bool(cpu_time or energy),
+        "counter_fields_normalized": True,
+        "source_tool_export_validation_required": True,
+    }
+    report_grade = execution_report_grade_assessment(
+        execution_validation_matrix(validation_checks),
+        validation_required=False,
+        gap_ids=["#10"],
+        extra_blockers=["source-tool-export-validation-required"],
+    )
     details = {
         "parser": "windows-srum-import",
         "parser_version": PARSER_VERSION,
@@ -472,6 +731,13 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
         "srum_table_family": "network-usage" if artifact_type == "srum-network-usage" else "app-resource",
         "parser_confidence": 0.82,
         "evidence_strength": "application-resource-usage-indicator",
+        "validation_required": False,
+        "validation_checks": validation_checks,
+        "execution_validation_matrix": execution_validation_matrix(validation_checks),
+        "execution_report_grade_assessment": report_grade,
+        "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": report_grade["blockers"],
         "risk_flags": risk_flags,
         "risk_score": min(100, len(risk_flags) * 20),
         "raw": dict(row),
@@ -486,10 +752,28 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
     )
 
 
+def srum_candidate_risk_flags(prefix: str, value: str) -> list[str]:
+    lowered = value.lower()
+    return [
+        f"{prefix}:{term}"
+        for term in SUSPICIOUS_COMMAND_TERMS
+        if term in lowered or (" " not in term and term.split()[0] in lowered)
+    ]
+
+
 def build_execution_summary(root: Path, records: Iterable[ArtifactRecord]) -> ArtifactRecord | None:
     groups: dict[str, dict[str, object]] = {}
+    report_grade_status_counts: dict[str, int] = {}
     for record in records:
         details = record.details
+        assessment = (
+            details.get("execution_report_grade_assessment")
+            if isinstance(details.get("execution_report_grade_assessment"), Mapping)
+            else {}
+        )
+        if assessment:
+            status = str(assessment.get("status") or "unknown")
+            report_grade_status_counts[status] = report_grade_status_counts.get(status, 0) + 1
         key = execution_group_key(record.artifact_type, details)
         if not key:
             continue
@@ -506,6 +790,8 @@ def build_execution_summary(root: Path, records: Iterable[ArtifactRecord]) -> Ar
                 "risk_flags": set(),
                 "source_paths": set(),
                 "command_line_samples": [],
+                "validation_required_count": 0,
+                "correlation_targets": set(),
             },
         )
         group["signal_count"] = int(group["signal_count"]) + 1
@@ -520,6 +806,11 @@ def build_execution_summary(root: Path, records: Iterable[ArtifactRecord]) -> Ar
             cast_set(group["source_paths"]).add(str(details["source_path"]))
         for flag in details.get("risk_flags", []):
             cast_set(group["risk_flags"]).add(str(flag))
+        if details.get("validation_required"):
+            group["validation_required_count"] = int(group["validation_required_count"]) + 1
+        checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+        for target in checks.get("correlation_targets", []) if isinstance(checks.get("correlation_targets"), list) else []:
+            cast_set(group["correlation_targets"]).add(str(target))
         command_line = str(details.get("command_line") or "")
         samples = group["command_line_samples"]
         if command_line and isinstance(samples, list) and command_line not in samples and len(samples) < 3:
@@ -542,6 +833,9 @@ def build_execution_summary(root: Path, records: Iterable[ArtifactRecord]) -> Ar
             "source_path": str(root.resolve()),
             "group_count": len(normalized_groups),
             "groups": normalized_groups,
+            "native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
+            "report_grade_status_counts": counter_items_from_mapping(report_grade_status_counts),
+            "report_grade_blockers": EXECUTION_REPORT_GRADE_BLOCKERS,
             "reporting_note": "Summary groups execution-related signals; review each source artifact before concluding proof of execution.",
         },
     )
@@ -568,6 +862,8 @@ def execution_artifact_metadata(artifact_type: str, key: str, values: Mapping[st
             "validation_required": True,
             "validation_guidance": "Amcache indicates program presence/install/execution-related metadata depending on source fields; validate timestamps and hashes with a dedicated parser.",
             "execution_caveat": "Amcache is not always direct proof of execution.",
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": ["native-amcache-schema-decoding-required", "timestamp-semantic-validation-required"],
         }
     if artifact_type == "shimcache-entry":
         return {
@@ -576,6 +872,8 @@ def execution_artifact_metadata(artifact_type: str, key: str, values: Mapping[st
             "validation_required": True,
             "validation_guidance": "ShimCache/AppCompatCache is useful for program presence/order and sometimes timestamps, but it is not direct proof of execution.",
             "execution_caveat": "Presence in ShimCache is not proof the executable ran.",
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": ["native-appcompatcache-layout-decoding-required", "os-version-specific-validation-required"],
         }
     if artifact_type == "bam-entry":
         return {
@@ -584,8 +882,170 @@ def execution_artifact_metadata(artifact_type: str, key: str, values: Mapping[st
             "validation_required": False,
             "validation_guidance": "BAM/DAM values commonly indicate recent execution by user SID; correlate with Prefetch, SRUM, UserAssist, and event logs.",
             "execution_caveat": "BAM/DAM should be correlated with other execution artifacts for final conclusions.",
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": ["native-system-hive-bam-decoding-required", "broad-windows-version-validation-required"],
         }
     return {"artifact_family": artifact_type, "parser_confidence": 0.74, "validation_required": False}
+
+
+def extract_execution_fields(artifact_type: str, key: str, values: Mapping[str, str]) -> dict[str, object]:
+    lowered = {normalize_key(name): value for name, value in values.items()}
+    if artifact_type == "amcache-entry":
+        return {
+            "executable_path": str(first_value(lowered, "path", "fullpath", "filepath", "filename") or ""),
+            "program_name": str(first_value(lowered, "name", "programname", "filename") or display_name_for_execution_key(key)),
+            "publisher": str(first_value(lowered, "publisher", "companyname", "company") or ""),
+            "sha1": first_hash_value(values, 40),
+            "file_description": str(first_value(lowered, "filedescription", "description") or ""),
+            "product_name": str(first_value(lowered, "productname", "product") or ""),
+        }
+    if artifact_type == "shimcache-entry":
+        return {
+            "executable_path": extract_executable_path(key, values),
+            "program_name": display_name_for_execution_key(extract_executable_path(key, values) or key),
+            "publisher": "",
+            "sha1": "",
+            "file_description": "",
+            "product_name": "",
+        }
+    return {"executable_path": extract_executable_path(key, values)}
+
+
+def first_hash_value(values: Mapping[str, str], length: int) -> str:
+    for name, value in values.items():
+        haystack = f"{name} {value}"
+        match = re.search(rf"(?i)\b[0-9a-f]{{{length}}}\b", haystack)
+        if match:
+            return match.group(0).lower()
+    return ""
+
+
+def execution_validation_checks(
+    artifact_type: str,
+    executable_path: str,
+    timestamp: str,
+    values: Mapping[str, str],
+) -> dict[str, object]:
+    return {
+        "artifact_type": artifact_type,
+        "has_executable_path": bool(executable_path),
+        "has_timestamp": bool(timestamp),
+        "has_hash": bool(first_hash_value(values, 40)),
+        "source_value_count": len(values),
+        "requires_correlation": artifact_type in {"amcache-entry", "shimcache-entry"},
+        "correlation_targets": execution_correlation_targets(artifact_type),
+    }
+
+
+def execution_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, object]]:
+    labels = {
+        "has_executable_path": ("Executable path", "high"),
+        "has_timestamp": ("Timestamp", "high"),
+        "has_hash": ("Hash", "medium"),
+        "has_hash_candidates": ("Hash candidates", "medium"),
+        "has_path_candidates": ("Path candidates", "medium"),
+        "has_sha1_candidates": ("SHA1 candidates", "medium"),
+        "has_app_id": ("Application ID", "high"),
+        "has_user": ("User", "medium"),
+        "has_user_or_sid": ("User or SID", "medium"),
+        "has_network_counters": ("Network counters", "high"),
+        "has_resource_counters": ("Resource counters", "medium"),
+        "has_counter_candidates": ("Counter candidates", "high"),
+        "has_timestamp_candidate": ("Timestamp candidate", "high"),
+        "has_url": ("URL", "medium"),
+        "has_path_pivots": ("Path pivots", "medium"),
+        "has_url_pivots": ("URL pivots", "medium"),
+        "ese_header_readable": ("ESE header readable", "critical"),
+        "ese_signature_valid": ("ESE signature valid", "critical"),
+        "native_srudb_page_size_plausible": ("SRUDB page size plausible", "high"),
+        "native_srudb_file_size_page_aligned": ("SRUDB file size page aligned", "medium"),
+        "has_native_srum_table_candidates": ("Native SRUM table candidates", "medium"),
+        "has_native_srum_row_candidates": ("Native SRUM row candidates", "medium"),
+        "row_level_decoding_available": ("Row-level decoding", "critical"),
+        "native_table_catalog_decoding_available": ("Native table catalog decoding", "critical"),
+        "native_schema_decoding_available": ("Native schema decoding", "critical"),
+        "counter_fields_normalized": ("Counter fields normalized", "medium"),
+        "requires_correlation": ("Correlation required", "high"),
+        "requires_second_parser_validation": ("Second parser validation", "high"),
+        "requires_srum_parser": ("SRUM parser validation", "critical"),
+        "source_tool_export_validation_required": ("Source tool export validation", "high"),
+    }
+    matrix: list[dict[str, object]] = []
+    for key, value in checks.items():
+        if key in {"artifact_type", "source_value_count", "correlation_targets"} or key.endswith("_count"):
+            continue
+        label, severity = labels.get(key, (key.replace("_", " "), "medium"))
+        negative_requirement = key.startswith("requires_") or key.endswith("_required")
+        passed = bool(value)
+        if negative_requirement:
+            passed = not bool(value)
+        matrix.append(
+            {
+                "id": key.replace("_", "-"),
+                "label": label,
+                "passed": passed,
+                "severity": severity,
+                "detail": value,
+            }
+        )
+    return matrix
+
+
+def execution_report_grade_assessment(
+    validation_matrix: list[dict[str, object]],
+    *,
+    validation_required: bool,
+    gap_ids: list[str],
+    extra_blockers: list[str],
+) -> dict[str, object]:
+    failed = [str(item.get("id")) for item in validation_matrix if not item.get("passed")]
+    blockers = set(EXECUTION_REPORT_GRADE_BLOCKERS)
+    blockers.update(f"validation-check-failed:{item}" for item in failed)
+    blockers.update(extra_blockers)
+    if validation_required:
+        blockers.add("execution-artifact-validation-required")
+    return {
+        "report_grade_ready": False,
+        "status": "validation-required" if failed else "triage-validated-report-grade-blocked",
+        "blockers": sorted(blockers),
+        "validated_strengths": [str(item.get("id")) for item in validation_matrix if item.get("passed")],
+        "commercial_gap_ids": gap_ids,
+        "next_validation_step": (
+            "Correlate execution signals with Prefetch, SRUM, BAM/DAM, Amcache, ShimCache, Event Logs, and "
+            "known-answer parser output before making report-grade execution conclusions."
+        ),
+    }
+
+
+def execution_gap_ids(artifact_type: str) -> list[str]:
+    if artifact_type == "amcache-entry":
+        return ["#7"]
+    if artifact_type == "shimcache-entry":
+        return ["#8"]
+    if artifact_type == "bam-entry":
+        return ["#9"]
+    if artifact_type.startswith("srum-"):
+        return ["#10"]
+    return ["#7", "#8", "#9", "#10"]
+
+
+def counter_items_from_mapping(values: Mapping[str, int]) -> list[dict[str, object]]:
+    return [
+        {"value": key, "count": int(count)}
+        for key, count in sorted(values.items(), key=lambda item: (-int(item[1]), str(item[0])))
+    ]
+
+
+def execution_correlation_targets(artifact_type: str) -> list[str]:
+    if artifact_type == "bam-entry":
+        return ["Prefetch", "SRUM", "UserAssist", "EventLog 4688/Sysmon 1"]
+    if artifact_type == "shimcache-entry":
+        return ["Amcache", "Prefetch", "BAM/DAM", "MFT"]
+    if artifact_type == "amcache-entry":
+        return ["ShimCache", "Prefetch", "BAM/DAM", "SRUM"]
+    if artifact_type == "userassist-entry":
+        return ["Prefetch", "BAM/DAM", "ShellBags", "Recent Files"]
+    return []
 
 
 def execution_risk_flags(artifact_type: str, executable_path: str, values: Mapping[str, str]) -> list[str]:
@@ -677,6 +1137,8 @@ def normalize_execution_group(group: Mapping[str, object]) -> dict[str, object]:
         "risk_flags": sorted(cast_set(group["risk_flags"])),
         "source_paths": sorted(cast_set(group["source_paths"])),
         "command_line_samples": list(group.get("command_line_samples", [])),
+        "validation_required_count": group.get("validation_required_count", 0),
+        "correlation_targets": sorted(cast_set(group.get("correlation_targets"))),
     }
 
 
@@ -826,14 +1288,24 @@ def unique_preserve_order(values: Iterable[str]) -> Iterable[str]:
         yield cleaned
 
 
-def extract_timestamp(values: Mapping[str, str]) -> str:
+def extract_execution_timestamp(artifact_type: str, values: Mapping[str, str]) -> tuple[str, str]:
     for name, value in values.items():
-        if "time" not in name.lower() and "last" not in name.lower():
+        lowered_name = name.lower()
+        if artifact_type == "bam-entry" and looks_like_executable_path(name):
+            parsed = parse_timestamp_value(value)
+            if parsed:
+                return parsed, "bam_value_filetime"
+        if "time" not in lowered_name and "last" not in lowered_name and "date" not in lowered_name:
             continue
         parsed = parse_timestamp_value(value)
         if parsed:
-            return parsed
-    return ""
+            return parsed, lowered_name
+    return "", ""
+
+
+def extract_timestamp(values: Mapping[str, str]) -> str:
+    timestamp, _ = extract_execution_timestamp("", values)
+    return timestamp
 
 
 def parse_timestamp_value(value: str) -> str:

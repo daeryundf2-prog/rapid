@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import csv
 import ipaddress
 import json
 import re
@@ -17,6 +18,19 @@ HASH_RE = re.compile(r"\b(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\b")
 MAX_SCALAR_LENGTH = 4096
 DEFAULT_MAX_INDICATORS = 1000
 DEFAULT_MAX_SOURCES_PER_INDICATOR = 10
+IOC_TI_GAP_ID = "#63"
+INDICATOR_NATIVE_CAPABILITIES = {
+    "url_domain_ip_hash_extraction": True,
+    "local_rule_matching": True,
+    "offline_ti_feed_enrichment": True,
+    "external_ti_api_calls": False,
+    "malware_sandbox_enrichment": False,
+}
+IOC_TI_REPORT_GRADE_BLOCKERS = [
+    "local-ti-feed-quality-and-timestamp-must-be-documented",
+    "indicator-presence-is-a-pivot-not-proof-of-malicious-activity",
+    "external-ti-api-enrichment-is-disabled-in-local-only-core",
+]
 
 
 class IndicatorSummaryError(ValueError):
@@ -27,6 +41,7 @@ def build_indicator_summary(
     run_output: Path | Mapping[str, object],
     *,
     rule_set: RuleSet | None = None,
+    ti_feeds: Sequence[Path] | None = None,
     max_indicators: int = DEFAULT_MAX_INDICATORS,
     max_sources_per_indicator: int = DEFAULT_MAX_SOURCES_PER_INDICATOR,
 ) -> dict[str, object]:
@@ -55,7 +70,11 @@ def build_indicator_summary(
                 max_sources_per_indicator=max_sources_per_indicator,
             )
 
-    indicators = [finalize_indicator(record, rule_set=rule_set) for record in accumulator.values()]
+    enrichment, ti_feed_sources = load_ti_feeds(ti_feeds or [])
+    indicators = [
+        finalize_indicator(record, rule_set=rule_set, enrichment=enrichment)
+        for record in accumulator.values()
+    ]
     indicators.sort(key=lambda item: (-int(item["count"]), str(item["type"]), str(item["value"])))
     if max_indicators:
         indicators = indicators[:max_indicators]
@@ -70,6 +89,7 @@ def build_indicator_summary(
             "max_indicators": max_indicators,
             "max_sources_per_indicator": max_sources_per_indicator,
             "rule_set": rule_set.path if rule_set else "",
+            "ti_feeds": [str(path) for path in (ti_feeds or [])],
         },
         "summary": {
             "indicator_count": len(indicators),
@@ -77,7 +97,14 @@ def build_indicator_summary(
             "source_output_counts": dict(source_counts),
             "matched_rule_counts": dict(rule_counts),
             "matched_indicator_count": sum(1 for item in indicators if item.get("matched_rules")),
+            "enriched_indicator_count": sum(1 for item in indicators if item.get("ti_enrichment")),
+            "ti_feed_count": len(ti_feed_sources),
+            "commercial_gap_ids": [IOC_TI_GAP_ID],
+            "commercial_grade_ready": False,
         },
+        "ti_feed_sources": ti_feed_sources,
+        "indicator_native_capabilities": dict(INDICATOR_NATIVE_CAPABILITIES),
+        "ti_enrichment_assessment": ti_enrichment_assessment(ti_feed_sources=ti_feed_sources),
         "indicators": indicators,
     }
 
@@ -198,7 +225,12 @@ def add_indicator(
             sources.append(compact_source)
 
 
-def finalize_indicator(record: Mapping[str, object], *, rule_set: RuleSet | None) -> dict[str, object]:
+def finalize_indicator(
+    record: Mapping[str, object],
+    *,
+    rule_set: RuleSet | None,
+    enrichment: Mapping[tuple[str, str], Mapping[str, object]] | None = None,
+) -> dict[str, object]:
     indicator = {
         "type": str(record.get("type", "")),
         "value": str(record.get("value", "")),
@@ -206,11 +238,172 @@ def finalize_indicator(record: Mapping[str, object], *, rule_set: RuleSet | None
         "classification": classify_indicator(str(record.get("type", "")), str(record.get("value", ""))),
         "risk_flags": indicator_risk_flags(str(record.get("type", "")), str(record.get("value", ""))),
         "sources": list(record.get("sources", [])) if isinstance(record.get("sources"), list) else [],
+        "commercial_gap_ids": [IOC_TI_GAP_ID],
+        "ready_for_court_report": False,
     }
     matched_rules = match_indicator_rules(indicator, rule_set)
     if matched_rules:
         indicator["matched_rules"] = matched_rules
+    enrichment_hit = lookup_ti_enrichment(indicator, enrichment or {})
+    if enrichment_hit:
+        indicator["ti_enrichment"] = dict(enrichment_hit)
+        indicator["risk_flags"] = sorted(set(indicator["risk_flags"]) | {"ti-enriched"})
     return indicator
+
+
+def load_ti_feeds(paths: Sequence[Path]) -> tuple[dict[tuple[str, str], dict[str, object]], list[dict[str, object]]]:
+    feeds: dict[tuple[str, str], dict[str, object]] = {}
+    sources: list[dict[str, object]] = []
+    for path in paths:
+        resolved = path.expanduser().resolve()
+        if not resolved.is_file():
+            raise IndicatorSummaryError(f"TI feed not found: {resolved}")
+        if resolved.suffix.lower() == ".json":
+            rows, metadata = read_ti_json_with_metadata(resolved)
+        elif resolved.suffix.lower() == ".csv":
+            rows = read_ti_csv(resolved)
+            metadata = {}
+        else:
+            rows = read_ti_text(resolved)
+            metadata = {}
+        feed_source = {
+            "path": str(resolved),
+            "format": resolved.suffix.lower().lstrip(".") or "text",
+            "name": str(metadata.get("name") or metadata.get("source") or resolved.name),
+            "version": str(metadata.get("version") or ""),
+            "indicator_count": 0,
+            "local_only": True,
+            "commercial_gap_ids": [IOC_TI_GAP_ID],
+            "validation_status": "analyst-feed-provenance-review-required",
+        }
+        for row in rows:
+            raw_value = str(row.get("value") or "")
+            indicator_type = normalize_feed_type(str(row.get("type") or raw_value))
+            value = normalize_feed_value(indicator_type, raw_value)
+            if not value:
+                continue
+            feed_source["indicator_count"] = int(feed_source["indicator_count"]) + 1
+            feeds[(indicator_type, value)] = {
+                "type": indicator_type,
+                "value": value,
+                "severity": str(row.get("severity") or row.get("risk") or "").strip(),
+                "classification": str(row.get("classification") or row.get("label") or "").strip(),
+                "source": str(row.get("source") or feed_source["name"]).strip(),
+                "feed_name": str(feed_source["name"]),
+                "feed_version": str(feed_source["version"]),
+                "feed_path": str(resolved),
+                "note": str(row.get("note") or row.get("description") or "").strip(),
+                "commercial_gap_ids": [IOC_TI_GAP_ID],
+                "validation_status": "analyst-feed-provenance-review-required",
+            }
+        sources.append(feed_source)
+    return feeds, sources
+
+
+def read_ti_json(path: Path) -> list[dict[str, object]]:
+    rows, _metadata = read_ti_json_with_metadata(path)
+    return rows
+
+
+def read_ti_json_with_metadata(path: Path) -> tuple[list[dict[str, object]], dict[str, object]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise IndicatorSummaryError(f"invalid TI feed JSON: {path}") from exc
+    if isinstance(payload, list):
+        return [dict(item) for item in payload if isinstance(item, Mapping)], {}
+    if isinstance(payload, Mapping):
+        metadata = {}
+        raw_metadata = payload.get("feed") or payload.get("plugin") or payload.get("metadata")
+        if isinstance(raw_metadata, Mapping):
+            metadata = dict(raw_metadata)
+        if isinstance(payload.get("indicators"), list):
+            return [dict(item) for item in payload["indicators"] if isinstance(item, Mapping)], metadata
+        return [
+            {"value": key, **dict(value)}
+            for key, value in payload.items()
+            if isinstance(value, Mapping) and key not in {"feed", "plugin", "metadata"}
+        ], metadata
+    raise IndicatorSummaryError(f"TI feed JSON must be a list or object: {path}")
+
+
+def read_ti_csv(path: Path) -> list[dict[str, object]]:
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return [dict(row) for row in csv.DictReader(handle)]
+
+
+def read_ti_text(path: Path) -> list[dict[str, object]]:
+    rows = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        value = line.strip()
+        if not value or value.startswith("#"):
+            continue
+        rows.append({"value": value, "source": path.name})
+    return rows
+
+
+def lookup_ti_enrichment(
+    indicator: Mapping[str, object],
+    enrichment: Mapping[tuple[str, str], Mapping[str, object]],
+) -> Mapping[str, object] | None:
+    indicator_type = str(indicator.get("type") or "")
+    value = str(indicator.get("value") or "")
+    keys = [(indicator_type, normalize_feed_value(indicator_type, value), "exact")]
+    if indicator_type == "url":
+        host = urlparse(value).hostname
+        if host:
+            keys.append(("domain", host.lower(), "url-host-domain"))
+    for feed_type, feed_value, matched_on in keys:
+        key = (feed_type, feed_value)
+        if key in enrichment:
+            return {**dict(enrichment[key]), "matched_on": matched_on}
+    return None
+
+
+def ti_enrichment_assessment(*, ti_feed_sources: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    return {
+        "component": "ioc-ti-enrichment-plugin",
+        "status": "offline-feed-enabled" if ti_feed_sources else "available-no-feed-loaded",
+        "commercial_gap_ids": [IOC_TI_GAP_ID],
+        "feed_count": len(ti_feed_sources),
+        "ready_for_court_report": False,
+        "blockers": list(IOC_TI_REPORT_GRADE_BLOCKERS),
+        "recommended_validation": [
+            "Preserve local TI feed files with name/version/path and explain why they were trusted.",
+            "Treat enrichment as a triage label until corroborated by source evidence, timestamps, and network context.",
+        ],
+    }
+
+
+def normalize_feed_type(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized in {"ipv4", "ip-address", "address"}:
+        return "ip"
+    if normalized in {"hostname", "host", "fqdn"}:
+        return "domain"
+    if normalized in {"uri"}:
+        return "url"
+    if normalized in {"md5", "sha1", "sha256", "url", "domain", "ip"}:
+        return normalized
+    text = value.strip()
+    if URL_RE.search(text):
+        return "url"
+    if valid_ipv4(text):
+        return "ip"
+    if HASH_RE.fullmatch(text):
+        return hash_type(text)
+    return "domain"
+
+
+def normalize_feed_value(indicator_type: str, value: str) -> str:
+    text = value.strip()
+    if indicator_type == "url":
+        return normalize_url(text)
+    if indicator_type == "domain":
+        return text.lower().strip(".")
+    if indicator_type in {"md5", "sha1", "sha256"}:
+        return text.lower()
+    return text
 
 
 def classify_indicator(indicator_type: str, value: str) -> str:

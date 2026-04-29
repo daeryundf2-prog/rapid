@@ -9,9 +9,10 @@ import email
 import hashlib
 import sqlite3
 import datetime as dt
+import wave
 from email import policy
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence
 from urllib.parse import quote
 from xml.etree import ElementTree as ET
 
@@ -27,10 +28,13 @@ from ..core.case_catalog import CaseCatalog, CaseCatalogError, default_case_cata
 from ..core.case_report import build_case_report_markdown, case_report_export_paths, write_case_report_exports
 from ..core.case_db import CaseDatabaseError, open_case_database
 from ..core.collect_plan import CollectPlanError, build_collect_plan, supported_collect_profiles
+from ..core.crash import write_crash_report
 from ..core.docs import SUPPORTED_DOC_EXTS, extract_text
 from ..core.doctor import run_doctor
+from ..core.enterprise import build_enterprise_policy
 from ..core.evidence import identify_evidence, supported_evidence_formats
 from ..core.jobs import RunJobStore, RunRequest, default_job_store, is_relative_to, run_output_dir
+from ..core.keyword_packs import KeywordPackError, keyword_pack_library_assessment, list_keyword_packs, resolve_keyword_packs
 from ..core.run import RunModeError
 from ..core.sample_case import DEFAULT_SAMPLE_MODE, SampleCaseError, run_sample_workflow
 from ..core.search import SearchError, run_unified_search
@@ -47,7 +51,22 @@ JSON_PREVIEW_ITEM_LIMIT = 50
 XML_PREVIEW_NODE_LIMIT = 80
 EMAIL_PREVIEW_MESSAGE_LIMIT = 10
 EMAIL_BODY_PREVIEW_CHARS = 4000
+HEX_PREVIEW_MAX_BYTES = 4096
+HEX_PREVIEW_ROW_WIDTH = 16
+MEDIA_TRANSCRIPT_PREVIEW_CHARS = 8000
+MEDIA_TRANSCRIPT_SUFFIXES = (".srt", ".vtt", ".txt", ".transcript.txt", ".ocr.txt")
 SOURCE_VIEWER_VERSION = "2"
+VIEWER_WORKFLOW_GAP_IDS = {
+    "review": "#51",
+    "compare": "#52",
+    "hex": "#53",
+    "sqlite": "#54",
+    "email": "#55",
+    "gallery": "#56",
+    "media": "#57",
+    "ocr_queue": "#58",
+    "korean_ocr": "#59",
+}
 
 
 class RunCreateRequest(BaseModel):
@@ -61,6 +80,7 @@ class RunCreateRequest(BaseModel):
     max_extract_size_bytes: int = 0
     max_file_count: int = 0
     overwrite: bool = False
+    resume: bool = False
     wait: bool = False
 
 
@@ -129,6 +149,7 @@ class CaseDbSearchRequest(BaseModel):
     review_status: Optional[str] = None
     verification_status: Optional[str] = None
     save_as: Optional[str] = None
+    keyword_packs: Optional[list[str]] = None
 
 
 class CaseDbReviewRequest(BaseModel):
@@ -141,6 +162,9 @@ class CaseDbReviewRequest(BaseModel):
     tags: Optional[list[str]] = None
     note: str = ""
     reviewer: str = ""
+    assignee: str = ""
+    priority: str = "normal"
+    due_at: str = ""
     include_in_report: bool = False
 
 
@@ -153,6 +177,9 @@ class CaseDbReviewBatchRequest(BaseModel):
     tags: Optional[list[str]] = None
     note: str = ""
     reviewer: str = ""
+    assignee: str = ""
+    priority: str = "normal"
+    due_at: str = ""
     include_in_report: bool = False
 
 
@@ -208,11 +235,29 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
 
     @api.middleware("http")
     async def require_auth_token(request: Request, call_next):
-        if expected_token and request.url.path.startswith("/api"):
-            supplied = request.headers.get("X-RapidTriage-Token") or request.query_params.get("token")
-            if supplied != expected_token:
-                return JSONResponse(status_code=401, content={"detail": "missing or invalid RapidTriage auth token"})
-        return await call_next(request)
+        try:
+            if expected_token and request.url.path.startswith("/api"):
+                supplied = request.headers.get("X-RapidTriage-Token") or request.query_params.get("token")
+                if supplied != expected_token:
+                    return JSONResponse(status_code=401, content={"detail": "missing or invalid RapidTriage auth token"})
+            return await call_next(request)
+        except Exception as exc:
+            report = write_crash_report(
+                exc,
+                context={
+                    "component": "web-api",
+                    "method": request.method,
+                    "path": request.url.path,
+                },
+            )
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "detail": "internal RapidTriage error; local crash report written",
+                    "crash_id": report["crash_id"],
+                    "crash_report": report["path"],
+                },
+            )
 
     @api.get("/api/health")
     def health() -> Dict[str, str]:
@@ -221,6 +266,10 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     @api.get("/api/doctor")
     def doctor() -> Dict[str, object]:
         return run_doctor(include_port_check=False)
+
+    @api.get("/api/enterprise/policy")
+    def enterprise_policy() -> Dict[str, object]:
+        return build_enterprise_policy()
 
     @api.get("/api/evidence/formats")
     def evidence_formats() -> Dict[str, object]:
@@ -241,6 +290,14 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     @api.get("/api/collect/profiles")
     def collect_profiles() -> Dict[str, object]:
         return {"profiles": list(supported_collect_profiles())}
+
+    @api.get("/api/keyword-packs")
+    def keyword_packs() -> Dict[str, object]:
+        return {
+            "command": "keyword-packs",
+            "packs": list_keyword_packs(),
+            "keyword_pack_library_assessment": keyword_pack_library_assessment(),
+        }
 
     @api.post("/api/collect/plan")
     def collect_plan(request: CollectPlanRequest) -> Dict[str, object]:
@@ -314,10 +371,11 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     @api.post("/api/case-db/search")
     def search_case_db(request: CaseDbSearchRequest) -> Dict[str, object]:
         try:
+            keywords = resolve_keyword_packs(request.keywords, pack_names=request.keyword_packs)
             database = open_case_database(Path(request.database))
             payload = database.search_case(
                 case_id=request.case_id,
-                keywords=request.keywords,
+                keywords=keywords,
                 limit=request.limit,
                 sources=request.sources,
                 review_status=request.review_status,
@@ -327,7 +385,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 payload["saved_search"] = database.save_search(
                     case_id=request.case_id,
                     name=request.save_as,
-                    keywords=request.keywords,
+                    keywords=keywords,
                     limit=request.limit,
                     sources=request.sources,
                     review_status=request.review_status,
@@ -335,7 +393,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                     created_by="web-ui",
                 )
             return payload
-        except CaseDatabaseError as exc:
+        except (CaseDatabaseError, KeywordPackError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.post("/api/case-db/review")
@@ -351,6 +409,9 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 tags=request.tags or [],
                 note=request.note,
                 reviewer=request.reviewer,
+                assignee=request.assignee,
+                priority=request.priority,
+                due_at=request.due_at,
                 include_in_report=request.include_in_report,
             )
         except CaseDatabaseError as exc:
@@ -368,6 +429,9 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 tags=request.tags or [],
                 note=request.note,
                 reviewer=request.reviewer,
+                assignee=request.assignee,
+                priority=request.priority,
+                due_at=request.due_at,
                 include_in_report=request.include_in_report,
             )
         except CaseDatabaseError as exc:
@@ -453,6 +517,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             max_extract_size_bytes=request.max_extract_size_bytes,
             max_file_count=request.max_file_count,
             overwrite=request.overwrite,
+            resume=request.resume,
         )
         job = store.run_sync(run_request) if request.wait else store.submit(run_request)
         return job.to_dict(include_summary=request.wait)
@@ -479,6 +544,22 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             store.remove(run_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="run not found")
+
+    @api.post("/api/runs/{run_id}/cancel")
+    def cancel_run(run_id: str) -> Dict[str, Any]:
+        try:
+            return store.cancel(run_id).to_dict(include_summary=True)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="run not found")
+
+    @api.post("/api/runs/{run_id}/retry", status_code=202)
+    def retry_run(run_id: str) -> Dict[str, Any]:
+        try:
+            return store.retry(run_id).to_dict(include_summary=True)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="run not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
 
     @api.get("/api/runs/{run_id}/summary")
     def get_run_summary(run_id: str) -> Dict[str, object]:
@@ -542,24 +623,27 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         run_id: str,
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
+        cursor: Optional[str] = Query(default=None),
     ) -> Dict[str, object]:
         payload = get_named_output(store, run_id, "timeline")
-        return paginate_payload(payload, "events", offset=offset, limit=limit)
+        return paginate_payload(payload, "events", offset=offset, limit=limit, cursor=cursor)
 
     @api.get("/api/runs/{run_id}/indicators")
     def get_run_indicators(
         run_id: str,
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
+        cursor: Optional[str] = Query(default=None),
     ) -> Dict[str, object]:
         payload = get_named_output(store, run_id, "indicators")
-        return paginate_payload(payload, "indicators", offset=offset, limit=limit)
+        return paginate_payload(payload, "indicators", offset=offset, limit=limit, cursor=cursor)
 
     @api.get("/api/runs/{run_id}/artifacts")
     def get_run_artifacts(
         run_id: str,
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
+        cursor: Optional[str] = Query(default=None),
     ) -> Dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
@@ -577,6 +661,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                         "artifacts",
                         offset=offset,
                         limit=limit,
+                        cursor=cursor,
                     )
                 except RuntimeError as exc:
                     raise HTTPException(status_code=409, detail=str(exc))
@@ -591,18 +676,20 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         run_id: str,
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
+        cursor: Optional[str] = Query(default=None),
     ) -> Dict[str, object]:
         payload = get_named_output(store, run_id, "files")
-        return paginate_payload(payload, "candidates", offset=offset, limit=limit)
+        return paginate_payload(payload, "candidates", offset=offset, limit=limit, cursor=cursor)
 
     @api.get("/api/runs/{run_id}/docs")
     def get_run_docs(
         run_id: str,
         offset: int = Query(0, ge=0),
         limit: int = Query(0, ge=0, le=1000),
+        cursor: Optional[str] = Query(default=None),
     ) -> Dict[str, object]:
         payload = get_named_output(store, run_id, "docs")
-        return paginate_payload(payload, "results", offset=offset, limit=limit, omit_fields=("candidates", "manifest"))
+        return paginate_payload(payload, "results", offset=offset, limit=limit, cursor=cursor, omit_fields=("candidates", "manifest"))
 
     @api.get("/api/runs/{run_id}/search")
     def search_run(
@@ -613,21 +700,31 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         source: list[str] = Query(default=[]),
         extension: list[str] = Query(default=[]),
         path_contains: Optional[str] = Query(default=None),
+        analysis: bool = True,
+        search_mode: str = Query("exact", pattern="^(exact|fuzzy|regex)$"),
+        fuzzy_distance: int = Query(1, ge=0, le=2),
+        proximity_window: int = Query(0, ge=0, le=100),
+        keyword_pack: list[str] = Query(default=[]),
     ) -> Dict[str, object]:
         job = get_job(store, run_id)
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
         try:
+            keywords = resolve_keyword_packs(keyword, pack_names=keyword_pack)
             return run_unified_search(
                 job.summary,
-                keyword,
+                keywords,
                 include_ocr=ocr,
                 limit=limit,
                 sources=source,
                 extensions=extension,
                 path_contains=path_contains,
+                include_analysis=analysis,
+                search_mode=search_mode,
+                fuzzy_distance=fuzzy_distance,
+                proximity_window=proximity_window,
             )
-        except SearchError as exc:
+        except (SearchError, KeywordPackError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
     @api.get("/api/runs/{run_id}/source-metadata")
@@ -859,10 +956,13 @@ def paginate_payload(
     *,
     offset: int,
     limit: int,
+    cursor: str | None = None,
     omit_fields: tuple[str, ...] = (),
 ) -> Dict[str, object]:
     if limit <= 0:
         return payload
+    if cursor:
+        offset = decode_pagination_cursor(cursor)
     rows = payload.get(collection_name)
     if not isinstance(rows, list):
         rows = []
@@ -883,9 +983,28 @@ def paginate_payload(
         "total": total,
         "next_offset": end if end < total else None,
         "previous_offset": max(0, offset - limit) if offset > 0 else None,
+        "cursor": encode_pagination_cursor(offset),
+        "next_cursor": encode_pagination_cursor(end) if end < total else None,
+        "previous_cursor": encode_pagination_cursor(max(0, offset - limit)) if offset > 0 else None,
         "has_more": end < total,
     }
     return page
+
+
+def encode_pagination_cursor(offset: int) -> str:
+    return f"offset:{max(0, int(offset))}"
+
+
+def decode_pagination_cursor(cursor: str) -> int:
+    text = str(cursor or "").strip()
+    if not text:
+        return 0
+    if text.startswith("offset:"):
+        text = text.split(":", 1)[1]
+    try:
+        return max(0, int(text))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid pagination cursor")
 
 
 def get_output_path(store: RunJobStore, run_id: str, output_name: str) -> Path:
@@ -1085,6 +1204,9 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         "search_url": f"/api/runs/{run_id}/source-search?path={quoted_path}",
         "viewer_actions": source_viewer_actions(run_id, source_path),
         "viewer_limitations": source_viewer_limitations(source_path, suffix=suffix, mime_type=mime_type, max_chars=max_chars),
+        "viewer_sandbox": source_viewer_sandbox(source_path, suffix=suffix, mime_type=mime_type, max_chars=max_chars),
+        "review_workflow": source_review_workflow_metadata(),
+        "compare_workflow": source_compare_workflow_metadata(),
         "preview_type": "binary",
         "text": "",
         "truncated": False,
@@ -1098,9 +1220,7 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         },
     }
     if mime_type.startswith("image/"):
-        payload["preview_type"] = "image"
-        payload["image_url"] = payload["download_url"]
-        payload["message"] = "Image preview is available."
+        payload.update(build_image_preview(source_path, image_url=str(payload["download_url"])))
         return payload
     if is_sqlite_candidate(source_path, suffix):
         payload.update(build_sqlite_preview(source_path))
@@ -1114,6 +1234,9 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
     if suffix in {".eml", ".mbox"}:
         payload.update(build_email_preview(source_path, suffix))
         return payload
+    if mime_type.startswith(("audio/", "video/")):
+        payload.update(build_media_preview(source_path, mime_type=mime_type))
+        return payload
 
     text = ""
     if suffix in SUPPORTED_DOC_EXTS:
@@ -1122,7 +1245,7 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         except Exception as exc:
             payload["message"] = f"Text extraction failed: {exc}"
             return payload
-    elif stat.st_size <= 2_000_000:
+    elif stat.st_size <= 2_000_000 and not is_probably_binary(source_path):
         try:
             text = source_path.read_text(encoding="utf-8", errors="ignore")
         except UnicodeError as exc:
@@ -1142,6 +1265,8 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
             "parser_version": SOURCE_VIEWER_VERSION,
             "max_chars": max_chars,
         }
+        return payload
+    payload.update(build_hex_preview(source_path))
     return payload
 
 
@@ -1171,10 +1296,12 @@ def source_viewer_actions(run_id: str, source_path: Path) -> list[dict[str, obje
         },
         {
             "id": "pin-compare",
-            "label": "Pin for A/B compare",
+            "label": "Pin for A/B/C compare",
             "url": None,
-            "purpose": "Keep this file available while opening another result for side-by-side review.",
+            "purpose": "Keep this file available while opening one or two more results for side-by-side review.",
             "heavy": False,
+            "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["compare"]],
+            "max_pinned_items": 3,
         },
         {
             "id": "save-review",
@@ -1182,8 +1309,67 @@ def source_viewer_actions(run_id: str, source_path: Path) -> list[dict[str, obje
             "url": None,
             "purpose": "Mark the result as relevant, rejected, needs-review, and optionally include it in reports.",
             "heavy": False,
+            "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["review"]],
+            "status_fields": ["status", "verification_status", "reviewer", "assignee", "priority", "due_at", "include_in_report"],
         },
     ]
+
+
+def source_review_workflow_metadata() -> dict[str, object]:
+    return {
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["review"]],
+        "status": "implemented-baseline-validation-required",
+        "supports": [
+            "review-status",
+            "verification-status",
+            "reviewer",
+            "assignee",
+            "priority",
+            "due-date",
+            "include-in-report",
+            "immutable-history",
+        ],
+        "ready_for_court_report": False,
+        "blockers": [
+            "single-user-local-workflow-until-role-based-case-server-is-enabled",
+            "review-decisions-still-require-source-hash-and-parser-limitation-verification",
+        ],
+    }
+
+
+def source_compare_workflow_metadata() -> dict[str, object]:
+    return {
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["compare"]],
+        "status": "implemented-baseline-validation-required",
+        "supports": ["a-b-compare", "a-b-c-baseline-compare", "hash-compare", "bounded-text-diff", "report-pivot"],
+        "ready_for_court_report": False,
+        "blockers": [
+            "binary-structure-aware-diff-not-implemented",
+            "visual-diff-and-table-aware-diff-require-dedicated-viewers",
+        ],
+    }
+
+
+def source_viewer_sandbox(source_path: Path, *, suffix: str, mime_type: str, max_chars: int) -> dict[str, object]:
+    active_content = suffix in {".html", ".htm", ".svg", ".js", ".vbs", ".hta"} or mime_type in {
+        "text/html",
+        "image/svg+xml",
+        "application/javascript",
+    }
+    return {
+        "mode": "read-only-bounded-preview",
+        "executes_content": False,
+        "active_content_blocked": active_content,
+        "path_redaction": "display-basename-in-summary-use-full-path-only-for-authorized-source-actions",
+        "max_inline_text_chars": max_chars,
+        "max_structured_preview_bytes": STRUCTURED_PREVIEW_MAX_BYTES,
+        "max_hex_preview_bytes": HEX_PREVIEW_MAX_BYTES,
+        "external_network_access": False,
+        "notes": [
+            "Preview routes never execute scripts, macros, HTML, SVG, or embedded active content.",
+            "Use source metadata/hash actions for verification before report inclusion.",
+        ],
+    }
 
 
 def source_viewer_limitations(source_path: Path, *, suffix: str, mime_type: str, max_chars: int) -> list[str]:
@@ -1202,6 +1388,19 @@ def source_viewer_limitations(source_path: Path, *, suffix: str, mime_type: str,
     return limitations
 
 
+def is_probably_binary(source_path: Path, *, sample_size: int = 4096) -> bool:
+    try:
+        sample = source_path.read_bytes()[:sample_size]
+    except OSError:
+        return False
+    if not sample:
+        return False
+    if b"\x00" in sample:
+        return True
+    control = sum(1 for byte in sample if byte < 9 or (13 < byte < 32))
+    return control / len(sample) > 0.08
+
+
 def is_sqlite_candidate(path: Path, suffix: str | None = None) -> bool:
     normalized_suffix = suffix if suffix is not None else path.suffix.lower()
     if normalized_suffix not in SQLITE_PREVIEW_EXTS:
@@ -1217,6 +1416,7 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
     try:
         with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
+            database_metadata = sqlite_database_metadata(connection, source_path)
             tables = list_sqlite_tables(connection)
             previews = [preview_sqlite_table(connection, table) for table in tables[:SQLITE_PREVIEW_TABLE_LIMIT]]
     except sqlite3.DatabaseError as exc:
@@ -1236,14 +1436,34 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
             "parser_version": SOURCE_VIEWER_VERSION,
             "table_limit": SQLITE_PREVIEW_TABLE_LIMIT,
             "row_limit": SQLITE_PREVIEW_ROW_LIMIT,
+            "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["sqlite"]],
         },
         "sqlite": {
             "table_count": len(tables),
+            "database_metadata": database_metadata,
             "tables": previews,
+            "table_profiles": build_sqlite_table_profiles(previews),
             "table_limit": SQLITE_PREVIEW_TABLE_LIMIT,
             "row_limit": SQLITE_PREVIEW_ROW_LIMIT,
             "column_limit": SQLITE_PREVIEW_COLUMN_LIMIT,
             "truncated": len(tables) > SQLITE_PREVIEW_TABLE_LIMIT,
+            "sqlite_viewer_assessment": source_viewer_component_assessment(
+                VIEWER_WORKFLOW_GAP_IDS["sqlite"],
+                "sqlite-table-viewer",
+                [
+                    "large-table-pagination-beyond-preview-limit-required",
+                    "foreign-key-relationship-graph-not-yet-rendered",
+                    "wal/journal-replay-and-deleted-row-recovery-not-implemented-in-viewer",
+                ],
+            ),
+            "review_features": [
+                "read-only-uri-open",
+                "schema-sql",
+                "column-type-and-pk-details",
+                "bounded-row-preview",
+                "text-column-keyword-search",
+                "table-profile-summary",
+            ],
         },
     }
 
@@ -1407,6 +1627,8 @@ def build_email_preview(source_path: Path, suffix: str) -> Dict[str, object]:
             "email": {"error": str(exc)},
         }
     summaries = [summarize_email_message(message, index) for index, message in enumerate(messages, start=1)]
+    threads = build_email_threads(summaries)
+    conversation = build_email_conversation_viewer(summaries, threads)
     text = "\n\n".join(item["body_preview"] for item in summaries if item.get("body_preview"))
     return {
         "preview_type": "email",
@@ -1418,9 +1640,331 @@ def build_email_preview(source_path: Path, suffix: str) -> Dict[str, object]:
             "message_count": len(summaries),
             "message_limit": EMAIL_PREVIEW_MESSAGE_LIMIT,
             "messages": summaries,
+            "threads": threads,
+            "conversation_view": conversation,
+            "thread_count": len(threads),
             "truncated": len(messages) >= EMAIL_PREVIEW_MESSAGE_LIMIT,
+            "email_conversation_viewer_assessment": source_viewer_component_assessment(
+                VIEWER_WORKFLOW_GAP_IDS["email"],
+                "email-conversation-viewer",
+                [
+                    "pst-ost-native-folder-flag-deleted-item-threading-not-implemented-in-viewer",
+                    "conversation-threading-is-header-based-and-needs-mailbox-known-answer-validation",
+                    "attachment-body-rendering-is-bounded-and-inventory-oriented",
+                ],
+            ),
         },
     }
+
+
+def build_hex_preview(source_path: Path) -> Dict[str, object]:
+    try:
+        with source_path.open("rb") as handle:
+            data = handle.read(HEX_PREVIEW_MAX_BYTES + 1)
+    except OSError as exc:
+        return {
+            "preview_type": "binary",
+            "message": f"Hex preview failed: {exc}",
+            "viewer_metadata": structured_viewer_metadata("binary", "hex-preview-failed", "parse-failed"),
+            "hex": {"error": str(exc)},
+        }
+    preview = data[:HEX_PREVIEW_MAX_BYTES]
+    preview_hashes = compute_hashes_for_bytes(preview)
+    rows = []
+    for offset in range(0, len(preview), HEX_PREVIEW_ROW_WIDTH):
+        chunk = preview[offset : offset + HEX_PREVIEW_ROW_WIDTH]
+        rows.append(
+            {
+                "offset": offset,
+                "offset_hex": f"0x{offset:08x}",
+                "hex": " ".join(f"{byte:02x}" for byte in chunk),
+                "ascii": "".join(chr(byte) if 32 <= byte < 127 else "." for byte in chunk),
+            }
+        )
+    return {
+        "preview_type": "hex",
+        "message": "Bounded hex preview is available.",
+        "text": "",
+        "truncated": len(data) > HEX_PREVIEW_MAX_BYTES,
+        "viewer_metadata": {
+            "source_format": source_path.suffix.lower().lstrip(".") or "binary",
+            "strategy": "bounded-hex-preview",
+            "preview_status": "available",
+            "parser": "rapidtriage.source-viewer.hex",
+            "parser_version": SOURCE_VIEWER_VERSION,
+            "max_bytes": HEX_PREVIEW_MAX_BYTES,
+            "row_width": HEX_PREVIEW_ROW_WIDTH,
+            "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["hex"]],
+        },
+        "hex": {
+            "offset_base": 0,
+            "bytes_read": len(preview),
+            "max_bytes": HEX_PREVIEW_MAX_BYTES,
+            "row_width": HEX_PREVIEW_ROW_WIDTH,
+            "preview_sha256": preview_hashes["sha256"],
+            "source_hash_status": "available-on-demand-via-source-metadata",
+            "first_offset_hex": "0x00000000" if preview else "",
+            "last_offset_hex": f"0x{max(len(preview) - 1, 0):08x}" if preview else "",
+            "offset_navigation": {
+                "unit": "byte",
+                "base": "hex",
+                "supports_keyword_byte_hits": True,
+                "supports_source_hash_verification": True,
+            },
+            "rows": rows,
+            "truncated": len(data) > HEX_PREVIEW_MAX_BYTES,
+            "safety": "read-only bounded preview; use source hashes before reporting byte offsets",
+            "hex_viewer_assessment": source_viewer_component_assessment(
+                VIEWER_WORKFLOW_GAP_IDS["hex"],
+                "raw-source-hex-viewer",
+                [
+                    "hex-viewer-is-bounded-preview-not-full-disk-editor",
+                    "sector/partition-aware-navigation-not-implemented",
+                    "file-format-structure-decoding-requires-specialized-parser",
+                ],
+            ),
+        },
+    }
+
+
+def build_image_preview(source_path: Path, *, image_url: str) -> Dict[str, object]:
+    try:
+        from ..artifacts.media import build_image_record
+
+        artifact = build_image_record(source_path)
+        details = artifact.details
+        thumbnail = details.get("thumbnail_preview") if isinstance(details.get("thumbnail_preview"), dict) else {}
+        image_payload = {
+            "decoded": bool(details.get("decoded")),
+            "width": details.get("width"),
+            "height": details.get("height"),
+            "channel_count": details.get("channel_count"),
+            "hashes": details.get("hashes") if isinstance(details.get("hashes"), dict) else {},
+            "perceptual_hash": str(details.get("perceptual_hash") or ""),
+            "similarity_bucket": str(details.get("similarity_bucket") or ""),
+            "visual_classification": details.get("visual_classification") if isinstance(details.get("visual_classification"), dict) else {},
+            "thumbnail_preview": thumbnail,
+            "ocr_plan": details.get("ocr_plan") if isinstance(details.get("ocr_plan"), dict) else {},
+            "translation_plan": details.get("translation_plan") if isinstance(details.get("translation_plan"), dict) else {},
+            "ocr_sidecar": details.get("ocr_sidecar") if isinstance(details.get("ocr_sidecar"), dict) else {},
+            "translation_sidecar": details.get("translation_sidecar") if isinstance(details.get("translation_sidecar"), dict) else {},
+            "gallery_review": {
+                "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["gallery"]],
+                "tag_suggestions": image_tag_suggestions(details),
+                "report_selection_hint": "Use review marks to include the image after verifying source hashes and context.",
+                "similarity_bucket_key": str(details.get("similarity_bucket") or ""),
+                "compare_ready": bool(details.get("perceptual_hash")),
+            },
+            "gallery_review_assessment": image_gallery_review_assessment(details),
+            "ocr_queue_assessment": details.get("ocr_queue_assessment") if isinstance(details.get("ocr_queue_assessment"), dict) else {},
+            "korean_ocr_translation_workflow": details.get("korean_ocr_translation_workflow") if isinstance(details.get("korean_ocr_translation_workflow"), dict) else {},
+        }
+    except Exception as exc:
+        image_payload = {
+            "decoded": False,
+            "error": str(exc),
+            "hashes": {},
+            "gallery_review": {
+                "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["gallery"]],
+                "tag_suggestions": ["image-review-needed"],
+                "report_selection_hint": "Open the authoritative image and compute hashes before report use.",
+                "similarity_bucket_key": "",
+                "compare_ready": False,
+            },
+            "gallery_review_assessment": image_gallery_review_assessment({}),
+        }
+    return {
+        "preview_type": "image",
+        "image_url": image_url,
+        "message": "Image preview and gallery review metadata are available.",
+        "viewer_metadata": {
+            "source_format": source_path.suffix.lower().lstrip(".") or "image",
+            "strategy": "image-gallery-preview",
+            "preview_status": "available" if image_payload.get("decoded") else "metadata-only",
+            "parser": "rapidtriage.source-viewer.image-gallery",
+            "parser_version": SOURCE_VIEWER_VERSION,
+            "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["gallery"], VIEWER_WORKFLOW_GAP_IDS["ocr_queue"], VIEWER_WORKFLOW_GAP_IDS["korean_ocr"]],
+        },
+        "image": image_payload,
+    }
+
+
+def image_gallery_review_assessment(details: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "component": "image-gallery-review-mode",
+        "status": "implemented-baseline-validation-required",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["gallery"]],
+        "ready_for_court_report": False,
+        "supports": [
+            "thumbnail-preview",
+            "similarity-bucket",
+            "ocr-sidecar-status",
+            "translation-sidecar-status",
+            "report-selection-hint",
+        ],
+        "blockers": [
+            "dedicated-large-gallery-virtualization-and-bulk-tagging-remain-limited",
+            "similarity-is-perceptual-hash-bucket-not-ml-validated",
+            "deepfake-and-sensitive-media-classification-not-implemented",
+        ],
+        "source_perceptual_hash_present": bool(details.get("perceptual_hash")),
+    }
+
+
+def image_tag_suggestions(details: Mapping[str, object]) -> list[str]:
+    tags = ["image"]
+    classification = details.get("visual_classification") if isinstance(details.get("visual_classification"), Mapping) else {}
+    label = str(classification.get("label") or "")
+    if label:
+        tags.append(label)
+    if details.get("ocr_sidecar"):
+        tags.append("ocr-sidecar")
+    if details.get("similarity_bucket"):
+        tags.append("similarity-bucketed")
+    if not details.get("decoded"):
+        tags.append("decode-warning")
+    return tags
+
+
+def build_media_preview(source_path: Path, *, mime_type: str) -> Dict[str, object]:
+    sidecars = collect_media_transcript_sidecars(source_path)
+    metadata: dict[str, object] = {
+        "duration_seconds": None,
+        "audio_channels": None,
+        "sample_rate": None,
+        "frame_count": None,
+    }
+    if source_path.suffix.lower() == ".wav":
+        metadata.update(read_wav_metadata(source_path))
+    transcript_text = "\n\n".join(str(item.get("preview") or "") for item in sidecars)
+    return {
+        "preview_type": "media",
+        "message": "Media metadata preview is available.",
+        "text": transcript_text[:20000],
+        "truncated": any(bool(item.get("truncated")) for item in sidecars),
+        "viewer_metadata": {
+            "source_format": source_path.suffix.lower().lstrip(".") or mime_type,
+            "strategy": "bounded-media-metadata",
+            "preview_status": "available",
+            "parser": "rapidtriage.source-viewer.media",
+            "parser_version": SOURCE_VIEWER_VERSION,
+            "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["media"]],
+        },
+        "media": {
+            "mime_type": mime_type,
+            "metadata": metadata,
+            "source_hashes": compute_hashes(source_path) if source_path.stat().st_size <= 128 * 1024 * 1024 else {},
+            "review": {
+                "playback_sandbox": "not-played-or-transcoded-inline",
+                "transcript_alignment": "sidecar-cue-based" if any(item.get("cues") for item in sidecars) else "not-available",
+                "report_selection_hint": "Cite transcript cue timestamps only after verifying them against the original media.",
+                "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["media"]],
+                "transcript_sidecar_verification_required": True,
+                "cue_navigation_available": any(item.get("cues") for item in sidecars),
+            },
+            "transcript_sidecar_count": len(sidecars),
+            "transcript_sidecars": sidecars,
+            "media_transcript_assessment": media_transcript_assessment(sidecars=sidecars),
+            "limitations": [
+                "Media playback/transcoding is not performed by the local viewer.",
+                "Transcript sidecars are imported as review aids and must be verified against the original media.",
+            ],
+        },
+    }
+
+
+def media_transcript_assessment(*, sidecars: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "component": "video-audio-preview-and-transcript",
+        "status": "sidecar-transcript-available" if sidecars else "metadata-only",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["media"]],
+        "ready_for_court_report": False,
+        "cue_count": sum(len(item.get("cues") or []) for item in sidecars),
+        "blockers": [
+            "media-playback-and-transcoding-not-performed-inline",
+            "automatic-speech-recognition-not-executed-by-viewer",
+            "transcript-sidecar-alignment-must-be-verified-against-original-media",
+        ],
+    }
+
+
+def collect_media_transcript_sidecars(source_path: Path) -> list[dict[str, object]]:
+    candidates: list[Path] = []
+    for suffix in MEDIA_TRANSCRIPT_SUFFIXES:
+        candidates.append(source_path.with_suffix(source_path.suffix + suffix))
+        candidates.append(source_path.with_suffix(suffix))
+    output = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen or not candidate.is_file():
+            continue
+        seen.add(candidate)
+        try:
+            text = candidate.read_text(encoding="utf-8", errors="replace")
+            stat = candidate.stat()
+        except OSError:
+            continue
+        cues = parse_transcript_cues(text)
+        output.append(
+            {
+                "path": str(candidate),
+                "name": candidate.name,
+                "size": stat.st_size,
+                "modified_at": dt.datetime.fromtimestamp(stat.st_mtime, tz=dt.timezone.utc).isoformat(),
+                "sha256": compute_hashes(candidate)["sha256"] if stat.st_size <= 20 * 1024 * 1024 else "",
+                "preview": text[:MEDIA_TRANSCRIPT_PREVIEW_CHARS],
+                "cues": cues,
+                "cue_count": len(cues),
+                "truncated": len(text) > MEDIA_TRANSCRIPT_PREVIEW_CHARS,
+                "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["media"]],
+                "validation_status": "sidecar-review-required",
+                "report_use": "review-aid-until-verified-against-original-media",
+            }
+        )
+    return output
+
+
+def parse_transcript_cues(text: str, *, limit: int = 20) -> list[dict[str, object]]:
+    cues: list[dict[str, object]] = []
+    lines = [line.strip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    index = 0
+    while index < len(lines) and len(cues) < limit:
+        line = lines[index]
+        if "-->" not in line:
+            index += 1
+            continue
+        start, end = [part.strip() for part in line.split("-->", 1)]
+        cue_lines: list[str] = []
+        index += 1
+        while index < len(lines) and lines[index]:
+            cue_lines.append(lines[index])
+            index += 1
+        text_value = " ".join(cue_lines).strip()
+        cues.append(
+            {
+                "start": start,
+                "end": end,
+                "text": text_value[:500],
+                "text_sha256": hashlib.sha256(text_value.encode("utf-8", errors="replace")).hexdigest() if text_value else "",
+            }
+        )
+        index += 1
+    return cues
+
+
+def read_wav_metadata(source_path: Path) -> dict[str, object]:
+    try:
+        with wave.open(str(source_path), "rb") as wav_file:
+            frames = wav_file.getnframes()
+            rate = wav_file.getframerate()
+            return {
+                "duration_seconds": round(frames / rate, 3) if rate else None,
+                "audio_channels": wav_file.getnchannels(),
+                "sample_rate": rate,
+                "frame_count": frames,
+            }
+    except (OSError, wave.Error):
+        return {}
 
 
 def parse_mbox_messages(source_path: Path) -> list[email.message.EmailMessage]:
@@ -1460,11 +2004,114 @@ def summarize_email_message(message: email.message.EmailMessage, index: int) -> 
         "cc": str(message.get("cc") or ""),
         "date": str(message.get("date") or ""),
         "message_id": str(message.get("message-id") or ""),
+        "in_reply_to": str(message.get("in-reply-to") or ""),
+        "references": str(message.get("references") or ""),
         "attachments": attachments[:20],
         "attachment_count": len(attachments),
         "body_preview": body[:EMAIL_BODY_PREVIEW_CHARS],
         "body_truncated": len(body) > EMAIL_BODY_PREVIEW_CHARS,
     }
+
+
+def build_email_threads(messages: list[dict[str, object]]) -> list[dict[str, object]]:
+    buckets: dict[str, list[dict[str, object]]] = {}
+    for message in messages:
+        buckets.setdefault(email_thread_key(message), []).append(message)
+    threads = []
+    for key, rows in sorted(buckets.items(), key=lambda item: (thread_sort_date(item[1]), item[0])):
+        threads.append(
+            {
+                "thread_id": hashlib.sha256(key.encode("utf-8")).hexdigest()[:16],
+                "subject": rows[0].get("subject") or "(no subject)",
+                "message_count": len(rows),
+                "participants": sorted(
+                    {
+                        value
+                        for row in rows
+                        for value in (
+                            str(row.get("from") or ""),
+                            str(row.get("to") or ""),
+                            str(row.get("cc") or ""),
+                        )
+                        if value
+                    }
+                )[:20],
+                "message_indices": [int(row["index"]) for row in rows if isinstance(row.get("index"), int)],
+                "first_date": rows[0].get("date") or "",
+                "last_date": rows[-1].get("date") or "",
+                "attachment_count": sum(int(row.get("attachment_count") or 0) for row in rows),
+            }
+        )
+    return threads
+
+
+def build_email_conversation_viewer(
+    messages: list[dict[str, object]],
+    threads: list[dict[str, object]],
+) -> dict[str, object]:
+    message_by_index = {int(message["index"]): message for message in messages if isinstance(message.get("index"), int)}
+    thread_rows = []
+    for thread in threads:
+        indices = [int(index) for index in thread.get("message_indices", []) if isinstance(index, int)]
+        rows = [message_by_index[index] for index in indices if index in message_by_index]
+        thread_rows.append(
+            {
+                "thread_id": thread.get("thread_id"),
+                "subject": thread.get("subject"),
+                "message_count": len(rows),
+                "participants": thread.get("participants", []),
+                "first_date": thread.get("first_date", ""),
+                "last_date": thread.get("last_date", ""),
+                "attachment_count": thread.get("attachment_count", 0),
+                "message_order": [
+                    {
+                        "index": row.get("index"),
+                        "date": row.get("date", ""),
+                        "from": row.get("from", ""),
+                        "to": row.get("to", ""),
+                        "subject": row.get("subject", ""),
+                        "message_id": row.get("message_id", ""),
+                        "reply_to": row.get("in_reply_to", ""),
+                    }
+                    for row in rows
+                ],
+                "validation_checks": {
+                    "message_id_present": all(bool(row.get("message_id")) for row in rows) if rows else False,
+                    "reply_headers_present": any(bool(row.get("in_reply_to") or row.get("references")) for row in rows),
+                    "body_preview_present": any(bool(row.get("body_preview")) for row in rows),
+                    "attachment_inventory_present": any(int(row.get("attachment_count") or 0) > 0 for row in rows),
+                    "mailbox_known_answer_validated": False,
+                },
+            }
+        )
+    return {
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["email"]],
+        "thread_count": len(thread_rows),
+        "threads": thread_rows,
+        "review_hint": "Review thread order, participants, attachments, and source message headers before reporting email conversation conclusions.",
+    }
+
+
+def email_thread_key(message: Mapping[str, object]) -> str:
+    references = str(message.get("references") or "").strip()
+    in_reply_to = str(message.get("in_reply_to") or "").strip()
+    if references:
+        return references.split()[0]
+    if in_reply_to:
+        return in_reply_to
+    subject = re.sub(r"^(re|fw|fwd):\s*", "", str(message.get("subject") or ""), flags=re.IGNORECASE).strip().lower()
+    participants = "|".join(
+        sorted(
+            value.lower()
+            for value in (str(message.get("from") or ""), str(message.get("to") or ""))
+            if value
+        )
+    )
+    return f"{subject}|{participants}"
+
+
+def thread_sort_date(messages: list[dict[str, object]]) -> str:
+    return str(messages[0].get("date") or "") if messages else ""
 
 
 def structured_viewer_metadata(source_format: str, strategy: str, status: str) -> dict[str, object]:
@@ -1474,6 +2121,20 @@ def structured_viewer_metadata(source_format: str, strategy: str, status: str) -
         "preview_status": status,
         "parser": f"rapidtriage.source-viewer.{source_format}",
         "parser_version": SOURCE_VIEWER_VERSION,
+    }
+
+
+def source_viewer_component_assessment(gap_id: str, component: str, blockers: list[str]) -> dict[str, object]:
+    return {
+        "component": component,
+        "status": "implemented-baseline-validation-required",
+        "commercial_gap_ids": [gap_id],
+        "ready_for_court_report": False,
+        "blockers": blockers,
+        "recommended_validation": [
+            "Verify the preview against the authoritative source file and source hashes before report inclusion.",
+            "Use specialized validated tooling for artifact-specific conclusions beyond this bounded viewer.",
+        ],
     }
 
 
@@ -1498,11 +2159,73 @@ def list_sqlite_tables(connection: sqlite3.Connection) -> list[str]:
     return [str(row["name"]) for row in rows]
 
 
+def sqlite_database_metadata(connection: sqlite3.Connection, source_path: Path) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "path": str(source_path),
+        "journal_mode": "",
+        "user_version": None,
+        "schema_version": None,
+        "page_size": None,
+        "page_count": None,
+        "freelist_count": None,
+        "encoding": "",
+        "database_list": [],
+    }
+    pragma_names = {
+        "journal_mode": "journal_mode",
+        "user_version": "user_version",
+        "schema_version": "schema_version",
+        "page_size": "page_size",
+        "page_count": "page_count",
+        "freelist_count": "freelist_count",
+        "encoding": "encoding",
+    }
+    for key, pragma in pragma_names.items():
+        try:
+            row = connection.execute(f"PRAGMA {pragma}").fetchone()
+        except sqlite3.DatabaseError:
+            row = None
+        if row is not None:
+            metadata[key] = row[0]
+    try:
+        database_rows = connection.execute("PRAGMA database_list").fetchall()
+        metadata["database_list"] = [
+            {"sequence": row[0], "name": str(row[1]), "file": str(row[2] or "")}
+            for row in database_rows
+        ]
+    except sqlite3.DatabaseError:
+        metadata["database_list"] = []
+    return metadata
+
+
 def preview_sqlite_table(connection: sqlite3.Connection, table: str) -> dict[str, object]:
     quoted = quote_sqlite_identifier(table)
-    columns = [
-        str(row["name"])
-        for row in connection.execute(f"PRAGMA table_info({quoted})").fetchall()
+    column_rows = connection.execute(f"PRAGMA table_info({quoted})").fetchall()
+    column_details = [
+        {
+            "cid": optional_int_for_api(row["cid"]),
+            "name": str(row["name"]),
+            "type": str(row["type"] or ""),
+            "notnull": bool(row["notnull"]),
+            "default_value": sqlite_preview_value(row["dflt_value"]),
+            "primary_key_position": optional_int_for_api(row["pk"]) or 0,
+        }
+        for row in column_rows
+    ]
+    columns = [str(column["name"]) for column in column_details]
+    schema_row = connection.execute(
+        "SELECT type, sql FROM sqlite_master WHERE name = ? ORDER BY type LIMIT 1",
+        (table,),
+    ).fetchone()
+    index_rows = connection.execute(f"PRAGMA index_list({quoted})").fetchall()
+    indexes = [
+        {
+            "name": str(row["name"]),
+            "unique": bool(row["unique"]),
+            "origin": str(row["origin"] or ""),
+            "partial": bool(row["partial"]) if "partial" in row.keys() else False,
+        }
+        for row in index_rows[:8]
     ]
     count = None
     try:
@@ -1523,16 +2246,71 @@ def preview_sqlite_table(connection: sqlite3.Connection, table: str) -> dict[str
     return {
         "name": table,
         "columns": selected_columns,
+        "column_details": column_details[:SQLITE_PREVIEW_COLUMN_LIMIT],
         "column_count": len(columns),
         "row_count": count,
         "rows": rows,
+        "schema_sql": str(schema_row["sql"] or "") if schema_row is not None else "",
+        "object_type": str(schema_row["type"] or "table") if schema_row is not None else "table",
+        "indexes": indexes,
+        "primary_key_columns": [
+            str(column["name"])
+            for column in sorted(column_details, key=lambda item: int(item["primary_key_position"]))
+            if int(column["primary_key_position"]) > 0
+        ],
         "truncated_columns": len(columns) > SQLITE_PREVIEW_COLUMN_LIMIT,
         "truncated_rows": bool(count is not None and count > SQLITE_PREVIEW_ROW_LIMIT),
+        "truncated_indexes": len(index_rows) > 8,
     }
+
+
+def build_sqlite_table_profiles(previews: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    profiles: list[dict[str, object]] = []
+    for table in previews:
+        column_details = table.get("column_details") if isinstance(table.get("column_details"), list) else []
+        text_columns = [
+            str(column.get("name"))
+            for column in column_details
+            if isinstance(column, Mapping) and str(column.get("type") or "").upper() in {"", "TEXT", "VARCHAR", "CHAR", "CLOB"}
+        ]
+        blob_columns = [
+            str(column.get("name"))
+            for column in column_details
+            if isinstance(column, Mapping) and "BLOB" in str(column.get("type") or "").upper()
+        ]
+        timestamp_candidates = [
+            str(column.get("name"))
+            for column in column_details
+            if isinstance(column, Mapping) and any(token in str(column.get("name") or "").lower() for token in ("time", "date", "created", "modified"))
+        ]
+        profiles.append(
+            {
+                "name": str(table.get("name") or ""),
+                "object_type": str(table.get("object_type") or "table"),
+                "row_count": table.get("row_count"),
+                "column_count": table.get("column_count"),
+                "primary_key_columns": list(table.get("primary_key_columns") or []),
+                "text_columns": text_columns[:20],
+                "blob_columns": blob_columns[:20],
+                "timestamp_column_candidates": timestamp_candidates[:20],
+                "searchable_text_column_count": len(text_columns),
+                "has_indexes": bool(table.get("indexes")),
+                "truncated_rows": bool(table.get("truncated_rows")),
+                "review_hint": "Use source-search for table text hits, then verify row/column values against the original SQLite file.",
+            }
+        )
+    return profiles
 
 
 def quote_sqlite_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
+
+
+def optional_int_for_api(value: object) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def sqlite_preview_value(value: object, *, max_length: int = 240) -> object:
@@ -1617,6 +2395,13 @@ def build_source_search(
         except Exception as exc:
             searchable = False
             message = f"Text extraction failed: {exc}"
+    elif stat.st_size <= max_plain_text_bytes and is_probably_binary(source_path):
+        try:
+            matches, truncated = search_binary_file(source_path, normalized, limit=limit, context=context)
+            message = "Binary/hex byte search completed."
+        except OSError as exc:
+            searchable = False
+            message = f"Binary search failed: {exc}"
     elif stat.st_size <= max_plain_text_bytes:
         try:
             matches, truncated = search_plain_text_file(source_path, normalized, limit=limit, context=context)
@@ -1679,6 +2464,9 @@ def source_search_locator(match: dict[str, object]) -> dict[str, object]:
     for key in ("table", "column", "row_number"):
         if key in match:
             locator[key] = match[key]
+    for key in ("offset_hex", "byte_length"):
+        if key in match:
+            locator[key] = match[key]
     return locator
 
 
@@ -1687,6 +2475,11 @@ def source_search_citation(source_path: Path, match: dict[str, object], locator:
         return (
             f"{source_path.name} table {locator.get('table')} row {locator.get('row_number')} "
             f"column {locator.get('column')} keyword {locator.get('keyword')}"
+        )
+    if locator.get("offset_hex"):
+        return (
+            f"{source_path.name} byte offset {locator.get('offset_hex')} "
+            f"length {locator.get('byte_length')} keyword {locator.get('keyword')}"
         )
     return f"{source_path.name} line {locator.get('line')} offset {locator.get('offset')} keyword {locator.get('keyword')}"
 
@@ -1785,6 +2578,44 @@ def search_plain_text_file(
                         truncated = True
                         return matches, truncated
     return matches, truncated
+
+
+def search_binary_file(
+    source_path: Path,
+    keywords: Sequence[str],
+    *,
+    limit: int,
+    context: int,
+) -> tuple[list[dict[str, object]], bool]:
+    data = source_path.read_bytes()
+    lowered = data.lower()
+    matches: list[dict[str, object]] = []
+    for keyword in keywords:
+        needle = keyword.encode("utf-8", errors="ignore").lower()
+        if not needle:
+            continue
+        start = 0
+        while len(matches) < limit:
+            index = lowered.find(needle, start)
+            if index < 0:
+                break
+            snippet_start = max(0, index - context)
+            snippet_end = min(len(data), index + len(needle) + context)
+            snippet = data[snippet_start:snippet_end]
+            matches.append(
+                {
+                    "keyword": keyword,
+                    "line": f"byte:{index}",
+                    "offset": index,
+                    "offset_hex": f"0x{index:08x}",
+                    "byte_length": len(needle),
+                    "snippet": "".join(chr(byte) if 32 <= byte < 127 else "." for byte in snippet),
+                    "hex_snippet": " ".join(f"{byte:02x}" for byte in snippet[:256]),
+                }
+            )
+            start = index + max(len(needle), 1)
+    matches.sort(key=lambda item: int(item["offset"]))
+    return matches[:limit], len(matches) >= limit
 
 
 def snippet_around(text: str, index: int, length: int, *, context: int) -> str:

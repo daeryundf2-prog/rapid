@@ -29,7 +29,21 @@ def run_artifact_collection(
     except KeyError as exc:
         raise ArtifactCollectionError(str(exc)) from exc
 
-    artifacts = [item.to_dict() for item in collector.collect(input_root.root_path)]
+    parser_errors: list[dict[str, str]] = []
+    collection_status = "completed"
+    try:
+        artifacts = [item.to_dict() for item in collector.collect(input_root.root_path)]
+    except Exception as exc:
+        artifacts = []
+        collection_status = "failed-isolated"
+        parser_errors.append(
+            {
+                "kind": kind,
+                "collector": str(getattr(collector, "name", kind)),
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+            }
+        )
     artifact_type_counts = Counter()
     for artifact in artifacts:
         artifact_type = artifact.get("artifact_type")
@@ -50,7 +64,10 @@ def run_artifact_collection(
         "summary": {
             "artifact_count": len(artifacts),
             "artifact_type_counts": dict(artifact_type_counts),
+            "parser_error_count": len(parser_errors),
+            "collection_status": collection_status,
         },
+        "parser_errors": parser_errors,
         "artifacts": artifacts,
     }
     if rule_set is not None:

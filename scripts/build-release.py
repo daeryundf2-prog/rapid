@@ -12,6 +12,10 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from rapidtriage.core.commercial_readiness import build_commercial_readiness_report
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build RapidTriage release artifacts")
@@ -43,13 +47,20 @@ def main(argv: list[str] | None = None) -> int:
         add_if_exists(archive, repo / "docs" / "rapidtriage-user-guide.md", "docs/rapidtriage-user-guide.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-known-limitations.md", "docs/rapidtriage-known-limitations.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-parser-coverage.md", "docs/rapidtriage-parser-coverage.md")
+        add_if_exists(
+            archive,
+            repo / "docs" / "rapidtriage-commercial-parity-backlog.md",
+            "docs/rapidtriage-commercial-parity-backlog.md",
+        )
         add_if_exists(archive, repo / "docs" / "rapidtriage-security-policy.md", "docs/rapidtriage-security-policy.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-release-checklist.md", "docs/rapidtriage-release-checklist.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-release-notes-template.md", "docs/rapidtriage-release-notes-template.md")
+        add_if_exists(archive, repo / "docs" / "rapidtriage-support-sla.md", "docs/rapidtriage-support-sla.md")
         add_if_exists(archive, repo / "scripts" / "start-rapidtriage.sh", "scripts/start-rapidtriage.sh")
         add_if_exists(archive, repo / "scripts" / "smoke-test-rapidtriage.sh", "scripts/smoke-test-rapidtriage.sh")
         add_if_exists(archive, repo / "scripts" / "summarize-smoke.py", "scripts/summarize-smoke.py")
         add_if_exists(archive, repo / "scripts" / "verify-release-evidence.py", "scripts/verify-release-evidence.py")
+        add_if_exists(archive, repo / "scripts" / "check-dependencies.py", "scripts/check-dependencies.py")
         add_tree(archive, repo / "scripts" / "windows", "scripts/windows")
         archive.writestr("data/.gitkeep", "")
         archive.writestr("cases/.gitkeep", "")
@@ -57,7 +68,10 @@ def main(argv: list[str] | None = None) -> int:
         archive.writestr("tools/.gitkeep", "")
 
     write_dependency_inventory(output_dir)
-    write_release_manifest(output_dir, repo)
+    commercial_readiness = build_commercial_readiness_report(output_dir=output_dir)
+    write_packaging_plan(output_dir)
+    write_update_manifest(output_dir)
+    write_release_manifest(output_dir, repo, commercial_readiness)
     write_sha256s(output_dir)
 
     print(f"Built portable zip: {portable_zip}")
@@ -108,7 +122,7 @@ def write_sha256s(output_dir: Path) -> None:
     checksum_path.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
 
 
-def write_release_manifest(output_dir: Path, repo: Path) -> None:
+def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: dict[str, object] | None = None) -> None:
     artifacts: list[dict[str, object]] = []
     for path in sorted(output_dir.iterdir()):
         if not path.is_file() or path.name in {"SHA256SUMS", "release-manifest.json"}:
@@ -132,6 +146,38 @@ def write_release_manifest(output_dir: Path, repo: Path) -> None:
             "platform": platform.platform(),
         },
         "artifacts": artifacts,
+        "commercial_readiness": {
+            "status": commercial_readiness.get("status") if commercial_readiness else "not-generated",
+            "commercial_claim_allowed": commercial_readiness.get("commercial_claim_allowed", False)
+            if commercial_readiness
+            else False,
+            "readiness_score": commercial_readiness.get("readiness_score") if commercial_readiness else None,
+            "non_commercial_count": commercial_readiness.get("non_commercial_count") if commercial_readiness else None,
+            "report": "rapidtriage-commercial-readiness.json",
+            "markdown": "rapidtriage-commercial-readiness.md",
+            "release_claim": commercial_readiness.get("release_claim") if commercial_readiness else "",
+        },
+        "package_readiness": {
+            "windows_signed_installer": {
+                "status": "external-required",
+                "required_evidence": ["Authenticode signature", "timestamp authority", "fresh Windows smoke test"],
+            },
+            "macos_notarized_package": {
+                "status": "external-required",
+                "required_evidence": ["codesign verification", "notarization ticket", "Gatekeeper assessment"],
+            },
+            "linux_package": {
+                "status": "packaging-plan-ready",
+                "supported_outputs": ["portable zip", "wheel", "sdist"],
+                "future_outputs": ["deb", "rpm", "AppImage"],
+                "plan": "packaging-plan.json",
+            },
+            "auto_update_channel": {
+                "status": "manifest-generated",
+                "manifest": "update-manifest.json",
+                "enterprise_disable_supported": True,
+            },
+        },
         "required_followup_evidence": [
             "Windows smoke output folder",
             "macOS/Linux smoke output folder",
@@ -141,6 +187,145 @@ def write_release_manifest(output_dir: Path, repo: Path) -> None:
     }
     manifest_path = output_dir / "release-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def write_packaging_plan(output_dir: Path) -> None:
+    plan = {
+        "name": "rapidtriage-packaging-plan",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "local_outputs": {
+            "portable_zip": {
+                "path": "rapidtriage-portable.zip",
+                "status": "generated",
+                "verification": ["SHA256SUMS", "release-manifest.json", "fresh-machine smoke test"],
+            },
+            "python_distribution": {
+                "status": "generated-when-build-enabled",
+                "outputs": ["wheel", "sdist"],
+                "verification": ["pip install smoke test", "dependency-inventory.txt"],
+            },
+            "update_manifest": {
+                "path": "update-manifest.json",
+                "status": "manual-channel-generated",
+                "enterprise_disable": True,
+            },
+        },
+        "platform_packages": {
+            "windows": {
+                "target_outputs": ["msi", "exe"],
+                "current_status": "external-signing-required",
+                "build_steps": [
+                    "Build wheel/sdist and portable ZIP with scripts/build-release.py.",
+                    "Wrap the release payload with the selected Windows installer tool.",
+                    "Sign installer with Authenticode and trusted timestamp authority.",
+                    "Run scripts/windows smoke test on a fresh Windows host.",
+                ],
+                "required_evidence": [
+                    "Get-AuthenticodeSignature output",
+                    "installer SHA256",
+                    "timestamp authority proof",
+                    "fresh Windows smoke folder",
+                ],
+            },
+            "macos": {
+                "target_outputs": ["pkg", "dmg"],
+                "current_status": "external-codesign-notarization-required",
+                "build_steps": [
+                    "Build wheel/sdist and portable ZIP with scripts/build-release.py.",
+                    "Wrap launcher and payload into pkg/dmg with hardened runtime settings where applicable.",
+                    "Codesign package/app and submit for Apple notarization.",
+                    "Run Gatekeeper assessment and macOS smoke test on a fresh host.",
+                ],
+                "required_evidence": [
+                    "codesign --verify output",
+                    "notarytool submission status",
+                    "spctl Gatekeeper assessment",
+                    "fresh macOS smoke folder",
+                ],
+            },
+            "linux": {
+                "target_outputs": ["deb", "rpm", "AppImage"],
+                "current_status": "portable-zip-wheel-ready-package-wrapper-pending",
+                "build_steps": [
+                    "Build wheel/sdist and portable ZIP with scripts/build-release.py.",
+                    "Generate distro package metadata from pyproject and dependency inventory.",
+                    "Build deb/rpm/AppImage in clean containers.",
+                    "Run install/uninstall and web smoke tests on target distributions.",
+                ],
+                "required_evidence": [
+                    "package manager install logs",
+                    "package SHA256",
+                    "dependency resolution log",
+                    "fresh Linux smoke folder",
+                ],
+            },
+        },
+        "release_gates": [
+            "Do not claim signed Windows installer until Authenticode evidence is attached.",
+            "Do not claim notarized macOS package until notary and Gatekeeper evidence is attached.",
+            "Do not claim Linux package support beyond portable ZIP/wheel until deb/rpm/AppImage smoke evidence is attached.",
+            "Do not enable public auto-update until artifacts are hosted, signed, and rollback-tested.",
+        ],
+    }
+    (output_dir / "packaging-plan.json").write_text(json.dumps(plan, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    (output_dir / "packaging-plan.md").write_text(render_packaging_plan_markdown(plan), encoding="utf-8")
+
+
+def render_packaging_plan_markdown(plan: dict[str, object]) -> str:
+    lines = [
+        "# RapidTriage Packaging Plan",
+        "",
+        f"- Generated at: `{plan.get('generated_at', '')}`",
+        "",
+        "## Platform Packages",
+        "",
+    ]
+    platform_packages = plan.get("platform_packages")
+    if isinstance(platform_packages, dict):
+        for name, payload in platform_packages.items():
+            if not isinstance(payload, dict):
+                continue
+            lines.extend(
+                [
+                    f"### {name}",
+                    "",
+                    f"- Status: `{payload.get('current_status', '')}`",
+                    f"- Targets: `{', '.join(payload.get('target_outputs', []))}`",
+                    "- Required evidence:",
+                    *[f"  - {item}" for item in payload.get("required_evidence", [])],
+                    "",
+                ]
+            )
+    lines.extend(["## Release Gates", ""])
+    lines.extend(f"- {item}" for item in plan.get("release_gates", []))
+    return "\n".join(lines) + "\n"
+
+
+def write_update_manifest(output_dir: Path) -> None:
+    artifacts = []
+    for path in sorted(output_dir.iterdir()):
+        if not path.is_file() or path.name in {"SHA256SUMS", "release-manifest.json", "update-manifest.json"}:
+            continue
+        artifacts.append(
+            {
+                "name": path.name,
+                "size_bytes": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "download_url": "",
+                "signature_required": path.suffix.lower() in {".exe", ".msi", ".pkg", ".dmg", ".appimage"},
+            }
+        )
+    manifest = {
+        "name": "rapidtriage-update-manifest",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "channel": "manual",
+        "auto_update_enabled_by_default": False,
+        "enterprise_disable": True,
+        "rollback_guidance": "Keep the previous portable ZIP and SHA256SUMS until the new release smoke tests pass.",
+        "artifacts": artifacts,
+        "signature_policy": "Public distribution requires signed Windows/macOS artifacts; portable ZIP distribution must verify SHA256SUMS.",
+    }
+    (output_dir / "update-manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def verify_sha256s(output_dir: Path) -> int:

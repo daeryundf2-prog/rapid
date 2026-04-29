@@ -1,5 +1,16 @@
 Version=1
 EventType=APPCRASH
 AppName=powershell.exe
+ApplicationPath=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
 FaultModuleName=evil.dll
+FaultModulePath=C:\Users\alice\AppData\Roaming\evil.dll
+ExceptionCode=c0000005
+EventTime=134216390450000000
+ReportIdentifier=11111111-2222-3333-4444-555555555555
 Bucket=123456789
+Sig[0].Name=Application Name
+Sig[0].Value=powershell.exe
+Sig[3].Name=Fault Module Name
+Sig[3].Value=evil.dll
+Sig[6].Name=Exception Code
+Sig[6].Value=c0000005

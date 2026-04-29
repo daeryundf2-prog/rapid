@@ -46,6 +46,7 @@ const RUN_MODE_COLLECTORS = {
   recovery: ["recent files", "OS/account", "event logs", "remote access", "prefetch", "MFT/USN", "macOS"],
 };
 const PAGE_SIZE = 250;
+const VIRTUAL_TABLE_ROW_LIMIT = 300;
 const COMPARE_LIMIT = 6;
 const VIEW_GROUPS = [
   {
@@ -1052,6 +1053,7 @@ function renderSearch(payload = null) {
 
 function renderSearchResults(payload, rows) {
   const summary = payload.summary || {};
+  const visibleRows = virtualizedRows(rows);
   if (!rows.length) {
     const ocrErrors = payload.ocr?.errors || [];
     return `
@@ -1070,10 +1072,12 @@ function renderSearchResults(payload, rows) {
       ${metric("OCR errors", summary.ocr_error_count)}
       ${metric("Keywords", (payload.keywords || []).length)}
     </div>
+    ${renderSearchAnalysis(payload.analysis)}
+    ${renderVirtualizationNotice(rows, visibleRows, "search matches")}
     <table class="data-table">
       <thead><tr><th>Source</th><th>Item</th><th>Keywords</th><th>Preview / Evidence</th><th></th></tr></thead>
       <tbody>
-        ${rows.map((match, index) => `
+        ${visibleRows.map((match, index) => `
           <tr data-filter="${rowText(match)}">
             <td>${escapeHtml(match.source)}<span>${escapeHtml(match.kind || "")}</span></td>
             <td><strong>${escapeHtml(match.title || fileName(match.path))}</strong><span>${escapeHtml(match.path || "")}</span></td>
@@ -1090,6 +1094,76 @@ function renderSearchResults(payload, rows) {
       </tbody>
     </table>
     ${renderOcrErrors(payload.ocr?.errors || [])}
+  `;
+}
+
+function renderSearchAnalysis(analysis) {
+  if (!analysis) return "";
+  const clusters = analysis.clusters?.clusters || [];
+  const entities = analysis.entities?.entities || [];
+  const hypotheses = analysis.workbook?.hypotheses || [];
+  const timelineEvents = analysis.timeline?.events || [];
+  const graphSummary = analysis.graph?.summary || {};
+  return `
+    <section class="analysis-grid" aria-label="Search analysis pivots">
+      <article class="analysis-card">
+        <p class="eyebrow">clusters</p>
+        <h3>Review by repeated patterns</h3>
+        ${clusters.length ? clusters.slice(0, 5).map((cluster) => `
+          <button class="analysis-chip" type="button" data-filter="${escapeHtml(String(cluster.value || ""))}">
+            <strong>${escapeHtml(cluster.label || "Cluster")}</strong>
+            <span>${escapeHtml(cluster.match_count)} hits · ${escapeHtml(cluster.review_hint || "")}</span>
+          </button>
+        `).join("") : '<p class="help-text">No repeated clusters yet.</p>'}
+      </article>
+      <article class="analysis-card">
+        <p class="eyebrow">entities</p>
+        <h3>Pivot people, accounts, URLs</h3>
+        ${entities.length ? entities.slice(0, 8).map((entity) => `
+          <button class="entity-pill" type="button" data-filter="${escapeHtml(entity.value || "")}">
+            ${escapeHtml(entity.type)} · ${escapeHtml(entity.value)} <span>${escapeHtml(entity.count)}</span>
+          </button>
+        `).join("") : '<p class="help-text">No entities extracted from current hits.</p>'}
+      </article>
+      <article class="analysis-card">
+        <p class="eyebrow">workbook</p>
+        <h3>Draft hypotheses</h3>
+        ${hypotheses.length ? hypotheses.slice(0, 4).map((hypothesis) => `
+          <details class="hypothesis-card">
+            <summary>${escapeHtml(hypothesis.title || hypothesis.key || "Hypothesis")}</summary>
+            <p>${escapeHtml(hypothesis.rationale || "")}</p>
+            <span>${escapeHtml((hypothesis.evidence_cluster_ids || []).length)} linked cluster(s)</span>
+          </details>
+        `).join("") : '<p class="help-text">No workbook hypotheses generated.</p>'}
+      </article>
+      <article class="analysis-card">
+        <p class="eyebrow">graph / timeline</p>
+        <h3>Relationship scale</h3>
+        <div class="mini-stat-row">
+          <span>${escapeHtml(graphSummary.node_count || 0)} nodes</span>
+          <span>${escapeHtml(graphSummary.edge_count || 0)} edges</span>
+          <span>${escapeHtml(timelineEvents.length)} timeline anchors</span>
+        </div>
+        ${timelineEvents.length ? `
+          <ol class="timeline-mini">
+            ${timelineEvents.slice(0, 4).map((event) => `
+              <li><b>${escapeHtml(String(event.timestamp || "").slice(0, 19))}</b><span>${escapeHtml(event.title || event.path || "")}</span></li>
+            `).join("")}
+          </ol>
+        ` : '<p class="help-text">No timestamp anchors in current hits.</p>'}
+      </article>
+    </section>
+    ${renderAnalysisLimitations(analysis.limitations || [])}
+  `;
+}
+
+function renderAnalysisLimitations(limitations) {
+  if (!limitations.length) return "";
+  return `
+    <details class="analysis-limitations">
+      <summary>Analysis limits and validation reminders</summary>
+      <ul>${limitations.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+    </details>
   `;
 }
 
@@ -1188,6 +1262,9 @@ function bindSearchForm() {
       form.requestSubmit();
     });
   }
+  for (const button of detailPanel.querySelectorAll(".analysis-chip[data-filter], .entity-pill[data-filter]")) {
+    button.addEventListener("click", () => applyFilter(button.dataset.filter || ""));
+  }
 }
 
 async function loadEvidencePreview(path, reviewContext = null, searchResultIndex = null) {
@@ -1216,7 +1293,7 @@ function renderEvidenceViewer(payload, reviewContext = null) {
   const hashButton = `<button class="icon-action" type="button" data-source-hash-path="${escapeHtml(payload.path)}">Compute hashes</button>`;
   let body = `<p class="empty-state">${escapeHtml(payload.message || "No preview available.")}</p>`;
   if (payload.preview_type === "image") {
-    body = `<img class="viewer-image" src="${escapeHtml(payload.image_url)}" alt="${escapeHtml(payload.name)}" />`;
+    body = renderImagePreview(payload.image || {}, payload);
   }
   if (payload.preview_type === "text") {
     body = `
@@ -1235,6 +1312,12 @@ function renderEvidenceViewer(payload, reviewContext = null) {
   }
   if (payload.preview_type === "email") {
     body = renderEmailPreview(payload.email || {}, payload);
+  }
+  if (payload.preview_type === "hex") {
+    body = renderHexPreview(payload.hex || {}, payload);
+  }
+  if (payload.preview_type === "media") {
+    body = renderMediaPreview(payload.media || {}, payload);
   }
   return `
     <div class="viewer-header">
@@ -1330,14 +1413,16 @@ function renderSqlitePreview(sqlite) {
   if (!tables.length) {
     return `<p class="empty-state">${escapeHtml(sqlite.error || "No user tables were found in this SQLite database.")}</p>`;
   }
+  const metadata = sqlite.database_metadata || {};
   return `
     <section class="sqlite-preview">
       <div class="file-search-summary">
         ${metric("Tables", sqlite.table_count)}
         ${metric("Previewed", tables.length)}
         ${metric("Rows/table", sqlite.row_limit)}
+        ${metric("Page size", metadata.page_size || "n/a")}
       </div>
-      <p class="help-text">SQLite viewer is read-only and capped for performance. Use file search above to find keywords inside text columns.</p>
+      <p class="help-text">SQLite viewer is read-only and capped for performance. It shows schema, indexes, bounded rows, and supports keyword search inside text columns.</p>
       ${tables.map((table) => `
         <article class="viewer-panel sqlite-table-card">
           <div class="viewer-header compact">
@@ -1347,10 +1432,20 @@ function renderSqlitePreview(sqlite) {
             </div>
             <span class="status-pill">${escapeHtml(table.row_count ?? "unknown")} rows</span>
           </div>
+          <p class="help-text">
+            Columns: ${escapeHtml(table.column_count ?? 0)}
+            ${table.primary_key_columns?.length ? ` · PK: ${escapeHtml(table.primary_key_columns.join(", "))}` : ""}
+            ${table.indexes?.length ? ` · Indexes: ${escapeHtml(table.indexes.map((index) => index.name).join(", "))}` : ""}
+          </p>
+          ${table.schema_sql ? `<pre class="code-preview compact">${escapeHtml(table.schema_sql)}</pre>` : ""}
           <div class="table-wrap">
             <table class="data-table">
               <thead>
-                <tr>${(table.columns || []).map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>
+                <tr>${(table.columns || []).map((column) => {
+                  const detail = (table.column_details || []).find((item) => item.name === column) || {};
+                  const typeLabel = detail.type ? `<small>${escapeHtml(detail.type)}</small>` : "";
+                  return `<th>${escapeHtml(column)} ${typeLabel}</th>`;
+                }).join("")}</tr>
               </thead>
               <tbody>
                 ${(table.rows || []).map((row) => `
@@ -1365,6 +1460,31 @@ function renderSqlitePreview(sqlite) {
         </article>
       `).join("")}
       ${sqlite.truncated ? '<p class="help-text">Additional tables are hidden to keep the viewer responsive.</p>' : ""}
+    </section>
+  `;
+}
+
+function renderImagePreview(imagePayload, payload) {
+  const gallery = imagePayload.gallery_review || {};
+  const tags = gallery.tag_suggestions || [];
+  const hashes = imagePayload.hashes || {};
+  return `
+    <section class="structured-preview image-gallery-preview">
+      <div class="file-search-summary">
+        ${metric("Size", imagePayload.width && imagePayload.height ? `${imagePayload.width}x${imagePayload.height}` : "unknown")}
+        ${metric("Bucket", imagePayload.similarity_bucket || "n/a")}
+        ${metric("OCR", imagePayload.ocr_plan?.status || "n/a")}
+        ${metric("Decoded", imagePayload.decoded ? "yes" : "no")}
+      </div>
+      <img class="viewer-image" src="${escapeHtml(payload.image_url)}" alt="${escapeHtml(payload.name)}" />
+      <div class="viewer-meta">
+        ${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}
+      </div>
+      <p class="help-text">Gallery review hint: ${escapeHtml(gallery.report_selection_hint || "Verify hashes and context before report use.")}</p>
+      ${hashes.sha256 ? `<p class="help-text">Source SHA256: ${escapeHtml(hashes.sha256)}</p>` : ""}
+      ${imagePayload.perceptual_hash ? `<p class="help-text">Perceptual hash: ${escapeHtml(imagePayload.perceptual_hash)} · compare-ready: ${gallery.compare_ready ? "yes" : "no"}</p>` : ""}
+      ${imagePayload.ocr_sidecar?.text ? `<details><summary>OCR sidecar excerpt</summary><pre class="viewer-text">${escapeHtml(imagePayload.ocr_sidecar.text)}</pre></details>` : ""}
+      ${imagePayload.translation_sidecar?.text ? `<details><summary>Translation sidecar excerpt</summary><pre class="viewer-text">${escapeHtml(imagePayload.translation_sidecar.text)}</pre></details>` : ""}
     </section>
   `;
 }
@@ -1413,14 +1533,27 @@ function renderXmlPreview(xml, payload) {
 
 function renderEmailPreview(emailPayload, payload) {
   const messages = emailPayload.messages || [];
+  const threads = emailPayload.threads || [];
   return `
     <section class="structured-preview">
       <div class="file-search-summary">
         ${metric("Messages", emailPayload.message_count ?? messages.length)}
+        ${metric("Threads", emailPayload.thread_count ?? threads.length)}
         ${metric("Limit", emailPayload.message_limit ?? "n/a")}
         ${metric("Preview", payload.truncated ? "capped" : "complete")}
       </div>
       <p class="help-text">Email viewer extracts headers, body preview, and attachment names without loading external content.</p>
+      ${threads.length ? `
+        <div class="thread-strip">
+          ${threads.map((thread) => `
+            <article class="thread-card">
+              <strong>${escapeHtml(thread.subject || "(no subject)")}</strong>
+              <span>${escapeHtml(thread.message_count)} msg · ${escapeHtml(thread.attachment_count)} attachment(s)</span>
+              <small>${escapeHtml((thread.participants || []).join(" · "))}</small>
+            </article>
+          `).join("")}
+        </div>
+      ` : ""}
       <div class="dense-list">
         ${messages.map((message) => `
           <article class="dense-row">
@@ -1432,6 +1565,68 @@ function renderEmailPreview(emailPayload, payload) {
         `).join("")}
       </div>
       ${emailPayload.truncated ? '<p class="help-text">Email preview was capped for performance.</p>' : ""}
+    </section>
+  `;
+}
+
+function renderHexPreview(hexPayload, payload) {
+  const rows = hexPayload.rows || [];
+  return `
+    <section class="structured-preview">
+      <div class="file-search-summary">
+        ${metric("Bytes", hexPayload.bytes_read ?? 0)}
+        ${metric("Max", hexPayload.max_bytes ?? "n/a")}
+        ${metric("Rows", rows.length)}
+        ${metric("Range", `${hexPayload.first_offset_hex || "0x0"}-${hexPayload.last_offset_hex || "n/a"}`)}
+      </div>
+      <p class="help-text">Hex viewer is read-only and bounded. Preview SHA256: ${escapeHtml(hexPayload.preview_sha256 || "n/a")}. Use source metadata to compute full-file hashes before reporting byte offsets.</p>
+      <div class="hex-table" role="table" aria-label="Hex preview for ${escapeHtml(payload.name || "source")}">
+        ${rows.map((row) => `
+          <div class="hex-row" role="row">
+            <code class="hex-offset">${escapeHtml(row.offset_hex)}</code>
+            <code class="hex-bytes">${escapeHtml(row.hex)}</code>
+            <code class="hex-ascii">${escapeHtml(row.ascii)}</code>
+          </div>
+        `).join("")}
+      </div>
+      ${hexPayload.truncated ? '<p class="help-text">Hex preview was capped for performance. Open source for full byte review.</p>' : ""}
+    </section>
+  `;
+}
+
+function renderMediaPreview(mediaPayload, payload) {
+  const metadata = mediaPayload.metadata || {};
+  const sidecars = mediaPayload.transcript_sidecars || [];
+  const review = mediaPayload.review || {};
+  const sourceHashes = mediaPayload.source_hashes || {};
+  return `
+    <section class="structured-preview">
+      <div class="file-search-summary">
+        ${metric("Type", mediaPayload.mime_type || payload.mime_type || "media")}
+        ${metric("Duration", metadata.duration_seconds ?? "unknown")}
+        ${metric("Transcripts", mediaPayload.transcript_sidecar_count ?? sidecars.length)}
+        ${metric("Alignment", review.transcript_alignment || "n/a")}
+      </div>
+      <p class="help-text">Media preview keeps playback/transcoding out of the browser and shows bounded metadata/transcript sidecars for safe review. ${escapeHtml(review.report_selection_hint || "")}</p>
+      ${sourceHashes.sha256 ? `<p class="help-text">Source SHA256: ${escapeHtml(sourceHashes.sha256)}</p>` : ""}
+      <div class="metadata-grid">
+        ${metric("Channels", metadata.audio_channels ?? "n/a")}
+        ${metric("Sample rate", metadata.sample_rate ?? "n/a")}
+        ${metric("Frames", metadata.frame_count ?? "n/a")}
+      </div>
+      ${sidecars.length ? `
+        <div class="dense-list">
+          ${sidecars.map((sidecar) => `
+            <article class="dense-row">
+              <strong>${escapeHtml(sidecar.name || "transcript")}</strong>
+              <span>${escapeHtml(sidecar.path || "")}</span>
+              <small>${escapeHtml(sidecar.preview || "")}</small>
+              ${(sidecar.cues || []).length ? `<small>Cues: ${escapeHtml(sidecar.cues.slice(0, 3).map((cue) => `${cue.start}-${cue.end}: ${cue.text}`).join(" | "))}</small>` : ""}
+            </article>
+          `).join("")}
+        </div>
+      ` : '<p class="empty-state">No transcript sidecar was found next to this media file.</p>'}
+      ${(mediaPayload.limitations || []).length ? `<ul class="viewer-limitations">${mediaPayload.limitations.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
     </section>
   `;
 }
@@ -2775,6 +2970,7 @@ function renderCaseDbEnsureResult(payload) {
 
 function renderCaseDbSearchResult(payload) {
   const rows = payload.matches || [];
+  const visibleRows = virtualizedRows(rows);
   const saved = payload.saved_search;
   if (!rows.length) {
     return `
@@ -2807,10 +3003,11 @@ function renderCaseDbSearchResult(payload) {
       <p class="help-text">Select rows that are clearly related, then apply the same review status in one action.</p>
       <span id="caseDbBatchStatus" class="review-save-status"></span>
     </section>
+    ${renderVirtualizationNotice(rows, visibleRows, "Case DB matches")}
     <table class="data-table">
       <thead><tr><th>Select</th><th>Citation</th><th>Priority</th><th>Source</th><th>Item</th><th>Review</th><th></th></tr></thead>
       <tbody>
-        ${rows.map((match) => {
+        ${visibleRows.map((match) => {
           const review = match.review || {};
           const sourceRef = match.source_reference || {};
           const targetPayload = {
@@ -2824,7 +3021,11 @@ function renderCaseDbSearchResult(payload) {
               <td>${priorityBadge(match.review_priority)}<span>${escapeHtml(match.review_priority?.recommended_action || "")}</span></td>
               <td>${escapeHtml(match.source || "")}<span>${escapeHtml(match.kind || "")}</span></td>
               <td><strong>${escapeHtml(match.title || "")}</strong><span>${escapeHtml(match.preview || match.path || "")}</span>${sourceReferenceLine(sourceRef)}</td>
-              <td>${escapeHtml(review.status || "unreviewed")}<span>${escapeHtml(review.verification_status || "unverified")}</span></td>
+              <td>
+                ${escapeHtml(review.status || "unreviewed")}
+                <span>${escapeHtml(review.verification_status || "unverified")}</span>
+                <span>${escapeHtml([review.assignee, review.priority].filter(Boolean).join(" · "))}</span>
+              </td>
               <td class="action-stack">
                 <button class="icon-action" type="button" data-case-db-review="${escapeHtml(JSON.stringify({
                   target_type: match.target_type,
@@ -2832,6 +3033,8 @@ function renderCaseDbSearchResult(payload) {
                   status: "relevant",
                   verification_status: "source_opened",
                   include_in_report: true,
+                  priority: match.review_priority?.level === "high" ? "high" : "normal",
+                  assignee: review.assignee || "triage",
                   note: match.preview || match.title || "",
                   tags: [match.source, match.kind].filter(Boolean),
                 }))}">Verify</button>
@@ -2841,6 +3044,8 @@ function renderCaseDbSearchResult(payload) {
                   status: "excluded",
                   verification_status: "rejected",
                   include_in_report: false,
+                  priority: "low",
+                  assignee: review.assignee || "triage",
                   note: match.preview || match.title || "",
                   tags: [match.source, "excluded"].filter(Boolean),
                 }))}">Reject</button>
@@ -2948,6 +3153,8 @@ function bindCaseDbBatchButtons(database, caseId) {
             status: "excluded",
             verification_status: "rejected",
             include_in_report: false,
+            priority: "low",
+            assignee: "triage",
             tags: ["batch", "excluded"],
             note: "Batch rejected from Case DB result list.",
           }
@@ -2955,6 +3162,8 @@ function bindCaseDbBatchButtons(database, caseId) {
             status: "relevant",
             verification_status: "source_opened",
             include_in_report: true,
+            priority: "high",
+            assignee: "triage",
             tags: ["batch", "report"],
             note: "Batch verified from Case DB result list.",
           };
@@ -3211,6 +3420,21 @@ function renderPaginationControls(pagination, tab) {
     <div class="pagination-bar pagination-actions">
       <button class="secondary-button" type="button" data-page-tab="${escapeHtml(tab)}" data-page-offset="${pagination.previous_offset ?? 0}" ${pagination.previous_offset === null ? "disabled" : ""}>${kbd("[")} Previous page</button>
       <button class="secondary-button" type="button" data-page-tab="${escapeHtml(tab)}" data-page-offset="${pagination.next_offset ?? pagination.offset}" ${pagination.next_offset === null ? "disabled" : ""}>Next ${pagination.limit} ${kbd("]")}</button>
+    </div>
+  `;
+}
+
+function virtualizedRows(rows) {
+  return (rows || []).slice(0, VIRTUAL_TABLE_ROW_LIMIT);
+}
+
+function renderVirtualizationNotice(rows, visibleRows, label) {
+  const total = (rows || []).length;
+  const visible = (visibleRows || []).length;
+  if (total <= visible) return "";
+  return `
+    <div class="pagination-bar">
+      <span>Rendering ${visible} of ${total} ${escapeHtml(label)} to keep the browser responsive. Narrow the search, use filters, or page API-backed tabs for the rest.</span>
     </div>
   `;
 }

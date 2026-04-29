@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import zipfile
 import xml.etree.ElementTree as ET
@@ -9,9 +10,10 @@ from typing import Iterable
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 
-PARSER_VERSION = "android-apk-v2"
+PARSER_VERSION = "android-apk-v4"
 ANDROID_NAMESPACE = "{http://schemas.android.com/apk/res/android}"
 APK_STRING_SCAN_LIMIT = 1024 * 1024
+MAX_APP_DATA_FILES = 25_000
 APK_SUSPICIOUS_STRING_TERMS = (
     "DexClassLoader",
     "PathClassLoader",
@@ -49,6 +51,29 @@ DANGEROUS_PERMISSION_KEYWORDS = (
     "BIND_ACCESSIBILITY_SERVICE",
     "RECEIVE_BOOT_COMPLETED",
 )
+ANDROID_NATIVE_CAPABILITIES = {
+    "apk_zip_inventory": True,
+    "text_manifest_decode": True,
+    "permission_component_inventory": True,
+    "dex_native_library_string_pivots": True,
+    "android_app_data_path_inventory": True,
+    "source_hashing": True,
+    "binary_manifest_decode": False,
+    "dex_control_flow_analysis": False,
+    "signature_chain_validation": False,
+    "app_specific_database_decode": False,
+    "encrypted_store_decryption": False,
+    "deleted_record_recovery": False,
+    "known_answer_android_corpus": False,
+}
+ANDROID_REPORT_GRADE_BLOCKERS = [
+    "binary-android-manifest-decoding-not-implemented",
+    "signature-chain-validation-not-implemented",
+    "dex-control-flow-and-malware-behavior-analysis-not-implemented",
+    "app-specific-database-schema-decoding-not-implemented",
+    "encrypted-store-and-deleted-record-recovery-not-implemented",
+    "known-answer-android-corpus-required",
+]
 
 
 class AndroidApkProvider:
@@ -64,6 +89,7 @@ class AndroidApkProvider:
         for path in sorted(root.rglob("*.apk"), key=lambda item: str(item).lower()):
             if path.is_file():
                 yield build_apk_record(path)
+        yield from collect_android_app_data_exports(root)
 
 
 def build_apk_record(path: Path) -> ArtifactRecord:
@@ -77,6 +103,10 @@ def build_apk_record(path: Path) -> ArtifactRecord:
         "source_size": stat_result.st_size,
         "entry_name": resolved.name,
         "hashes": compute_hashes(resolved),
+        "commercial_grade_ready": False,
+        "commercial_gap_ids": ["#30"],
+        "android_native_capabilities": dict(ANDROID_NATIVE_CAPABILITIES),
+        "legal_warning": "APK triage is inventory/risk scoring only. Confirm malware or app-behavior conclusions with validated mobile/malware tooling.",
     }
     try:
         with zipfile.ZipFile(resolved) as archive:
@@ -88,6 +118,12 @@ def build_apk_record(path: Path) -> ArtifactRecord:
                 "manifest_format": "unreadable",
                 "risk_flags": ["apk-not-readable"],
                 "risk_score": 25,
+                "validation_checks": {"valid_zip": False, "manifest_decoded": False, "commercial_validation_corpus": False},
+                "android_validation_matrix": android_validation_matrix(
+                    {"valid_zip": False, "manifest_decoded": False, "commercial_validation_corpus": False}
+                ),
+                "android_report_grade_assessment": android_report_grade_assessment(["#30"]),
+                "commercial_grade_blockers": apk_blockers(),
             }
         )
     return ArtifactRecord(
@@ -115,6 +151,7 @@ def parse_apk_zip(archive: zipfile.ZipFile) -> dict[str, object]:
         manifest_format=str(manifest.get("manifest_format", "")),
         string_pivots=string_pivots,
     )
+    validation_checks = apk_validation_checks(names, manifest, permissions, dex_entries, certificate_entries)
     return {
         "valid_zip": True,
         "zip_entry_count": len(names),
@@ -123,11 +160,20 @@ def parse_apk_zip(archive: zipfile.ZipFile) -> dict[str, object]:
         "native_library_count": len(native_libraries),
         "native_libraries": native_libraries[:25],
         "certificate_entries": certificate_entries[:10],
+        "entry_hashes": apk_entry_hashes(archive, [*dex_entries[:25], *native_libraries[:25], *certificate_entries[:10]]),
+        "native_architectures": native_architectures(native_libraries),
         "permissions": permissions,
         "dangerous_permissions": dangerous_permissions(permissions),
         "string_pivots": string_pivots,
         "risk_flags": risk_flags,
         "risk_score": score_risk(risk_flags, permissions, native_libraries, dex_entries, string_pivots),
+        "validation_checks": validation_checks,
+        "android_validation_matrix": android_validation_matrix(validation_checks),
+        "android_report_grade_assessment": android_report_grade_assessment(["#30"]),
+        "commercial_grade_ready": False,
+        "commercial_gap_ids": ["#30"],
+        "android_native_capabilities": dict(ANDROID_NATIVE_CAPABILITIES),
+        "commercial_grade_blockers": apk_blockers(),
         **manifest,
     }
 
@@ -156,12 +202,28 @@ def parse_manifest(archive: zipfile.ZipFile) -> dict[str, object]:
         }
     package = root.attrib.get("package", "")
     permissions = []
+    uses_features = []
+    components: dict[str, list[dict[str, str]]] = {
+        "activity": [],
+        "service": [],
+        "receiver": [],
+        "provider": [],
+    }
     for element in root.iter():
-        if local_name(element.tag) != "uses-permission":
+        tag = local_name(element.tag)
+        if tag == "uses-permission":
+            name = element.attrib.get(f"{ANDROID_NAMESPACE}name") or element.attrib.get("name")
+            if name:
+                permissions.append(name)
             continue
-        name = element.attrib.get(f"{ANDROID_NAMESPACE}name") or element.attrib.get("name")
-        if name:
-            permissions.append(name)
+        if tag == "uses-feature":
+            name = element.attrib.get(f"{ANDROID_NAMESPACE}name") or element.attrib.get("name")
+            if name:
+                uses_features.append(name)
+            continue
+        if tag in components:
+            components[tag].append(component_summary(element))
+            continue
     uses_sdk = next((element for element in root.iter() if local_name(element.tag) == "uses-sdk"), None)
     application = next((element for element in root.iter() if local_name(element.tag) == "application"), None)
     return {
@@ -173,6 +235,9 @@ def parse_manifest(archive: zipfile.ZipFile) -> dict[str, object]:
         "target_sdk": sdk_attr(uses_sdk, "targetSdkVersion"),
         "application_label": sdk_attr(application, "label"),
         "permissions": permissions,
+        "uses_features": sorted(uses_features)[:50],
+        "components": {key: value[:50] for key, value in components.items()},
+        "component_counts": {key: len(value) for key, value in components.items()},
         "raw_manifest_preview": text[:400],
     }
 
@@ -193,6 +258,15 @@ def sdk_attr(element: ET.Element | None, name: str) -> str:
     if element is None:
         return ""
     return element.attrib.get(f"{ANDROID_NAMESPACE}{name}") or element.attrib.get(name, "")
+
+
+def component_summary(element: ET.Element) -> dict[str, str]:
+    return {
+        "name": sdk_attr(element, "name"),
+        "exported": sdk_attr(element, "exported"),
+        "permission": sdk_attr(element, "permission"),
+        "enabled": sdk_attr(element, "enabled"),
+    }
 
 
 def local_name(tag: str) -> str:
@@ -237,12 +311,227 @@ def build_risk_flags(
         flags.append("missing-certificate-entry")
     if manifest_format != "xml":
         flags.append("manifest-not-decoded")
+    if any(permission.endswith("READ_SMS") or permission.endswith("SEND_SMS") for permission in permissions):
+        flags.append("sms-access")
+    if any(permission.endswith("READ_CONTACTS") or permission.endswith("READ_CALL_LOG") for permission in permissions):
+        flags.append("personal-data-access")
     pivot_types = {item["type"] for item in string_pivots}
     if "suspicious-string" in pivot_types:
         flags.append("suspicious-code-strings")
     if "url" in pivot_types or "ip" in pivot_types:
         flags.append("network-indicators")
     return flags
+
+
+def collect_android_app_data_exports(root: Path) -> Iterable[ArtifactRecord]:
+    emitted = 0
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if emitted >= MAX_APP_DATA_FILES:
+            break
+        if not path.is_file() or path.suffix.lower() == ".apk":
+            continue
+        package = package_from_android_data_path(path)
+        if not package:
+            continue
+        emitted += 1
+        yield build_android_app_data_record(path, package)
+
+
+def build_android_app_data_record(path: Path, package: str) -> ArtifactRecord:
+    resolved = path.resolve()
+    stat_result = resolved.stat()
+    category = android_app_data_category(path)
+    details = {
+        "parser": "android-app-data-export",
+        "parser_version": PARSER_VERSION,
+        "source_path": str(resolved),
+        "source_format": "android-export-file",
+        "source_size": stat_result.st_size,
+        "source_mtime": stat_result.st_mtime,
+        "hashes": compute_hashes(resolved),
+        "package": package,
+        "data_category": category,
+        "risk_flags": android_app_data_risk_flags(path, category),
+        "validation_checks": {
+            "package_inferred_from_path": True,
+            "file_payload_parsed": False,
+            "secret_values_extracted": False,
+            "source_hash_present": True,
+        },
+        "android_validation_matrix": android_validation_matrix(
+            {
+                "valid_zip": True,
+                "manifest_decoded": False,
+                "source_hash_present": True,
+                "app_specific_database_decoded": False,
+                "commercial_validation_corpus": False,
+            }
+        ),
+        "android_report_grade_assessment": android_report_grade_assessment(["#29", "#30"]),
+        "android_native_capabilities": dict(ANDROID_NATIVE_CAPABILITIES),
+        "commercial_grade_ready": False,
+        "commercial_gap_ids": ["#29", "#30"],
+        "commercial_grade_blockers": [
+            "Android app data is inventoried from exported files only; app-specific database schemas are not decoded here.",
+            "Encrypted stores, deleted records, and credential/cookie contents are intentionally not extracted.",
+            "Package/path attribution must be verified against acquisition logs and original filesystem metadata.",
+        ],
+        "legal_warning": "Inventory only. Do not infer app message/account contents from this row without authorized, validated app-specific parsing.",
+    }
+    return ArtifactRecord(
+        provider=AndroidApkProvider.name,
+        artifact_type="android-app-data",
+        path=str(resolved),
+        supported=True,
+        details=details,
+    )
+
+
+def package_from_android_data_path(path: Path) -> str:
+    parts = path.parts
+    lowered = [part.lower() for part in parts]
+    for marker in (("android", "data"), ("android", "media"), ("data", "data")):
+        for index in range(0, len(parts) - len(marker)):
+            if tuple(lowered[index : index + len(marker)]) == marker:
+                candidate_index = index + len(marker)
+                if candidate_index < len(parts):
+                    candidate = parts[candidate_index]
+                    if looks_like_android_package(candidate):
+                        return candidate
+    return ""
+
+
+def looks_like_android_package(value: str) -> bool:
+    return "." in value and all(part and part.replace("_", "").isalnum() for part in value.split("."))
+
+
+def android_app_data_category(path: Path) -> str:
+    lowered = str(path).lower()
+    if lowered.endswith((".db", ".sqlite", ".sqlite3")):
+        return "database"
+    if any(token in lowered for token in ("shared_prefs", ".xml", ".json", ".plist")):
+        return "configuration"
+    if any(token in lowered for token in ("cache", "tmp")):
+        return "cache"
+    if any(token in lowered for token in ("media", "image", "video", "audio", ".jpg", ".png", ".mp4", ".m4a")):
+        return "media"
+    return "file"
+
+
+def android_app_data_risk_flags(path: Path, category: str) -> list[str]:
+    lowered = str(path).lower()
+    flags = ["android-app-data-export", f"android-app-data-{category}"]
+    if any(token in lowered for token in ("shared_prefs", "account", "cookie", "token", "credential", "key")):
+        flags.append("sensitive-store-candidate")
+    if any(token in lowered for token in ("sms", "call", "contact", "message", "chat")):
+        flags.append("communication-store-candidate")
+    if category == "database":
+        flags.append("structured-data-file")
+    return flags
+
+
+def apk_entry_hashes(archive: zipfile.ZipFile, entries: list[str]) -> list[dict[str, object]]:
+    hashes: list[dict[str, object]] = []
+    for entry in entries[:75]:
+        try:
+            blob = archive.read(entry)
+        except (KeyError, OSError, zipfile.BadZipFile):
+            continue
+        hashes.append(
+            {
+                "entry": entry,
+                "size": len(blob),
+                "sha256": hashlib.sha256(blob).hexdigest(),
+            }
+        )
+    return hashes
+
+
+def native_architectures(native_libraries: list[str]) -> list[str]:
+    architectures = set()
+    for entry in native_libraries:
+        parts = entry.split("/")
+        if len(parts) >= 3 and parts[0] == "lib":
+            architectures.add(parts[1])
+    return sorted(architectures)
+
+
+def apk_validation_checks(
+    names: list[str],
+    manifest: dict[str, object],
+    permissions: list[str],
+    dex_entries: list[str],
+    certificate_entries: list[str],
+) -> dict[str, object]:
+    components = manifest.get("component_counts")
+    return {
+        "valid_zip": True,
+        "manifest_present": "AndroidManifest.xml" in names,
+        "manifest_decoded": manifest.get("manifest_format") == "xml",
+        "package_present": bool(manifest.get("package")),
+        "dex_present": bool(dex_entries),
+        "certificate_entry_present": bool(certificate_entries),
+        "permission_count": len(permissions),
+        "component_counts": components if isinstance(components, dict) else {},
+        "binary_manifest_decoder_available": False,
+        "commercial_validation_corpus": False,
+    }
+
+
+def android_validation_matrix(checks: dict[str, object]) -> list[dict[str, object]]:
+    return [
+        {
+            "id": "source-readable",
+            "label": "APK/export source is readable and hashed",
+            "passed": bool(checks.get("valid_zip", True) or checks.get("source_hash_present")),
+            "severity": "critical",
+        },
+        {
+            "id": "manifest-or-package-context",
+            "label": "Package or manifest context is available",
+            "passed": bool(checks.get("manifest_decoded") or checks.get("package_present") or checks.get("package_inferred_from_path")),
+            "severity": "high",
+        },
+        {
+            "id": "payload-inventory",
+            "label": "Executable/app-data payload is inventoried",
+            "passed": bool(checks.get("dex_present") or checks.get("file_payload_parsed") is False),
+            "severity": "medium",
+        },
+        {
+            "id": "signature-and-binary-manifest",
+            "label": "Binary manifest and signature/certificate chain are validated",
+            "passed": bool(checks.get("binary_manifest_decoder_available")) and bool(checks.get("certificate_entry_present")),
+            "severity": "critical",
+        },
+        {
+            "id": "app-data-report-grade",
+            "label": "App databases, encrypted stores, and deleted records are decoded with known-answer validation",
+            "passed": bool(checks.get("app_specific_database_decoded")) and bool(checks.get("commercial_validation_corpus")),
+            "severity": "critical",
+        },
+    ]
+
+
+def android_report_grade_assessment(gap_ids: list[str]) -> dict[str, object]:
+    return {
+        "status": "validation-required",
+        "commercial_gap_ids": list(gap_ids),
+        "blockers": list(ANDROID_REPORT_GRADE_BLOCKERS),
+        "ready_for_court_report": False,
+        "recommended_validation": [
+            "Validate APK/app-data findings with Android-specific mobile forensic or malware-analysis tooling.",
+            "Preserve acquisition/export logs, package source, signature data, and app version context before reporting.",
+        ],
+    }
+
+
+def apk_blockers() -> list[str]:
+    return [
+        "Binary AndroidManifest.xml is not fully decoded without an external validated decoder.",
+        "DEX bytecode is scanned for bounded strings only; code flow, packed payloads, and native behavior are not analyzed.",
+        "Signature/certificate trust, malware verdicts, and app-specific data schemas require independent validated tooling.",
+    ]
 
 
 def scan_apk_string_pivots(archive: zipfile.ZipFile, entries: list[str]) -> list[dict[str, str]]:

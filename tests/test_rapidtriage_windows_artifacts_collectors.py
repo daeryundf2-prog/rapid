@@ -7,13 +7,102 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
+from rapidtriage.artifacts.windows.registry import collect_registry_hive
+from rapidtriage.artifacts.windows.shellbags import WindowsShellbagsProvider
 from rapidtriage.cli import main
-from tests.windows_artifact_fixtures import build_minimal_registry_hive
+from tests.windows_artifact_fixtures import build_minimal_registry_hive, build_minimal_shellbags_registry_hive
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rapidtriage" / "windows_artifacts"
 
 
 class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
+    def test_shellbags_provider_emits_native_hive_candidate_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            hive_path = Path(tmp_dir) / "Users" / "alice" / "UsrClass.dat"
+            hive_path.parent.mkdir(parents=True, exist_ok=True)
+            hive_path.write_bytes(
+                build_minimal_shellbags_registry_hive(
+                    datetime(2024, 4, 2, 3, 4, 5, tzinfo=timezone.utc),
+                    "UsrClass.dat",
+                )
+            )
+
+            records = list(WindowsShellbagsProvider().collect(Path(tmp_dir)))
+            native = [record for record in records if record.artifact_type == "shellbag-native-candidate"]
+
+            self.assertTrue(native)
+            key_tree = next(record for record in native if record.details["candidate_source"] == "native-key-tree")
+            self.assertEqual(key_tree.details["shellbag_section"], "bagmru")
+            self.assertIn("0", key_tree.details["node_id_candidates"])
+            self.assertIn("42", key_tree.details["bag_id_candidates"])
+            self.assertTrue(key_tree.details["timestamp_candidates"])
+            self.assertTrue(key_tree.details["validation_checks"]["regf_header_valid"])
+            self.assertFalse(key_tree.details["validation_checks"]["binary_shell_item_decoding_available"])
+            self.assertFalse(key_tree.details["commercial_grade_ready"])
+            self.assertIn("#15", key_tree.details["shellbag_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertFalse(key_tree.details["shellbag_native_capabilities"]["binary_shell_item_decode"])
+            self.assertIn("requires_dedicated_shellbags_parser", key_tree.details["validation_checks"])
+
+    def test_registry_hive_reconstructs_native_key_and_value_links(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            hive_path = Path(tmp_dir) / "NTUSER.DAT"
+            hive_path.write_bytes(
+                build_minimal_registry_hive(
+                    datetime(2024, 4, 1, 4, 5, 6, tzinfo=timezone.utc),
+                    "NTUSER.DAT",
+                    [
+                        r"Software\Microsoft\Windows\CurrentVersion\Run",
+                        r"C:\Users\alice\AppData\Roaming\SecurityUpdater.exe",
+                    ],
+                )
+            )
+
+            records = list(collect_registry_hive(hive_path))
+
+            key_tree_nodes = [record for record in records if record.artifact_type == "registry-key-tree-node"]
+            run_key = next(record for record in key_tree_nodes if record.details["name"] == "Run")
+            self.assertEqual(run_key.details["key_path"], "HKEY_CURRENT_USER\\Software\\Run")
+            self.assertEqual(run_key.details["key_path_confidence"], "parent-chain")
+            self.assertEqual(run_key.details["value_names"], ["SecurityUpdater"])
+            self.assertEqual(run_key.details["linked_value_count"], 1)
+            self.assertEqual(run_key.details["missing_value_cell_offsets"], [])
+            self.assertFalse(run_key.details["validation_required"])
+            self.assertFalse(run_key.details["commercial_grade_ready"])
+            self.assertEqual(
+                run_key.details["registry_report_grade_assessment"]["status"],
+                "triage-validated-report-grade-blocked",
+            )
+            self.assertIn("#4", run_key.details["registry_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertTrue(run_key.details["registry_native_capabilities"]["parent_chain_path_reconstruction"])
+            self.assertFalse(run_key.details["registry_native_capabilities"]["transaction_log_replay"])
+            validation_matrix = {item["id"]: item for item in run_key.details["registry_validation_matrix"]}
+            self.assertTrue(validation_matrix["regf-header"]["passed"])
+            self.assertTrue(validation_matrix["parent-chain"]["passed"])
+            self.assertTrue(validation_matrix["value-list-resolution"]["passed"])
+
+            value_recovery = next(
+                record
+                for record in records
+                if record.artifact_type == "registry-value-recovery-candidate"
+                and record.details["name"] == "SecurityUpdater"
+            )
+            self.assertEqual(value_recovery.details["parent_key_path_candidate"], "HKEY_CURRENT_USER\\Software\\Run")
+            self.assertEqual(value_recovery.details["parent_key_confidence"], "key-value-list")
+            self.assertGreater(value_recovery.details["parent_key_cell_offset"], 0)
+            self.assertEqual(value_recovery.details["decoded_data_preview"], "1")
+            self.assertEqual(
+                value_recovery.details["registry_report_grade_assessment"]["status"],
+                "recovery-candidate-validation-required",
+            )
+            self.assertIn("#5", value_recovery.details["registry_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertIn(
+                "deleted-or-free-cell-independent-validation-required",
+                value_recovery.details["registry_report_grade_assessment"]["blockers"],
+            )
+            value_matrix = {item["id"]: item for item in value_recovery.details["registry_validation_matrix"]}
+            self.assertTrue(value_matrix["deleted-value-cell"]["passed"])
+            self.assertTrue(value_matrix["parent-key-link"]["passed"])
+
     def test_manifest_collects_browser_and_recent_file_artifacts_from_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "windows_artifacts"
@@ -195,6 +284,15 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertTrue(summary["details"]["key_recovery_candidates"])
             self.assertTrue(summary["details"]["value_recovery_candidates"])
             self.assertTrue(summary["details"]["user_activity_entries"])
+            self.assertFalse(summary["details"]["native_capabilities"]["transaction_log_replay"])
+            self.assertIn(
+                {"value": "triage-validated-report-grade-blocked", "count": 2},
+                summary["details"]["native_report_grade_status_counts"],
+            )
+            self.assertIn(
+                {"value": "recovery-candidate-validation-required", "count": 4},
+                summary["details"]["native_report_grade_status_counts"],
+            )
 
             shellbags_provider = providers["windows-shellbags"]
             self.assertEqual(shellbags_provider["artifacts"][0]["artifact_type"], "shellbag-key")
@@ -218,10 +316,25 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("Bypass", task["details"]["arguments"])
             defender = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "defender-support-log")
             self.assertEqual(defender["details"]["interesting_entry_count"], 3)
+            self.assertIn("#18", defender["details"]["system_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertFalse(defender["details"]["system_native_capabilities"]["defender_event_mpcmdrun_correlation"])
             firewall = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "firewall-log")
             self.assertEqual(firewall["details"]["blocked_count"], 1)
+            self.assertIn("#18", firewall["details"]["system_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertFalse(firewall["details"]["system_native_capabilities"]["firewall_rule_store_correlation"])
             wer = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "wer-report")
             self.assertEqual(wer["details"]["application"], "powershell.exe")
+            self.assertEqual(wer["details"]["coverage_status"], "wer-key-value-normalized")
+            self.assertEqual(wer["details"]["application_path"], r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+            self.assertEqual(wer["details"]["fault_module_path"], r"C:\Users\alice\AppData\Roaming\evil.dll")
+            self.assertEqual(wer["details"]["exception_code"], "c0000005")
+            self.assertEqual(wer["details"]["event_time"], "2026-04-26T01:04:05+00:00")
+            self.assertEqual(wer["details"]["report_id"], "11111111-2222-3333-4444-555555555555")
+            self.assertTrue(wer["details"]["validation_checks"]["has_exception_code"])
+            self.assertFalse(wer["details"]["commercial_grade_ready"])
+            self.assertIn("#18", wer["details"]["system_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertIn("wer-dump-file-correlation-not-implemented", wer["details"]["commercial_grade_blockers"])
+            self.assertEqual(len(wer["details"]["source_hashes"]["sha256"]), 64)
             zone = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "zone-identifier")
             self.assertEqual(zone["details"]["zone_id"], "3")
             self.assertEqual(zone["details"]["host_url"], "https://download.example.com/report.zip")

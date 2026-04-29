@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from .hash_cache import compute_hashes_cached
 
 HASH_ALGORITHMS = ("md5", "sha1", "sha256")
 
@@ -89,16 +89,7 @@ def build_submission_manifest(
 
 
 def compute_hashes(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> dict[str, str]:
-    hashers = {
-        "md5": hashlib.md5(usedforsecurity=False),
-        "sha1": hashlib.sha1(usedforsecurity=False),
-        "sha256": hashlib.sha256(),
-    }
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(chunk_size), b""):
-            for hasher in hashers.values():
-                hasher.update(chunk)
-    return {name: hasher.hexdigest() for name, hasher in hashers.items()}
+    return compute_hashes_cached(path, chunk_size=chunk_size)
 
 
 def build_skip(bookmark: Mapping[str, object], *, reason: str, path: Path | None = None) -> dict[str, object]:

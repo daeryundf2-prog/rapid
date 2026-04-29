@@ -113,6 +113,12 @@
             "null"
           ]
         },
+        "duplicate_group_count": {
+          "type": "integer"
+        },
+        "duplicate_file_count": {
+          "type": "integer"
+        },
         "matched_rule_count": {
           "type": "integer"
         },
@@ -202,6 +208,40 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "duplicate_content_groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sha256",
+          "file_count",
+          "size",
+          "paths",
+          "truncated_paths"
+        ],
+        "properties": {
+          "sha256": {
+            "type": "string"
+          },
+          "file_count": {
+            "type": "integer"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "truncated_paths": {
+            "type": "boolean"
           }
         }
       }

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from rapidtriage.cli import build_parser, main
-from tests.windows_artifact_fixtures import build_minimal_lnk
+from tests.windows_artifact_fixtures import _minimal_ese_database, build_minimal_lnk
 
 SAMPLES_DIR = Path(__file__).resolve().parent.parent / "docs" / "rapidtriage-output-samples"
 WINDOWS_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rapidtriage" / "windows_artifacts"
@@ -77,7 +77,33 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
     )
     search_edb = root / "ProgramData" / "Microsoft" / "Search" / "Data" / "Applications" / "Windows" / "Windows.edb"
     search_edb.parent.mkdir(parents=True, exist_ok=True)
-    search_edb.write_bytes(b"sample windows search edb")
+    search_edb.write_bytes(
+        _minimal_ese_database(
+            [
+                "SystemIndex_GthrPth WorkID ItemUrl",
+                "SystemIndex_PropertyStore System.ItemPathDisplay System.FileName System.DateModified",
+                "System.Search.Contents IsDeleted CrawlStatus",
+                r"C:\Users\alice\Documents\Case Notes.docx",
+                "rapid forensic case notes",
+                "https://example.com/search-hit",
+            ]
+        )
+    )
+    srum_db = root / "Windows" / "System32" / "sru" / "SRUDB.dat"
+    srum_db.parent.mkdir(parents=True, exist_ok=True)
+    srum_db.write_bytes(
+        _minimal_ese_database(
+            [
+                r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                "NetworkUsage",
+                (
+                    "SruDbTable=NetworkUsage Application=powershell.exe UserSid=S-1-5-21-1000 "
+                    "Timestamp=2024-04-01T05:06:07Z BytesSent=512 BytesReceived=2048 "
+                    "InterfaceLuid=12 NetworkProfile=CorpWiFi Url=https://download.example/tools/installer.exe"
+                ),
+            ]
+        )
+    )
     default_rdp = root / "Users" / "alice" / "Documents" / "Default.rdp"
     default_rdp.parent.mkdir(parents=True, exist_ok=True)
     default_rdp.write_text(
@@ -105,6 +131,7 @@ def build_windows_collector_sample_fixture(root: Path) -> None:
     )
     set_mtime(search_csv, datetime(2024, 3, 5, 6, 7, 9, tzinfo=timezone.utc))
     set_mtime(search_edb, datetime(2024, 3, 5, 6, 7, 10, tzinfo=timezone.utc))
+    set_mtime(srum_db, datetime(2024, 3, 5, 6, 7, 10, tzinfo=timezone.utc))
     set_mtime(default_rdp, datetime(2024, 3, 5, 6, 7, 11, tzinfo=timezone.utc))
     set_mtime(rdp_cache, datetime(2024, 3, 5, 6, 7, 12, tzinfo=timezone.utc))
     set_mtime(rdp_reg, datetime(2024, 3, 5, 6, 7, 13, tzinfo=timezone.utc))

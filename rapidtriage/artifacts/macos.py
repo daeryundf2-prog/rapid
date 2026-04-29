@@ -151,6 +151,7 @@ def collect_macos_browsers(user_root: Path) -> Iterable[ArtifactRecord]:
                     profile_dir=profile_dir,
                     parser_version=PARSER_VERSION,
                     ai_conversation_artifact_type="macos-browser-ai-conversation",
+                    storage_inventory_artifact_type="macos-browser-storage-inventory",
                 )
                 continue
             history_rows, download_rows = extract_chromium_history_and_downloads(history_path)
@@ -195,6 +196,7 @@ def browser_records(
         parser_version=PARSER_VERSION,
         ai_artifact_type="macos-browser-ai-usage",
         ai_conversation_artifact_type="macos-browser-ai-conversation",
+        storage_inventory_artifact_type="macos-browser-storage-inventory",
     )
 
 

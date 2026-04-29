@@ -4,6 +4,7 @@ from typing import Dict, List
 
 from .android import AndroidApkProvider
 from .cloud import CloudExportProvider
+from .email import EmailArtifactsProvider
 from .generic import GenericDocumentArtifactProvider
 from .linux import LinuxSystemArtifactsProvider
 from .macos import MacOsSystemArtifactsProvider
@@ -29,6 +30,7 @@ def all_providers() -> List[object]:
         GenericDocumentArtifactProvider(),
         AndroidApkProvider(),
         CloudExportProvider(),
+        EmailArtifactsProvider(),
         LinuxSystemArtifactsProvider(),
         MacOsSystemArtifactsProvider(),
         MediaImageProvider(),

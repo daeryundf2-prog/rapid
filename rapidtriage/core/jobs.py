@@ -14,7 +14,7 @@ from .rules import RuleConfigError, load_rule_set
 from .run import RunModeError, run_triage_mode
 
 
-RUN_STATUSES = ("queued", "running", "completed", "failed")
+RUN_STATUSES = ("queued", "running", "completed", "failed", "canceled")
 JOB_STEP_NAMES = ("prepare", "triage", "persist", "finalize")
 
 
@@ -34,6 +34,7 @@ class RunRequest:
     max_extract_size_bytes: int = 0
     max_file_count: int = 0
     overwrite: bool = False
+    resume: bool = False
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -47,6 +48,7 @@ class RunRequest:
             "max_extract_size_bytes": self.max_extract_size_bytes,
             "max_file_count": self.max_file_count,
             "overwrite": self.overwrite,
+            "resume": self.resume,
         }
 
     @classmethod
@@ -62,6 +64,7 @@ class RunRequest:
             max_extract_size_bytes=int(payload.get("max_extract_size_bytes") or 0),
             max_file_count=int(payload.get("max_file_count") or 0),
             overwrite=bool(payload.get("overwrite", False)),
+            resume=bool(payload.get("resume", False)),
         )
 
 
@@ -78,6 +81,7 @@ class RunJob:
     summary: Dict[str, object] | None = None
     origin: str = "web"
     steps: List[Dict[str, object]] = field(default_factory=list)
+    cancellation_requested: bool = False
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -95,6 +99,7 @@ class RunJob:
             "error": self.error,
             "request": self.request.to_dict(),
             "steps": self.steps,
+            "cancellation_requested": self.cancellation_requested,
         }
         if self.summary:
             outputs = self.summary.get("outputs", {})
@@ -126,6 +131,7 @@ class RunJob:
             error=str(payload["error"]) if payload.get("error") else None,
             summary=dict(summary_payload) if isinstance(summary_payload, Mapping) else None,
             steps=[dict(step) for step in payload.get("steps", [])] if isinstance(payload.get("steps"), list) else [],
+            cancellation_requested=bool(payload.get("cancellation_requested", False)),
         )
 
 
@@ -268,6 +274,39 @@ class RunJobStore:
             self._futures.pop(run_id, None)
             self._write_state_locked()
 
+    def cancel(self, run_id: str) -> RunJob:
+        with self._lock:
+            if run_id not in self._jobs:
+                raise KeyError(run_id)
+            job = self._jobs[run_id]
+            future = self._futures.get(run_id)
+            job.cancellation_requested = True
+            if job.status == "queued":
+                if future is not None:
+                    future.cancel()
+                job.status = "canceled"
+                job.completed_at = now_iso()
+                job.steps = update_step(job.steps, "prepare", "canceled", message="Canceled before execution")
+            elif job.status == "running":
+                job.steps = update_step(
+                    job.steps,
+                    "triage",
+                    "running",
+                    message="Cancellation requested; current stage will finish safely before state changes.",
+                )
+            job.updated_at = now_iso()
+            self._write_state_locked()
+            return job
+
+    def retry(self, run_id: str) -> RunJob:
+        with self._lock:
+            if run_id not in self._jobs:
+                raise KeyError(run_id)
+            previous = self._jobs[run_id]
+            if previous.status not in {"failed", "canceled"}:
+                raise ValueError("only failed or canceled runs can be retried")
+        return self.submit(previous.request)
+
     def _execute(self, run_id: str) -> Dict[str, object]:
         with self._lock:
             job = self._jobs[run_id]
@@ -275,6 +314,13 @@ class RunJobStore:
             job.started_at = now_iso()
             job.updated_at = job.started_at
             self._write_state_locked()
+            if job.cancellation_requested:
+                job.status = "canceled"
+                job.completed_at = now_iso()
+                job.updated_at = job.completed_at
+                job.steps = update_step(job.steps, "prepare", "canceled", message="Canceled before execution")
+                self._write_state_locked()
+                return {}
         try:
             self._mark_step(run_id, "prepare", "completed", message="Run request accepted")
             self._mark_step(run_id, "triage", "running", message="Executing triage workflow")
@@ -417,6 +463,7 @@ def execute_run_request(request: RunRequest, *, run_id: str | None = None) -> Di
             max_extract_size_bytes=request.max_extract_size_bytes,
             max_file_count=request.max_file_count,
             overwrite=request.overwrite,
+            resume=request.resume,
             rule_set=rule_set,
         )
     except (FileNotFoundError, OSError, RuleConfigError, RunModeError, ValueError):

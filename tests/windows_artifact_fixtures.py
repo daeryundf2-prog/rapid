@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import struct
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -137,6 +139,7 @@ def build_windows_artifact_fixture(root: Path) -> WindowsArtifactFixture:
         downloads=[],
     )
     _write_ai_storage_fixture(ai_storage_log)
+    _write_browser_storage_inventory_fixture(chrome_history.parent)
     _write_chromium_history(
         edge_history,
         visits=[edge_visit],
@@ -285,6 +288,27 @@ def _write_ai_storage_fixture(path: Path) -> None:
     )
 
 
+def _write_browser_storage_inventory_fixture(profile_dir: Path) -> None:
+    cache_entry = profile_dir / "Cache" / "Cache_Data" / "f_000001"
+    session_entry = profile_dir / "Session Storage" / "000004.log"
+    extension_manifest = profile_dir / "Extensions" / "abcdefghijklmnopabcdefghijklmnop" / "1.0.0" / "manifest.json"
+    sync_metadata = profile_dir / "Sync Data" / "LevelDB" / "000005.ldb"
+    cookies_db = profile_dir / "Network" / "Cookies"
+    cache_entry.parent.mkdir(parents=True, exist_ok=True)
+    session_entry.parent.mkdir(parents=True, exist_ok=True)
+    extension_manifest.parent.mkdir(parents=True, exist_ok=True)
+    sync_metadata.parent.mkdir(parents=True, exist_ok=True)
+    cookies_db.parent.mkdir(parents=True, exist_ok=True)
+    cache_entry.write_bytes(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\ncached browser response")
+    session_entry.write_bytes(b'{"session":"chatgpt-tab","last_url":"https://chatgpt.com/c/fixture"}')
+    extension_manifest.write_text(
+        '{"name":"Fixture Extension","version":"1.0.0","permissions":["storage"]}',
+        encoding="utf-8",
+    )
+    sync_metadata.write_bytes(b"sync_metadata\x00account_id_redacted\x00")
+    cookies_db.write_bytes(b"SQLite format 3\x00fixture cookie store placeholder")
+
+
 def _write_recent_shortcuts(path: Path, shortcuts: list[RecentShortcut]) -> None:
     path.mkdir(parents=True, exist_ok=True)
     timestamp = shortcuts[0].modified_at if shortcuts else datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -299,9 +323,21 @@ def _write_recent_shortcuts(path: Path, shortcuts: list[RecentShortcut]) -> None
     automatic.parent.mkdir(parents=True, exist_ok=True)
     custom.parent.mkdir(parents=True, exist_ok=True)
     automatic.write_bytes(
-        build_minimal_ole_jumplist(
-            "1",
-            build_minimal_lnk(r"C:\Users\alice\Documents\Incident Notes.docx", timestamp),
+        build_minimal_ole_jumplist_streams(
+            [
+                (
+                    "DestList",
+                    build_minimal_destlist(
+                        1,
+                        r"C:\Users\alice\Documents\Incident Notes.docx",
+                        timestamp,
+                    ),
+                ),
+                (
+                    "1",
+                    build_minimal_lnk(r"C:\Users\alice\Documents\Incident Notes.docx", timestamp),
+                ),
+            ]
         )
     )
     custom.write_bytes(
@@ -323,10 +359,35 @@ def build_minimal_lnk(target_path: str, timestamp: datetime) -> bytes:
     header[0x2C:0x34] = filetime.to_bytes(8, "little")
     header[0x34:0x38] = (4096).to_bytes(4, "little")
     header[0x3C:0x40] = (1).to_bytes(4, "little")
-    return bytes(header) + lnk_unicode_string(target_path) + lnk_unicode_string(r"C:\Users\alice\Documents") + lnk_unicode_string("")
+    return (
+        bytes(header)
+        + lnk_unicode_string(target_path)
+        + lnk_unicode_string(r"C:\Users\alice\Documents")
+        + lnk_unicode_string("")
+        + build_lnk_tracker_block("ALICE-PC")
+        + b"\x00\x00\x00\x00"
+    )
+
+
+def build_lnk_tracker_block(machine_id: str) -> bytes:
+    block = bytearray(0x60)
+    block[0:4] = (0x60).to_bytes(4, "little")
+    block[4:8] = (0xA0000003).to_bytes(4, "little")
+    block[8:12] = (0x58).to_bytes(4, "little")
+    block[12:16] = (0).to_bytes(4, "little")
+    block[0x10:0x20] = machine_id.encode("cp1252")[:15].ljust(16, b"\x00")
+    block[0x20:0x30] = bytes.fromhex("785634123412785690abcdef12345678")
+    block[0x30:0x40] = bytes.fromhex("21436587ba09fedc1032547698badcfe")
+    block[0x40:0x50] = bytes.fromhex("efcdab89674523011032547698badcfe")
+    block[0x50:0x60] = bytes.fromhex("0badf00d34127856aabbccddeeff0011")
+    return bytes(block)
 
 
 def build_minimal_ole_jumplist(stream_name: str, stream_payload: bytes) -> bytes:
+    return build_minimal_ole_jumplist_streams([(stream_name, stream_payload)])
+
+
+def build_minimal_ole_jumplist_streams(streams: list[tuple[str, bytes]]) -> bytes:
     sector_size = 512
     header = bytearray(sector_size)
     header[0:8] = bytes.fromhex("d0cf11e0a1b11ae1")
@@ -346,12 +407,20 @@ def build_minimal_ole_jumplist(stream_name: str, stream_payload: bytes) -> bytes
     for offset in range(80, 512, 4):
         header[offset : offset + 4] = (0xFFFFFFFF).to_bytes(4, "little")
 
-    stream_sector_count = max(1, (len(stream_payload) + sector_size - 1) // sector_size)
-    stream_sector_ids = list(range(2, 2 + stream_sector_count))
-    fat_entries = [0xFFFFFFFD, 0xFFFFFFFE]
-    for index, sector_id in enumerate(stream_sector_ids):
-        is_last = index == len(stream_sector_ids) - 1
-        fat_entries.append(0xFFFFFFFE if is_last else sector_id + 1)
+    stream_sector_ranges: list[tuple[int, int]] = []
+    next_sector_id = 2
+    for _, stream_payload in streams:
+        stream_sector_count = max(1, (len(stream_payload) + sector_size - 1) // sector_size)
+        stream_sector_ranges.append((next_sector_id, stream_sector_count))
+        next_sector_id += stream_sector_count
+    fat_entries = [0xFFFFFFFF for _ in range(next_sector_id)]
+    fat_entries[0] = 0xFFFFFFFD
+    fat_entries[1] = 0xFFFFFFFE
+    for start_sector, stream_sector_count in stream_sector_ranges:
+        for index in range(stream_sector_count):
+            sector_id = start_sector + index
+            is_last = index == stream_sector_count - 1
+            fat_entries[sector_id] = 0xFFFFFFFE if is_last else sector_id + 1
     fat_sector = bytearray(sector_size)
     for index in range(sector_size // 4):
         value = fat_entries[index] if index < len(fat_entries) else 0xFFFFFFFF
@@ -359,13 +428,19 @@ def build_minimal_ole_jumplist(stream_name: str, stream_payload: bytes) -> bytes
 
     directory_sector = bytearray(sector_size)
     directory_sector[0:128] = cfb_directory_entry("Root Entry", 5, child_id=1)
-    directory_sector[128:256] = cfb_directory_entry(
-        stream_name,
-        2,
-        start_sector=stream_sector_ids[0],
-        stream_size=len(stream_payload),
+    for index, ((stream_name, stream_payload), (start_sector, _)) in enumerate(zip(streams, stream_sector_ranges), start=1):
+        right_id = index + 1 if index < len(streams) else 0xFFFFFFFF
+        directory_sector[index * 128 : (index + 1) * 128] = cfb_directory_entry(
+            stream_name,
+            2,
+            right_id=right_id,
+            start_sector=start_sector,
+            stream_size=len(stream_payload),
+        )
+    stream_bytes = b"".join(
+        stream_payload.ljust(stream_sector_count * sector_size, b"\x00")
+        for (_, stream_payload), (_, stream_sector_count) in zip(streams, stream_sector_ranges)
     )
-    stream_bytes = stream_payload.ljust(stream_sector_count * sector_size, b"\x00")
     return bytes(header) + bytes(fat_sector) + bytes(directory_sector) + stream_bytes
 
 
@@ -373,6 +448,7 @@ def cfb_directory_entry(
     name: str,
     object_type: int,
     *,
+    right_id: int = 0xFFFFFFFF,
     child_id: int = 0xFFFFFFFF,
     start_sector: int = 0xFFFFFFFF,
     stream_size: int = 0,
@@ -384,11 +460,35 @@ def cfb_directory_entry(
     entry[66] = object_type
     entry[67] = 1
     entry[68:72] = (0xFFFFFFFF).to_bytes(4, "little")
-    entry[72:76] = (0xFFFFFFFF).to_bytes(4, "little")
+    entry[72:76] = right_id.to_bytes(4, "little")
     entry[76:80] = child_id.to_bytes(4, "little")
     entry[116:120] = start_sector.to_bytes(4, "little")
     entry[120:128] = stream_size.to_bytes(8, "little")
     return bytes(entry)
+
+
+def build_minimal_destlist(stream_id: int, target_path: str, timestamp: datetime) -> bytes:
+    header = bytearray(32)
+    header[0:4] = (3).to_bytes(4, "little")
+    header[4:8] = (1).to_bytes(4, "little")
+    header[16:24] = stream_id.to_bytes(8, "little")
+
+    entry = bytearray(114)
+    guid_values = (
+        "11111111-2222-3333-4444-555555555555",
+        "66666666-7777-8888-9999-aaaaaaaaaaaa",
+        "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+        "12345678-1234-5678-9abc-def012345678",
+    )
+    for index, value in enumerate(guid_values):
+        entry[index * 16 : index * 16 + 16] = uuid.UUID(value).bytes_le
+    entry[64:80] = "ALICEPC".encode("utf-16le").ljust(16, b"\x00")
+    entry[80:84] = stream_id.to_bytes(4, "little")
+    entry[88:96] = datetime_to_filetime(timestamp).to_bytes(8, "little")
+    entry[96:100] = (3).to_bytes(4, "little")
+    entry[100:104] = stream_id.to_bytes(4, "little")
+    entry[112:114] = len(target_path).to_bytes(2, "little")
+    return bytes(header) + bytes(entry) + target_path.encode("utf-16le")
 
 
 def lnk_unicode_string(value: str) -> bytes:
@@ -403,6 +503,25 @@ def datetime_to_filetime(value: datetime) -> int:
 def filetime_reg_hex(value: datetime) -> str:
     raw = datetime_to_filetime(value).to_bytes(8, "little")
     return ",".join(f"{byte:02x}" for byte in raw)
+
+
+def reg_hex_from_bytes(raw: bytes) -> str:
+    return ",".join(f"{byte:02x}" for byte in raw)
+
+
+def sam_f_reg_hex(*, last_logon: datetime, password_last_set: datetime, rid: int, uac: int) -> str:
+    raw = bytearray(0x44)
+    raw[0x08:0x10] = datetime_to_filetime(last_logon).to_bytes(8, "little")
+    raw[0x18:0x20] = datetime_to_filetime(password_last_set).to_bytes(8, "little")
+    raw[0x30:0x34] = rid.to_bytes(4, "little")
+    raw[0x34:0x38] = (513).to_bytes(4, "little")
+    raw[0x38:0x3C] = uac.to_bytes(4, "little")
+    raw[0x42:0x44] = (7).to_bytes(2, "little")
+    return reg_hex_from_bytes(bytes(raw))
+
+
+def sam_v_reg_hex(*strings: str) -> str:
+    return reg_hex_from_bytes(("\x00".join(strings) + "\x00").encode("utf-16le"))
 
 
 def build_minimal_evtx(record_id: int, timestamp: datetime, strings: list[str]) -> bytes:
@@ -559,6 +678,8 @@ def build_minimal_binxml_fragment(strings: list[str]) -> bytes:
                         _binxml_element("SubjectUserSid", [_binxml_sid(5, [21, 111, 222, 333, 1001])]),
                         _binxml_element("ProcessId", [_binxml_uint32(4321)]),
                         _binxml_element("IsElevated", [_binxml_bool(True)]),
+                        _binxml_element("CpuSeconds", [_binxml_float64(12.5)]),
+                        _binxml_element("RiskRatio", [_binxml_float32(0.25)]),
                         _binxml_element("ActivityGuid", [_binxml_guid(bytes.fromhex("00112233445566778899aabbccddeeff"))]),
                         _binxml_element("PayloadHash", [_binxml_binary(bytes.fromhex("feedface"))]),
                     ],
@@ -613,6 +734,14 @@ def _binxml_bool(value: bool) -> bytes:
     return b"\x05\x0d" + (1 if value else 0).to_bytes(4, "little")
 
 
+def _binxml_float32(value: float) -> bytes:
+    return b"\x05\x0b" + struct.pack("<f", value)
+
+
+def _binxml_float64(value: float) -> bytes:
+    return b"\x05\x0c" + struct.pack("<d", value)
+
+
 def _binxml_filetime(value: datetime) -> bytes:
     return b"\x05\x11" + datetime_to_filetime(value).to_bytes(8, "little")
 
@@ -657,21 +786,51 @@ def build_minimal_registry_hive(timestamp: datetime, embedded_name: str, strings
     header[44:48] = (1).to_bytes(4, "little")
     header[48:112] = embedded_name.encode("utf-16le")[:64].ljust(64, b"\x00")
     header[508:512] = (0x12345678).to_bytes(4, "little")
+    has_run_string = any("Run" in value for value in strings)
+    root_name = "Software" if has_run_string else embedded_name
+    child_name = "Run" if has_run_string else f"{embedded_name[:16]}Key"
+    deleted_key_name = "DeletedRun" if has_run_string else f"Deleted{embedded_name[:16]}"
+    value_name = "SecurityUpdater" if any("SecurityUpdater" in value for value in strings) else "SampleValue"
+    root_relative_offset = 32
+    root_size = _registry_cell_size(0x4C + len(root_name.encode("latin-1", errors="ignore")))
+    subkey_list_relative_offset = root_relative_offset + root_size
+    subkey_list_size = _registry_cell_size(12)
+    child_relative_offset = subkey_list_relative_offset + subkey_list_size
+    child_size = _registry_cell_size(0x4C + len(child_name.encode("latin-1", errors="ignore")))
+    value_list_cell_relative_offset = child_relative_offset + child_size
+    value_list_data_relative_offset = value_list_cell_relative_offset + 4
+    value_list_size = _registry_cell_size(4)
+    value_relative_offset = value_list_cell_relative_offset + value_list_size
     cell_payload = b"".join(
         [
             build_registry_nk_cell(
-                "Run" if any("Run" in value for value in strings) else embedded_name,
+                root_name,
                 timestamp,
                 allocated=True,
+                stable_subkey_count=1,
+                stable_subkey_list_relative_offset=subkey_list_relative_offset,
+            ),
+            build_registry_subkey_list_cell([child_relative_offset]),
+            build_registry_nk_cell(
+                child_name,
+                timestamp,
+                allocated=True,
+                parent_relative_offset=root_relative_offset,
+                value_count=1,
+                value_list_relative_offset=value_list_data_relative_offset,
+            ),
+            build_registry_value_list_cell([value_relative_offset]),
+            build_registry_vk_cell(
+                value_name,
+                allocated=False,
+                value_type=4,
+                inline_data=(1).to_bytes(4, "little"),
             ),
             build_registry_nk_cell(
-                "DeletedRun" if any("Run" in value for value in strings) else f"Deleted{embedded_name[:16]}",
+                deleted_key_name,
                 timestamp,
                 allocated=False,
-            ),
-            build_registry_vk_cell(
-                "SecurityUpdater" if any("SecurityUpdater" in value for value in strings) else "SampleValue",
-                allocated=False,
+                parent_relative_offset=child_relative_offset,
             ),
         ]
     )
@@ -684,33 +843,140 @@ def build_minimal_registry_hive(timestamp: datetime, embedded_name: str, strings
     return bytes(header) + bytes(hbin)
 
 
-def build_registry_nk_cell(name: str, timestamp: datetime, *, allocated: bool) -> bytes:
+def build_minimal_shellbags_registry_hive(timestamp: datetime, embedded_name: str = "UsrClass.dat") -> bytes:
+    header = bytearray(4096)
+    header[0:4] = b"regf"
+    header[4:8] = (11).to_bytes(4, "little")
+    header[8:12] = (11).to_bytes(4, "little")
+    header[12:20] = datetime_to_filetime(timestamp).to_bytes(8, "little")
+    header[20:24] = (1).to_bytes(4, "little")
+    header[24:28] = (5).to_bytes(4, "little")
+    header[36:40] = (32).to_bytes(4, "little")
+    header[40:44] = (4096).to_bytes(4, "little")
+    header[44:48] = (1).to_bytes(4, "little")
+    header[48:112] = embedded_name.encode("utf-16le")[:64].ljust(64, b"\x00")
+    header[508:512] = (0x12345678).to_bytes(4, "little")
+
+    root_relative_offset = 32
+    root_size = _registry_cell_size(0x4C + len(b"Shell"))
+    subkey_list_relative_offset = root_relative_offset + root_size
+    subkey_list_size = _registry_cell_size(12)
+    bagmru_relative_offset = subkey_list_relative_offset + subkey_list_size
+    bagmru_size = _registry_cell_size(0x4C + len(b"BagMRU"))
+    value_list_cell_relative_offset = bagmru_relative_offset + bagmru_size
+    value_list_data_relative_offset = value_list_cell_relative_offset + 4
+    value_list_size = _registry_cell_size(8)
+    shell_item_value_relative_offset = value_list_cell_relative_offset + value_list_size
+    shell_item_value_size = _registry_cell_size(20 + len(b"0"))
+    node_slot_value_relative_offset = shell_item_value_relative_offset + shell_item_value_size
+
+    cell_payload = b"".join(
+        [
+            build_registry_nk_cell(
+                "Shell",
+                timestamp,
+                allocated=True,
+                stable_subkey_count=1,
+                stable_subkey_list_relative_offset=subkey_list_relative_offset,
+            ),
+            build_registry_subkey_list_cell([bagmru_relative_offset]),
+            build_registry_nk_cell(
+                "BagMRU",
+                timestamp,
+                allocated=True,
+                parent_relative_offset=root_relative_offset,
+                value_count=2,
+                value_list_relative_offset=value_list_data_relative_offset,
+            ),
+            build_registry_value_list_cell([shell_item_value_relative_offset, node_slot_value_relative_offset]),
+            build_registry_vk_cell("0", allocated=True, value_type=3, inline_data=b"\x14\x00\x1fP"),
+            build_registry_vk_cell("NodeSlot", allocated=True, value_type=4, inline_data=(42).to_bytes(4, "little")),
+        ]
+    )
+    payload = cell_payload + r"Software\Microsoft\Windows\Shell\BagMRU\0".encode("utf-16le") + b"\x00\x00"
+    hbin = bytearray(4096)
+    hbin[0:4] = b"hbin"
+    hbin[4:8] = (0).to_bytes(4, "little")
+    hbin[8:12] = len(hbin).to_bytes(4, "little")
+    hbin[32 : 32 + min(len(payload), len(hbin) - 32)] = payload[: len(hbin) - 32]
+    return bytes(header) + bytes(hbin)
+
+
+def build_registry_nk_cell(
+    name: str,
+    timestamp: datetime,
+    *,
+    allocated: bool,
+    parent_relative_offset: int = 0,
+    stable_subkey_count: int = 0,
+    stable_subkey_list_relative_offset: int = 0,
+    value_count: int = 0,
+    value_list_relative_offset: int = 0,
+) -> bytes:
     name_bytes = name.encode("latin-1", errors="ignore")
     body = bytearray(0x4C + len(name_bytes))
     body[0:2] = b"nk"
     body[2:4] = (0x0020).to_bytes(2, "little")
     body[4:12] = datetime_to_filetime(timestamp).to_bytes(8, "little")
+    body[0x10:0x14] = parent_relative_offset.to_bytes(4, "little")
+    body[0x14:0x18] = stable_subkey_count.to_bytes(4, "little")
+    body[0x1C:0x20] = stable_subkey_list_relative_offset.to_bytes(4, "little")
+    body[0x24:0x28] = value_count.to_bytes(4, "little")
+    body[0x28:0x2C] = value_list_relative_offset.to_bytes(4, "little")
     body[0x48:0x4A] = len(name_bytes).to_bytes(2, "little")
     body[0x4C : 0x4C + len(name_bytes)] = name_bytes
     return _registry_cell(bytes(body), allocated=allocated)
 
 
-def build_registry_vk_cell(name: str, *, allocated: bool) -> bytes:
+def build_registry_vk_cell(
+    name: str,
+    *,
+    allocated: bool,
+    value_type: int = 1,
+    inline_data: bytes = b"",
+) -> bytes:
     name_bytes = name.encode("latin-1", errors="ignore")
     body = bytearray(20 + len(name_bytes))
     body[0:2] = b"vk"
     body[2:4] = len(name_bytes).to_bytes(2, "little")
-    body[4:8] = (4).to_bytes(4, "little")
-    body[8:12] = (0).to_bytes(4, "little")
-    body[12:16] = (1).to_bytes(4, "little")
+    if inline_data:
+        body[4:8] = (0x80000000 | len(inline_data)).to_bytes(4, "little")
+        body[8:12] = inline_data[:4].ljust(4, b"\x00")
+    else:
+        body[4:8] = (4).to_bytes(4, "little")
+        body[8:12] = (0).to_bytes(4, "little")
+    body[12:16] = value_type.to_bytes(4, "little")
     body[16:18] = (1).to_bytes(2, "little")
     body[20 : 20 + len(name_bytes)] = name_bytes
     return _registry_cell(bytes(body), allocated=allocated)
 
 
+def build_registry_subkey_list_cell(child_relative_offsets: list[int]) -> bytes:
+    body = bytearray(4 + len(child_relative_offsets) * 8)
+    body[0:2] = b"lf"
+    body[2:4] = len(child_relative_offsets).to_bytes(2, "little")
+    cursor = 4
+    for child_relative_offset in child_relative_offsets:
+        body[cursor : cursor + 4] = child_relative_offset.to_bytes(4, "little")
+        cursor += 8
+    return _registry_cell(bytes(body), allocated=True)
+
+
+def build_registry_value_list_cell(value_relative_offsets: list[int]) -> bytes:
+    body = bytearray(len(value_relative_offsets) * 4)
+    for index, value_relative_offset in enumerate(value_relative_offsets):
+        body[index * 4 : index * 4 + 4] = value_relative_offset.to_bytes(4, "little")
+    return _registry_cell(bytes(body), allocated=True)
+
+
+def _registry_cell_size(body_size: int) -> int:
+    unpadded_size = body_size + 4
+    return unpadded_size + ((8 - (unpadded_size % 8)) % 8)
+
+
 def _registry_cell(body: bytes, *, allocated: bool) -> bytes:
     unpadded_size = len(body) + 4
-    cell_size = unpadded_size + ((8 - (unpadded_size % 8)) % 8)
+    cell_size = _registry_cell_size(len(body))
     signed_size = -cell_size if allocated else cell_size
     return signed_size.to_bytes(4, "little", signed=True) + body + (b"\x00" * (cell_size - unpadded_size))
 
@@ -813,6 +1079,8 @@ def _write_user_profile_fixtures(profile_path: Path, reg_path: Path) -> None:
         )
         + build_registry_nk_cell("alice", datetime(2024, 3, 1, 0, 0, 0, tzinfo=timezone.utc), allocated=True)
         + build_registry_nk_cell("000003E9", datetime(2024, 3, 1, 0, 0, 1, tzinfo=timezone.utc), allocated=True)
+        + build_registry_nk_cell("Administrators", datetime(2024, 3, 1, 0, 0, 2, tzinfo=timezone.utc), allocated=True)
+        + build_registry_nk_cell("00000220", datetime(2024, 3, 1, 0, 0, 3, tzinfo=timezone.utc), allocated=True)
     )
     reg_path.write_text(
         f"""Windows Registry Editor Version 5.00
@@ -845,6 +1113,8 @@ def _write_user_profile_fixtures(profile_path: Path, reg_path: Path) -> None:
 
 [HKEY_LOCAL_MACHINE\\SECURITY\\Policy\\Secrets\\_SC_SecurityUpdater]
 "CurrVal"=hex:00,01
+"CupdTime"=hex(b):{filetime_reg_hex(datetime(2024, 4, 1, 1, 23, 45, tzinfo=timezone.utc))}
+"SecDesc"=hex:01,00,04,80
 
 [HKEY_LOCAL_MACHINE\\SECURITY\\Policy\\PolPrDmN\\Privilege Rights]
 "SeDebugPrivilege"="S-1-5-32-544"
@@ -858,6 +1128,10 @@ def _write_user_profile_fixtures(profile_path: Path, reg_path: Path) -> None:
 [HKEY_LOCAL_MACHINE\\SAM\\SAM\\Domains\\Account\\Users\\Names\\alice]
 @=dword:000003e9
 
+[HKEY_LOCAL_MACHINE\\SAM\\SAM\\Domains\\Builtin\\Aliases\\Names\\Administrators]
+"Members"="S-1-5-21-111-222-333-1001"
+"MemberNames"="alice"
+
 [HKEY_LOCAL_MACHINE\\SAM\\SAM\\Domains\\Account\\Users\\000003E9]
 "UserName"="alice"
 "AccountCreated"="2024-03-01T00:00:00Z"
@@ -865,6 +1139,8 @@ def _write_user_profile_fixtures(profile_path: Path, reg_path: Path) -> None:
 "PasswordLastSet"="2024-03-15T12:34:56Z"
 "UserAccountControl"=dword:00000200
 "AdminCount"=dword:00000001
+"F"=hex:{sam_f_reg_hex(last_logon=datetime(2024, 4, 1, 1, 2, 3, tzinfo=timezone.utc), password_last_set=datetime(2024, 3, 15, 12, 34, 56, tzinfo=timezone.utc), rid=1001, uac=0x0200)}
+"V"=hex:{sam_v_reg_hex("alice", "Alice Example")}
 """,
         encoding="utf-16",
     )
@@ -873,12 +1149,12 @@ def _write_user_profile_fixtures(profile_path: Path, reg_path: Path) -> None:
 def _write_execution_fixtures(reg_path: Path, powershell_history: Path, amcache_hive: Path) -> None:
     reg_path.parent.mkdir(parents=True, exist_ok=True)
     reg_path.write_text(
-        """Windows Registry Editor Version 5.00
+        f"""Windows Registry Editor Version 5.00
 
 [HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\bam\\State\\UserSettings\\S-1-5-21-1000]
-"\\Device\\HarddiskVolume3\\Users\\alice\\AppData\\Roaming\\evil.exe"=hex(b):00,00,00,00,00,00,00,00
+"\\Device\\HarddiskVolume3\\Users\\alice\\AppData\\Roaming\\evil.exe"=hex(b):{filetime_reg_hex(datetime(2024, 4, 1, 6, 7, 8, tzinfo=timezone.utc))}
 
-[HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\UserAssist\\{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}\\Count]
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\UserAssist\\{{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}}\\Count]
 "P:\\Hfref\\nyvpr\\NccQngn\\Ebnzvat\\rivy.rkr"=hex:01,00,00,00
 
 [HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\AppCompatCache]
@@ -892,6 +1168,8 @@ def _write_execution_fixtures(reg_path: Path, powershell_history: Path, amcache_
 "Name"="Example App"
 "Publisher"="Example Publisher"
 "SHA1"="0123456789abcdef0123456789abcdef01234567"
+"FileDescription"="Example Application Binary"
+"ProductName"="Example Suite"
 "LinkDate"="2024-04-01T02:03:04Z"
 """,
         encoding="utf-16",
@@ -920,8 +1198,10 @@ def _write_prefetch_fixture(path: Path) -> None:
     header = bytearray(512)
     header[0:4] = (30).to_bytes(4, "little")
     header[4:8] = b"SCCA"
+    header[0x0C:0x10] = (len(header)).to_bytes(4, "little")
     header[16 : 16 + len("POWERSHELL.EXE".encode("utf-16le"))] = "POWERSHELL.EXE".encode("utf-16le")
     header[0x80:0x88] = datetime_to_filetime(datetime(2024, 4, 1, 9, 10, 11, tzinfo=timezone.utc)).to_bytes(8, "little")
+    header[0x88:0x90] = datetime_to_filetime(datetime(2024, 3, 30, 8, 9, 10, tzinfo=timezone.utc)).to_bytes(8, "little")
     header[0xD0:0xD4] = (3).to_bytes(4, "little")
     referenced_path = r"\DEVICE\HARDDISKVOLUME3\WINDOWS\SYSTEM32\WINDOWSPOWERSHELL\V1.0\POWERSHELL.EXE".encode("utf-16le")
     header[0x120 : 0x120 + len(referenced_path)] = referenced_path
@@ -945,6 +1225,11 @@ def _write_srum_database_fixture(path: Path) -> None:
                 r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
                 "NetworkUsage",
                 "bytes received from https://download.example/tools/installer.exe",
+                (
+                    "SruDbTable=NetworkUsage Application=powershell.exe UserSid=S-1-5-21-1000 "
+                    "Timestamp=2024-04-01T05:06:07Z BytesSent=512 BytesReceived=2048 "
+                    "InterfaceLuid=12 NetworkProfile=CorpWiFi Url=https://download.example/tools/installer.exe"
+                ),
             ]
         )
     )
@@ -965,7 +1250,8 @@ def _write_filesystem_fixtures(mft_csv: Path, usn_jsonl: Path, mft_native: Path,
     mft_native.write_bytes(build_minimal_mft())
     usn_journal.parent.mkdir(parents=True, exist_ok=True)
     usn_journal.write_bytes(
-        build_minimal_usn_journal(
+        (b"\x00" * 16)
+        + build_minimal_usn_journal(
             file_name="deleted.txt",
             timestamp=datetime(2024, 4, 1, 4, 6, 7, tzinfo=timezone.utc),
             reason=0x00000200,
@@ -975,21 +1261,80 @@ def _write_filesystem_fixtures(mft_csv: Path, usn_jsonl: Path, mft_native: Path,
             timestamp=datetime(2024, 4, 1, 4, 7, 8, tzinfo=timezone.utc),
             reason=0x00002000 | 0x80000000,
         )
+        + build_minimal_usn_journal(
+            file_name=f"large_{'x' * 260}.bin",
+            timestamp=datetime(2024, 4, 1, 4, 8, 9, tzinfo=timezone.utc),
+            reason=0x00000002 | 0x80000000,
+        )
     )
 
 
 def build_minimal_mft() -> bytes:
     record = bytearray(1024)
     record[0:4] = b"FILE"
+    record[0x04:0x06] = (0x30).to_bytes(2, "little")
+    record[0x06:0x08] = (3).to_bytes(2, "little")
     record[0x10:0x12] = (3).to_bytes(2, "little")
     record[0x12:0x14] = (1).to_bytes(2, "little")
     record[0x14:0x16] = (0x38).to_bytes(2, "little")
     record[0x16:0x18] = (0x01).to_bytes(2, "little")
-    record[0x18:0x1C] = (512).to_bytes(4, "little")
     record[0x1C:0x20] = (1024).to_bytes(4, "little")
+    record[0x28:0x2A] = (1).to_bytes(2, "little")
+    record[0x2C:0x30] = (4).to_bytes(4, "little")
+    record[0x30:0x32] = b"\xaa\xbb"
+    record[0x32:0x34] = b"\x11\x22"
+    record[0x34:0x36] = b"\x33\x44"
+    timestamp = datetime(2024, 4, 1, 4, 5, 6, tzinfo=timezone.utc)
+    timestamp_filetime = datetime_to_filetime(timestamp)
+    standard_information = bytearray(48)
+    for offset in (0, 8, 16, 24):
+        standard_information[offset : offset + 8] = timestamp_filetime.to_bytes(8, "little")
+    standard_information[32:36] = (0x20).to_bytes(4, "little")
+
+    file_name = "deleted.txt"
+    encoded_name = file_name.encode("utf-16le")
+    file_name_value = bytearray(66 + len(encoded_name))
+    file_name_value[0:8] = ((1 << 48) | 5).to_bytes(8, "little")
+    for offset in (8, 16, 24, 32):
+        file_name_value[offset : offset + 8] = timestamp_filetime.to_bytes(8, "little")
+    file_name_value[40:48] = (128).to_bytes(8, "little")
+    file_name_value[48:56] = (32).to_bytes(8, "little")
+    file_name_value[56:60] = (0x20).to_bytes(4, "little")
+    file_name_value[64] = len(file_name)
+    file_name_value[65] = 1
+    file_name_value[66 : 66 + len(encoded_name)] = encoded_name
+
+    cursor = 0x38
+    for attribute in (
+        build_mft_resident_attribute(0x10, bytes(standard_information), attribute_id=1),
+        build_mft_resident_attribute(0x30, bytes(file_name_value), attribute_id=2),
+        build_mft_resident_attribute(0x80, b"triage fixture data", attribute_id=3),
+    ):
+        record[cursor : cursor + len(attribute)] = attribute
+        cursor += len(attribute)
+    record[cursor : cursor + 4] = (0xFFFFFFFF).to_bytes(4, "little")
+    cursor += 8
+    record[0x18:0x1C] = cursor.to_bytes(4, "little")
     path = r"C:\Users\alice\Desktop\deleted.txt".encode("utf-16le")
-    record[0x100 : 0x100 + len(path)] = path
+    record[0x300 : 0x300 + len(path)] = path
+    record[510:512] = b"\xaa\xbb"
+    record[1022:1024] = b"\xaa\xbb"
     return bytes(record)
+
+
+def build_mft_resident_attribute(attribute_type: int, value: bytes, *, attribute_id: int) -> bytes:
+    value_offset = 0x18
+    length = align8(value_offset + len(value))
+    attribute = bytearray(length)
+    attribute[0:4] = attribute_type.to_bytes(4, "little")
+    attribute[4:8] = length.to_bytes(4, "little")
+    attribute[8] = 0
+    attribute[12:14] = (0).to_bytes(2, "little")
+    attribute[14:16] = attribute_id.to_bytes(2, "little")
+    attribute[16:20] = len(value).to_bytes(4, "little")
+    attribute[20:22] = value_offset.to_bytes(2, "little")
+    attribute[value_offset : value_offset + len(value)] = value
+    return bytes(attribute)
 
 
 def build_minimal_usn_journal(file_name: str, timestamp: datetime, reason: int) -> bytes:
@@ -1049,6 +1394,9 @@ def _write_windows_search_fixture(csv_path: Path, edb_path: Path) -> None:
     edb_path.write_bytes(
         _minimal_ese_database(
             [
+                "SystemIndex_GthrPth WorkID ItemUrl",
+                "SystemIndex_PropertyStore System.ItemPathDisplay System.FileName System.DateModified",
+                "System.Search.Contents IsDeleted CrawlStatus",
                 r"C:\Users\alice\Documents\Incident Notes.docx",
                 "encoded powershell investigation notes",
                 "https://example.com/browser-history",
@@ -1058,13 +1406,16 @@ def _write_windows_search_fixture(csv_path: Path, edb_path: Path) -> None:
 
 
 def _minimal_ese_database(strings: list[str]) -> bytes:
+    page_size = 8192
     header = bytearray(8192)
     header[4:8] = bytes.fromhex("efcdab89")
     header[8:12] = (0x620).to_bytes(4, "little")
     header[12:16] = (1).to_bytes(4, "little")
-    header[0xEC:0xF0] = (8192).to_bytes(4, "little")
+    header[0xEC:0xF0] = page_size.to_bytes(4, "little")
     payload = b"\x00\x00".join(value.encode("utf-16le") for value in strings)
-    return bytes(header) + payload
+    database = bytes(header) + payload
+    padding = (page_size - (len(database) % page_size)) % page_size
+    return database + (b"\x00" * padding)
 
 
 def _write_remote_access_fixtures(default_rdp: Path, cache_file: Path, reg_path: Path) -> None:

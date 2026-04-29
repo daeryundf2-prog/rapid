@@ -95,6 +95,13 @@
         "artifacts": []
       },
       {
+        "name": "email-artifacts",
+        "description": "Email EML/MBOX parsing and PST/OST/MSG bounded mailbox inventory",
+        "target_platform": "any",
+        "supported": true,
+        "artifacts": []
+      },
+      {
         "name": "linux-system-artifacts",
         "description": "Linux user, shell history, SSH, auth log, cron, and systemd triage artifacts",
         "target_platform": "linux",
@@ -194,7 +201,7 @@
       },
       {
         "name": "windows-shellbags",
-        "description": "Windows Shellbags from Registry .reg exports",
+        "description": "Windows ShellBags from Registry exports and native user-hive candidates",
         "target_platform": "windows",
         "supported": true,
         "artifacts": []

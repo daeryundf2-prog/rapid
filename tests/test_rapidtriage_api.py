@@ -5,6 +5,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+import wave
 import zipfile
 from pathlib import Path
 
@@ -35,11 +36,16 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(args.host, "0.0.0.0")
         self.assertEqual(args.port, 9000)
         self.assertEqual(args.reload, False)
+        self.assertIsNone(args.crash_log_dir)
 
     def test_health_and_index_are_available(self) -> None:
         client = TestClient(create_app(RunJobStore()))
 
         self.assertEqual(client.get("/api/health").json(), {"status": "ok"})
+        self.assertFalse(client.get("/api/enterprise/policy").json()["telemetry"]["enabled"])
+        keyword_packs = client.get("/api/keyword-packs").json()
+        self.assertIn("#62", keyword_packs["keyword_pack_library_assessment"]["commercial_gap_ids"])
+        self.assertIn("#62", keyword_packs["packs"][0]["commercial_gap_ids"])
         index_response = client.get("/")
 
         self.assertEqual(index_response.status_code, 200)
@@ -131,6 +137,21 @@ class RapidTriageApiTests(unittest.TestCase):
                 "password email body\n",
                 encoding="utf-8",
             )
+            binary_path = root / "binary.bin"
+            binary_path.write_bytes(b"\x00\x01RapidTriage\xff" * 300)
+            image_path = root / "screen.png"
+            from PIL import Image
+
+            Image.new("RGB", (16, 12), "white").save(image_path)
+            image_path.with_name("screen.ocr.txt").write_text("image OCR password", encoding="utf-8")
+            image_path.with_name("screen.translation.txt").write_text("translated OCR password", encoding="utf-8")
+            media_path = root / "call.wav"
+            with wave.open(str(media_path), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(8000)
+                wav_file.writeframes(b"\x00\x00" * 8000)
+            media_path.with_suffix(".wav.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\npassword spoken\n", encoding="utf-8")
             client = TestClient(create_app(RunJobStore()))
 
             response = client.post(
@@ -199,10 +220,16 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(preview_payload["viewer_metadata"]["parser_version"], "2")
             self.assertIn("source-search", preview_payload["search_url"])
             self.assertIn("Preview is read-only", preview_payload["viewer_limitations"][0])
+            self.assertIn("#51", preview_payload["review_workflow"]["commercial_gap_ids"])
+            self.assertIn("#52", preview_payload["compare_workflow"]["commercial_gap_ids"])
             self.assertEqual(
                 {action["id"] for action in preview_payload["viewer_actions"]},
                 {"download", "hash", "search-current-file", "pin-compare", "save-review"},
             )
+            compare_action = next(action for action in preview_payload["viewer_actions"] if action["id"] == "pin-compare")
+            review_action = next(action for action in preview_payload["viewer_actions"] if action["id"] == "save-review")
+            self.assertEqual(compare_action["max_pinned_items"], 3)
+            self.assertIn("#51", review_action["commercial_gap_ids"])
             metadata_response = client.get(
                 f"/api/runs/{run_id}/source-metadata",
                 params={"path": document_match["path"], "hash": "true"},
@@ -233,6 +260,15 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(sqlite_preview["preview_type"], "sqlite")
             self.assertEqual(sqlite_preview["sqlite"]["tables"][0]["name"], "notes")
             self.assertEqual(sqlite_preview["sqlite"]["tables"][0]["rows"][0]["values"]["body"], "password in sqlite viewer")
+            self.assertIn("database_metadata", sqlite_preview["sqlite"])
+            self.assertTrue(
+                any(column["name"] == "body" for column in sqlite_preview["sqlite"]["tables"][0]["column_details"])
+            )
+            self.assertIn("CREATE TABLE notes", sqlite_preview["sqlite"]["tables"][0]["schema_sql"])
+            self.assertIn("schema-sql", sqlite_preview["sqlite"]["review_features"])
+            self.assertIn("#54", sqlite_preview["sqlite"]["sqlite_viewer_assessment"]["commercial_gap_ids"])
+            self.assertEqual(sqlite_preview["sqlite"]["table_profiles"][0]["name"], "notes")
+            self.assertGreaterEqual(sqlite_preview["sqlite"]["table_profiles"][0]["searchable_text_column_count"], 1)
             self.assertTrue(any("SQLite previews show bounded" in item for item in sqlite_preview["viewer_limitations"]))
             sqlite_search_response = client.get(
                 f"/api/runs/{run_id}/source-search",
@@ -262,6 +298,64 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(eml_preview["preview_type"], "email")
             self.assertEqual(eml_preview["email"]["messages"][0]["subject"], "Password review")
             self.assertIn("password email body", eml_preview["email"]["messages"][0]["body_preview"])
+            self.assertEqual(eml_preview["email"]["thread_count"], 1)
+            self.assertEqual(eml_preview["email"]["threads"][0]["message_count"], 1)
+            self.assertIn("#55", eml_preview["email"]["email_conversation_viewer_assessment"]["commercial_gap_ids"])
+            self.assertEqual(eml_preview["email"]["conversation_view"]["thread_count"], 1)
+            self.assertEqual(
+                eml_preview["email"]["conversation_view"]["threads"][0]["message_order"][0]["subject"],
+                "Password review",
+            )
+            binary_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(binary_path)})
+            self.assertEqual(binary_preview_response.status_code, 200, binary_preview_response.text)
+            binary_preview = binary_preview_response.json()
+            self.assertEqual(binary_preview["preview_type"], "hex")
+            self.assertEqual(binary_preview["hex"]["rows"][0]["offset_hex"], "0x00000000")
+            self.assertIn("52 61 70 69 64", binary_preview["hex"]["rows"][0]["hex"])
+            self.assertTrue(binary_preview["hex"]["truncated"])
+            self.assertEqual(len(binary_preview["hex"]["preview_sha256"]), 64)
+            self.assertIn("#53", binary_preview["hex"]["hex_viewer_assessment"]["commercial_gap_ids"])
+            self.assertTrue(binary_preview["hex"]["offset_navigation"]["supports_keyword_byte_hits"])
+            binary_search_response = client.get(
+                f"/api/runs/{run_id}/source-search",
+                params={"path": str(binary_path), "keyword": "RapidTriage"},
+            )
+            self.assertEqual(binary_search_response.status_code, 200, binary_search_response.text)
+            binary_search = binary_search_response.json()
+            self.assertEqual(binary_search["message"], "Binary/hex byte search completed.")
+            self.assertEqual(binary_search["matches"][0]["offset_hex"], "0x00000002")
+            self.assertIn("byte offset", binary_search["matches"][0]["citation"])
+            image_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(image_path)})
+            self.assertEqual(image_preview_response.status_code, 200, image_preview_response.text)
+            image_preview = image_preview_response.json()
+            self.assertEqual(image_preview["preview_type"], "image")
+            self.assertEqual(image_preview["image"]["width"], 16)
+            self.assertEqual(len(image_preview["image"]["perceptual_hash"]), 16)
+            self.assertIn("#56", image_preview["image"]["gallery_review"]["commercial_gap_ids"])
+            self.assertIn("#56", image_preview["image"]["gallery_review_assessment"]["commercial_gap_ids"])
+            self.assertIn("#58", image_preview["image"]["ocr_queue_assessment"]["commercial_gap_ids"])
+            self.assertIn("#59", image_preview["image"]["korean_ocr_translation_workflow"]["commercial_gap_ids"])
+            self.assertIn("similarity-bucketed", image_preview["image"]["gallery_review"]["tag_suggestions"])
+            self.assertEqual(image_preview["image"]["ocr_plan"]["status"], "sidecar-imported")
+            self.assertEqual(image_preview["image"]["translation_plan"]["status"], "sidecar-imported")
+            self.assertIn("translated OCR", image_preview["image"]["translation_sidecar"]["text"])
+            media_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(media_path)})
+            self.assertEqual(media_preview_response.status_code, 200, media_preview_response.text)
+            media_preview = media_preview_response.json()
+            self.assertEqual(media_preview["preview_type"], "media")
+            self.assertEqual(len(media_preview["media"]["source_hashes"]["sha256"]), 64)
+            self.assertEqual(media_preview["media"]["review"]["transcript_alignment"], "sidecar-cue-based")
+            self.assertIn("#57", media_preview["media"]["review"]["commercial_gap_ids"])
+            self.assertTrue(media_preview["media"]["review"]["cue_navigation_available"])
+            self.assertIn("#57", media_preview["media"]["media_transcript_assessment"]["commercial_gap_ids"])
+            self.assertEqual(media_preview["media"]["media_transcript_assessment"]["cue_count"], 1)
+            self.assertEqual(media_preview["media"]["transcript_sidecars"][0]["cues"][0]["start"], "00:00:00,000")
+            self.assertIn("#57", media_preview["media"]["transcript_sidecars"][0]["commercial_gap_ids"])
+            self.assertEqual(media_preview["media"]["transcript_sidecars"][0]["cue_count"], 1)
+            self.assertEqual(media_preview["media"]["transcript_sidecars"][0]["validation_status"], "sidecar-review-required")
+            self.assertEqual(media_preview["media"]["metadata"]["duration_seconds"], 1.0)
+            self.assertEqual(media_preview["media"]["transcript_sidecar_count"], 1)
+            self.assertIn("password spoken", media_preview["media"]["transcript_sidecars"][0]["preview"])
             filtered_search_response = client.get(
                 f"/api/runs/{run_id}/search",
                 params={
@@ -287,6 +381,13 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(paged_files["pagination"]["limit"], 2)
             self.assertEqual(len(paged_files["candidates"]), 2)
             self.assertGreaterEqual(paged_files["pagination"]["total"], 2)
+            self.assertIn("next_cursor", paged_files["pagination"])
+            cursor_files_response = client.get(
+                f"/api/runs/{run_id}/files",
+                params={"cursor": paged_files["pagination"]["cursor"], "limit": 2},
+            )
+            self.assertEqual(cursor_files_response.status_code, 200)
+            self.assertEqual(cursor_files_response.json()["pagination"]["offset"], 1)
             paged_docs_response = client.get(f"/api/runs/{run_id}/docs", params={"offset": 0, "limit": 1})
             self.assertEqual(paged_docs_response.status_code, 200)
             paged_docs = paged_docs_response.json()
@@ -613,11 +714,18 @@ class RapidTriageApiTests(unittest.TestCase):
                     "tags": ["credential"],
                     "note": "Opened in viewer.",
                     "reviewer": "api-test",
+                    "assignee": "analyst-a",
+                    "priority": "high",
+                    "due_at": "2026-04-30T09:00:00+09:00",
                     "include_in_report": True,
                 },
             )
             self.assertEqual(review_response.status_code, 200, review_response.text)
             self.assertEqual(review_response.json()["verification_status"], "source_opened")
+            self.assertEqual(review_response.json()["assignee"], "analyst-a")
+            self.assertEqual(review_response.json()["priority"], "high")
+            self.assertEqual(review_response.json()["due_at"], "2026-04-30T09:00:00+09:00")
+            self.assertIn("#51", review_response.json()["review_workflow"]["commercial_gap_ids"])
 
             saved_searches_response = client.post(
                 "/api/case-db/saved-searches/list",
@@ -645,11 +753,16 @@ class RapidTriageApiTests(unittest.TestCase):
                     "tags": ["credential", "batch"],
                     "note": "Batch verified.",
                     "reviewer": "api-test",
+                    "assignee": "lead-reviewer",
+                    "priority": "urgent",
                     "include_in_report": True,
                 },
             )
             self.assertEqual(batch_response.status_code, 200, batch_response.text)
             self.assertEqual(batch_response.json()["updated_count"], 1)
+            self.assertEqual(batch_response.json()["marks"][0]["assignee"], "lead-reviewer")
+            self.assertEqual(batch_response.json()["marks"][0]["priority"], "urgent")
+            self.assertTrue(batch_response.json()["marks"][0]["review_workflow"]["assignment_present"])
 
             export_response = client.post(
                 "/api/case-db/report-export",

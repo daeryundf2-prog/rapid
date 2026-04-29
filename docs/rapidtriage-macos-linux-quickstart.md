@@ -94,6 +94,8 @@ If you have an E01/Ex01:
 rapidtriage evidence ./case.E01 --json
 ```
 
+Review the JSON fields before running extraction: `tool_preflight` shows libewf/Sleuth Kit availability and versions, `source_integrity` records bounded source hash metadata, and `fallback_guidance` explains the read-only mount/export path if direct tools are missing.
+
 If direct E01 tools are missing or fail, mount/export the image using your trusted forensic workflow and point RapidTriage at the resulting folder:
 
 ```bash
@@ -101,3 +103,5 @@ rapidtriage run ./mounted-case-folder --mode fraud --read-only
 ```
 
 For AD1, AFF/AFF4, VHD/VHDX, VMDK, ISO, DMG, XVA, QCOW, mobile extraction packages, and memory dumps, RapidTriage currently provides preflight detection and guidance. Direct parsing/mounting is not yet the default workflow.
+
+For raw/split images and qemu-convertible virtual disks, direct runs record split-part discovery, partition offsets, qemu-img/Sleuth Kit command history, hashes where bounded, and warnings in `rapidtriage-disk-image.json` or `rapidtriage-virtual-disk.json`. AD1/L01/Lx01/AFF/AFF4/AFF4-L and XVA remain export-first workflows; preserve original container hashes and vendor/export logs with the case.

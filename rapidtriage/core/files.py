@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from .input_root import InputRoot, resolve_input_root
+from .hash_cache import compute_hashes_cached
 from .models import FileCandidate
 from .rules import RuleSet, annotate_files_payload
 
@@ -308,6 +309,7 @@ def run_files_scan(
             category_counts[category] = category_counts.get(category, 0) + 1
 
     modified_values = [candidate.modified_at for candidate in candidates]
+    duplicate_groups = build_duplicate_content_groups(candidates)
     payload = {
         "command": "files",
         "root": str(input_root.root_path),
@@ -327,7 +329,10 @@ def run_files_scan(
             "category_counts": category_counts,
             "newest_modified_at": max(modified_values) if modified_values else None,
             "oldest_modified_at": min(modified_values) if modified_values else None,
+            "duplicate_group_count": len(duplicate_groups),
+            "duplicate_file_count": sum(int(group["file_count"]) for group in duplicate_groups),
         },
+        "duplicate_content_groups": duplicate_groups,
         "candidates": [item.to_dict() for item in candidates],
     }
     if rule_set is not None:
@@ -494,3 +499,44 @@ def first_contains(text: str, values: Iterable[str]) -> Optional[str]:
         if value in text:
             return value
     return None
+
+
+def build_duplicate_content_groups(
+    candidates: Sequence[FileCandidate],
+    *,
+    max_hash_bytes: int = 50 * 1024 * 1024,
+    max_files_to_hash: int = 500,
+) -> list[dict[str, object]]:
+    size_buckets: dict[int, list[FileCandidate]] = {}
+    for candidate in candidates:
+        size_buckets.setdefault(int(candidate.size), []).append(candidate)
+    hash_buckets: dict[str, list[FileCandidate]] = {}
+    hashed_count = 0
+    for size, bucket in size_buckets.items():
+        if len(bucket) < 2 or size > max_hash_bytes:
+            continue
+        for candidate in bucket:
+            if hashed_count >= max_files_to_hash:
+                break
+            try:
+                sha256 = compute_hashes_cached(Path(candidate.path))["sha256"]
+            except OSError:
+                continue
+            hash_buckets.setdefault(sha256, []).append(candidate)
+            hashed_count += 1
+    groups = []
+    for sha256, bucket in sorted(hash_buckets.items(), key=lambda item: (-len(item[1]), item[0])):
+        if len(bucket) < 2:
+            continue
+        groups.append(
+            {
+                "sha256": sha256,
+                "file_count": len(bucket),
+                "size": bucket[0].size,
+                "paths": [candidate.path for candidate in bucket[:20]],
+                "truncated_paths": len(bucket) > 20,
+            }
+        )
+        if len(groups) >= 50:
+            break
+    return groups

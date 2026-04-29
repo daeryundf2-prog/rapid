@@ -18,6 +18,7 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
 
         self.assertIn("indicators", commands)
         self.assertIn("--rules", commands["indicators"].format_help())
+        self.assertIn("--ti-feed", commands["indicators"].format_help())
 
     def test_run_writes_indicator_summary_and_cli_matches_rules(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -46,13 +47,40 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             self.assertIndicatorMatchedRule(indicators_payload, "malicious.example", "credential-url-hit")
 
             output = Path(tmp_dir) / "indicators-manual.json"
+            ti_feed = Path(tmp_dir) / "ti-feed.json"
+            ti_feed.write_text(
+                json.dumps(
+                    {
+                        "plugin": {"name": "unit-ti-plugin", "version": "2026.04"},
+                        "indicators": [
+                            {
+                                "type": "domain",
+                                "value": "malicious.example",
+                                "severity": "high",
+                                "source": "unit-feed",
+                                "note": "Known credential collection host.",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
             self.assertEqual(
-                main(["indicators", str(output_dir), "--rules", str(rules_path), "--output", str(output)]),
+                main(["indicators", str(output_dir), "--rules", str(rules_path), "--ti-feed", str(ti_feed), "--output", str(output)]),
                 0,
             )
             manual_payload = json.loads(output.read_text(encoding="utf-8"))
             self.assertIndicatorMatchedRule(manual_payload, "download.example", "browser-download-ioc")
+            self.assertIndicatorEnriched(manual_payload, "malicious.example", "unit-feed")
+            self.assertEqual(manual_payload["summary"]["ti_feed_count"], 1)
+            self.assertIn("#63", manual_payload["summary"]["commercial_gap_ids"])
+            self.assertIn("#63", manual_payload["ti_enrichment_assessment"]["commercial_gap_ids"])
+            self.assertFalse(manual_payload["indicator_native_capabilities"]["external_ti_api_calls"])
+            self.assertEqual(manual_payload["ti_feed_sources"][0]["name"], "unit-ti-plugin")
+            self.assertEqual(manual_payload["ti_feed_sources"][0]["version"], "2026.04")
+            self.assertIn("#63", manual_payload["ti_feed_sources"][0]["commercial_gap_ids"])
             self.assertGreaterEqual(manual_payload["summary"]["indicator_count"], 3)
+            self.assertGreaterEqual(manual_payload["summary"]["enriched_indicator_count"], 1)
 
             search_output = Path(tmp_dir) / "search.json"
             self.assertEqual(
@@ -87,6 +115,19 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             if indicator["value"] == value and rule_id in indicator.get("matched_rules", []):
                 return
         self.fail(f"expected indicator {value!r} to match rule {rule_id!r}")
+
+    def assertIndicatorEnriched(self, payload: dict[str, object], value: str, source: str) -> None:
+        for indicator in payload["indicators"]:
+            enrichment = indicator.get("ti_enrichment")
+            if indicator["value"] == value and isinstance(enrichment, dict) and enrichment.get("source") == source:
+                self.assertEqual(enrichment.get("feed_name"), "unit-ti-plugin")
+                self.assertEqual(enrichment.get("feed_version"), "2026.04")
+                self.assertIn(enrichment.get("matched_on"), {"exact", "url-host-domain"})
+                self.assertIn("#63", indicator["commercial_gap_ids"])
+                self.assertIn("#63", enrichment["commercial_gap_ids"])
+                self.assertEqual(enrichment["validation_status"], "analyst-feed-provenance-review-required")
+                return
+        self.fail(f"expected indicator {value!r} to be enriched by {source!r}")
 
 
 def add_indicator_fixture_content(root: Path) -> Path:

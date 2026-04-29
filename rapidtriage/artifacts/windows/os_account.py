@@ -2,18 +2,40 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import math
 import re
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from ...core.models import ArtifactRecord
 from .registry import MAX_HIVE_CELL_SCAN_BYTES, iter_registry_cell_candidates, parse_registry_hive_header
 
-PARSER_VERSION = "windows-os-account-v4"
+PARSER_VERSION = "windows-os-account-v8"
 USER_PROFILE_ROOT = "Users"
 REGISTRY_EXPORT_EXT = ".reg"
 SAM_HIVE_NAME = "SAM"
 SAM_BUILTIN_KEY_NAMES = {"SAM", "Domains", "Account", "Users", "Names", "Builtin", "Aliases", "Groups"}
+SAM_COMMON_GROUP_NAMES = {
+    "account operators",
+    "administrators",
+    "backup operators",
+    "domain admins",
+    "enterprise admins",
+    "event log readers",
+    "guests",
+    "power users",
+    "remote desktop users",
+    "users",
+}
+SAM_BUILTIN_GROUP_RIDS = {
+    "00000220": "Administrators",
+    "00000221": "Users",
+    "00000222": "Guests",
+    "00000223": "Power Users",
+    "00000227": "Backup Operators",
+    "0000022F": "Remote Desktop Users",
+    "0000023D": "Event Log Readers",
+}
 ACCOUNT_HINT_KEYS = (
     "Microsoft\\Windows NT\\CurrentVersion\\ProfileList",
     "Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
@@ -26,10 +48,33 @@ ACCOUNT_HINT_KEYS = (
     "CurrentControlSet\\MountedDevices",
     "Policy\\Secrets",
     "Privilege Rights",
+    "SAM\\Domains\\Builtin\\Aliases",
+    "SAM\\Domains\\Builtin\\Aliases\\Names",
+    "SAM\\Domains\\Account\\Groups\\Names",
     "LastBootUpTime",
     "ShutdownTime",
     "SAM\\Domains\\Account\\Users",
 )
+OS_ACCOUNT_NATIVE_CAPABILITIES = {
+    "profile_inventory": True,
+    "sam_key_candidate_scan": True,
+    "sam_fv_export_field_decode": True,
+    "account_lifecycle_export_mapping": True,
+    "group_membership_export_mapping": True,
+    "lsa_policy_location_inventory": True,
+    "privilege_assignment_export_mapping": True,
+    "security_secret_decryption": False,
+    "native_sam_alias_member_binary_decode": False,
+    "full_os_version_sam_fv_layout_validation": False,
+    "domain_controller_context_resolution": False,
+    "transaction_log_replay": False,
+}
+OS_ACCOUNT_REPORT_GRADE_BLOCKERS = [
+    "full-native-sam-fv-layout-validation-required",
+    "native-sam-alias-member-binary-decoding-required",
+    "security-secret-decryption-not-implemented",
+    "domain-context-and-transaction-log-validation-required",
+]
 
 
 class WindowsOsAccountProvider:
@@ -114,6 +159,8 @@ def collect_registry_export_hints(root: Path) -> Iterable[ArtifactRecord]:
             "mounted_device_count": len(hints["mounted_devices"]),
             "lsa_secret_count": len(hints["lsa_policy_locations"]),
             "privilege_assignment_count": len(hints["privilege_assignments"]),
+            "group_membership_hint_count": len(hints["group_memberships"]),
+            "group_membership_hints": normalized_group_memberships(hints["group_memberships"]),
             "account_lifecycle_hints": sorted(
                 hints["account_lifecycle_hints"].values(),
                 key=lambda item: (str(item.get("user_name") or ""), str(item.get("rid") or "")),
@@ -128,6 +175,8 @@ def collect_registry_export_hints(root: Path) -> Iterable[ArtifactRecord]:
             details=details,
         )
         for record in build_system_security_records(path, hints, source_hashes):
+            yield record
+        for record in build_account_lifecycle_records(path, hints, source_hashes):
             yield record
 
 
@@ -144,18 +193,26 @@ def collect_sam_hive_candidates(root: Path) -> Iterable[ArtifactRecord]:
         metadata = parse_registry_hive_header(header)
         if not metadata.get("regf_valid"):
             continue
-        cell_candidates = [
-            item
-            for item in iter_registry_cell_candidates(scan_blob)
-            if item.get("cell_kind") == "key-node" and is_sam_account_key_name(str(item.get("name") or ""))
-        ]
+        key_candidates = [item for item in iter_registry_cell_candidates(scan_blob) if item.get("cell_kind") == "key-node"]
+        cell_candidates = [item for item in key_candidates if is_sam_account_key_name(str(item.get("name") or ""))]
         rid_candidates = [item for item in cell_candidates if is_rid_key_name(str(item.get("name") or ""))]
+        group_candidates = [item for item in key_candidates if is_sam_group_key_name(str(item.get("name") or ""))]
+        group_rid_candidates = [item for item in group_candidates if is_builtin_group_rid_key_name(str(item.get("name") or ""))]
         source_hashes = file_hashes(path)
         for candidate in cell_candidates:
             details = sam_account_candidate_details(path, candidate, rid_candidates, metadata, source_hashes)
             yield ArtifactRecord(
                 provider=WindowsOsAccountProvider.name,
                 artifact_type="windows-sam-account-candidate",
+                path=str(path.resolve()),
+                supported=True,
+                details=details,
+            )
+        for candidate in group_candidates:
+            details = sam_group_candidate_details(path, candidate, group_rid_candidates, metadata, source_hashes)
+            yield ArtifactRecord(
+                provider=WindowsOsAccountProvider.name,
+                artifact_type="windows-sam-group-candidate",
                 path=str(path.resolve()),
                 supported=True,
                 details=details,
@@ -188,6 +245,20 @@ def sam_account_candidate_details(
         rid_hex = str(nearby_rid.get("name") or "").upper()
     user_name = "" if is_rid_key_name(name) else name
     risk_flags = sam_account_risk_flags(user_name, rid_hex, candidate)
+    validation_checks = {
+        "regf_header_valid": bool(metadata.get("regf_valid")),
+        "has_user_name_candidate": bool(user_name),
+        "has_rid_candidate": bool(rid_hex),
+        "allocated_key_cell": candidate.get("allocation_status") == "allocated",
+        "native_sam_fv_decoding_available": False,
+        "requires_second_parser_validation": True,
+    }
+    report_grade = os_account_report_grade_assessment(
+        os_account_validation_matrix(validation_checks),
+        validation_required=True,
+        gap_ids=["#6"],
+        extra_blockers=["native-sam-account-fv-binary-decoding-required"],
+    )
     return {
         "parser": "windows-sam-hive-native-account-scan",
         "parser_version": PARSER_VERSION,
@@ -212,10 +283,80 @@ def sam_account_candidate_details(
         "parser_confidence": 0.55 if user_name and rid_hex else 0.45,
         "evidence_strength": "sam-hive-key-candidate",
         "validation_required": True,
+        "validation_checks": validation_checks,
+        "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
+        "os_account_report_grade_assessment": report_grade,
+        "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": report_grade["blockers"],
         "validation_guidance": "Native SAM rows identify account-name/RID key candidates only; validate full F/V account attributes with a dedicated SAM parser before final testimony.",
         "risk_flags": risk_flags,
         "risk_score": min(100, len(risk_flags) * 20 + (20 if user_name.lower() in {"administrator", "admin"} else 0)),
         "raw_preview": " ".join(part for part in [user_name, rid_hex] if part),
+    }
+
+
+def sam_group_candidate_details(
+    path: Path,
+    candidate: dict[str, object],
+    group_rid_candidates: list[dict[str, object]],
+    metadata: dict[str, object],
+    source_hashes: dict[str, str],
+) -> dict[str, object]:
+    name = str(candidate.get("name") or "")
+    alias_rid_hex = name.upper() if is_builtin_group_rid_key_name(name) else ""
+    nearby_rid = nearest_rid_candidate(candidate, group_rid_candidates) if not alias_rid_hex else None
+    if nearby_rid is not None:
+        alias_rid_hex = str(nearby_rid.get("name") or "").upper()
+    group_name = SAM_BUILTIN_GROUP_RIDS.get(alias_rid_hex, "") if is_builtin_group_rid_key_name(name) else name
+    risk_flags = sam_group_risk_flags(group_name, alias_rid_hex, candidate)
+    validation_checks = {
+        "regf_header_valid": bool(metadata.get("regf_valid")),
+        "has_group_name_candidate": bool(group_name),
+        "has_builtin_alias_rid_candidate": bool(alias_rid_hex),
+        "allocated_key_cell": candidate.get("allocation_status") == "allocated",
+        "native_membership_reconstruction_available": False,
+        "requires_sam_alias_member_binary_decoding": True,
+    }
+    report_grade = os_account_report_grade_assessment(
+        os_account_validation_matrix(validation_checks),
+        validation_required=True,
+        gap_ids=["#6"],
+        extra_blockers=["native-sam-alias-member-binary-decoding-required"],
+    )
+    return {
+        "parser": "windows-sam-hive-native-group-scan",
+        "parser_version": PARSER_VERSION,
+        "coverage_status": "native-sam-group-key-candidate",
+        "reportability": "triage",
+        "source_path": str(path.resolve()),
+        "source_format": "registry-hive-sam",
+        "source_hashes": dict(source_hashes),
+        "hive_name": path.name,
+        "regf_valid": bool(metadata.get("regf_valid")),
+        "hive_last_written_at": metadata.get("last_written_at", ""),
+        "candidate_role": "builtin-alias-rid-key" if is_builtin_group_rid_key_name(name) else "group-name-key",
+        "group_name_candidate": group_name,
+        "alias_rid_hex": alias_rid_hex,
+        "alias_rid_decimal": rid_decimal(alias_rid_hex),
+        "nearby_alias_rid_cell_offset": nearby_rid.get("cell_offset", 0) if nearby_rid is not None else 0,
+        "cell_offset": candidate.get("cell_offset", 0),
+        "cell_size": candidate.get("cell_size", 0),
+        "allocation_status": candidate.get("allocation_status", ""),
+        "last_written_at": candidate.get("last_written_at", ""),
+        "parser_confidence": 0.54 if group_name and alias_rid_hex else 0.48,
+        "evidence_strength": "sam-hive-group-key-candidate",
+        "validation_required": True,
+        "validation_checks": validation_checks,
+        "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
+        "os_account_report_grade_assessment": report_grade,
+        "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
+        "validation_guidance": "Native SAM group rows identify group/alias key candidates only; validate membership from alias member binary attributes with a dedicated SAM parser before final testimony.",
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": report_grade["blockers"],
+        "risk_flags": risk_flags,
+        "risk_score": min(100, len(risk_flags) * 20 + (20 if is_privileged_group_name(group_name) else 0)),
+        "raw_preview": " ".join(part for part in [group_name, alias_rid_hex] if part),
     }
 
 
@@ -224,13 +365,29 @@ def is_sam_account_key_name(name: str) -> bool:
         return False
     if len(name) > 128:
         return False
+    if is_builtin_group_rid_key_name(name):
+        return False
     if is_rid_key_name(name):
         return True
+    if name.lower() in SAM_COMMON_GROUP_NAMES:
+        return False
     return bool(re.fullmatch(r"[A-Za-z0-9._$ -]{1,128}", name))
 
 
 def is_rid_key_name(name: str) -> bool:
     return bool(re.fullmatch(r"[0-9A-Fa-f]{8}", name))
+
+
+def is_sam_group_key_name(name: str) -> bool:
+    if not name or name in SAM_BUILTIN_KEY_NAMES:
+        return False
+    if is_builtin_group_rid_key_name(name):
+        return True
+    return name.lower() in SAM_COMMON_GROUP_NAMES
+
+
+def is_builtin_group_rid_key_name(name: str) -> bool:
+    return name.upper() in SAM_BUILTIN_GROUP_RIDS
 
 
 def nearest_rid_candidate(candidate: dict[str, object], rid_candidates: list[dict[str, object]]) -> dict[str, object] | None:
@@ -279,6 +436,7 @@ def parse_registry_hints(text: str) -> dict[str, object]:
         "mounted_devices": {},
         "lsa_policy_locations": {},
         "privilege_assignments": {},
+        "group_memberships": {},
         "account_lifecycle_hints": {},
     }
     current_key = ""
@@ -387,6 +545,13 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
             },
         )
     for index, item in enumerate(sorted(hints["lsa_policy_locations"].values(), key=lambda row: str(row.get("key") or ""))):
+        validation_checks = security_policy_validation_checks(item)
+        report_grade = os_account_report_grade_assessment(
+            os_account_validation_matrix(validation_checks),
+            validation_required=True,
+            gap_ids=["#6"],
+            extra_blockers=["security-secret-decryption-not-implemented", "lsa-policy-context-validation-required"],
+        )
         yield ArtifactRecord(
             provider=WindowsOsAccountProvider.name,
             artifact_type="windows-lsa-policy-location",
@@ -403,16 +568,35 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "source_index": index,
                 "key": item.get("key", ""),
                 "secret_name": item.get("secret_name", ""),
+                "value_names": sorted((item.get("values") or {}).keys()) if isinstance(item.get("values"), dict) else [],
+                "secret_value_metadata": item.get("values", {}),
                 "parser_confidence": 0.72,
                 "evidence_strength": "security-policy-sensitive-location",
                 "validation_required": True,
+                "validation_checks": validation_checks,
+                "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
+                "os_account_report_grade_assessment": report_grade,
+                "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
                 "validation_guidance": "This row identifies sensitive LSA/SECURITY policy locations only; secrets are not decrypted and must be handled under legal authorization.",
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": report_grade["blockers"],
                 "risk_flags": ["security-sensitive-registry-location"],
                 "risk_score": 45,
                 "raw_preview": str(item.get("key", "")),
             },
         )
     for index, item in enumerate(sorted(hints["privilege_assignments"].values(), key=lambda row: str(row.get("privilege") or ""))):
+        validation_checks = {
+            "has_privilege": bool(item.get("privilege")),
+            "has_assigned_sid": bool(item.get("assigned_sids")),
+            "requires_lsa_policy_validation": True,
+        }
+        report_grade = os_account_report_grade_assessment(
+            os_account_validation_matrix(validation_checks),
+            validation_required=True,
+            gap_ids=["#6"],
+            extra_blockers=["lsa-policy-export-or-native-validation-required"],
+        )
         yield ArtifactRecord(
             provider=WindowsOsAccountProvider.name,
             artifact_type="windows-privilege-assignment",
@@ -433,12 +617,162 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "parser_confidence": 0.74,
                 "evidence_strength": "security-privilege-assignment",
                 "validation_required": True,
+                "validation_checks": validation_checks,
+                "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
+                "os_account_report_grade_assessment": report_grade,
+                "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": report_grade["blockers"],
                 "validation_guidance": "Validate privilege assignments against secedit/LSA policy exports before final testimony.",
                 "risk_flags": privilege_risk_flags(item),
                 "risk_score": min(100, 30 + len(privilege_risk_flags(item)) * 25),
                 "raw_preview": str(item.get("key", "")),
             },
         )
+    for index, group in enumerate(normalized_group_memberships(hints["group_memberships"])):
+        risk_flags = group_membership_risk_flags(group)
+        validation_checks = {
+            "has_group_name": bool(group.get("group_name")),
+            "has_member_sid": bool(group.get("member_sids")),
+            "has_member_name": bool(group.get("member_names")),
+            "native_membership_reconstruction_available": False,
+            "requires_native_sam_alias_validation": True,
+        }
+        report_grade = os_account_report_grade_assessment(
+            os_account_validation_matrix(validation_checks),
+            validation_required=True,
+            gap_ids=["#6"],
+            extra_blockers=["native-sam-alias-member-binary-decoding-required", "domain-context-validation-required"],
+        )
+        yield ArtifactRecord(
+            provider=WindowsOsAccountProvider.name,
+            artifact_type="windows-group-membership",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-sam-group-membership-reg-export",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "mapped-reg-export",
+                "reportability": "review",
+                "source_path": str(path.resolve()),
+                "source_format": "reg",
+                "source_hashes": dict(source_hashes),
+                "source_index": index,
+                "key": group.get("key", ""),
+                "group_name": group.get("group_name", ""),
+                "member_sids": list(group.get("member_sids") or []),
+                "member_names": list(group.get("member_names") or []),
+                "member_count": group.get("member_count", 0),
+                "member_identifier_count": group.get("member_identifier_count", 0),
+                "member_count_semantics": group.get("member_count_semantics", ""),
+                "membership_source_types": list(group.get("membership_source_types") or []),
+                "privileged_group": bool(group.get("privileged_group")),
+                "parser_confidence": 0.76,
+                "evidence_strength": "exported-group-membership-hint",
+                "validation_required": True,
+                "validation_checks": validation_checks,
+                "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
+                "os_account_report_grade_assessment": report_grade,
+                "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
+                "validation_guidance": "Registry exports can identify group membership hints, but validate against native SAM alias member attributes and domain context before final testimony.",
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": report_grade["blockers"],
+                "risk_flags": risk_flags,
+                "risk_score": min(100, len(risk_flags) * 25 + (20 if group.get("privileged_group") else 0)),
+                "raw_preview": str(group.get("key", "")),
+            },
+        )
+
+
+def build_account_lifecycle_records(path: Path, hints: dict[str, object], source_hashes: dict[str, str]) -> Iterable[ArtifactRecord]:
+    accounts = hints.get("account_lifecycle_hints") if isinstance(hints.get("account_lifecycle_hints"), dict) else {}
+    groups = hints.get("group_memberships") if isinstance(hints.get("group_memberships"), dict) else {}
+    for index, account in enumerate(
+        sorted(consolidate_account_lifecycle_hints(accounts), key=lambda item: (str(item.get("user_name") or ""), str(item.get("rid") or "")))
+    ):
+        user_name = str(account.get("user_name") or "")
+        rid = str(account.get("rid") or "")
+        group_rows = group_memberships_for_account(groups, user_name, rid)
+        risk_flags = account_lifecycle_risk_flags(account, group_rows)
+        validation_checks = account_lifecycle_validation_checks(account, group_rows)
+        report_grade = os_account_report_grade_assessment(
+            os_account_validation_matrix(validation_checks),
+            validation_required=True,
+            gap_ids=["#6"],
+            extra_blockers=[
+                "full-native-sam-fv-layout-validation-required",
+                "security-policy-secret-decryption-not-implemented",
+                "domain-context-and-transaction-log-validation-required",
+            ],
+        )
+        yield ArtifactRecord(
+            provider=WindowsOsAccountProvider.name,
+            artifact_type="windows-account-lifecycle",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-account-lifecycle-reg-export",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "mapped-reg-export",
+                "reportability": "review",
+                "source_path": str(path.resolve()),
+                "source_format": "reg",
+                "source_hashes": dict(source_hashes),
+                "source_index": index,
+                "key": account.get("key", ""),
+                "user_name": user_name,
+                "rid": rid,
+                "rid_decimal": rid_decimal(rid),
+                "profile_path": account.get("profile_path", ""),
+                "created_at": account.get("created_at", ""),
+                "last_logon_at": account.get("last_logon_at", ""),
+                "password_last_set_at": account.get("password_last_set_at", ""),
+                "account_disabled_hint": bool(account.get("account_disabled_hint")),
+                "admin_hint": bool(account.get("admin_hint")),
+                "uac_flags": list(account.get("uac_flags") or []),
+                "sam_binary_fields": dict(account.get("sam_binary_fields") or {}),
+                "group_membership_hints": group_rows,
+                "parser_confidence": account_lifecycle_confidence(account, group_rows),
+                "evidence_strength": "account-lifecycle-registry-export",
+                "validation_required": True,
+                "validation_checks": validation_checks,
+                "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
+                "os_account_report_grade_assessment": report_grade,
+                "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
+                "validation_guidance": "Validate account status, group membership, and timestamps against native SAM F/V records, SECURITY policy, and domain context before final testimony.",
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": report_grade["blockers"],
+                "risk_flags": risk_flags,
+                "risk_score": min(100, len(risk_flags) * 20 + (20 if account.get("admin_hint") else 0)),
+                "raw_preview": f"{user_name} {rid}".strip(),
+            },
+        )
+
+
+def consolidate_account_lifecycle_hints(accounts: object) -> list[dict[str, object]]:
+    if not isinstance(accounts, dict):
+        return []
+    merged: dict[str, dict[str, object]] = {}
+    for account in accounts.values():
+        if not isinstance(account, dict):
+            continue
+        key = str(account.get("user_name") or account.get("rid") or account.get("key") or "")
+        if not key:
+            continue
+        target = merged.setdefault(key, dict(account))
+        for field in ("user_name", "rid", "profile_path", "created_at", "last_logon_at", "password_last_set_at"):
+            if not target.get(field) and account.get(field):
+                target[field] = account[field]
+        target["account_disabled_hint"] = bool(target.get("account_disabled_hint") or account.get("account_disabled_hint"))
+        target["admin_hint"] = bool(target.get("admin_hint") or account.get("admin_hint"))
+        target["uac_flags"] = sorted(set([*list(target.get("uac_flags") or []), *list(account.get("uac_flags") or [])]))
+        binary_fields = target.setdefault("sam_binary_fields", {})
+        if isinstance(binary_fields, dict) and isinstance(account.get("sam_binary_fields"), dict):
+            binary_fields.update(account["sam_binary_fields"])
+        raw = target.setdefault("raw_fields", {})
+        if isinstance(raw, dict) and isinstance(account.get("raw_fields"), dict):
+            raw.update(account["raw_fields"])
+    return list(merged.values())
 
 
 def register_structural_key_hint(hints: dict[str, object], key: str) -> None:
@@ -451,6 +785,12 @@ def register_structural_key_hint(hints: dict[str, object], key: str) -> None:
     secret_name = lsa_secret_name_from_key(key)
     if secret_name:
         hints["lsa_policy_locations"].setdefault(key, {"key": key, "secret_name": secret_name})
+    group_name = group_name_from_key(key)
+    if group_name:
+        hints["group_memberships"].setdefault(
+            key,
+            {"key": key, "group_name": group_name, "member_sids": [], "member_names": []},
+        )
 
 
 def add_structural_value_hint(hints: dict[str, object], key: str, name: str, value: str) -> None:
@@ -476,6 +816,12 @@ def add_structural_value_hint(hints: dict[str, object], key: str, name: str, val
         if "\\mounteddevices" in key.lower() and name:
             value_device = mounted_device_from_value_name(key, name)
             hints["mounted_devices"].setdefault(value_device["key"], value_device)
+    secret_name = lsa_secret_name_from_key(key)
+    if secret_name:
+        secret = hints["lsa_policy_locations"].setdefault(key, {"key": key, "secret_name": secret_name})
+        values = secret.setdefault("values", {})
+        if isinstance(values, dict) and name:
+            values[name] = security_secret_value_metadata(name, value)
     if "privilege rights" in key.lower():
         privilege = name if name else key.rsplit("\\", 1)[-1]
         hints["privilege_assignments"][privilege] = {
@@ -483,6 +829,16 @@ def add_structural_value_hint(hints: dict[str, object], key: str, name: str, val
             "privilege": privilege,
             "assigned_sids": split_sid_list(value),
         }
+    group_name = group_name_from_key(key)
+    if group_name:
+        group = hints["group_memberships"].setdefault(
+            key,
+            {"key": key, "group_name": group_name, "member_sids": [], "member_names": []},
+        )
+        if lowered_name in {"members", "member", "membersids", "sids"}:
+            group["member_sids"] = split_sid_list(value)
+        elif lowered_name in {"membernames", "names", "membername"}:
+            group["member_names"] = split_name_list(value)
     if key.lower().endswith("\\select") and lowered_name in {"current", "default", "lastknowngood"}:
         parsed = parse_int(value)
         if parsed is not None:
@@ -543,8 +899,272 @@ def lsa_secret_name_from_key(key: str) -> str:
     return match.group(1) if match else ""
 
 
+def security_secret_value_metadata(name: str, value: str) -> dict[str, object]:
+    raw = parse_reg_binary(value)
+    metadata = {
+        "value_name": name,
+        "registry_value_type": registry_value_type_label(value),
+        "byte_count": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest() if raw else "",
+        "entropy": byte_entropy(raw) if raw else 0.0,
+        "contains_nonzero_bytes": any(byte != 0 for byte in raw),
+        "timestamp_candidate": parse_timestamp_value(value) if name.lower() in {"cupdtime", "oupdtime", "updtime"} else "",
+        "metadata_only": True,
+        "decrypted": False,
+        "decryption_status": "not-attempted",
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": ["security-secret-decryption-not-implemented"],
+        "validation_note": "SECURITY Policy\\Secrets values are inventoried and hashed, but not decrypted.",
+    }
+    return metadata
+
+
+def security_policy_validation_checks(item: dict[str, object]) -> dict[str, object]:
+    values = item.get("values") if isinstance(item.get("values"), dict) else {}
+    metadata_values = [value for value in values.values() if isinstance(value, dict)]
+    return {
+        "has_secret_name": bool(item.get("secret_name")),
+        "has_exported_values": bool(values),
+        "exported_value_count": len(values),
+        "hashed_value_count": sum(1 for value in metadata_values if value.get("sha256")),
+        "timestamp_candidate_count": sum(1 for value in metadata_values if value.get("timestamp_candidate")),
+        "secret_decryption_attempted": False,
+        "requires_legal_authorization": True,
+    }
+
+
+def os_account_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, object]]:
+    labels = {
+        "regf_header_valid": ("SAM hive header", "critical"),
+        "has_user_name_candidate": ("User-name candidate", "high"),
+        "has_rid_candidate": ("RID candidate", "high"),
+        "allocated_key_cell": ("Allocated key cell", "medium"),
+        "has_group_name_candidate": ("Group-name candidate", "high"),
+        "has_builtin_alias_rid_candidate": ("Builtin alias RID candidate", "high"),
+        "has_group_name": ("Group name", "high"),
+        "has_member_sid": ("Member SID", "high"),
+        "has_member_name": ("Member name", "medium"),
+        "has_privilege": ("Privilege name", "high"),
+        "has_assigned_sid": ("Assigned SID", "high"),
+        "has_secret_name": ("LSA secret name", "high"),
+        "has_exported_values": ("LSA exported values", "medium"),
+        "has_sam_f_value": ("SAM F value", "high"),
+        "has_sam_v_value": ("SAM V value", "high"),
+        "native_sam_fv_candidate_decoding_available": ("Native SAM F/V candidate decode", "medium"),
+        "native_sam_fv_report_grade": ("Native SAM F/V report-grade decode", "critical"),
+        "native_membership_reconstruction_available": ("Native membership reconstruction", "critical"),
+        "security_secret_decryption_available": ("SECURITY secret decryption", "critical"),
+        "secret_decryption_attempted": ("Secret decryption attempted", "critical"),
+        "requires_second_parser_validation": ("Second parser validation", "high"),
+        "requires_lsa_policy_validation": ("LSA policy validation", "high"),
+        "requires_native_sam_alias_validation": ("Native SAM alias validation", "high"),
+        "requires_sam_alias_member_binary_decoding": ("SAM alias member binary decode", "critical"),
+        "requires_legal_authorization": ("Legal authorization required", "critical"),
+    }
+    matrix: list[dict[str, object]] = []
+    for key, value in checks.items():
+        if key.endswith("_count") or key in {"exported_value_count", "hashed_value_count", "timestamp_candidate_count"}:
+            continue
+        label, severity = labels.get(key, (key.replace("_", " "), "medium"))
+        negative_requirement = key.startswith("requires_")
+        passed = bool(value)
+        if negative_requirement:
+            passed = not bool(value)
+        matrix.append(
+            {
+                "id": key.replace("_", "-"),
+                "label": label,
+                "passed": passed,
+                "severity": severity,
+                "detail": value,
+            }
+        )
+    return matrix
+
+
+def os_account_report_grade_assessment(
+    validation_matrix: list[dict[str, object]],
+    *,
+    validation_required: bool,
+    gap_ids: list[str],
+    extra_blockers: list[str],
+) -> dict[str, object]:
+    failed = [str(item.get("id")) for item in validation_matrix if not item.get("passed")]
+    blockers = set(OS_ACCOUNT_REPORT_GRADE_BLOCKERS)
+    blockers.update(f"validation-check-failed:{item}" for item in failed)
+    blockers.update(extra_blockers)
+    if validation_required:
+        blockers.add("os-account-validation-required")
+    return {
+        "report_grade_ready": False,
+        "status": "validation-required" if failed else "triage-validated-report-grade-blocked",
+        "blockers": sorted(blockers),
+        "validated_strengths": [str(item.get("id")) for item in validation_matrix if item.get("passed")],
+        "commercial_gap_ids": gap_ids,
+        "next_validation_step": (
+            "Validate account, group, privilege, and SECURITY findings with native SAM/SECURITY parsing, "
+            "transaction logs, domain context, and a second trusted parser before final testimony."
+        ),
+    }
+
+
+def registry_value_type_label(value: str) -> str:
+    lowered = value.strip().lower()
+    if lowered.startswith("hex(b):"):
+        return "REG_QWORD"
+    if lowered.startswith("hex(2):"):
+        return "REG_EXPAND_SZ"
+    if lowered.startswith("hex(7):"):
+        return "REG_MULTI_SZ"
+    if lowered.startswith("hex:"):
+        return "REG_BINARY"
+    if lowered.startswith("dword:"):
+        return "REG_DWORD"
+    if value.startswith('"') and value.endswith('"'):
+        return "REG_SZ"
+    return "unknown"
+
+
+def byte_entropy(raw: bytes) -> float:
+    if not raw:
+        return 0.0
+    entropy = 0.0
+    for byte in set(raw):
+        probability = raw.count(byte) / len(raw)
+        entropy -= probability * math.log2(probability)
+    return round(entropy, 4)
+
+
+def group_name_from_key(key: str) -> str:
+    alias_match = re.search(r"\\Aliases\\Names\\([^\\\]]+)", key, flags=re.IGNORECASE)
+    if alias_match:
+        return alias_match.group(1)
+    group_match = re.search(r"\\Groups\\Names\\([^\\\]]+)", key, flags=re.IGNORECASE)
+    return group_match.group(1) if group_match else ""
+
+
 def split_sid_list(value: str) -> list[str]:
     return sorted(set(re.findall(r"S-\d(?:-\d+)+", value)))
+
+
+def split_name_list(value: str) -> list[str]:
+    return sorted({item.strip() for item in re.split(r"[,;|]", value) if item.strip()})
+
+
+def normalized_group_memberships(groups: object) -> list[dict[str, object]]:
+    if not isinstance(groups, dict):
+        return []
+    rows: list[dict[str, object]] = []
+    for group in groups.values():
+        if not isinstance(group, dict):
+            continue
+        member_sids = sorted(set(str(item) for item in list(group.get("member_sids") or []) if str(item)))
+        member_names = sorted(set(str(item) for item in list(group.get("member_names") or []) if str(item)))
+        group_name = str(group.get("group_name") or "")
+        rows.append(
+            {
+                "key": group.get("key", ""),
+                "group_name": group_name,
+                "member_sids": member_sids,
+                "member_names": member_names,
+                "member_count": max(len(member_sids), len(member_names)),
+                "member_identifier_count": len(set(member_sids + [item.lower() for item in member_names])),
+                "member_count_semantics": "estimated from exported SID/name lists; SID-to-name correlation is not proven without native SAM/domain validation",
+                "membership_source_types": group_membership_source_types(member_sids, member_names),
+                "privileged_group": is_privileged_group_name(group_name),
+            }
+        )
+    return sorted(rows, key=lambda item: (str(item.get("group_name") or "").lower(), str(item.get("key") or "").lower()))
+
+
+def group_membership_source_types(member_sids: list[str], member_names: list[str]) -> list[str]:
+    source_types: list[str] = []
+    if member_sids:
+        source_types.append("member-sid")
+    if member_names:
+        source_types.append("member-name")
+    return source_types
+
+
+def group_memberships_for_account(groups: object, user_name: str, rid: str) -> list[dict[str, object]]:
+    if not isinstance(groups, dict):
+        return []
+    matches: list[dict[str, object]] = []
+    sid_tail = f"-{rid_decimal(rid)}" if rid else ""
+    for group in groups.values():
+        if not isinstance(group, dict):
+            continue
+        member_sids = list(group.get("member_sids") or [])
+        member_names = list(group.get("member_names") or [])
+        name_match = user_name and any(str(item).lower() == user_name.lower() for item in member_names)
+        rid_match = sid_tail != "-0" and any(str(item).endswith(sid_tail) for item in member_sids)
+        match_types = []
+        if name_match:
+            match_types.append("name")
+        if rid_match:
+            match_types.append("rid-sid-tail")
+        if name_match or rid_match:
+            matches.append(
+                {
+                    "group_name": group.get("group_name", ""),
+                    "key": group.get("key", ""),
+                    "match_type": match_types[0],
+                    "match_types": match_types,
+                    "member_sids": member_sids,
+                    "member_names": member_names,
+                    "privileged_group": is_privileged_group_name(str(group.get("group_name") or "")),
+                }
+            )
+    return sorted(matches, key=lambda item: str(item.get("group_name") or ""))
+
+
+def account_lifecycle_confidence(account: dict[str, object], group_rows: list[dict[str, object]]) -> float:
+    score = 0.58
+    if account.get("user_name"):
+        score += 0.08
+    if account.get("rid"):
+        score += 0.08
+    if account.get("last_logon_at") or account.get("created_at"):
+        score += 0.08
+    if group_rows:
+        score += 0.06
+    return min(0.88, round(score, 2))
+
+
+def account_lifecycle_risk_flags(account: dict[str, object], group_rows: list[dict[str, object]]) -> list[str]:
+    flags: list[str] = ["account-lifecycle-hint"]
+    if account.get("admin_hint"):
+        flags.append("admin-account-hint")
+    if account.get("account_disabled_hint"):
+        flags.append("disabled-account-hint")
+    for group in group_rows:
+        if is_privileged_group_name(str(group.get("group_name") or "")):
+            flags.append("privileged-group-membership-hint")
+    return sorted(set(flags))
+
+
+def group_membership_risk_flags(group: dict[str, object]) -> list[str]:
+    flags = ["group-membership-hint"]
+    if group.get("privileged_group"):
+        flags.append("privileged-group-membership-hint")
+    if group.get("member_sids"):
+        flags.append("sid-membership-hint")
+    if group.get("member_names"):
+        flags.append("name-membership-hint")
+    return sorted(set(flags))
+
+
+def sam_group_risk_flags(group_name: str, alias_rid_hex: str, candidate: dict[str, object]) -> list[str]:
+    flags = ["sam-group-key-candidate"]
+    if is_privileged_group_name(group_name) or alias_rid_hex.upper() == "00000220":
+        flags.append("privileged-group-candidate")
+    if candidate.get("allocation_status") == "free-or-deleted-candidate":
+        flags.append("deleted-or-free-sam-group-key-candidate")
+    return sorted(set(flags))
+
+
+def is_privileged_group_name(group_name: str) -> bool:
+    return group_name.lower() in {"administrators", "domain admins", "enterprise admins", "account operators", "backup operators"}
 
 
 def service_risk_flags(service: dict[str, object]) -> list[str]:
@@ -608,6 +1228,8 @@ def account_hint_for_key(hints: dict[str, object], key: str) -> dict[str, object
             "password_last_set_at": "",
             "account_disabled_hint": False,
             "admin_hint": False,
+            "uac_flags": [],
+            "sam_binary_fields": {},
             "raw_fields": {},
         },
     )
@@ -622,7 +1244,17 @@ def add_account_lifecycle_value(hints: dict[str, object], key: str, name: str, v
     if isinstance(raw_fields, dict):
         raw_fields[name] = value
     lowered_name = name.lower()
-    if lowered_name in {"username", "name", "accountname"} and value:
+    if lowered_name in {"f", "v"}:
+        binary_fields = hint.setdefault("sam_binary_fields", {})
+        if isinstance(binary_fields, dict):
+            decoded = decode_sam_binary_field(lowered_name.upper(), value)
+            binary_fields[lowered_name.upper()] = decoded
+            apply_sam_binary_decoded_fields(hint, lowered_name.upper(), decoded)
+    if lowered_name == "@" and account_name_from_key(key):
+        parsed = parse_int(value)
+        if parsed is not None:
+            hint["rid"] = f"{parsed:08X}"
+    elif lowered_name in {"username", "name", "accountname"} and value:
         hint["user_name"] = value
     elif lowered_name == "profileimagepath":
         hint["profile_path"] = value
@@ -640,6 +1272,167 @@ def add_account_lifecycle_value(hints: dict[str, object], key: str, name: str, v
         number = parse_int(value)
         if number is not None:
             hint["account_disabled_hint"] = bool(number & 0x2)
+            hint["uac_flags"] = user_account_control_flags(number)
+
+
+def account_lifecycle_validation_checks(account: dict[str, object], group_rows: list[dict[str, object]]) -> dict[str, object]:
+    binary_fields = account.get("sam_binary_fields") if isinstance(account.get("sam_binary_fields"), dict) else {}
+    f_field = binary_fields.get("F") if isinstance(binary_fields.get("F"), dict) else {}
+    v_field = binary_fields.get("V") if isinstance(binary_fields.get("V"), dict) else {}
+    return {
+        "has_user_name": bool(account.get("user_name")),
+        "has_rid": bool(account.get("rid")),
+        "has_created_timestamp": bool(account.get("created_at")),
+        "has_last_logon_timestamp": bool(account.get("last_logon_at")),
+        "has_password_last_set_timestamp": bool(account.get("password_last_set_at")),
+        "has_uac_flags": bool(account.get("uac_flags")),
+        "has_group_membership_hint": bool(group_rows),
+        "has_sam_f_value": "F" in binary_fields,
+        "has_sam_v_value": "V" in binary_fields,
+        "has_decoded_sam_f_timestamps": bool(f_field.get("decoded_timestamps")),
+        "has_decoded_sam_f_uac": bool(f_field.get("user_account_control_flags")),
+        "has_decoded_sam_v_strings": bool(v_field.get("string_candidates")),
+        "native_sam_fv_candidate_decoding_available": bool(f_field.get("decoded") or v_field.get("decoded")),
+        "native_sam_fv_report_grade": False,
+        "requires_second_parser_validation": True,
+    }
+
+
+def decode_sam_binary_field(field_name: str, value: str) -> dict[str, object]:
+    raw = parse_reg_binary(value)
+    decoded: dict[str, object] = {
+        "present": True,
+        "byte_count": len(raw),
+        "decoded": False,
+        "decoder_scope": "sam-fv-triage-candidate",
+        "validation_note": "SAM F/V binary field is partially decoded for triage only; validate offsets against OS version and a second parser before testimony.",
+    }
+    if field_name == "F":
+        f_decoded = decode_sam_f_value(raw)
+        decoded.update(f_decoded)
+        decoded["decoded"] = bool(f_decoded)
+    elif field_name == "V":
+        string_candidates = extract_utf16le_strings(raw, min_chars=3, limit=20)
+        decoded["string_candidates"] = string_candidates
+        decoded["decoded"] = bool(string_candidates)
+    return decoded
+
+
+def decode_sam_f_value(raw: bytes) -> dict[str, object]:
+    if len(raw) < 16:
+        return {}
+    timestamp_offsets = {
+        "last_logon_at": 0x08,
+        "password_last_set_at": 0x18,
+        "account_expires_at": 0x20,
+        "last_failed_logon_at": 0x28,
+    }
+    decoded_timestamps: dict[str, str] = {}
+    for name, offset in timestamp_offsets.items():
+        if offset + 8 > len(raw):
+            continue
+        parsed = filetime_to_iso(int.from_bytes(raw[offset : offset + 8], "little", signed=False))
+        if parsed:
+            decoded_timestamps[name] = parsed
+    result: dict[str, object] = {}
+    if decoded_timestamps:
+        result["decoded_timestamps"] = decoded_timestamps
+    if len(raw) >= 0x34:
+        rid = int.from_bytes(raw[0x30:0x34], "little", signed=False)
+        if 0 < rid < 0x10000000:
+            result["rid_decimal_candidate"] = rid
+            result["rid_hex_candidate"] = f"{rid:08X}"
+    if len(raw) >= 0x38:
+        primary_group = int.from_bytes(raw[0x34:0x38], "little", signed=False)
+        if 0 < primary_group < 0x10000000:
+            result["primary_group_rid_candidate"] = primary_group
+    if len(raw) >= 0x3C:
+        uac = int.from_bytes(raw[0x38:0x3C], "little", signed=False)
+        if uac:
+            result["user_account_control_candidate"] = uac
+            result["user_account_control_flags"] = user_account_control_flags(uac)
+    if len(raw) >= 0x44:
+        result["country_code_candidate"] = int.from_bytes(raw[0x3C:0x3E], "little", signed=False)
+        result["bad_password_count_candidate"] = int.from_bytes(raw[0x40:0x42], "little", signed=False)
+        result["logon_count_candidate"] = int.from_bytes(raw[0x42:0x44], "little", signed=False)
+    return result
+
+
+def apply_sam_binary_decoded_fields(hint: dict[str, object], field_name: str, decoded: dict[str, object]) -> None:
+    if field_name == "F":
+        timestamps = decoded.get("decoded_timestamps") if isinstance(decoded.get("decoded_timestamps"), dict) else {}
+        if not hint.get("last_logon_at") and timestamps.get("last_logon_at"):
+            hint["last_logon_at"] = timestamps["last_logon_at"]
+        if not hint.get("password_last_set_at") and timestamps.get("password_last_set_at"):
+            hint["password_last_set_at"] = timestamps["password_last_set_at"]
+        if not hint.get("rid") and decoded.get("rid_hex_candidate"):
+            hint["rid"] = decoded["rid_hex_candidate"]
+        if decoded.get("user_account_control_flags"):
+            hint["uac_flags"] = sorted(set([*list(hint.get("uac_flags") or []), *list(decoded.get("user_account_control_flags") or [])]))
+            hint["account_disabled_hint"] = bool(hint.get("account_disabled_hint") or "ACCOUNTDISABLE" in hint["uac_flags"])
+    elif field_name == "V" and not hint.get("user_name"):
+        strings = decoded.get("string_candidates") if isinstance(decoded.get("string_candidates"), list) else []
+        if strings:
+            hint["user_name"] = strings[0]
+
+
+def user_account_control_flags(value: int) -> list[str]:
+    flags = {
+        0x0002: "ACCOUNTDISABLE",
+        0x0010: "LOCKOUT",
+        0x0020: "PASSWD_NOTREQD",
+        0x0200: "NORMAL_ACCOUNT",
+        0x10000: "DONT_EXPIRE_PASSWORD",
+        0x40000: "SMARTCARD_REQUIRED",
+        0x80000: "TRUSTED_FOR_DELEGATION",
+        0x100000: "NOT_DELEGATED",
+        0x400000: "DONT_REQ_PREAUTH",
+        0x800000: "PASSWORD_EXPIRED",
+    }
+    return [label for bit, label in flags.items() if value & bit]
+
+
+def reg_binary_byte_count(value: str) -> int:
+    return len(parse_reg_binary(value))
+
+
+def parse_reg_binary(value: str) -> bytes:
+    text = value.strip()
+    if ":" in text:
+        text = text.split(":", 1)[1]
+    items: list[int] = []
+    for item in text.replace("\\", "").replace("\n", "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            items.append(int(item, 16))
+        except ValueError:
+            continue
+    return bytes(items)
+
+
+def extract_utf16le_strings(raw: bytes, *, min_chars: int, limit: int) -> list[str]:
+    strings: list[str] = []
+    current = bytearray()
+    for index in range(0, len(raw) - 1, 2):
+        code_unit = raw[index : index + 2]
+        value = int.from_bytes(code_unit, "little", signed=False)
+        if 32 <= value <= 0xD7FF or 0xE000 <= value <= 0xFFFD:
+            current.extend(code_unit)
+            continue
+        if len(current) >= min_chars * 2:
+            decoded = current.decode("utf-16le", errors="ignore").strip("\x00\r\n\t ")
+            if decoded and decoded not in strings:
+                strings.append(decoded)
+                if len(strings) >= limit:
+                    return strings
+        current.clear()
+    if len(current) >= min_chars * 2:
+        decoded = current.decode("utf-16le", errors="ignore").strip("\x00\r\n\t ")
+        if decoded and decoded not in strings:
+            strings.append(decoded)
+    return strings[:limit]
 
 
 def decode_reg_export(raw: bytes) -> str:

@@ -14,6 +14,7 @@
     "outputs",
     "steps",
     "processing",
+    "silent_failure_detection",
     "summary",
     "highlights"
   ],
@@ -181,13 +182,43 @@
         "resume": {
           "type": "boolean"
         },
+        "resume_effective": {
+          "type": "boolean"
+        },
+        "resume_disabled_reason": {
+          "type": "string"
+        },
         "reused_outputs": {
           "type": "array",
           "items": {
             "type": "string"
           }
+        },
+        "artifact_scheduler": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "strategy",
+            "max_workers",
+            "scheduled_count"
+          ],
+          "properties": {
+            "strategy": {
+              "type": "string"
+            },
+            "max_workers": {
+              "type": "integer"
+            },
+            "scheduled_count": {
+              "type": "integer"
+            }
+          }
         }
       }
+    },
+    "resource_caps": {
+      "type": "object",
+      "additionalProperties": true
     },
     "outputs": {
       "type": "object",
@@ -327,7 +358,9 @@
         "docs_extracted_count",
         "files_extracted_count",
         "preferred_location_candidate_count",
-        "timeline_event_count"
+        "timeline_event_count",
+        "silent_failure_risk",
+        "silent_failure_risk_check_count"
       ],
       "properties": {
         "document_candidate_count": {
@@ -410,11 +443,54 @@
         "timeline_event_count": {
           "type": "integer"
         },
+        "silent_failure_risk": {
+          "type": "boolean"
+        },
+        "silent_failure_risk_check_count": {
+          "type": "integer"
+        },
         "matched_rule_count": {
           "type": "integer"
         },
         "ioc_hit_count": {
           "type": "integer"
+        }
+      }
+    },
+    "silent_failure_detection": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "status",
+        "silent_failure_risk",
+        "check_count",
+        "risk_check_count",
+        "target_inventory",
+        "checks"
+      ],
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "silent_failure_risk": {
+          "type": "boolean"
+        },
+        "check_count": {
+          "type": "integer"
+        },
+        "risk_check_count": {
+          "type": "integer"
+        },
+        "target_inventory": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
         }
       }
     },

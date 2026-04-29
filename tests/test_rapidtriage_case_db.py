@@ -29,12 +29,14 @@ REQUIRED_TABLES = {
     "evidence_source",
     "file_record",
     "hash_record",
+    "acquisition_metadata",
     "artifact",
     "artifact_fts",
     "event",
     "indexed_document",
     "indexed_document_fts",
     "review_mark",
+    "review_mark_history",
     "saved_search",
     "audit_event",
     "report_item",
@@ -59,6 +61,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
         self.assertIn("--review-status", commands["case-search"].format_help())
         self.assertIn("--verification-status", commands["case-search"].format_help())
         self.assertIn("--save-as", commands["case-search"].format_help())
+        self.assertIn("--keyword-pack", commands["case-search"].format_help())
         self.assertIn("case-review", commands)
         self.assertIn("--include-in-report", commands["case-review"].format_help())
         self.assertIn("case-db-report", commands)
@@ -84,8 +87,10 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 self.assertTrue(REQUIRED_TABLES.issubset(set(list_tables(connection))))
                 self.assertIn("hash_scope", table_columns(connection, "hash_record"))
                 self.assertIn("verification_status", table_columns(connection, "review_mark"))
+                self.assertIn("version", table_columns(connection, "review_mark_history"))
                 self.assertIn("filters_json", table_columns(connection, "saved_search"))
                 self.assertIn("citation_id", table_columns(connection, "audit_event"))
+                self.assertIn("write_blocker", table_columns(connection, "acquisition_metadata"))
 
     def test_create_list_and_get_case(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -107,6 +112,32 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(created.citation_prefix, "CASE-2026-001")
             self.assertEqual(fetched.to_dict(), created.to_dict())
             self.assertEqual([item.case_id for item in listed], [created.case_id])
+
+    def test_acquisition_metadata_records_required_submission_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            database = open_case_database(Path(tmp_dir) / "case.db")
+            database.create_case(case_id="CASE-ACQ", examiner="Analyst A", organization="Lab")
+
+            record = database.record_acquisition_metadata(
+                case_id="CASE-ACQ",
+                operator="Analyst A",
+                acquisition_started_at="2026-04-28T09:00:00+09:00",
+                acquisition_completed_at="2026-04-28T10:00:00+09:00",
+                source_identifier="Disk SN ABC123",
+                write_blocker="Tableau TX1 SN WB-01 verified read-only",
+                acquisition_tool="RapidTriage",
+                acquisition_tool_version="dev",
+                whole_source_sha256="b" * 64,
+                notes="Recorded before processing.",
+            )
+            records = database.list_acquisition_metadata("CASE-ACQ")
+            export = database.export_reviewed_items(case_id="CASE-ACQ")
+
+            self.assertTrue(record["citation_id"].startswith("CASE-ACQ-ACQ-"))
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["write_blocker"], "Tableau TX1 SN WB-01 verified read-only")
+            self.assertEqual(export["acquisition_metadata"]["status"], "metadata-recorded")
+            self.assertEqual(export["summary"]["acquisition_metadata_missing_count"], 0)
 
     def test_create_case_rejects_duplicate_case_id(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -490,6 +521,8 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(review["status"], "relevant")
             self.assertEqual(review["verification_status"], "source_opened")
             self.assertEqual(review["include_in_report"], True)
+            self.assertIn("#51", review["review_workflow"]["commercial_gap_ids"])
+            self.assertFalse(review["review_workflow"]["ready_for_court_report"])
 
             filtered = database.search_case(
                 case_id="CASE-REVIEW-SEARCH",
@@ -605,6 +638,21 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 note="Batch reviewed.",
                 include_in_report=True,
                 reviewer="unit-test",
+                assignee="analyst-a",
+                priority="high",
+            )
+            database.mark_review(
+                case_id="CASE-75",
+                target_type=targets[0]["target_type"],
+                target_id=targets[0]["target_id"],
+                status="relevant",
+                verification_status="verified",
+                tags=["credential", "batch"],
+                note="Source was verified.",
+                include_in_report=True,
+                reviewer="unit-test",
+                assignee="analyst-a",
+                priority="urgent",
             )
             reviewed = database.search_case(
                 case_id="CASE-75",
@@ -618,16 +666,49 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertTrue(saved["citation_id"].startswith("CASE-75-SRCH-"))
             self.assertEqual(database.list_saved_searches("CASE-75")[0]["name"], "Credential review")
             self.assertEqual(batch["updated_count"], len(targets))
-            self.assertGreaterEqual(reviewed["summary"]["match_count"], len(targets))
+            self.assertIn("#51", batch["marks"][0]["review_workflow"]["commercial_gap_ids"])
+            self.assertIn("#65", batch["marks"][0]["evidence_selection_versioning"]["commercial_gap_ids"])
+            self.assertTrue(batch["marks"][0]["review_workflow"]["assignment_present"])
+            self.assertGreaterEqual(reviewed["summary"]["match_count"], max(0, len(targets) - 1))
             self.assertTrue(all(match["review"]["status"] == "relevant" for match in reviewed["matches"]))
 
             export = database.export_reviewed_items(case_id="CASE-75")
             self.assertEqual(export["command"], "case-db-report-export")
+            self.assertIn("#51", export["summary"]["review_workflow_gap_ids"])
+            self.assertIn("#64", export["summary"]["report_citation_gap_ids"])
+            self.assertIn("#65", export["summary"]["evidence_selection_gap_ids"])
+            self.assertTrue(export["summary"]["review_assignment_enabled"])
             self.assertEqual(export["summary"]["exported_item_count"], len(targets))
             self.assertTrue(all(item["review"]["include_in_report"] for item in export["items"]))
             self.assertTrue(all(item["review_citation_id"].startswith("CASE-75-REV-") for item in export["items"]))
             self.assertTrue(all(item["target_citation_id"].startswith("CASE-75-") for item in export["items"]))
             self.assertTrue(all("source_reference" in item for item in export["items"]))
+            self.assertGreaterEqual(export["summary"]["citation_count"], len(targets) * 2)
+            self.assertTrue(export["citation_index"])
+            self.assertIn("#64", export["citation_index"][0]["commercial_gap_ids"])
+            self.assertIn("#64", export["report_citation_manager"]["commercial_gap_ids"])
+            self.assertGreaterEqual(len(export["items"][0]["review_history"]), 1)
+            self.assertIn("#65", export["items"][0]["review_history"][0]["commercial_gap_ids"])
+            self.assertIn("#65", export["evidence_selection_version_history"]["commercial_gap_ids"])
+            self.assertIn("#65", export["items"][0]["commercial_gap_ids"])
+            self.assertIn("custody_workflow", export)
+            self.assertGreaterEqual(export["custody_workflow"]["summary"]["evidence_source_count"], 1)
+            self.assertIn("acquisition_hash_workflow", export)
+            self.assertIn("audit_integrity", export)
+            self.assertGreaterEqual(export["audit_integrity"]["summary"]["event_count"], 1)
+            self.assertTrue(export["audit_integrity"]["summary"]["head_hash"])
+            self.assertIn("reproducibility", export)
+            self.assertTrue(export["reproducibility"]["stable_payload_sha256"])
+            self.assertTrue(all("provenance" in item for item in export["items"]))
+            self.assertTrue(all(item["provenance"]["review_citation_id"].startswith("CASE-75-REV-") for item in export["items"]))
+            self.assertTrue(all("validation_assessment" in item for item in export["items"]))
+            self.assertGreaterEqual(export["summary"]["validation_warning_count"], 0)
+            self.assertTrue(all(item["legal_limitations"] for item in export["items"]))
+            self.assertIn("acquisition_metadata", export)
+            self.assertGreaterEqual(export["summary"]["acquisition_metadata_missing_count"], 1)
+            self.assertIn("timezone_validation", export)
+            self.assertIn("clock_skew_analysis", export)
+            self.assertIn("contamination_warnings", export)
 
             output_path = root / "case-db-report.json"
             stdout = io.StringIO()

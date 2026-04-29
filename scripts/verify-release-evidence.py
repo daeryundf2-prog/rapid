@@ -82,9 +82,12 @@ def check_release_artifacts(release_dir: Path) -> list[dict[str, Any]]:
         check_path("release-sha256s", release_dir / "SHA256SUMS"),
         check_path("release-manifest", release_dir / "release-manifest.json"),
         check_path("release-dependency-inventory", release_dir / "dependency-inventory.txt"),
+        check_path("release-commercial-readiness-json", release_dir / "rapidtriage-commercial-readiness.json"),
+        check_path("release-commercial-readiness-markdown", release_dir / "rapidtriage-commercial-readiness.md"),
     ]
     checks.append(check_sha256s(release_dir))
     checks.append(check_release_manifest(release_dir))
+    checks.append(check_commercial_readiness_disclosure(release_dir))
     return checks
 
 
@@ -229,6 +232,30 @@ def check_release_manifest(release_dir: Path) -> dict[str, Any]:
         f"artifacts={len(artifacts) if isinstance(artifacts, list) else 0}, missing={missing}",
         path=manifest_path,
     )
+
+
+def check_commercial_readiness_disclosure(release_dir: Path) -> dict[str, Any]:
+    readiness_path = release_dir / "rapidtriage-commercial-readiness.json"
+    payload = read_json(readiness_path)
+    if not isinstance(payload, dict):
+        return make_check(
+            "release-commercial-readiness-disclosure",
+            False,
+            "commercial readiness report missing or invalid",
+            path=readiness_path,
+        )
+    has_disclosure = (
+        "commercial_claim_allowed" in payload
+        and "non_commercial_count" in payload
+        and "release_claim" in payload
+        and isinstance(payload.get("non_commercial_items"), list)
+    )
+    detail = (
+        f"claim_allowed={payload.get('commercial_claim_allowed')}, "
+        f"non_commercial_count={payload.get('non_commercial_count')}, "
+        f"status={payload.get('status')}"
+    )
+    return make_check("release-commercial-readiness-disclosure", has_disclosure, detail, path=readiness_path)
 
 
 def check_path(check_id: str, path: Path, *, is_dir: bool = False) -> dict[str, Any]:

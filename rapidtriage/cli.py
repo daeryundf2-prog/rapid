@@ -6,8 +6,15 @@ import textwrap
 from pathlib import Path
 
 from .core.audit import audit_path_for, write_audit_record
+from .core.backup import BackupError, build_case_backup, restore_case_backup
 from .core.artifacts import ArtifactCollectionError, SUPPORTED_ARTIFACT_KINDS, run_artifact_collection
-from .core.benchmark import BenchmarkError, DEFAULT_BENCHMARK_FILE_COUNT, DEFAULT_BENCHMARK_KEYWORD, run_benchmark
+from .core.benchmark import (
+    DEFAULT_BENCHMARK_FILE_COUNT,
+    DEFAULT_BENCHMARK_KEYWORD,
+    BenchmarkError,
+    build_stress_test_plan,
+    run_benchmark,
+)
 from .core.bundle import BundleError, build_submission_bundle
 from .core.carving import (
     DEFAULT_MAX_CANDIDATES,
@@ -33,6 +40,7 @@ from .core.collect_plan import (
     run_collect_export,
     supported_collect_profiles,
 )
+from .core.commercial_readiness import CommercialReadinessError, build_commercial_readiness_report
 from .core.cloud_api import (
     DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES,
     DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
@@ -40,15 +48,25 @@ from .core.cloud_api import (
     CloudApiCollectionError,
     run_cloud_api_collection,
 )
-from .core.compare import CompareError, compare_paths
+from .core.compare import CompareError, compare_many_paths, compare_paths
+from .core.confidence import (
+    ConfidenceDashboardError,
+    build_confidence_dashboard,
+    build_parser_explainability,
+    build_reproducibility_kit,
+)
+from .core.cross_tool import CrossToolValidationError, build_cross_tool_validation_report
 from .core.docs import build_manifest, run_docs_search, write_result
 from .core.doctor import format_doctor_text, run_doctor
+from .core.enterprise import build_enterprise_policy
 from .core.evidence import identify_evidence
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
 from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
 from .core.indicators import IndicatorSummaryError, build_indicator_summary
 from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS, resolve_input_root
+from .core.keyword_packs import KeywordPackError, keyword_pack_library_assessment, list_keyword_packs, resolve_keyword_packs
 from .core.normalize import NormalizationError, build_normalized_case
+from .core.ocr_queue import OcrQueueError, build_ocr_queue
 from .core.plugins import PluginError, load_plugin_registry, validate_plugin_manifest, read_plugin_manifest
 from .core.rules import RuleConfigError, load_rule_set
 from .core.run import RunModeError, SUPPORTED_RUN_MODES, run_triage_mode
@@ -98,6 +116,7 @@ def add_web_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--auth-token", help="Require X-RapidTriage-Token for API calls")
     parser.add_argument("--allow-remote-without-auth", action="store_true", help="Allow non-localhost binding without auth token")
     parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload for UI/API development")
+    parser.add_argument("--crash-log-dir", help="Local-only directory for web/API crash reports")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -138,6 +157,9 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage evidence ./case.E01
               rapidtriage benchmark --output-dir ./rapidtriage-benchmark --file-count 1000
               rapidtriage validation --output-dir ./rapidtriage-validation --overwrite
+              rapidtriage commercial-readiness --output-dir ./commercial-readiness --json
+              rapidtriage cross-tool-validate --rapid-output rapidtriage-artifacts-eventlog.json --reference-output evtxecmd=EvtxECmd.csv
+              rapidtriage confidence-dashboard ./rapidtriage-run --json
               rapidtriage case-catalog --add-run ./rapidtriage-run --case-id CASE-001 --list
               rapidtriage timeline-export ./rapidtriage-run --source artifacts --output timeline-export.json
               rapidtriage normalize ./rapidtriage-run --output normalized-case.json
@@ -412,15 +434,16 @@ def build_parser() -> argparse.ArgumentParser:
             """\
             Examples:
               rapidtriage compare ./before.txt ./after.txt --output compare.json
+              rapidtriage compare ./baseline.txt ./host-a.txt ./host-b.txt --label baseline --label host-a --label host-b
               rapidtriage compare ./export-a.evtx.json ./export-b.evtx.json --left-label baseline --right-label suspect --json
               rapidtriage compare ./large-a.log ./large-b.log --no-text-diff
             """
         ),
     )
-    compare.add_argument("left", help="Left/source file to compare")
-    compare.add_argument("right", help="Right/target file to compare")
+    compare.add_argument("paths", nargs="+", help="Two or more files to compare; first file is the baseline for 3+ inputs")
     compare.add_argument("--left-label", default="left", help="Human label for the left file")
     compare.add_argument("--right-label", default="right", help="Human label for the right file")
+    compare.add_argument("--label", action="append", help="Label for each positional file when comparing 3+ files")
     compare.add_argument("--output", default="rapidtriage-compare.json", help="JSON output path")
     compare.add_argument("--no-hash", action="store_true", help="Skip MD5/SHA1/SHA256 hashing")
     compare.add_argument("--no-text-diff", action="store_true", help="Skip bounded text diff preview")
@@ -511,6 +534,32 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--output", default="rapidtriage-search.json", help="JSON output path")
     search.add_argument("--limit", type=int, default=500, help="Maximum number of combined matches")
     search.add_argument("--no-ocr", action="store_true", help="Skip OCR over image candidates")
+    search.add_argument("--no-analysis", action="store_true", help="Skip clustering/entity/graph/workbook analysis pivots")
+    search.add_argument("--search-mode", choices=["exact", "fuzzy", "regex"], default="exact", help="Keyword matching mode")
+    search.add_argument("--fuzzy-distance", type=int, default=1, help="Maximum edit distance for --search-mode fuzzy (0-2)")
+    search.add_argument("--proximity-window", type=int, default=0, help="Annotate hits where multiple keywords occur within N word tokens")
+    search.add_argument("--keyword-pack", action="append", help="Add a built-in keyword pack such as credentials, execution, network, browser-ai, windows-ir")
+    search.add_argument("--keyword-pack-file", action="append", help="JSON keyword pack file containing a keywords list")
+
+    ocr_queue = sub.add_parser(
+        "ocr-queue",
+        help="Build an OCR work queue for image candidates and sidecar imports",
+        description="Scan image files, preserve OCR sidecar metadata, and produce retryable per-file OCR state",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage ocr-queue ./case-root --output rapidtriage-ocr-queue.json
+              rapidtriage ocr-queue ./case-root --previous rapidtriage-ocr-queue.json --retry-failures --json
+            """
+        ),
+    )
+    ocr_queue.add_argument("root", help="Directory containing image evidence or extracted files")
+    ocr_queue.add_argument("--output", default="rapidtriage-ocr-queue.json", help="OCR queue JSON output path")
+    ocr_queue.add_argument("--previous", help="Previous OCR queue JSON for retry/status carry-forward")
+    ocr_queue.add_argument("--retry-failures", action="store_true", help="Move previous failed items back to retry queue")
+    ocr_queue.add_argument("--max-items", type=int, default=0, help="Cap scanned image candidates (0 means all)")
+    ocr_queue.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     indicators = sub.add_parser(
         "indicators",
@@ -529,6 +578,7 @@ def build_parser() -> argparse.ArgumentParser:
     indicators.add_argument("--output", default="rapidtriage-indicators.json", help="JSON output path")
     indicators.add_argument("--limit", type=int, default=1000, help="Maximum number of indicators to keep")
     indicators.add_argument("--max-sources", type=int, default=10, help="Maximum source references per indicator")
+    indicators.add_argument("--ti-feed", action="append", help="Local JSON/CSV/TXT threat-intel feed for offline IOC enrichment")
     indicators.add_argument("--json", action="store_true", help="Print JSON to stdout")
     add_rules_argument(indicators)
 
@@ -552,6 +602,45 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--app-data-dir", help="Override the app data directory to probe")
     doctor.add_argument("--no-write-probe", action="store_true", help="Do not create a temporary write probe file")
     doctor.add_argument("--strict", action="store_true", help="Return exit code 1 when any doctor check is error")
+
+    enterprise_policy = sub.add_parser(
+        "enterprise-policy",
+        help="Print local-only enterprise/security policy status",
+        description="Print local-only enterprise policy status for telemetry, license, RBAC, and collaboration readiness",
+    )
+    enterprise_policy.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    case_backup = sub.add_parser("case-backup", help="Back up a RapidTriage Case DB with hashes")
+    case_backup.add_argument("database", help="Case DB path")
+    case_backup.add_argument("--output-dir", required=True, help="Directory for backup files and manifest")
+    case_backup.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty backup directory")
+    case_backup.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    case_restore = sub.add_parser("case-restore", help="Restore a RapidTriage Case DB backup")
+    case_restore.add_argument("manifest", help="Backup manifest JSON")
+    case_restore.add_argument("--output", required=True, help="Restored Case DB path")
+    case_restore.add_argument("--overwrite", action="store_true", help="Overwrite restored output if it exists")
+    case_restore.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    case_acquisition = sub.add_parser(
+        "case-acquisition",
+        help="Record or list acquisition/write-blocker metadata for a Case DB",
+        description="Record acquisition operator, source, write-blocker, time, tool, and whole-source hash metadata",
+    )
+    case_acquisition.add_argument("database", help="Case DB path")
+    case_acquisition.add_argument("--case-id", required=True, help="Case identifier")
+    case_acquisition.add_argument("--evidence-source-citation-id", default="", help="Optional evidence source citation ID")
+    case_acquisition.add_argument("--operator", default="", help="Acquisition operator/examiner")
+    case_acquisition.add_argument("--started-at", default="", help="Acquisition start timestamp")
+    case_acquisition.add_argument("--completed-at", default="", help="Acquisition completion timestamp")
+    case_acquisition.add_argument("--source-identifier", default="", help="Device/source serial, asset tag, or image identifier")
+    case_acquisition.add_argument("--write-blocker", default="", help="Write-blocker model/serial/status")
+    case_acquisition.add_argument("--tool", default="", help="Acquisition tool name")
+    case_acquisition.add_argument("--tool-version", default="", help="Acquisition tool version")
+    case_acquisition.add_argument("--whole-source-sha256", default="", help="Whole-source SHA256 from acquisition workflow")
+    case_acquisition.add_argument("--notes", default="", help="Acquisition notes")
+    case_acquisition.add_argument("--list", action="store_true", help="List existing acquisition metadata instead of recording")
+    case_acquisition.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     sample = sub.add_parser(
         "sample",
@@ -625,6 +714,8 @@ def build_parser() -> argparse.ArgumentParser:
     case_search.add_argument("--review-status", help="Limit by analyst review status")
     case_search.add_argument("--verification-status", help="Limit by review verification status")
     case_search.add_argument("--save-as", help="Save this keyword/filter set for reuse")
+    case_search.add_argument("--keyword-pack", action="append", help="Add a built-in keyword pack to this case search")
+    case_search.add_argument("--keyword-pack-file", action="append", help="JSON keyword pack file containing a keywords list")
     case_search.add_argument("--output", help="Optional JSON output path")
     case_search.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
@@ -650,6 +741,9 @@ def build_parser() -> argparse.ArgumentParser:
     case_review.add_argument("--tag", action="append", help="Review tag (repeatable)")
     case_review.add_argument("--note", default="", help="Review note")
     case_review.add_argument("--reviewer", default="", help="Reviewer name")
+    case_review.add_argument("--assignee", default="", help="Analyst assigned to follow up this result")
+    case_review.add_argument("--priority", default="normal", help="Review priority: urgent, high, normal, or low")
+    case_review.add_argument("--due-at", default="", help="Optional due date/time for review follow-up")
     case_review.add_argument("--include-in-report", action="store_true", help="Mark target as report candidate")
     case_review.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
@@ -709,7 +803,19 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--mode", choices=sorted(SUPPORTED_RUN_MODES), default="fraud", help="Run mode")
     benchmark.add_argument("--search-iterations", type=int, default=3, help="Repeated search samples for p50/p95")
     benchmark.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty benchmark output directory")
+    benchmark.add_argument("--resume", action="store_true", help="Reuse valid benchmark run outputs when the input fingerprint is unchanged")
     benchmark.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    stress_plan = sub.add_parser(
+        "stress-plan",
+        help="Write a repeatable 1TB-10TB stress-test plan without generating large data",
+        description="Create a stress-test runbook with resource caps, checkpoints, failure thresholds, and evidence requirements",
+    )
+    stress_plan.add_argument("--output-dir", required=True, help="Directory for stress plan outputs")
+    stress_plan.add_argument("--size-tb", type=int, action="append", help="Evidence size scenario in TB (repeatable; default 1/5/10)")
+    stress_plan.add_argument("--expected-throughput-mb-s", type=float, default=80.0, help="Expected ingest throughput for wall-clock estimates")
+    stress_plan.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty stress-plan output directory")
+    stress_plan.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     validation = sub.add_parser(
         "validation",
@@ -726,7 +832,83 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validation.add_argument("--output-dir", required=True, help="Directory for validation JSON and Markdown outputs")
     validation.add_argument("--overwrite", action="store_true", help="Allow writing into a non-empty validation output directory")
+    validation.add_argument("--known-answer-manifest", help="Optional JSON manifest of NIST CFReDS/CFTT-style known-answer runs")
+    validation.add_argument("--fixture-root", help="Repository/root path used to discover parser fixture corpus coverage")
+    validation.add_argument("--independent-report", help="Optional independent validation report to hash and attach")
     validation.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    commercial_readiness = sub.add_parser(
+        "commercial-readiness",
+        help="Summarize commercial parity gaps from the 120-item backlog",
+        description="Build a commercial-readiness gate report so partial features cannot be advertised as AXIOM/WISDOM-class",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage commercial-readiness --json
+              rapidtriage commercial-readiness --output-dir ./commercial-readiness --json
+              rapidtriage commercial-readiness --strict
+            """
+        ),
+    )
+    commercial_readiness.add_argument("--backlog", help="Path to rapidtriage-commercial-parity-backlog.md")
+    commercial_readiness.add_argument("--output-dir", help="Optional directory for JSON and Markdown gate reports")
+    commercial_readiness.add_argument("--strict", action="store_true", help="Exit non-zero when commercial gaps remain")
+    commercial_readiness.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    cross_tool = sub.add_parser(
+        "cross-tool-validate",
+        help="Compare RapidTriage output against external forensic tool exports",
+        description="Build a cross-tool validation report for detecting parser omissions and schema mismatches",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage cross-tool-validate --rapid-output rapidtriage-artifacts-eventlog.json --reference-output evtxecmd=Security.csv --json
+              rapidtriage cross-tool-validate --rapid-output rapidtriage-filesystem.json --reference-output mftecmd=MFTECmd.csv --min-overlap 0.9 --output cross-tool.json
+            """
+        ),
+    )
+    cross_tool.add_argument("--rapid-output", required=True, help="RapidTriage JSON/JSONL/CSV output to compare")
+    cross_tool.add_argument(
+        "--reference-output",
+        action="append",
+        required=True,
+        help="External tool output as NAME=PATH; repeat for EvtxECmd, RECmd, MFTECmd, PECmd, Plaso, etc.",
+    )
+    cross_tool.add_argument("--min-overlap", type=float, default=0.8, help="Minimum reference-key overlap ratio")
+    cross_tool.add_argument("--output", help="Optional JSON report path")
+    cross_tool.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    confidence_dashboard = sub.add_parser(
+        "confidence-dashboard",
+        help="Summarize report-grade, validation-required, triage, and unsupported result counts",
+        description="Build an evidence confidence dashboard from a completed run",
+    )
+    confidence_dashboard.add_argument("run_output", help="Completed run output directory or rapidtriage-run-summary.json")
+    confidence_dashboard.add_argument("--output", help="Optional JSON output path")
+    confidence_dashboard.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    parser_explainability = sub.add_parser(
+        "parser-explainability",
+        help="Export parser/source/provenance explanations for run records",
+        description="Build a parser explainability report for source path, parser version, hashes, offsets, and validation state",
+    )
+    parser_explainability.add_argument("run_output", help="Completed run output directory or rapidtriage-run-summary.json")
+    parser_explainability.add_argument("--output", help="Optional JSON output path")
+    parser_explainability.add_argument("--markdown-output", help="Optional Markdown output path")
+    parser_explainability.add_argument("--limit", type=int, default=500, help="Maximum records to include")
+    parser_explainability.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    reproducibility = sub.add_parser(
+        "reproducibility-kit",
+        help="Compare two completed runs for same-input/same-output reproducibility",
+        description="Build a reproducibility kit with canonical output hashes and per-output diffs",
+    )
+    reproducibility.add_argument("--baseline-run", required=True, help="Baseline run directory or summary JSON")
+    reproducibility.add_argument("--candidate-run", required=True, help="Candidate run directory or summary JSON")
+    reproducibility.add_argument("--output-dir", required=True, help="Directory for reproducibility JSON/Markdown outputs")
+    reproducibility.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     case_catalog = sub.add_parser(
         "case-catalog",
@@ -803,6 +985,13 @@ def build_parser() -> argparse.ArgumentParser:
     plugins.add_argument("--validate", help="Validate one plugin.json manifest")
     plugins.add_argument("--list", action="store_true", help="List built-in and discovered plugins")
     plugins.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    keyword_packs = sub.add_parser(
+        "keyword-packs",
+        help="List built-in keyword packs for repeatable searches",
+        description="List built-in keyword packs for credentials, execution, network, browser/AI, and Windows IR review",
+    )
+    keyword_packs.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     case_parser = sub.add_parser(
         "case",
@@ -897,21 +1086,32 @@ def build_web_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run_web_server(host: str, port: int, reload: bool = False, auth_token: str | None = None, allow_remote_without_auth: bool = False) -> int:
-    try:
-        import uvicorn
-    except ImportError as exc:
-        raise RuntimeError("rapidtriage web requires the 'web' extra: pip install 'dashcam-tools[web]'") from exc
+def run_web_server(
+    host: str,
+    port: int,
+    reload: bool = False,
+    auth_token: str | None = None,
+    allow_remote_without_auth: bool = False,
+    crash_log_dir: str | None = None,
+) -> int:
     if host not in {"127.0.0.1", "localhost", "::1"} and not auth_token and not allow_remote_without_auth:
         raise RuntimeError(
             "Refusing to bind RapidTriage to a non-localhost interface without --auth-token. "
             "Use --auth-token or --allow-remote-without-auth if you understand the risk."
         )
+    try:
+        import uvicorn
+    except ImportError as exc:
+        raise RuntimeError("rapidtriage web requires the 'web' extra: pip install 'dashcam-tools[web]'") from exc
     print(f"Starting rapidtriage web UI at http://{host}:{port}")
     if auth_token:
         import os
 
         os.environ["RAPIDTRIAGE_AUTH_TOKEN"] = auth_token
+    if crash_log_dir:
+        import os
+
+        os.environ["RAPIDTRIAGE_CRASH_LOG_DIR"] = str(Path(crash_log_dir).expanduser().resolve())
     uvicorn.run("rapidtriage.api.app:app", host=host, port=port, reload=reload)
     return 0
 
@@ -920,7 +1120,14 @@ def web_main(argv=None) -> int:
     parser = build_web_parser()
     args = parser.parse_args(argv)
     try:
-        return run_web_server(args.host, args.port, args.reload, args.auth_token, args.allow_remote_without_auth)
+        return run_web_server(
+            args.host,
+            args.port,
+            args.reload,
+            args.auth_token,
+            args.allow_remote_without_auth,
+            args.crash_log_dir,
+        )
     except RuntimeError as exc:
         parser.error(str(exc))
     return 2
@@ -1134,7 +1341,14 @@ def main(argv=None) -> int:
 
     if args.command == "web":
         try:
-            return run_web_server(args.host, args.port, args.reload, args.auth_token, args.allow_remote_without_auth)
+            return run_web_server(
+                args.host,
+                args.port,
+                args.reload,
+                args.auth_token,
+                args.allow_remote_without_auth,
+                args.crash_log_dir,
+            )
         except RuntimeError as exc:
             parser.error(str(exc))
 
@@ -1150,6 +1364,97 @@ def main(argv=None) -> int:
         else:
             print(format_doctor_text(payload))
         return 1 if args.strict and payload["status"] == "error" else 0
+
+    if args.command == "enterprise-policy":
+        payload = build_enterprise_policy()
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("RapidTriage enterprise policy")
+            print(f"Telemetry enabled: {payload['telemetry']['enabled']}")
+            print(f"License required: {payload['license_activation']['required']}")
+            print(f"RBAC status: {payload['rbac']['status']}")
+            print(f"Multi-user server: {payload['multi_user_case_server']['status']}")
+        return 0
+
+    if args.command == "case-backup":
+        try:
+            payload = build_case_backup(
+                database_path=Path(args.database).expanduser().resolve(),
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+                overwrite=args.overwrite,
+            )
+        except (BackupError, OSError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved case backup manifest: {Path(args.output_dir).expanduser().resolve() / 'rapidtriage-case-backup-manifest.json'}")
+            print(f"Copied files: {payload['copied_count']}")
+        return 0
+
+    if args.command == "case-restore":
+        try:
+            payload = restore_case_backup(
+                manifest_path=Path(args.manifest).expanduser().resolve(),
+                output_path=Path(args.output).expanduser().resolve(),
+                overwrite=args.overwrite,
+            )
+        except (BackupError, OSError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Restored case database: {payload['restored_database']}")
+            print(f"Hash verified: {payload['hash_verified']}")
+        return 0
+
+    if args.command == "case-acquisition":
+        database = open_case_database(Path(args.database).expanduser().resolve())
+        try:
+            if args.list:
+                records = database.list_acquisition_metadata(args.case_id)
+                payload = {
+                    "command": "case-acquisition",
+                    "database": str(database.path),
+                    "case_id": args.case_id,
+                    "records": records,
+                    "record_count": len(records),
+                }
+            else:
+                record = database.record_acquisition_metadata(
+                    case_id=args.case_id,
+                    evidence_source_citation_id=args.evidence_source_citation_id,
+                    operator=args.operator,
+                    acquisition_started_at=args.started_at,
+                    acquisition_completed_at=args.completed_at,
+                    source_identifier=args.source_identifier,
+                    write_blocker=args.write_blocker,
+                    acquisition_tool=args.tool,
+                    acquisition_tool_version=args.tool_version,
+                    whole_source_sha256=args.whole_source_sha256,
+                    notes=args.notes,
+                )
+                payload = {
+                    "command": "case-acquisition",
+                    "database": str(database.path),
+                    "case_id": args.case_id,
+                    "record": record,
+                }
+        except CaseDatabaseError as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        elif args.list:
+            print(f"Acquisition metadata records: {payload['record_count']}")
+            for record in payload["records"]:
+                print(f"- {record['citation_id']} source={record['source_identifier']} operator={record['operator']}")
+        else:
+            record = payload["record"]
+            print(f"Recorded acquisition metadata: {record['citation_id']}")
+            if record.get("whole_source_sha256"):
+                print(f"Whole-source SHA256: {record['whole_source_sha256']}")
+        return 0
 
     if args.command == "sample":
         output_dir = Path(args.output_dir).expanduser().resolve()
@@ -1249,10 +1554,18 @@ def main(argv=None) -> int:
     if args.command == "case-search":
         database_path = Path(args.database).expanduser().resolve()
         try:
+            resolved_keywords = resolve_keyword_packs(
+                args.keyword,
+                pack_names=args.keyword_pack,
+                pack_files=[Path(path) for path in (args.keyword_pack_file or [])],
+            )
+        except KeywordPackError as exc:
+            parser.error(str(exc))
+        try:
             database = open_case_database(database_path)
             payload = database.search_case(
                 case_id=args.case_id,
-                keywords=args.keyword,
+                keywords=resolved_keywords,
                 limit=args.limit,
                 sources=args.source,
                 metadata_filters=args.metadata,
@@ -1263,7 +1576,7 @@ def main(argv=None) -> int:
                 payload["saved_search"] = database.save_search(
                     case_id=args.case_id,
                     name=args.save_as,
-                    keywords=args.keyword,
+                    keywords=resolved_keywords,
                     limit=args.limit,
                     sources=args.source,
                     metadata_filters=args.metadata,
@@ -1298,6 +1611,9 @@ def main(argv=None) -> int:
                 tags=args.tag or [],
                 note=args.note,
                 reviewer=args.reviewer,
+                assignee=args.assignee,
+                priority=args.priority,
+                due_at=args.due_at,
                 include_in_report=args.include_in_report,
             )
         except CaseDatabaseError as exc:
@@ -1368,6 +1684,7 @@ def main(argv=None) -> int:
                 mode=args.mode,
                 search_iterations=args.search_iterations,
                 overwrite=args.overwrite,
+                resume=args.resume,
             )
         except (BenchmarkError, SearchError, RunModeError, OSError, ValueError) as exc:
             parser.error(str(exc))
@@ -1384,11 +1701,34 @@ def main(argv=None) -> int:
             )
         return 0
 
+    if args.command == "stress-plan":
+        try:
+            payload = build_stress_test_plan(
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+                evidence_sizes_tb=tuple(args.size_tb or [1, 5, 10]),
+                expected_throughput_mb_s=args.expected_throughput_mb_s,
+                overwrite=args.overwrite,
+            )
+        except (BenchmarkError, OSError, ValueError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved stress plan JSON: {payload['outputs']['json']}")
+            print(f"Saved stress plan report: {payload['outputs']['markdown']}")
+            print(f"Scenarios: {payload['summary']['scenario_count']}")
+        return 0
+
     if args.command == "validation":
         try:
             payload = build_validation_package(
                 output_dir=Path(args.output_dir).expanduser().resolve(),
                 overwrite=args.overwrite,
+                known_answer_manifest=Path(args.known_answer_manifest).expanduser().resolve()
+                if args.known_answer_manifest
+                else None,
+                fixture_root=Path(args.fixture_root).expanduser().resolve() if args.fixture_root else None,
+                independent_report=Path(args.independent_report).expanduser().resolve() if args.independent_report else None,
             )
         except (ValidationError, OSError) as exc:
             parser.error(str(exc))
@@ -1398,6 +1738,125 @@ def main(argv=None) -> int:
             print(f"Saved validation JSON: {payload['outputs']['json']}")
             print(f"Saved validation report: {payload['outputs']['markdown']}")
             print(f"Score target: {payload['score_target']}/100")
+        return 0
+
+    if args.command == "commercial-readiness":
+        try:
+            payload = build_commercial_readiness_report(
+                backlog_path=Path(args.backlog).expanduser().resolve() if args.backlog else None,
+                output_dir=Path(args.output_dir).expanduser().resolve() if args.output_dir else None,
+            )
+        except CommercialReadinessError as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("RapidTriage commercial readiness gate")
+            print(f"Status: {payload['status']}")
+            print(f"Readiness score: {payload['readiness_score']}/100")
+            print(f"Non-commercial items: {payload['non_commercial_count']}/{payload['item_count']}")
+            print(f"Commercial claim allowed: {payload['commercial_claim_allowed']}")
+            if payload.get("outputs"):
+                outputs = payload["outputs"]
+                print(f"Saved JSON: {outputs['json']}")
+                print(f"Saved Markdown: {outputs['markdown']}")
+        return 1 if args.strict and not payload["commercial_claim_allowed"] else 0
+
+    if args.command == "cross-tool-validate":
+        references: dict[str, Path] = {}
+        for value in args.reference_output or []:
+            if "=" not in value:
+                parser.error("--reference-output must use NAME=PATH")
+            name, path = value.split("=", 1)
+            if not name.strip() or not path.strip():
+                parser.error("--reference-output must use NAME=PATH")
+            references[name.strip()] = Path(path).expanduser().resolve()
+        try:
+            payload = build_cross_tool_validation_report(
+                rapid_output=Path(args.rapid_output).expanduser().resolve(),
+                reference_outputs=references,
+                output=Path(args.output).expanduser().resolve() if args.output else None,
+                min_overlap=args.min_overlap,
+            )
+        except (CrossToolValidationError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("RapidTriage cross-tool validation")
+            print(f"Status: {payload['status']}")
+            for item in payload["comparisons"]:
+                print(
+                    f"- {item['reference_name']}: status={item['status']} "
+                    f"overlap={item['overlap_ratio']} row_delta={item['row_count_delta']}"
+                )
+            if payload.get("output"):
+                print(f"Saved report: {payload['output']}")
+        return 0
+
+    if args.command == "confidence-dashboard":
+        try:
+            payload = build_confidence_dashboard(
+                Path(args.run_output).expanduser().resolve(),
+                output=Path(args.output).expanduser().resolve() if args.output else None,
+            )
+        except (ConfidenceDashboardError, OSError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            counts = payload["summary"]["confidence_counts"]
+            print("RapidTriage evidence confidence dashboard")
+            print(f"Status: {payload['status']}")
+            print(
+                "Counts: "
+                f"report-grade={counts['report-grade']} "
+                f"needs-validation={counts['needs-validation']} "
+                f"triage={counts['triage']} unsupported={counts['unsupported']}"
+            )
+            if payload.get("output"):
+                print(f"Saved dashboard: {payload['output']}")
+        return 0
+
+    if args.command == "parser-explainability":
+        try:
+            payload = build_parser_explainability(
+                Path(args.run_output).expanduser().resolve(),
+                output=Path(args.output).expanduser().resolve() if args.output else None,
+                markdown_output=Path(args.markdown_output).expanduser().resolve() if args.markdown_output else None,
+                limit=args.limit,
+            )
+        except (ConfidenceDashboardError, OSError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("RapidTriage parser explainability")
+            print(f"Entries: {payload['summary']['entry_count']}")
+            print(f"Incomplete: {payload['summary']['incomplete_count']}")
+            if payload.get("output"):
+                print(f"Saved JSON: {payload['output']}")
+            if payload.get("markdown_output"):
+                print(f"Saved Markdown: {payload['markdown_output']}")
+        return 0
+
+    if args.command == "reproducibility-kit":
+        try:
+            payload = build_reproducibility_kit(
+                baseline_run=Path(args.baseline_run).expanduser().resolve(),
+                candidate_run=Path(args.candidate_run).expanduser().resolve(),
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+            )
+        except (ConfidenceDashboardError, OSError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("RapidTriage reproducibility kit")
+            print(f"Status: {payload['status']}")
+            print(f"Diff count: {payload['summary']['diff_count']}")
+            print(f"Saved JSON: {payload['outputs']['json']}")
+            print(f"Saved Markdown: {payload['outputs']['markdown']}")
         return 0
 
     if args.command == "case-catalog":
@@ -1525,11 +1984,41 @@ def main(argv=None) -> int:
                 print(f"! {error['path']}: {error['error']}")
         return 0
 
+    if args.command == "keyword-packs":
+        payload = {
+            "command": "keyword-packs",
+            "packs": list_keyword_packs(),
+            "keyword_pack_library_assessment": keyword_pack_library_assessment(),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            for pack in payload["packs"]:
+                print(f"- {pack['name']}: {pack['keyword_count']} keywords")
+        return 0
+
     if args.command == "search":
         run_output = Path(args.run_output).expanduser().resolve()
         output = Path(args.output).expanduser().resolve()
         try:
-            payload = run_unified_search(run_output, args.keyword, include_ocr=not args.no_ocr, limit=args.limit)
+            resolved_keywords = resolve_keyword_packs(
+                args.keyword,
+                pack_names=args.keyword_pack,
+                pack_files=[Path(path) for path in (args.keyword_pack_file or [])],
+            )
+        except KeywordPackError as exc:
+            parser.error(str(exc))
+        try:
+            payload = run_unified_search(
+                run_output,
+                resolved_keywords,
+                include_ocr=not args.no_ocr,
+                limit=args.limit,
+                include_analysis=not args.no_analysis,
+                search_mode=args.search_mode,
+                fuzzy_distance=args.fuzzy_distance,
+                proximity_window=args.proximity_window,
+            )
         except SearchError as exc:
             parser.error(str(exc))
         write_result(payload, output)
@@ -1539,10 +2028,16 @@ def main(argv=None) -> int:
             audit_output,
             command="search",
             options={
-                "keywords": args.keyword,
+                "keywords": resolved_keywords,
                 "output": str(output),
                 "limit": args.limit,
                 "ocr": not args.no_ocr,
+                "analysis": not args.no_analysis,
+                "search_mode": args.search_mode,
+                "fuzzy_distance": args.fuzzy_distance,
+                "proximity_window": args.proximity_window,
+                "keyword_pack": args.keyword_pack or [],
+                "keyword_pack_file": args.keyword_pack_file or [],
             },
             input_files=[("run-summary", input_summary)],
             output_files=[("search-json", output)],
@@ -1552,6 +2047,42 @@ def main(argv=None) -> int:
         print(f"Matches: {payload['summary']['match_count']}")
         return 0
 
+    if args.command == "ocr-queue":
+        root = Path(args.root).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        previous = Path(args.previous).expanduser().resolve() if args.previous else None
+        try:
+            payload = build_ocr_queue(
+                root,
+                previous_queue=previous,
+                retry_failures=args.retry_failures,
+                max_items=args.max_items,
+            )
+        except OcrQueueError as exc:
+            parser.error(str(exc))
+        write_result(payload, output)
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="ocr-queue",
+            options={
+                "root": str(root),
+                "output": str(output),
+                "previous": str(previous) if previous else "",
+                "retry_failures": args.retry_failures,
+                "max_items": args.max_items,
+            },
+            input_files=[("root", root), *([("previous-queue", previous)] if previous else [])],
+            output_files=[("ocr-queue-json", output)],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved OCR queue JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(f"Candidates: {payload['summary']['candidate_count']}")
+        return 0
+
     if args.command == "indicators":
         run_output = Path(args.run_output).expanduser().resolve()
         output = Path(args.output).expanduser().resolve()
@@ -1559,6 +2090,7 @@ def main(argv=None) -> int:
             payload = build_indicator_summary(
                 run_output,
                 rule_set=rule_set,
+                ti_feeds=[Path(path) for path in (args.ti_feed or [])],
                 max_indicators=args.limit,
                 max_sources_per_indicator=args.max_sources,
             )
@@ -1575,6 +2107,7 @@ def main(argv=None) -> int:
                 "limit": args.limit,
                 "max_sources": args.max_sources,
                 "rules": str(rule_set.path) if rule_set else None,
+                "ti_feed": args.ti_feed or [],
             },
             input_files=[("run-summary", input_summary)],
             output_files=[("indicators-json", output)],
@@ -1588,20 +2121,31 @@ def main(argv=None) -> int:
         return 0
 
     if args.command == "compare":
-        left = Path(args.left).expanduser().resolve()
-        right = Path(args.right).expanduser().resolve()
+        compare_paths_input = [Path(value).expanduser().resolve() for value in args.paths]
+        if len(compare_paths_input) < 2:
+            parser.error("compare requires at least two files")
         output = Path(args.output).expanduser().resolve()
         try:
-            payload = compare_paths(
-                left,
-                right,
-                left_label=args.left_label,
-                right_label=args.right_label,
-                hash_files=not args.no_hash,
-                include_text_diff=not args.no_text_diff,
-                max_text_bytes=args.max_text_bytes,
-                diff_context=args.diff_context,
-            )
+            if len(compare_paths_input) == 2:
+                payload = compare_paths(
+                    compare_paths_input[0],
+                    compare_paths_input[1],
+                    left_label=args.left_label,
+                    right_label=args.right_label,
+                    hash_files=not args.no_hash,
+                    include_text_diff=not args.no_text_diff,
+                    max_text_bytes=args.max_text_bytes,
+                    diff_context=args.diff_context,
+                )
+            else:
+                payload = compare_many_paths(
+                    compare_paths_input,
+                    labels=args.label,
+                    hash_files=not args.no_hash,
+                    include_text_diff=not args.no_text_diff,
+                    max_text_bytes=args.max_text_bytes,
+                    diff_context=args.diff_context,
+                )
         except CompareError as exc:
             parser.error(str(exc))
         write_result(payload, output)
@@ -1610,17 +2154,17 @@ def main(argv=None) -> int:
             audit_output,
             command="compare",
             options={
-                "left": str(left),
-                "right": str(right),
+                "paths": [str(path) for path in compare_paths_input],
                 "left_label": args.left_label,
                 "right_label": args.right_label,
+                "labels": args.label or [],
                 "output": str(output),
                 "hash": not args.no_hash,
                 "text_diff": not args.no_text_diff,
                 "max_text_bytes": args.max_text_bytes,
                 "diff_context": args.diff_context,
             },
-            input_files=[("left", left), ("right", right)],
+            input_files=[(f"input:{index}", path) for index, path in enumerate(compare_paths_input, start=1)],
             output_files=[("compare-json", output)],
             notes=[
                 "Compare output is review-oriented; preserve the original files and hashes for evidentiary submission.",

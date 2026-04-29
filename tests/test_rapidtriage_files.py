@@ -43,6 +43,8 @@ class RapidTriageFilesTests(unittest.TestCase):
             self.assertEqual(payload["command"], "files")
             self.assertEqual(Path(payload["root"]), root.resolve())
             self.assertEqual(payload["summary"]["candidate_count"], 11)
+            self.assertIn("duplicate_group_count", payload["summary"])
+            self.assertIn("duplicate_content_groups", payload)
             category_counts = payload["summary"]["category_counts"]
             self.assertGreaterEqual(category_counts["documents"], 1)
             self.assertGreaterEqual(category_counts["archives"], 1)
@@ -113,6 +115,19 @@ class RapidTriageFilesTests(unittest.TestCase):
             self.assertEqual(candidate["extension"], ".docx")
             self.assertEqual(Path(candidate["path"]), candidate_path.resolve())
             self.assertEqual(candidate["modified_at"], datetime.fromtimestamp(mtime).isoformat())
+
+    def test_files_command_groups_bounded_duplicate_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "copy-a.txt").write_text("same evidence content", encoding="utf-8")
+            (root / "copy-b.txt").write_text("same evidence content", encoding="utf-8")
+            output = root / "duplicates.json"
+
+            self.assertEqual(main(["files", str(root), "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+
+            self.assertEqual(payload["summary"]["duplicate_group_count"], 1)
+            self.assertEqual(payload["duplicate_content_groups"][0]["file_count"], 2)
 
 
 if __name__ == "__main__":

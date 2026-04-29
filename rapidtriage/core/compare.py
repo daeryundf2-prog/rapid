@@ -4,7 +4,7 @@ import datetime as dt
 import difflib
 import hashlib
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 
 class CompareError(ValueError):
@@ -30,6 +30,22 @@ TEXT_EXTENSIONS = {
     ".yaml",
     ".yml",
 }
+COMPARE_GAP_ID = "#52"
+COMPARE_NATIVE_CAPABILITIES = {
+    "a_b_file_compare": True,
+    "a_b_c_baseline_compare": True,
+    "hash_compare_md5_sha1_sha256": True,
+    "bounded_text_diff": True,
+    "case_report_pivot": True,
+    "binary_structure_aware_diff": False,
+    "image_visual_diff": False,
+    "sqlite_table_aware_diff": False,
+}
+COMPARE_REPORT_GRADE_BLOCKERS = [
+    "binary-structure-aware-diff-not-implemented",
+    "visual-and-table-aware-diff-not-implemented",
+    "comparison-context-and-analyst-selection-require-review-history",
+]
 
 
 def compare_paths(
@@ -88,8 +104,103 @@ def compare_paths(
             "status_counts": {status: 1},
             "different_field_count": sum(1 for item in fields if item.get("status") == "different"),
             "text_diff_included": bool(text_diff.get("included")) if isinstance(text_diff, Mapping) else False,
+            "commercial_gap_ids": [COMPARE_GAP_ID],
+            "commercial_grade_ready": False,
         },
+        "compare_native_capabilities": dict(COMPARE_NATIVE_CAPABILITIES),
+        "compare_report_grade_assessment": compare_report_grade_assessment(mode="pair"),
         "results": [result],
+    }
+
+
+def compare_many_paths(
+    paths: Sequence[Path],
+    *,
+    labels: Sequence[str] | None = None,
+    hash_files: bool = True,
+    include_text_diff: bool = True,
+    max_text_bytes: int = 256 * 1024,
+    diff_context: int = 3,
+) -> dict[str, object]:
+    if len(paths) < 2:
+        raise CompareError("compare requires at least two files")
+    normalized_labels = list(labels or [])
+    while len(normalized_labels) < len(paths):
+        normalized_labels.append(f"item-{len(normalized_labels) + 1}")
+    baseline = paths[0]
+    comparisons = []
+    status_counts: dict[str, int] = {}
+    different_field_count = 0
+    text_diff_count = 0
+    input_records = []
+    baseline_record = describe_path(baseline.expanduser().resolve(), label=normalized_labels[0], hash_files=hash_files)
+    input_records.append(baseline_record)
+    for index, path in enumerate(paths[1:], start=2):
+        payload = compare_paths(
+            baseline,
+            path,
+            left_label=normalized_labels[0],
+            right_label=normalized_labels[index - 1],
+            hash_files=hash_files,
+            include_text_diff=include_text_diff,
+            max_text_bytes=max_text_bytes,
+            diff_context=diff_context,
+        )
+        result = dict(payload["results"][0])
+        result["comparison_id"] = f"compare-{index - 1:04d}"
+        result["baseline_index"] = 1
+        result["comparison_index"] = index
+        comparisons.append(result)
+        status = str(result.get("status") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        different_field_count += sum(1 for item in result.get("fields", []) if isinstance(item, Mapping) and item.get("status") == "different")
+        diff = result.get("diff") if isinstance(result.get("diff"), Mapping) else {}
+        if diff.get("included"):
+            text_diff_count += 1
+        input_records.append(result["right"])
+    return {
+        "command": "compare",
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "options": {
+            "mode": "multi",
+            "baseline_label": normalized_labels[0],
+            "labels": normalized_labels[: len(paths)],
+            "hash_files": hash_files,
+            "include_text_diff": include_text_diff,
+            "max_text_bytes": max_text_bytes,
+            "diff_context": diff_context,
+        },
+        "inputs": {
+            "baseline": baseline_record,
+            "items": input_records,
+        },
+        "summary": {
+            "result_count": len(comparisons),
+            "input_count": len(paths),
+            "status_counts": status_counts,
+            "different_field_count": different_field_count,
+            "text_diff_included": text_diff_count > 0,
+            "text_diff_count": text_diff_count,
+            "commercial_gap_ids": [COMPARE_GAP_ID],
+            "commercial_grade_ready": False,
+        },
+        "compare_native_capabilities": dict(COMPARE_NATIVE_CAPABILITIES),
+        "compare_report_grade_assessment": compare_report_grade_assessment(mode="multi"),
+        "results": comparisons,
+    }
+
+
+def compare_report_grade_assessment(*, mode: str) -> dict[str, object]:
+    return {
+        "status": "implemented-baseline-validation-required",
+        "mode": mode,
+        "commercial_gap_ids": [COMPARE_GAP_ID],
+        "ready_for_court_report": False,
+        "blockers": list(COMPARE_REPORT_GRADE_BLOCKERS),
+        "recommended_validation": [
+            "Confirm why the compared files were selected and record reviewer status before report inclusion.",
+            "Use artifact-specific viewers/parsers for binary, image, SQLite, and mailbox semantic differences.",
+        ],
     }
 
 

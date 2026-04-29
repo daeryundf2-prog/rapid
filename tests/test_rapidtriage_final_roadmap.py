@@ -25,6 +25,7 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
         self.assertIn("plugins", commands)
         self.assertIn("validation", commands)
         self.assertIn("--output-dir", commands["validation"].format_help())
+        self.assertIn("--known-answer-manifest", commands["validation"].format_help())
 
     def test_validation_package_separates_internal_and_commercial_scores(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -41,6 +42,63 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertTrue(any(item["area"] == "native-evidence-acquisition" for item in gaps))
             report = Path(tmp_dir) / "rapidtriage-validation-report.md"
             self.assertIn("Commercial Gap Assessment", report.read_text(encoding="utf-8"))
+            self.assertTrue(Path(payload["outputs"]["artifact_manifest"]).is_file())
+
+    def test_validation_package_accepts_known_answer_and_independent_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            known_answer = root / "known-answer.json"
+            independent = root / "independent-validation.md"
+            evidence = root / "observed-output.json"
+            output_dir = root / "validation"
+            evidence.write_text('{"ok": true}\n', encoding="utf-8")
+            independent.write_text("# Independent validation\n\nSigned review placeholder.\n", encoding="utf-8")
+            known_answer.write_text(
+                json.dumps(
+                    {
+                        "datasets": [
+                            {
+                                "id": "cfreds-sample-001",
+                                "source": "NIST CFReDS",
+                                "corpus_family": "disk-image",
+                                "status": "pass",
+                                "expected": {"eventlog_records_min": 1},
+                                "evidence_paths": [str(evidence)],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "validation",
+                        "--output-dir",
+                        str(output_dir),
+                        "--known-answer-manifest",
+                        str(known_answer),
+                        "--independent-report",
+                        str(independent),
+                        "--fixture-root",
+                        str(Path.cwd()),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["known_answer_validation"]["status"], "all-passed")
+            self.assertEqual(payload["known_answer_validation"]["dataset_count"], 1)
+            self.assertTrue(payload["known_answer_validation"]["datasets"][0]["evidence_paths_present"])
+            self.assertEqual(payload["independent_validation_report"]["status"], "attached")
+            self.assertTrue(payload["external_tool_versions"])
+            self.assertGreater(payload["parser_fixture_corpus"]["fixture_backed_count"], 0)
+            artifact_manifest = json.loads(Path(payload["outputs"]["artifact_manifest"]).read_text(encoding="utf-8"))
+            self.assertEqual(artifact_manifest["artifact_count"], 2)
+            self.assertTrue(all(item["sha256"] for item in artifact_manifest["artifacts"]))
 
     def test_timeline_export_and_normalize_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -166,9 +224,13 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertTrue((bundle_dir / "rapidtriage-case-report.exports.json").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-reviewer.html").is_file())
             self.assertTrue((bundle_dir / "rapidtriage-bundle-manifest.json").is_file())
+            self.assertTrue((bundle_dir / "rapidtriage-court-exhibit-index.json").is_file())
+            self.assertTrue((bundle_dir / "rapidtriage-tamper-evident-audit-bundle.json").is_file())
             report_html = (bundle_dir / "rapidtriage-case-report.html").read_text(encoding="utf-8")
             reviewer_html = (bundle_dir / "rapidtriage-reviewer.html").read_text(encoding="utf-8")
             export_manifest = json.loads((bundle_dir / "rapidtriage-case-report.exports.json").read_text(encoding="utf-8"))
+            court_exhibit = json.loads((bundle_dir / "rapidtriage-court-exhibit-index.json").read_text(encoding="utf-8"))
+            tamper_bundle = json.loads((bundle_dir / "rapidtriage-tamper-evident-audit-bundle.json").read_text(encoding="utf-8"))
             self.assertIn("Reviewer Bundle", reviewer_html)
             self.assertIn("rapidtriage-bundle-manifest.json", reviewer_html)
             self.assertIn("Reviewer Checklist", reviewer_html)
@@ -190,6 +252,8 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
                 self.assertIn("rapidtriage-case-report.docx", bundle_zip.namelist())
                 self.assertIn("rapidtriage-case-report.pdf", bundle_zip.namelist())
                 self.assertIn("rapidtriage-case-report.exports.json", bundle_zip.namelist())
+                self.assertIn("rapidtriage-court-exhibit-index.json", bundle_zip.namelist())
+                self.assertIn("rapidtriage-tamper-evident-audit-bundle.json", bundle_zip.namelist())
                 self.assertIn("rapidtriage-bundle-manifest.json", bundle_zip.namelist())
             self.assertTrue(Path(payload["archive"]).is_file())
             self.assertIn("sha256", payload["archive_hashes"])
@@ -198,6 +262,11 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertIn("report_pdf", payload["outputs"])
             self.assertIn("report_export_manifest", payload["outputs"])
             self.assertIn("bundle_manifest", payload["outputs"])
+            self.assertIn("court_exhibit_index", payload["outputs"])
+            self.assertIn("tamper_evident_audit_bundle", payload["outputs"])
+            self.assertEqual(court_exhibit["command"], "court-exhibit-index")
+            self.assertTrue(court_exhibit["output_hashes"])
+            self.assertTrue(tamper_bundle["summary"]["head_hash"])
             self.assertIn("reviewer", payload["outputs"])
             selected = json.loads((bundle_dir / "rapidtriage-selected-evidence.json").read_text(encoding="utf-8"))
             self.assertEqual(selected["items"][0]["hash_status"], "hashed")

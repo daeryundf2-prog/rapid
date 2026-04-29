@@ -25,16 +25,21 @@
     "inputs": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "left",
-        "right"
-      ],
       "properties": {
         "left": {
           "$ref": "#/$defs/input"
         },
         "right": {
           "$ref": "#/$defs/input"
+        },
+        "baseline": {
+          "$ref": "#/$defs/input"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/input"
+          }
         }
       }
     },
@@ -60,8 +65,24 @@
         },
         "text_diff_included": {
           "type": "boolean"
+        },
+        "input_count": {
+          "type": "integer"
+        },
+        "text_diff_count": {
+          "type": "integer"
         }
       }
+    },
+    "compare_native_capabilities": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      }
+    },
+    "compare_report_grade_assessment": {
+      "type": "object",
+      "additionalProperties": true
     },
     "results": {
       "type": "array",

@@ -39,6 +39,14 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["can_extract"], result["missing_tools"] == [])
             self.assertIn(result["support_level"], {"direct-extract", "tooling-required"})
             self.assertTrue(result["next_actions"])
+            self.assertFalse(result["commercial_grade_ready"])
+            self.assertEqual(result["source_integrity"]["hash_status"], "computed")
+            self.assertIn("sha256", result["source_integrity"])
+            self.assertTrue(result["tool_preflight"])
+            self.assertIn("#22", result["commercial_gap_ids"])
+            self.assertFalse(result["native_capabilities"]["native_e01_ex01_parser"])
+            self.assertTrue(result["limitations"])
+            self.assertTrue(result["fallback_guidance"])
 
     def test_identifies_raw_image_as_direct_extract_when_sleuthkit_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -54,6 +62,10 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["support_level"], "direct-extract")
             self.assertEqual(result["scan_strategy"], "auto-extract-then-scan")
             self.assertIn("mmls", result["required_tools"])
+            self.assertFalse(result["commercial_grade_ready"])
+            self.assertIn("#23", result["commercial_gap_ids"])
+            self.assertFalse(result["native_capabilities"]["native_partition_filesystem_parser"])
+            self.assertEqual(result["source_integrity"]["split_part_count"], 1)
 
     def test_identifies_archive_image_as_direct_extract_when_tool_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -84,6 +96,10 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["can_extract"], True)
             self.assertEqual(result["support_level"], "direct-extract")
             self.assertEqual(result["scan_strategy"], "auto-convert-extract-then-scan")
+            self.assertFalse(result["commercial_grade_ready"])
+            self.assertIn("#24", result["commercial_gap_ids"])
+            self.assertFalse(result["native_capabilities"]["snapshot_chain_validation"])
+            self.assertEqual(result["source_integrity"]["hash_status"], "computed")
 
     def test_identifies_xva_as_export_first_virtual_disk(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -99,11 +115,21 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["support_level"], "detected-only")
             self.assertEqual(result["scan_strategy"], "xva-export-or-convert-first")
             self.assertIn("XVA", result["message"])
+            self.assertFalse(result["commercial_grade_ready"])
+            self.assertIn("#24", result["commercial_gap_ids"])
+            self.assertFalse(result["native_capabilities"]["xva_direct_extraction"])
+            self.assertEqual(result["source_integrity"]["hash_status"], "computed")
+            self.assertTrue(result["fallback_guidance"])
 
     def test_identifies_common_image_formats_as_planned_adapters(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             expected = {
                 "case.ad1": ("forensic-container", "ad1"),
+                "case.l01": ("forensic-container", "l01"),
+                "case.lx01": ("forensic-container", "lx01"),
+                "case.aff": ("forensic-container", "aff"),
+                "case.aff4": ("forensic-container", "aff4"),
+                "case.aff4-l": ("forensic-container", "aff4-l"),
             }
             for file_name, (adapter, detected_format) in expected.items():
                 image_path = Path(tmp_dir) / file_name
@@ -118,6 +144,11 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 self.assertEqual(result["support_level"], "detected-only")
                 self.assertTrue(result["next_actions"])
                 self.assertTrue(result["warnings"])
+                self.assertFalse(result["commercial_grade_ready"])
+                self.assertIn("#25", result["commercial_gap_ids"])
+                self.assertFalse(result["native_capabilities"]["direct_ad1_l01_lx01_aff_aff4_parser"])
+                self.assertEqual(result["source_integrity"]["hash_status"], "computed")
+                self.assertTrue(result["limitations"])
 
     def test_unknown_format_is_not_supported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

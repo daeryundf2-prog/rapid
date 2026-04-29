@@ -1,0 +1,795 @@
+from __future__ import annotations
+
+import datetime as dt
+import hashlib
+import json
+import re
+from collections import Counter, defaultdict
+from pathlib import Path
+from typing import Any, Iterable, Mapping, Sequence
+from urllib.parse import urlparse
+
+
+ENTITY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("email", re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)),
+    ("url", re.compile(r"\bhttps?://[^\s\"'<>),]+", re.IGNORECASE)),
+    ("ipv4", re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b")),
+    ("hash", re.compile(r"\b(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\b")),
+    ("phone", re.compile(r"(?<!\w)(?:\+?\d[\d .()\-]{7,}\d)(?!\w)")),
+)
+TIMESTAMP_KEYS = {
+    "timestamp",
+    "event_at",
+    "observed_at",
+    "occurred_at",
+    "modified_at",
+    "created_at",
+    "accessed_at",
+    "visited_at",
+    "last_visited_at",
+    "started_at",
+    "ended_at",
+    "sent_at",
+    "received_at",
+    "deleted_at",
+}
+MAX_CLUSTER_REPRESENTATIVES = 8
+MAX_ENTITY_MATCH_REFERENCES = 15
+MAX_GRAPH_MATCH_NODES = 40
+ANALYSIS_GAP_IDS = ["#46", "#47", "#48", "#49", "#50", "#60"]
+ANALYSIS_NATIVE_CAPABILITIES = {
+    "large_result_clustering": True,
+    "entity_view_email_phone_ip_domain_hash_url": True,
+    "structured_person_account_entity_hints": True,
+    "bounded_relationship_graph": True,
+    "search_result_timeline_correlation": True,
+    "hypothesis_workbook_drafts": True,
+    "search_hit_deduplication": True,
+    "full_case_reindex": False,
+    "ml_semantic_clustering": False,
+    "analyst_verified_entity_resolution": False,
+    "court_ready_graph_layout": False,
+}
+ANALYSIS_REPORT_GRADE_BLOCKERS = [
+    "analysis-derived-from-bounded-search-results-not-full-index",
+    "entity-resolution-is-pattern-and-field-based-not-analyst-verified",
+    "graph-edges-are-candidate-pivots-not-causal-proof",
+    "timeline-events-need-source-parser-confidence-and-timezone-validation",
+    "hypotheses-are-draft-review-aids-not-findings",
+]
+SEARCH_DEDUP_GAP_ID = "#60"
+
+
+def build_search_analysis(
+    matches: Sequence[Mapping[str, object]],
+    keywords: Sequence[str],
+    *,
+    max_clusters: int = 25,
+    max_entities: int = 200,
+    max_graph_edges: int = 350,
+    max_timeline_events: int = 500,
+) -> dict[str, object]:
+    """Build bounded analyst pivots for large search result sets.
+
+    The output is deliberately evidence-light: it links back to match indices and
+    source pointers instead of duplicating rows, keeping large cases responsive.
+    """
+    normalized_matches = [dict(match) for match in matches]
+    clusters = build_result_clusters(normalized_matches, max_clusters=max_clusters)
+    entities = build_entity_view(normalized_matches, max_entities=max_entities)
+    timeline = build_correlated_timeline(normalized_matches, max_events=max_timeline_events)
+    graph = build_relationship_graph(
+        normalized_matches,
+        entities=entities["entities"],
+        max_edges=max_graph_edges,
+    )
+    deduplication = build_search_hit_deduplication(normalized_matches)
+    workbook = build_hypothesis_workbook(
+        normalized_matches,
+        keywords=keywords,
+        clusters=clusters["clusters"],
+        entities=entities["entities"],
+        timeline_events=timeline["events"],
+    )
+    return {
+        "summary": {
+            "match_count": len(normalized_matches),
+            "cluster_count": len(clusters["clusters"]),
+            "entity_count": len(entities["entities"]),
+            "graph_node_count": graph["summary"]["node_count"],
+            "graph_edge_count": graph["summary"]["edge_count"],
+            "timeline_event_count": len(timeline["events"]),
+            "workbook_hypothesis_count": len(workbook["hypotheses"]),
+            "duplicate_group_count": deduplication["summary"]["duplicate_group_count"],
+            "duplicate_match_count": deduplication["summary"]["duplicate_match_count"],
+            "commercial_gap_ids": ANALYSIS_GAP_IDS,
+            "commercial_grade_ready": False,
+        },
+        "clusters": clusters,
+        "entities": entities,
+        "graph": graph,
+        "timeline": timeline,
+        "deduplication": deduplication,
+        "workbook": workbook,
+        "analysis_native_capabilities": dict(ANALYSIS_NATIVE_CAPABILITIES),
+        "analysis_report_grade_assessment": analysis_report_grade_assessment(),
+        "limitations": [
+            "Analysis pivots are derived from bounded search results, not a full re-index.",
+            "Entities and clusters are triage aids; verify source rows and hashes before reporting.",
+            "Graph output is capped to keep web and CLI review responsive on large cases.",
+        ],
+    }
+
+
+def build_result_clusters(
+    matches: Sequence[Mapping[str, object]],
+    *,
+    max_clusters: int,
+) -> dict[str, object]:
+    buckets: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for index, match in enumerate(matches):
+        for key in cluster_keys(match):
+            buckets[key].append(index)
+
+    clusters: list[dict[str, object]] = []
+    for (family, value), indices in sorted(buckets.items(), key=lambda item: (-len(item[1]), item[0])):
+        if len(indices) < 2 and family not in {"source", "keyword"}:
+            continue
+        sample_matches = [matches[index] for index in indices[:MAX_CLUSTER_REPRESENTATIVES]]
+        clusters.append(
+            {
+                "cluster_id": stable_id("cluster", family, value),
+                "family": family,
+                "label": cluster_label(family, value),
+                "value": value,
+                "match_count": len(indices),
+                "match_indices": indices[:MAX_CLUSTER_REPRESENTATIVES],
+                "truncated_match_indices": len(indices) > MAX_CLUSTER_REPRESENTATIVES,
+                "sources": sorted({str(item.get("source") or "unknown") for item in sample_matches}),
+                "keywords": sorted(
+                    {
+                        str(keyword)
+                        for item in sample_matches
+                        for keyword in item.get("matched_keywords", [])
+                    }
+                ),
+                "representative_titles": [str(item.get("title") or item.get("path") or "") for item in sample_matches[:5]],
+                "top_paths": most_common_paths(sample_matches),
+                "review_hint": cluster_review_hint(family, value, len(indices)),
+            }
+        )
+        if len(clusters) >= max_clusters:
+            break
+    return {
+        "summary": {
+            "cluster_count": len(clusters),
+            "candidate_bucket_count": len(buckets),
+            "max_clusters": max_clusters,
+            "truncated": len(clusters) >= max_clusters and len(buckets) > max_clusters,
+            "commercial_gap_ids": ["#46"],
+            "commercial_grade_ready": False,
+        },
+        "clusters": clusters,
+        "report_grade_assessment": component_report_grade_assessment("#46", "large-result-clustering"),
+    }
+
+
+def build_search_hit_deduplication(matches: Sequence[Mapping[str, object]], *, max_groups: int = 25) -> dict[str, object]:
+    buckets: dict[str, list[int]] = defaultdict(list)
+    for index, match in enumerate(matches):
+        buckets[dedupe_fingerprint(match)].append(index)
+    groups = []
+    duplicate_match_count = 0
+    for fingerprint, indices in sorted(buckets.items(), key=lambda item: (-len(item[1]), item[0])):
+        if len(indices) < 2:
+            continue
+        duplicate_match_count += len(indices)
+        sample = [matches[index] for index in indices[:8]]
+        groups.append(
+            {
+                "group_id": stable_id("duplicate", fingerprint),
+                "fingerprint": fingerprint,
+                "match_count": len(indices),
+                "match_indices": indices[:20],
+                "truncated_match_indices": len(indices) > 20,
+                "sources": sorted({str(item.get("source") or "unknown") for item in sample}),
+                "paths": sorted({str(item.get("path") or "") for item in sample if item.get("path")})[:8],
+                "representative_preview": str(sample[0].get("preview") or "")[:240] if sample else "",
+                "review_action": "review-representative-hit-first",
+                "duplicate_resolution_status": "candidate",
+                "commercial_gap_ids": [SEARCH_DEDUP_GAP_ID],
+            }
+        )
+        if len(groups) >= max_groups:
+            break
+    return {
+        "summary": {
+            "duplicate_group_count": len(groups),
+            "duplicate_match_count": duplicate_match_count,
+            "unique_fingerprint_count": len(buckets),
+            "max_groups": max_groups,
+            "truncated": len([indices for indices in buckets.values() if len(indices) > 1]) > len(groups),
+            "commercial_gap_ids": [SEARCH_DEDUP_GAP_ID],
+            "commercial_grade_ready": False,
+        },
+        "groups": groups,
+        "deduplication_assessment": search_deduplication_assessment(),
+    }
+
+
+def dedupe_fingerprint(match: Mapping[str, object]) -> str:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), Mapping) else {}
+    hashes = []
+    for key in ("sha256", "sha1", "md5", "hash"):
+        value = metadata.get(key) or match.get(key)
+        if isinstance(value, str) and value:
+            hashes.append(value.lower())
+    if hashes:
+        return f"hash:{hashes[0]}"
+    source = str(match.get("source") or "").lower()
+    path = normalize_dedupe_text(str(match.get("path") or ""))
+    title = normalize_dedupe_text(str(match.get("title") or ""))
+    preview = normalize_dedupe_text(str(match.get("preview") or ""))[:300]
+    return stable_id("preview", source, path, title, preview)
+
+
+def search_deduplication_assessment() -> dict[str, object]:
+    return {
+        "component": "search-hit-deduplication",
+        "status": "implemented-baseline-validation-required",
+        "commercial_gap_ids": [SEARCH_DEDUP_GAP_ID],
+        "ready_for_court_report": False,
+        "blockers": [
+            "deduplication-is-hash-or-normalized-preview-based-not-full-content-clustering",
+            "ocr-and-export-duplicate-hits-need-source-level-review-before-suppression",
+            "near-duplicate-semantic-clustering-not-implemented",
+        ],
+        "recommended_validation": [
+            "Use duplicate groups to reduce review load, but verify representative source rows before hiding or rejecting duplicates.",
+            "Prefer hash-based duplicate groups for report decisions; preview-based groups are triage hints.",
+        ],
+    }
+
+
+def normalize_dedupe_text(value: str) -> str:
+    return " ".join(value.strip().lower().split())
+
+
+def cluster_keys(match: Mapping[str, object]) -> Iterable[tuple[str, str]]:
+    source = str(match.get("source") or "unknown").strip().lower()
+    if source:
+        yield ("source", source)
+    kind = str(match.get("kind") or "").strip().lower()
+    if kind:
+        yield ("kind", kind)
+    path = str(match.get("path") or "")
+    suffix = Path(path).suffix.lower()
+    if suffix:
+        yield ("extension", suffix)
+    parent = str(Path(path).parent) if path else ""
+    if parent and parent != ".":
+        yield ("folder", parent)
+    for keyword in match.get("matched_keywords", []):
+        text = str(keyword).strip().lower()
+        if text:
+            yield ("keyword", text)
+
+
+def cluster_label(family: str, value: str) -> str:
+    labels = {
+        "source": "Source",
+        "kind": "Artifact kind",
+        "extension": "Extension",
+        "folder": "Folder",
+        "keyword": "Keyword",
+    }
+    return f"{labels.get(family, family.title())}: {value}"
+
+
+def cluster_review_hint(family: str, value: str, count: int) -> str:
+    if family == "folder":
+        return f"Review this folder as a set; {count} hits may share custody, owner, or app context."
+    if family == "keyword":
+        return f"Use this keyword cluster to separate repeated hits from unique evidence before reporting."
+    if family == "kind":
+        return f"Open representative rows first, then verify parser limitations for {value}."
+    return "Use representative hits to decide whether this cluster is report-worthy or noise."
+
+
+def most_common_paths(matches: Sequence[Mapping[str, object]]) -> list[str]:
+    counter = Counter(str(item.get("path") or "") for item in matches if item.get("path"))
+    return [path for path, _count in counter.most_common(5)]
+
+
+def build_entity_view(
+    matches: Sequence[Mapping[str, object]],
+    *,
+    max_entities: int,
+) -> dict[str, object]:
+    buckets: dict[tuple[str, str], dict[str, object]] = {}
+    for index, match in enumerate(matches):
+        text = entity_haystack(match)
+        for entity_type, value in [*iter_entities(text), *iter_structured_entities(match)]:
+            key = (entity_type, value)
+            bucket = buckets.setdefault(
+                key,
+                {
+                    "entity_id": stable_id("entity", entity_type, value),
+                    "type": entity_type,
+                    "value": value,
+                    "count": 0,
+                    "sources": set(),
+                    "kinds": set(),
+                    "paths": set(),
+                    "match_indices": [],
+                    "risk_flags": set(),
+                },
+            )
+            bucket["count"] = int(bucket["count"]) + 1
+            bucket["sources"].add(str(match.get("source") or "unknown"))
+            if match.get("kind"):
+                bucket["kinds"].add(str(match.get("kind")))
+            if match.get("path"):
+                bucket["paths"].add(str(match.get("path")))
+            if len(bucket["match_indices"]) < MAX_ENTITY_MATCH_REFERENCES:
+                bucket["match_indices"].append(index)
+            for flag in entity_risk_flags(entity_type, value):
+                bucket["risk_flags"].add(flag)
+
+    entities = []
+    for bucket in sorted(buckets.values(), key=lambda item: (-int(item["count"]), str(item["type"]), str(item["value"]))):
+        entities.append(
+            {
+                "entity_id": bucket["entity_id"],
+                "type": bucket["type"],
+                "value": bucket["value"],
+                "count": bucket["count"],
+                "sources": sorted(bucket["sources"]),
+                "kinds": sorted(bucket["kinds"]),
+                "paths": sorted(bucket["paths"])[:10],
+                "match_indices": bucket["match_indices"],
+                "truncated_match_indices": int(bucket["count"]) > len(bucket["match_indices"]),
+                "risk_flags": sorted(bucket["risk_flags"]),
+                "confidence": "pattern-match",
+            }
+        )
+        if len(entities) >= max_entities:
+            break
+
+    type_counts = Counter(str(item["type"]) for item in entities)
+    return {
+        "summary": {
+            "entity_count": len(entities),
+            "type_counts": dict(sorted(type_counts.items())),
+            "max_entities": max_entities,
+            "truncated": len(buckets) > len(entities),
+            "commercial_gap_ids": ["#47"],
+            "commercial_grade_ready": False,
+        },
+        "entities": entities,
+        "report_grade_assessment": component_report_grade_assessment("#47", "entity-view"),
+    }
+
+
+def entity_haystack(match: Mapping[str, object]) -> str:
+    return json.dumps(
+        {
+            "path": match.get("path"),
+            "title": match.get("title"),
+            "preview": match.get("preview"),
+            "metadata": match.get("metadata"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+
+
+def iter_entities(text: str) -> Iterable[tuple[str, str]]:
+    seen: set[tuple[str, str]] = set()
+    for entity_type, pattern in ENTITY_PATTERNS:
+        for match in pattern.finditer(text):
+            value = normalize_entity_value(entity_type, match.group(0))
+            if not value:
+                continue
+            key = (entity_type, value)
+            if key in seen:
+                continue
+            seen.add(key)
+            yield key
+            if entity_type == "url":
+                domain = normalize_domain(urlparse(value).hostname or "")
+                if domain:
+                    domain_key = ("domain", domain)
+                    if domain_key not in seen:
+                        seen.add(domain_key)
+                        yield domain_key
+
+
+def iter_structured_entities(match: Mapping[str, object]) -> Iterable[tuple[str, str]]:
+    payload = match.get("metadata") if isinstance(match.get("metadata"), Mapping) else {}
+    candidates = collect_structured_entity_candidates(payload)
+    candidates.extend(collect_structured_entity_candidates(match))
+    seen: set[tuple[str, str]] = set()
+    for entity_type, value in candidates:
+        normalized = normalize_entity_value(entity_type, value)
+        if not normalized:
+            continue
+        key = (entity_type, normalized)
+        if key in seen:
+            continue
+        seen.add(key)
+        yield key
+
+
+def collect_structured_entity_candidates(value: object, *, depth: int = 0) -> list[tuple[str, str]]:
+    if depth > 4:
+        return []
+    rows: list[tuple[str, str]] = []
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            key_text = str(key).lower()
+            if isinstance(item, str):
+                text = item.strip()
+                if text:
+                    if key_text in {"user", "username", "account", "account_name", "accountname", "account_identifier", "accountidentifier"}:
+                        rows.append(("account", text))
+                    elif key_text in {"person", "name", "contact_name", "contactname", "display_name", "displayname", "fullname", "owner"}:
+                        rows.append(("person", text))
+                    elif key_text in {"sender", "recipient", "from", "to", "author"}:
+                        rows.append(("account", text))
+            elif isinstance(item, (Mapping, list)):
+                rows.extend(collect_structured_entity_candidates(item, depth=depth + 1))
+    elif isinstance(value, list):
+        for item in value[:50]:
+            rows.extend(collect_structured_entity_candidates(item, depth=depth + 1))
+    return rows
+
+
+def normalize_entity_value(entity_type: str, value: str) -> str:
+    stripped = value.strip().strip(".,;:)]}\"'")
+    if entity_type in {"email", "url", "hash"}:
+        stripped = stripped.lower()
+    if entity_type == "phone":
+        digits = re.sub(r"\D", "", stripped)
+        return stripped if len(digits) >= 8 else ""
+    if entity_type == "person":
+        if "://" in stripped or "@" in stripped or len(stripped) > 120:
+            return ""
+    if entity_type == "account":
+        if len(stripped) > 160:
+            return ""
+    if entity_type == "ipv4" and is_private_or_noise_ip(stripped):
+        return ""
+    return stripped
+
+
+def normalize_domain(value: str) -> str:
+    domain = value.lower().strip(".")
+    if not domain or "." not in domain:
+        return ""
+    return domain
+
+
+def is_private_or_noise_ip(value: str) -> bool:
+    if value in {"0.0.0.0", "127.0.0.1", "255.255.255.255"}:
+        return True
+    parts = [int(part) for part in value.split(".") if part.isdigit()]
+    if len(parts) != 4:
+        return True
+    return parts[0] == 10 or (parts[0] == 192 and parts[1] == 168) or (parts[0] == 172 and 16 <= parts[1] <= 31)
+
+
+def entity_risk_flags(entity_type: str, value: str) -> list[str]:
+    flags = []
+    if entity_type in {"url", "domain", "ipv4"}:
+        flags.append("network-pivot")
+    if entity_type == "email":
+        flags.append("account-pivot")
+    if entity_type == "hash":
+        flags.append("hash-pivot")
+    if entity_type == "phone":
+        flags.append("person-pivot")
+    if entity_type == "person":
+        flags.append("person-pivot")
+    if entity_type == "account":
+        flags.append("account-pivot")
+    if value.endswith((".ru", ".cn", ".top", ".xyz")):
+        flags.append("review-tld")
+    return flags
+
+
+def build_relationship_graph(
+    matches: Sequence[Mapping[str, object]],
+    *,
+    entities: Sequence[Mapping[str, object]],
+    max_edges: int,
+) -> dict[str, object]:
+    nodes: dict[str, dict[str, object]] = {}
+    edges: list[dict[str, object]] = []
+    entity_by_match: dict[int, list[Mapping[str, object]]] = defaultdict(list)
+    for entity in entities:
+        for index in entity.get("match_indices", []):
+            if isinstance(index, int):
+                entity_by_match[index].append(entity)
+
+    for index, match in enumerate(matches[:MAX_GRAPH_MATCH_NODES]):
+        match_id = stable_id("match", index, match.get("source"), match.get("path"), match.get("pointer"))
+        nodes[match_id] = {
+            "id": match_id,
+            "type": "match",
+            "label": str(match.get("title") or match.get("path") or f"match {index}"),
+            "source": match.get("source"),
+            "match_index": index,
+        }
+        path = str(match.get("path") or "")
+        if path:
+            path_id = stable_id("path", path)
+            nodes.setdefault(path_id, {"id": path_id, "type": "path", "label": Path(path).name or path, "path": path})
+            edges.append({"source": match_id, "target": path_id, "type": "located-at"})
+        for keyword in match.get("matched_keywords", []):
+            keyword_id = stable_id("keyword", keyword)
+            nodes.setdefault(keyword_id, {"id": keyword_id, "type": "keyword", "label": str(keyword)})
+            edges.append({"source": match_id, "target": keyword_id, "type": "matched-keyword"})
+        for entity in entity_by_match.get(index, [])[:8]:
+            entity_id = str(entity.get("entity_id"))
+            nodes.setdefault(
+                entity_id,
+                {
+                    "id": entity_id,
+                    "type": str(entity.get("type") or "entity"),
+                    "label": str(entity.get("value") or ""),
+                    "count": entity.get("count"),
+                },
+            )
+            edges.append({"source": match_id, "target": entity_id, "type": "mentions"})
+        if len(edges) >= max_edges:
+            edges = edges[:max_edges]
+            break
+
+    return {
+        "summary": {
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "max_match_nodes": MAX_GRAPH_MATCH_NODES,
+            "max_edges": max_edges,
+            "truncated": len(matches) > MAX_GRAPH_MATCH_NODES or len(edges) >= max_edges,
+            "commercial_gap_ids": ["#48"],
+            "commercial_grade_ready": False,
+        },
+        "nodes": list(nodes.values()),
+        "edges": edges,
+        "report_grade_assessment": component_report_grade_assessment("#48", "relationship-graph"),
+    }
+
+
+def build_correlated_timeline(
+    matches: Sequence[Mapping[str, object]],
+    *,
+    max_events: int,
+) -> dict[str, object]:
+    events: list[dict[str, object]] = []
+    for index, match in enumerate(matches):
+        for timestamp_key, timestamp in iter_timestamps(match):
+            events.append(
+                {
+                    "event_id": stable_id("analysis-event", index, timestamp_key, timestamp),
+                    "timestamp": timestamp,
+                    "timestamp_key": timestamp_key,
+                    "match_index": index,
+                    "source": str(match.get("source") or "unknown"),
+                    "kind": str(match.get("kind") or ""),
+                    "path": str(match.get("path") or ""),
+                    "title": str(match.get("title") or match.get("path") or ""),
+                    "summary": str(match.get("preview") or "")[:240],
+                }
+            )
+    events.sort(key=lambda item: (timestamp_to_epoch(str(item["timestamp"])), str(item["source"]), str(item["path"])))
+    truncated = len(events) > max_events
+    events = events[:max_events]
+    buckets = Counter(str(event["timestamp"])[:10] for event in events if str(event.get("timestamp")))
+    return {
+        "summary": {
+            "event_count": len(events),
+            "date_bucket_count": len(buckets),
+            "earliest_event_at": events[0]["timestamp"] if events else None,
+            "latest_event_at": events[-1]["timestamp"] if events else None,
+            "truncated": truncated,
+            "commercial_gap_ids": ["#49"],
+            "commercial_grade_ready": False,
+        },
+        "date_buckets": [{"date": date, "count": count} for date, count in sorted(buckets.items())],
+        "events": events,
+        "report_grade_assessment": component_report_grade_assessment("#49", "correlated-timeline"),
+    }
+
+
+def iter_timestamps(value: object, *, prefix: str = "") -> Iterable[tuple[str, str]]:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            key_text = str(key)
+            next_prefix = f"{prefix}.{key_text}" if prefix else key_text
+            if key_text in TIMESTAMP_KEYS and isinstance(item, str):
+                timestamp = normalize_timestamp(item)
+                if timestamp:
+                    yield next_prefix, timestamp
+            if isinstance(item, (Mapping, list)):
+                yield from iter_timestamps(item, prefix=next_prefix)
+    elif isinstance(value, list):
+        for index, item in enumerate(value[:100]):
+            yield from iter_timestamps(item, prefix=f"{prefix}[{index}]")
+
+
+def normalize_timestamp(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc).isoformat()
+
+
+def timestamp_to_epoch(value: str) -> float:
+    try:
+        return dt.datetime.fromisoformat(value).timestamp()
+    except ValueError:
+        return float("-inf")
+
+
+def build_hypothesis_workbook(
+    matches: Sequence[Mapping[str, object]],
+    *,
+    keywords: Sequence[str],
+    clusters: Sequence[Mapping[str, object]],
+    entities: Sequence[Mapping[str, object]],
+    timeline_events: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    source_counts = Counter(str(match.get("source") or "unknown") for match in matches)
+    entity_type_counts = Counter(str(entity.get("type") or "entity") for entity in entities)
+    hypotheses: list[dict[str, object]] = []
+    add_hypothesis(
+        hypotheses,
+        key="credential-exposure",
+        condition=keyword_seen(keywords, {"password", "credential", "token", "secret"}) or entity_type_counts.get("email", 0) >= 2,
+        title="Credential or account exposure",
+        rationale="Credential-like keywords or account entities appear in the result set.",
+        evidence_cluster_ids=cluster_ids_for(clusters, {"keyword:password", "keyword:credential", "keyword:token"}),
+    )
+    add_hypothesis(
+        hypotheses,
+        key="web-ai-activity",
+        condition=source_counts.get("web", 0) > 0 or any("ai" in str(match.get("preview", "")).lower() for match in matches),
+        title="Browser or AI-service activity is relevant",
+        rationale="Web/AI artifacts appear in search results and may explain user intent or research steps.",
+        evidence_cluster_ids=cluster_ids_for(clusters, {"source:web", "kind:browser"}),
+    )
+    add_hypothesis(
+        hypotheses,
+        key="execution-or-persistence",
+        condition=any(
+            token in str(match.get("kind", "")).lower() or token in str(match.get("preview", "")).lower()
+            for match in matches
+            for token in ("prefetch", "powershell", "task", "service", "execution", "evtx")
+        ),
+        title="Execution, persistence, or log activity needs review",
+        rationale="Execution/log artifacts appear in the result set; verify event IDs, parser confidence, and source hashes.",
+        evidence_cluster_ids=cluster_ids_for(clusters, {"kind:windows-execution", "kind:eventlog", "source:timeline"}),
+    )
+    add_hypothesis(
+        hypotheses,
+        key="network-or-cloud",
+        condition=entity_type_counts.get("domain", 0) > 0 or entity_type_counts.get("url", 0) > 0 or source_counts.get("indicators", 0) > 0,
+        title="Network, cloud, or external-service pivot",
+        rationale="URL/domain/IP entities or indicator rows are available for enrichment and timeline correlation.",
+        evidence_cluster_ids=cluster_ids_for(clusters, {"source:indicators", "kind:cloud"}),
+    )
+    if not hypotheses:
+        add_hypothesis(
+            hypotheses,
+            key="general-review",
+            condition=True,
+            title="General evidence review",
+            rationale="No strong automated hypothesis was identified; start with largest clusters and earliest/latest timeline events.",
+            evidence_cluster_ids=[str(cluster.get("cluster_id")) for cluster in clusters[:3]],
+        )
+
+    return {
+        "summary": {
+            "hypothesis_count": len(hypotheses),
+            "keyword_count": len([keyword for keyword in keywords if str(keyword).strip()]),
+            "source_counts": dict(sorted(source_counts.items())),
+            "commercial_gap_ids": ["#50"],
+            "commercial_grade_ready": False,
+        },
+        "hypotheses": hypotheses,
+        "report_grade_assessment": component_report_grade_assessment("#50", "hypothesis-workbook"),
+        "review_questions": [
+            "Which cluster contains unique report-worthy evidence rather than repeated noise?",
+            "Which entities connect multiple sources, users, or time ranges?",
+            "Do timeline events support the analyst hypothesis in chronological order?",
+            "Have source hashes and parser limitations been verified before report inclusion?",
+        ],
+        "next_actions": [
+            "Open representative hits from the top clusters.",
+            "Bookmark only verified source rows and mark review status.",
+            "Use the entity list to pivot across files, web artifacts, logs, and cloud/mobile rows.",
+            "Export report candidates only after source preview/hash verification.",
+        ],
+        "timeline_anchor_indices": [int(event["match_index"]) for event in timeline_events[:10] if isinstance(event.get("match_index"), int)],
+    }
+
+
+def add_hypothesis(
+    rows: list[dict[str, object]],
+    *,
+    key: str,
+    condition: bool,
+    title: str,
+    rationale: str,
+    evidence_cluster_ids: Sequence[str],
+) -> None:
+    if not condition:
+        return
+    rows.append(
+        {
+            "hypothesis_id": stable_id("hypothesis", key),
+            "key": key,
+            "title": title,
+            "status": "draft",
+            "rationale": rationale,
+            "evidence_cluster_ids": list(evidence_cluster_ids)[:8],
+            "tasks": [
+                "Open representative source rows.",
+                "Verify source hashes and parser warnings.",
+                "Bookmark relevant rows with notes.",
+                "Decide whether to include in the report.",
+            ],
+            "commercial_gap_ids": ["#50"],
+            "ready_for_report": False,
+        }
+    )
+
+
+def keyword_seen(keywords: Sequence[str], needles: set[str]) -> bool:
+    return any(str(keyword).strip().lower() in needles for keyword in keywords)
+
+
+def cluster_ids_for(clusters: Sequence[Mapping[str, object]], keys: set[str]) -> list[str]:
+    rows = []
+    for cluster in clusters:
+        marker = f"{cluster.get('family')}:{cluster.get('value')}"
+        if marker in keys:
+            rows.append(str(cluster.get("cluster_id")))
+    return rows
+
+
+def stable_id(*parts: object) -> str:
+    serialized = json.dumps([str(part) for part in parts], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+
+
+def analysis_report_grade_assessment() -> dict[str, object]:
+    return {
+        "status": "triage-only-validation-required",
+        "commercial_gap_ids": ANALYSIS_GAP_IDS,
+        "ready_for_court_report": False,
+        "blockers": list(ANALYSIS_REPORT_GRADE_BLOCKERS),
+        "recommended_validation": [
+            "Validate clusters, entities, graph edges, and timeline anchors against source rows before report inclusion.",
+            "Document analyst review decisions in the case workbook/bookmark workflow before treating hypotheses as findings.",
+        ],
+    }
+
+
+def component_report_grade_assessment(gap_id: str, component: str) -> dict[str, object]:
+    return {
+        "component": component,
+        "status": "triage-only-validation-required",
+        "commercial_gap_ids": [gap_id],
+        "ready_for_court_report": False,
+        "blockers": list(ANALYSIS_REPORT_GRADE_BLOCKERS),
+    }

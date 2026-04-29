@@ -27,7 +27,8 @@
       "required": [
         "max_indicators",
         "max_sources_per_indicator",
-        "rule_set"
+        "rule_set",
+        "ti_feeds"
       ],
       "properties": {
         "max_indicators": {
@@ -38,6 +39,12 @@
         },
         "rule_set": {
           "type": "string"
+        },
+        "ti_feeds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -49,7 +56,9 @@
         "type_counts",
         "source_output_counts",
         "matched_rule_counts",
-        "matched_indicator_count"
+        "matched_indicator_count",
+        "enriched_indicator_count",
+        "ti_feed_count"
       ],
       "properties": {
         "indicator_count": {
@@ -75,8 +84,77 @@
         },
         "matched_indicator_count": {
           "type": "integer"
+        },
+        "enriched_indicator_count": {
+          "type": "integer"
+        },
+        "ti_feed_count": {
+          "type": "integer"
+        },
+        "commercial_gap_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "commercial_grade_ready": {
+          "type": "boolean"
         }
       }
+    },
+    "ti_feed_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "format",
+          "name",
+          "version",
+          "indicator_count",
+          "local_only"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "indicator_count": {
+            "type": "integer"
+          },
+          "local_only": {
+            "type": "boolean"
+          },
+          "commercial_gap_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "validation_status": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "indicator_native_capabilities": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      }
+    },
+    "ti_enrichment_assessment": {
+      "type": "object",
+      "additionalProperties": true
     },
     "indicators": {
       "type": "array",
@@ -126,10 +204,64 @@
               }
             }
           },
+          "commercial_gap_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ready_for_court_report": {
+            "type": "boolean"
+          },
           "matched_rules": {
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "ti_enrichment": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string"
+              },
+              "classification": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "feed_name": {
+                "type": "string"
+              },
+              "feed_version": {
+                "type": "string"
+              },
+              "feed_path": {
+                "type": "string"
+              },
+              "matched_on": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              },
+              "commercial_gap_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "validation_status": {
+                "type": "string"
+              }
             }
           }
         }

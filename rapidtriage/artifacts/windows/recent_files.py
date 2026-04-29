@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 import struct
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence, Tuple
@@ -11,10 +12,39 @@ from ...core.models import ArtifactRecord
 from .common import isoformat_from_timestamp, iter_windows_user_homes
 
 RECENT_ROOT = ("AppData", "Roaming", "Microsoft", "Windows", "Recent")
-PARSER_VERSION = "windows-recent-files-v3"
+PARSER_VERSION = "windows-recent-files-v4"
 MAX_JUMPLIST_EMBEDDED_LNKS = 50
 MAX_OLE_STREAMS = 128
 MAX_OLE_STREAM_BYTES = 8 * 1024 * 1024
+MAX_LNK_EXTRA_DATA_BLOCKS = 64
+MAX_LNK_SHELL_ITEMS = 128
+MAX_DESTLIST_ENTRIES = 128
+MAX_DESTLIST_CANDIDATE_TIMES = 8
+MAX_DESTLIST_NUMERIC_CANDIDATES = 12
+DESTLIST_HEADER_SIZE = 32
+DESTLIST_ENTRY_LAYOUTS: Tuple[Tuple[str, int], ...] = (
+    ("win7-win8-fixed114", 114),
+    ("win10-plus-fixed130", 130),
+)
+JUMPLIST_COMMERCIAL_BLOCKERS = [
+    "destlist-os-version-specific-field-validation-required",
+    "destlist-deleted-entry-recovery-not-implemented",
+    "destlist-account-metadata-not-fully-decoded",
+    "application-id-hash-to-application-name-map-not-bundled",
+]
+JUMPLIST_CAPABILITIES = {
+    "lnk_header_decode": True,
+    "lnk_linkinfo_decode": True,
+    "lnk_tracker_block_candidate_decode": True,
+    "ole_stream_inventory": True,
+    "embedded_lnk_destination_extraction": True,
+    "destlist_header_candidate_decode": True,
+    "destlist_entry_candidate_decode": True,
+    "full_shell_item_property_store_decode": False,
+    "destlist_deleted_entry_recovery": False,
+    "destlist_account_metadata_decode": False,
+    "appid_hash_mapping": False,
+}
 RECENT_PATTERNS: Tuple[Tuple[str, str, Sequence[str]], ...] = (
     ("recent-shortcut", "*.lnk", ()),
     ("jumplist-automatic", "*.automaticDestinations-ms", ("AutomaticDestinations",)),
@@ -50,6 +80,19 @@ LNK_FILE_ATTRIBUTE_NAMES = {
     0x00000800: "COMPRESSED",
     0x00001000: "OFFLINE",
     0x00004000: "ENCRYPTED",
+}
+LNK_EXTRA_DATA_SIGNATURES = {
+    0xA0000001: "EnvironmentVariableDataBlock",
+    0xA0000002: "ConsoleDataBlock",
+    0xA0000003: "TrackerDataBlock",
+    0xA0000004: "ConsoleFEDataBlock",
+    0xA0000005: "SpecialFolderDataBlock",
+    0xA0000006: "DarwinDataBlock",
+    0xA0000007: "IconEnvironmentDataBlock",
+    0xA0000008: "ShimDataBlock",
+    0xA0000009: "PropertyStoreDataBlock",
+    0xA000000B: "KnownFolderDataBlock",
+    0xA000000C: "VistaAndAboveIDListDataBlock",
 }
 STRING_DATA_FIELDS = (
     (0x00000004, "description"),
@@ -128,18 +171,44 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
             "lnk_parse_status": "unsupported-header",
             "target_path": "",
             "embedded_paths": embedded_paths,
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": ["native Shell Link header validation failed"],
         }
 
     link_flags = read_u32(data, 0x14)
     file_attributes = read_u32(data, 0x18)
+    shell_item_metadata = parse_lnk_shell_item_metadata(data, link_flags)
     string_data, string_offset = parse_lnk_string_data(data, link_flags)
     link_info = parse_lnk_link_info(data, link_flags)
+    extra_data_blocks, tracker_data = parse_lnk_extra_data(data, string_offset)
     target_path = first_non_empty(
         link_info.get("local_base_path"),
         string_data.get("relative_path"),
         next(iter(embedded_paths), ""),
     )
     paths = sorted({item for item in [target_path, *embedded_paths] if item})
+    validation_checks = {
+        "has_valid_header": True,
+        "has_target_path": bool(target_path),
+        "has_timestamps": any(
+            windows_filetime_to_iso(read_u64(data, offset))
+            for offset in (0x1C, 0x24, 0x2C)
+        ),
+        "has_link_info": bool(link_info),
+        "has_shell_item_idlist": bool(shell_item_metadata.get("items")),
+        "has_tracker_data": bool(tracker_data),
+        "extra_data_block_count": len(extra_data_blocks),
+        "full_property_store_decode_available": False,
+    }
+    report_grade = recent_report_grade_assessment(
+        recent_validation_matrix(validation_checks),
+        validation_required=True,
+        gap_ids=["#17"],
+        blockers=[
+            "full-shell-item-property-store-decoding-required",
+            "tracker-data-known-answer-corpus-validation-required",
+        ],
+    )
     return {
         "lnk_parse_status": "parsed",
         "lnk_header_size": read_u32(data, 0),
@@ -161,8 +230,116 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
         "command_line_arguments": string_data.get("command_line_arguments", ""),
         "icon_location": string_data.get("icon_location", ""),
         "link_info": link_info,
+        "shell_item_metadata": shell_item_metadata,
+        "extra_data_blocks": extra_data_blocks,
+        "tracker_data": tracker_data,
         "string_data_offset": string_offset,
+        "validation_checks": validation_checks,
+        "recent_validation_matrix": recent_validation_matrix(validation_checks),
+        "recent_report_grade_assessment": report_grade,
+        "recent_native_capabilities": JUMPLIST_CAPABILITIES,
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": report_grade["blockers"],
     }
+
+
+def parse_lnk_shell_item_metadata(data: bytes, link_flags: int) -> dict[str, object]:
+    if not (link_flags & 0x00000001):
+        return {"parse_status": "not-present", "items": []}
+    offset = LNK_HEADER_SIZE
+    id_list_size = read_u16(data, offset)
+    end = offset + 2 + id_list_size
+    if id_list_size <= 0 or end > len(data):
+        return {"parse_status": "invalid-idlist", "declared_size": id_list_size, "items": []}
+    item_offset = offset + 2
+    items: list[dict[str, object]] = []
+    while item_offset + 2 <= end and len(items) < MAX_LNK_SHELL_ITEMS:
+        item_size = read_u16(data, item_offset)
+        if item_size == 0:
+            break
+        if item_size < 2 or item_offset + item_size > end:
+            return {
+                "parse_status": "truncated-item",
+                "declared_size": id_list_size,
+                "items": items,
+            }
+        item_data = data[item_offset : item_offset + item_size]
+        items.append(
+            {
+                "index": len(items),
+                "offset": item_offset,
+                "size": item_size,
+                "type_hint": shell_item_type_hint(item_data[2] if len(item_data) > 2 else 0),
+                "embedded_paths": extract_windows_paths(item_data),
+            }
+        )
+        item_offset += item_size
+    return {
+        "parse_status": "parsed",
+        "declared_size": id_list_size,
+        "item_count": len(items),
+        "items": items,
+    }
+
+
+def parse_lnk_extra_data(data: bytes, offset: int) -> tuple[list[dict[str, object]], dict[str, object]]:
+    blocks: list[dict[str, object]] = []
+    tracker_data: dict[str, object] = {}
+    while offset + 4 <= len(data) and len(blocks) < MAX_LNK_EXTRA_DATA_BLOCKS:
+        block_size = read_u32(data, offset)
+        if block_size == 0:
+            break
+        if block_size < 8 or offset + block_size > len(data):
+            blocks.append(
+                {
+                    "offset": offset,
+                    "size": block_size,
+                    "signature": "",
+                    "type": "InvalidExtraDataBlock",
+                    "parse_status": "truncated-or-invalid-size",
+                }
+            )
+            break
+        signature = read_u32(data, offset + 4)
+        block_data = data[offset : offset + block_size]
+        block_type = LNK_EXTRA_DATA_SIGNATURES.get(signature, "UnknownExtraDataBlock")
+        block_summary: dict[str, object] = {
+            "index": len(blocks),
+            "offset": offset,
+            "size": block_size,
+            "signature": f"0x{signature:08X}",
+            "type": block_type,
+            "parse_status": "parsed-known" if signature in LNK_EXTRA_DATA_SIGNATURES else "parsed-unknown",
+        }
+        if signature == 0xA0000003:
+            tracker_data = parse_lnk_tracker_data_block(block_data)
+            block_summary["tracker_data"] = tracker_data
+        blocks.append(block_summary)
+        offset += block_size
+    return blocks, tracker_data
+
+
+def parse_lnk_tracker_data_block(block_data: bytes) -> dict[str, object]:
+    machine_id = decode_text(block_data[0x10:0x20], "cp1252") if len(block_data) >= 0x20 else ""
+    return {
+        "parse_status": "parsed-candidate" if len(block_data) >= 0x60 else "truncated-candidate",
+        "machine_id": machine_id,
+        "droid_volume_identifier": format_guid_le(block_data[0x20:0x30]),
+        "droid_file_identifier": format_guid_le(block_data[0x30:0x40]),
+        "birth_droid_volume_identifier": format_guid_le(block_data[0x40:0x50]),
+        "birth_droid_file_identifier": format_guid_le(block_data[0x50:0x60]),
+        "validation_status": "candidate-requires-known-answer-corpus",
+    }
+
+
+def shell_item_type_hint(value: int) -> str:
+    if (value & 0x70) == 0x30:
+        return "file-system"
+    if (value & 0x70) == 0x20:
+        return "volume"
+    if (value & 0x70) == 0x40:
+        return "network"
+    return f"unknown-0x{value:02X}"
 
 
 def parse_lnk_string_data(data: bytes, link_flags: int) -> tuple[dict[str, str], int]:
@@ -218,6 +395,8 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         return {"jump_list_parse_status": "read-error"}
     ole_streams = parse_ole_compound_streams(data) if data.startswith(CFB_SIGNATURE) else []
     destinations = extract_jumplist_destinations(data, ole_streams)
+    destlist_metadata = parse_destlist_metadata(ole_streams)
+    enrich_destinations_with_destlist_candidates(destinations, destlist_metadata.get("destlist_entry_candidates", []))
     embedded_paths = sorted(
         {
             item
@@ -236,11 +415,24 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
             "path": str(stream["path"]),
             "size": int(stream["size"]),
             "start_sector": int(stream["start_sector"]),
+            "sha256": str(stream.get("sha256") or ""),
         }
         for stream in ole_streams[:MAX_OLE_STREAMS]
     ]
+    validation_checks = jumplist_validation_checks(data, ole_streams, destinations, destlist_metadata)
+    report_grade = recent_report_grade_assessment(
+        recent_validation_matrix(validation_checks),
+        validation_required=True,
+        gap_ids=["#14"],
+        blockers=jumplist_commercial_blockers(destlist_metadata),
+    )
     return {
         "jump_list_parse_status": "parsed-ole-stream-lnk" if ole_streams and destinations else "parsed-embedded-lnk" if destinations else "inventory",
+        "coverage_status": "native-destlist-candidate" if destlist_metadata.get("destlist_parse_status") == "parsed-candidate" else "mapped",
+        "reportability": "triage",
+        "parser_confidence": jumplist_parser_confidence(destinations, destlist_metadata),
+        "evidence_strength": "jumplist-destination-candidate" if destinations else "jumplist-container-presence",
+        "commercial_grade_ready": False,
         "container_hint": "ole-compound-file" if data.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1") else "custom-binary",
         "jumplist_kind": "automatic" if artifact_type == "jumplist-automatic" else "custom",
         "application_id_hash": path.stem.split(".", 1)[0],
@@ -251,7 +443,17 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         "destination_count": len(destinations),
         "destination_stream_count": len({str(destination.get("stream_path") or "") for destination in destinations if destination.get("stream_path")}),
         "destinations": destinations,
-        "note": "OLE Jump List streams are traversed when recoverable; otherwise embedded Shell Link and path extraction is provided for triage search.",
+        "validation_checks": validation_checks,
+        "recent_validation_matrix": recent_validation_matrix(validation_checks),
+        "recent_report_grade_assessment": report_grade,
+        "recent_native_capabilities": JUMPLIST_CAPABILITIES,
+        "validation_guidance": (
+            "Jump List rows recover OLE stream provenance, embedded Shell Link destinations, and bounded DestList metadata candidates. "
+            "Validate OS-version-specific DestList field semantics, deleted entries, and account context with a dedicated Jump List parser before final testimony."
+        ),
+        "commercial_grade_blockers": report_grade["blockers"],
+        **destlist_metadata,
+        "note": "OLE Jump List streams are traversed when recoverable; DestList rows are exposed as metadata candidates and embedded Shell Link/path extraction is provided for triage search.",
     }
 
 
@@ -271,6 +473,390 @@ def extract_jumplist_destinations(
     if not ole_streams or not destinations:
         append_lnk_destinations(destinations, data)
     return destinations[:MAX_JUMPLIST_EMBEDDED_LNKS]
+
+
+def parse_destlist_metadata(ole_streams: Sequence[dict[str, object]]) -> dict[str, object]:
+    destlist_streams = [
+        stream
+        for stream in ole_streams
+        if str(stream.get("name") or "").lower() == "destlist" or str(stream.get("path") or "").lower().endswith("/destlist")
+    ]
+    if not ole_streams:
+        return {
+            "destlist_parse_status": "not-ole",
+            "destlist_stream_count": 0,
+            "destlist_streams": [],
+            "destlist_header_candidates": [],
+            "destlist_entry_candidate_count": 0,
+            "destlist_entry_candidates": [],
+            "destlist_validation_checks": {"has_destlist_stream": False, "report_grade": False},
+        }
+    if not destlist_streams:
+        return {
+            "destlist_parse_status": "not-present",
+            "destlist_stream_count": 0,
+            "destlist_streams": [],
+            "destlist_header_candidates": [],
+            "destlist_entry_candidate_count": 0,
+            "destlist_entry_candidates": [],
+            "destlist_validation_checks": {"has_destlist_stream": False, "report_grade": False},
+        }
+
+    lnk_stream_names = {
+        str(stream.get("name") or "")
+        for stream in ole_streams
+        if str(stream.get("name") or "").lower() != "destlist"
+    }
+    stream_summaries: list[dict[str, object]] = []
+    header_candidates: list[dict[str, object]] = []
+    entry_candidates: list[dict[str, object]] = []
+    declared_counts: list[int] = []
+    parse_status = "unsupported-or-empty"
+    for stream in destlist_streams:
+        stream_data = stream.get("data")
+        if not isinstance(stream_data, bytes):
+            continue
+        source = destlist_stream_summary(stream, stream_data)
+        stream_summaries.append(source)
+        if len(stream_data) < DESTLIST_HEADER_SIZE:
+            continue
+        header = parse_destlist_header_candidate(stream_data, source)
+        header_candidates.append(header)
+        declared_count = int(header.get("declared_entry_count_candidate") or 0)
+        if declared_count:
+            declared_counts.append(declared_count)
+        entries = parse_destlist_entry_candidates(stream_data, source, lnk_stream_names, declared_count)
+        entry_candidates.extend(entries)
+        if entries or header:
+            parse_status = "parsed-candidate"
+
+    validation_checks = destlist_validation_checks(
+        bool(destlist_streams),
+        declared_counts,
+        len(entry_candidates),
+        entry_candidates,
+    )
+    return {
+        "destlist_parse_status": parse_status,
+        "destlist_stream_count": len(destlist_streams),
+        "destlist_streams": stream_summaries,
+        "destlist_header_candidates": header_candidates,
+        "destlist_declared_entry_count_candidates": declared_counts,
+        "destlist_entry_candidate_count": len(entry_candidates),
+        "destlist_entry_candidates": entry_candidates[:MAX_DESTLIST_ENTRIES],
+        "destlist_validation_checks": validation_checks,
+    }
+
+
+def destlist_stream_summary(stream: dict[str, object], stream_data: bytes) -> dict[str, object]:
+    return {
+        "source_stream_name": str(stream.get("name") or ""),
+        "source_stream_path": str(stream.get("path") or ""),
+        "source_stream_index": int(stream.get("index") or 0),
+        "source_stream_size": int(stream.get("size") or len(stream_data)),
+        "source_stream_start_sector": int(stream.get("start_sector") or 0),
+        "source_stream_sha256": sha256_bytes(stream_data),
+    }
+
+
+def parse_destlist_header_candidate(data: bytes, source: dict[str, object]) -> dict[str, object]:
+    return {
+        **source,
+        "header_size_candidate": DESTLIST_HEADER_SIZE,
+        "version_candidate": read_u32(data, 0),
+        "declared_entry_count_candidate": read_u32(data, 4),
+        "pinned_entry_count_candidate": read_u32(data, 8),
+        "unknown_header_u32_0c": read_u32(data, 12),
+        "last_entry_id_candidate": read_u64(data, 16),
+        "raw_header_sha256": sha256_bytes(data[:DESTLIST_HEADER_SIZE]),
+    }
+
+
+def parse_destlist_entry_candidates(
+    data: bytes,
+    source: dict[str, object],
+    lnk_stream_names: set[str],
+    declared_count: int,
+) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    offset = DESTLIST_HEADER_SIZE
+    limit = min(declared_count or MAX_DESTLIST_ENTRIES, MAX_DESTLIST_ENTRIES)
+    while len(candidates) < limit and offset < len(data):
+        candidate = best_destlist_entry_candidate(data, offset, len(candidates), source, lnk_stream_names)
+        if not candidate:
+            break
+        candidates.append(candidate)
+        next_offset = int(candidate["entry_offset"]) + int(candidate["entry_size_candidate"])
+        if next_offset <= offset:
+            break
+        offset = next_offset
+    return candidates
+
+
+def best_destlist_entry_candidate(
+    data: bytes,
+    offset: int,
+    index: int,
+    source: dict[str, object],
+    lnk_stream_names: set[str],
+) -> dict[str, object] | None:
+    layout_candidates: list[tuple[int, str, int, str, int]] = []
+    for layout_name, fixed_size in DESTLIST_ENTRY_LAYOUTS:
+        if offset + fixed_size > len(data):
+            continue
+        path_char_count = read_u16(data, offset + fixed_size - 2)
+        if path_char_count > 1024:
+            continue
+        end = offset + fixed_size + path_char_count * 2
+        if end > len(data):
+            continue
+        path = decode_text(data[offset + fixed_size : end], "utf-16le")
+        score = 0
+        if path_char_count == 0 or path:
+            score += 2
+        if "\\" in path or "/" in path:
+            score += 2
+        if matched_lnk_stream_candidates(data[offset : offset + fixed_size], lnk_stream_names):
+            score += 2
+        layout_candidates.append((score, layout_name, fixed_size, path, end - offset))
+    if not layout_candidates:
+        return None
+    _, layout_name, fixed_size, path, entry_size = sorted(layout_candidates, key=lambda item: item[0], reverse=True)[0]
+    prefix = data[offset : offset + fixed_size]
+    matched_streams = matched_lnk_stream_candidates(prefix, lnk_stream_names)
+    filetime_candidates = destlist_filetime_candidates(prefix)
+    validation_status = "candidate-linked-lnk-stream" if matched_streams else "candidate-unlinked"
+    return {
+        **source,
+        "index": index,
+        "entry_offset": offset,
+        "entry_size_candidate": entry_size,
+        "layout_candidate": layout_name,
+        "fixed_header_size_candidate": fixed_size,
+        "path_candidate": path,
+        "droid_guid_candidates": destlist_guid_candidates(prefix),
+        "hostname_candidates": destlist_hostname_candidates(prefix),
+        "filetime_candidates": filetime_candidates,
+        "numeric_field_candidates": destlist_numeric_candidates(prefix, lnk_stream_names),
+        "matched_lnk_stream_candidates": matched_streams,
+        "validation_status": validation_status,
+        "parser_confidence": destlist_entry_confidence(path, matched_streams, filetime_candidates),
+    }
+
+
+def destlist_guid_candidates(prefix: bytes) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for offset in (0, 16, 32, 48):
+        raw = prefix[offset : offset + 16]
+        if len(raw) != 16 or raw == b"\x00" * 16:
+            continue
+        candidates.append({"offset": offset, "guid_candidate": str(uuid.UUID(bytes_le=raw))})
+    return candidates
+
+
+def destlist_hostname_candidates(prefix: bytes) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for offset in (64, 72, 80):
+        raw = prefix[offset : offset + 16]
+        text = decode_text(raw, "utf-16le")
+        if 2 <= len(text) <= 15 and re.fullmatch(r"[A-Za-z0-9_.-]+", text):
+            candidates.append({"offset": offset, "hostname_candidate": text})
+    return candidates
+
+
+def destlist_filetime_candidates(prefix: bytes) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for offset in range(0, max(0, len(prefix) - 7), 4):
+        value = read_u64(prefix, offset)
+        timestamp = plausible_filetime_to_iso(value)
+        if timestamp:
+            candidates.append({"offset": offset, "timestamp_candidate": timestamp})
+        if len(candidates) >= MAX_DESTLIST_CANDIDATE_TIMES:
+            break
+    return candidates
+
+
+def destlist_numeric_candidates(prefix: bytes, lnk_stream_names: set[str]) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for offset in range(0, len(prefix) - 3, 4):
+        value = read_u32(prefix, offset)
+        if value == 0 or value > 10_000_000:
+            continue
+        item: dict[str, object] = {"offset": offset, "u32_candidate": value}
+        if str(value) in lnk_stream_names:
+            item["matches_lnk_stream_name"] = str(value)
+        candidates.append(item)
+        if len(candidates) >= MAX_DESTLIST_NUMERIC_CANDIDATES:
+            break
+    return candidates
+
+
+def matched_lnk_stream_candidates(prefix: bytes, lnk_stream_names: set[str]) -> list[dict[str, object]]:
+    matches: list[dict[str, object]] = []
+    for offset in range(0, len(prefix) - 3, 4):
+        value = read_u32(prefix, offset)
+        stream_name = str(value)
+        if stream_name in lnk_stream_names:
+            matches.append({"field_offset": offset, "field_value": value, "stream_name_candidate": stream_name})
+    return matches
+
+
+def destlist_entry_confidence(
+    path: str,
+    matched_streams: Sequence[dict[str, object]],
+    filetime_candidates: Sequence[dict[str, object]],
+) -> float:
+    confidence = 0.42
+    if path:
+        confidence += 0.08
+    if matched_streams:
+        confidence += 0.16
+    if filetime_candidates:
+        confidence += 0.08
+    return min(confidence, 0.74)
+
+
+def destlist_validation_checks(
+    has_destlist_stream: bool,
+    declared_counts: Sequence[int],
+    entry_candidate_count: int,
+    entry_candidates: Sequence[dict[str, object]],
+) -> dict[str, object]:
+    linked_count = sum(1 for entry in entry_candidates if entry.get("matched_lnk_stream_candidates"))
+    declared_total = max(declared_counts) if declared_counts else 0
+    return {
+        "has_destlist_stream": has_destlist_stream,
+        "declared_entry_count_max": declared_total,
+        "entry_candidate_count": entry_candidate_count,
+        "declared_count_matches_candidates": bool(declared_total and declared_total == entry_candidate_count),
+        "linked_lnk_stream_candidate_count": linked_count,
+        "all_candidates_link_to_lnk_stream": bool(entry_candidate_count and linked_count == entry_candidate_count),
+        "account_metadata_report_grade": False,
+        "deleted_entry_recovery_available": False,
+        "report_grade": False,
+    }
+
+
+def enrich_destinations_with_destlist_candidates(
+    destinations: list[dict[str, object]],
+    destlist_candidates: object,
+) -> None:
+    if not isinstance(destlist_candidates, list):
+        return
+    by_stream: dict[str, list[dict[str, object]]] = {}
+    for candidate in destlist_candidates:
+        if not isinstance(candidate, dict):
+            continue
+        for match in candidate.get("matched_lnk_stream_candidates", []):
+            if not isinstance(match, dict):
+                continue
+            stream_name = str(match.get("stream_name_candidate") or "")
+            if stream_name:
+                by_stream.setdefault(stream_name, []).append(candidate)
+    for destination in destinations:
+        stream_name = str(destination.get("stream_name") or "")
+        matches = by_stream.get(stream_name, [])
+        if not matches:
+            continue
+        match = matches[0]
+        destination.update(
+            {
+                "destlist_entry_index_candidate": match.get("index"),
+                "destlist_entry_offset_candidate": match.get("entry_offset"),
+                "destlist_path_candidate": match.get("path_candidate", ""),
+                "destlist_hostname_candidates": match.get("hostname_candidates", []),
+                "destlist_filetime_candidates": match.get("filetime_candidates", []),
+                "destlist_validation_status": match.get("validation_status", ""),
+            }
+        )
+
+
+def jumplist_validation_checks(
+    data: bytes,
+    ole_streams: Sequence[dict[str, object]],
+    destinations: Sequence[dict[str, object]],
+    destlist_metadata: dict[str, object],
+) -> dict[str, object]:
+    destlist_checks = destlist_metadata.get("destlist_validation_checks")
+    return {
+        "is_ole_compound": data.startswith(CFB_SIGNATURE),
+        "ole_streams_recovered": len(ole_streams),
+        "embedded_lnk_destinations_recovered": len(destinations),
+        "has_destlist_stream": bool(destlist_checks.get("has_destlist_stream")) if isinstance(destlist_checks, dict) else False,
+        "destlist_candidate_decoding_available": destlist_metadata.get("destlist_parse_status") == "parsed-candidate",
+        "destlist_report_grade": False,
+        "requires_external_validation": True,
+    }
+
+
+def recent_validation_matrix(checks: dict[str, object]) -> list[dict[str, object]]:
+    labels = {
+        "has_valid_header": ("LNK valid header", "critical"),
+        "has_target_path": ("Target path", "high"),
+        "has_timestamps": ("LNK timestamps", "medium"),
+        "has_link_info": ("LinkInfo", "medium"),
+        "has_shell_item_idlist": ("Shell item IDList", "medium"),
+        "has_tracker_data": ("TrackerDataBlock", "medium"),
+        "full_property_store_decode_available": ("Full property store decode", "critical"),
+        "is_ole_compound": ("OLE compound file", "high"),
+        "ole_streams_recovered": ("OLE streams recovered", "medium"),
+        "embedded_lnk_destinations_recovered": ("Embedded LNK destinations", "high"),
+        "has_destlist_stream": ("DestList stream", "high"),
+        "destlist_candidate_decoding_available": ("DestList candidate decoding", "medium"),
+        "destlist_report_grade": ("DestList report-grade decode", "critical"),
+        "requires_external_validation": ("External validation", "critical"),
+    }
+    matrix: list[dict[str, object]] = []
+    for key, value in checks.items():
+        if key in {"extra_data_block_count"}:
+            continue
+        label, severity = labels.get(key, (key.replace("_", " "), "medium"))
+        negative_requirement = key.startswith("requires_")
+        passed = bool(value)
+        if isinstance(value, int):
+            passed = value > 0
+        if negative_requirement:
+            passed = not bool(value)
+        matrix.append({"id": key.replace("_", "-"), "label": label, "passed": passed, "severity": severity, "detail": value})
+    return matrix
+
+
+def recent_report_grade_assessment(
+    validation_matrix: list[dict[str, object]],
+    *,
+    validation_required: bool,
+    gap_ids: list[str],
+    blockers: Sequence[str],
+) -> dict[str, object]:
+    failed = [str(item.get("id")) for item in validation_matrix if not item.get("passed")]
+    all_blockers = set(blockers)
+    all_blockers.update(f"validation-check-failed:{item}" for item in failed)
+    if validation_required:
+        all_blockers.add("recent-files-validation-required")
+    return {
+        "report_grade_ready": False,
+        "status": "validation-required" if failed else "triage-validated-report-grade-blocked",
+        "blockers": sorted(all_blockers),
+        "validated_strengths": [str(item.get("id")) for item in validation_matrix if item.get("passed")],
+        "commercial_gap_ids": gap_ids,
+        "next_validation_step": "Validate JumpList DestList semantics, deleted entries, account context, and Shell Link property stores with known-answer corpus before report-grade use.",
+    }
+
+
+def jumplist_parser_confidence(destinations: Sequence[dict[str, object]], destlist_metadata: dict[str, object]) -> float:
+    confidence = 0.45
+    if destinations:
+        confidence += 0.2
+    if destlist_metadata.get("destlist_parse_status") == "parsed-candidate":
+        confidence += 0.1
+    return min(confidence, 0.78)
+
+
+def jumplist_commercial_blockers(destlist_metadata: dict[str, object]) -> list[str]:
+    blockers = list(JUMPLIST_COMMERCIAL_BLOCKERS)
+    if destlist_metadata.get("destlist_parse_status") != "parsed-candidate":
+        blockers.insert(0, "destlist-stream-not-present-or-unrecoverable")
+    return blockers
 
 
 def append_lnk_destinations(
@@ -307,6 +893,8 @@ def append_lnk_destinations(
             "working_dir": metadata.get("working_dir", ""),
             "command_line_arguments": metadata.get("command_line_arguments", ""),
             "link_flag_names": metadata.get("link_flag_names", []),
+            "has_tracker_data": bool(metadata.get("tracker_data")),
+            "extra_data_block_count": len(metadata.get("extra_data_blocks", [])),
         }
         if stream:
             destination.update(
@@ -315,8 +903,12 @@ def append_lnk_destinations(
                     "stream_path": stream_path,
                     "stream_size": int(stream.get("size") or 0),
                     "stream_index": int(stream.get("index") or 0),
+                    "stream_start_sector": int(stream.get("start_sector") or 0),
+                    "stream_sha256": str(stream.get("sha256") or ""),
                 }
             )
+        else:
+            destination.update({"stream_name": "container-scan", "stream_path": "", "stream_sha256": sha256_bytes(data)})
         destinations.append(destination)
         seen.add(dedupe_key)
         if len(destinations) >= MAX_JUMPLIST_EMBEDDED_LNKS:
@@ -372,6 +964,7 @@ def parse_ole_compound_streams(data: bytes) -> list[dict[str, object]]:
                 "size": size,
                 "start_sector": int(entry["start_sector"]),
                 "data": stream_data,
+                "sha256": sha256_bytes(stream_data),
             }
         )
     return streams
@@ -540,6 +1133,14 @@ def flag_names(value: int, names: dict[int, str]) -> list[str]:
     return [name for flag, name in names.items() if value & flag]
 
 
+def format_guid_le(data: bytes) -> str:
+    if len(data) != 16:
+        return ""
+    first, second, third = struct.unpack_from("<IHH", data, 0)
+    tail = data[8:]
+    return f"{first:08x}-{second:04x}-{third:04x}-{tail[0]:02x}{tail[1]:02x}-{tail[2:].hex()}"
+
+
 def windows_filetime_to_iso(value: int) -> str:
     if value <= 0:
         return ""
@@ -548,6 +1149,19 @@ def windows_filetime_to_iso(value: int) -> str:
         return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat()
     except (OSError, OverflowError, ValueError):
         return ""
+
+
+def plausible_filetime_to_iso(value: int) -> str:
+    timestamp = windows_filetime_to_iso(value)
+    if not timestamp:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return ""
+    if datetime(1990, 1, 1, tzinfo=timezone.utc) <= parsed <= datetime(2035, 1, 1, tzinfo=timezone.utc):
+        return timestamp
+    return ""
 
 
 def read_u16(data: bytes, offset: int) -> int:
@@ -571,3 +1185,7 @@ def file_hashes(path: Path) -> dict[str, str]:
     except OSError:
         return {}
     return {"sha256": digest.hexdigest()}
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()

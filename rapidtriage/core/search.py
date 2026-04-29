@@ -2,13 +2,30 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
+from .analysis import build_search_analysis
 from .docs import build_preview, extract_text
 from .files import CATEGORY_RULES
 
 IMAGE_EXTS = set(CATEGORY_RULES["images"]["extensions"])
+SEARCH_FEATURE_GAP_ID = "#61"
+SEARCH_NATIVE_CAPABILITIES = {
+    "exact_search": True,
+    "regex_search": True,
+    "fuzzy_levenshtein_search": True,
+    "simple_suffix_stemming": True,
+    "proximity_window_summary": True,
+    "full_linguistic_stemming": False,
+    "semantic_near_duplicate_search": False,
+}
+SEARCH_REPORT_GRADE_BLOCKERS = [
+    "fuzzy-and-stemmed-search-are-triage-aids-not-exact-source-proof",
+    "regex-pattern-quality-is-analyst-controlled-and-must-be-documented",
+    "proximity-window-results-require-source-row-verification-before-reporting",
+]
 
 
 class SearchError(ValueError):
@@ -24,11 +41,18 @@ def run_unified_search(
     sources: Sequence[str] | None = None,
     extensions: Sequence[str] | None = None,
     path_contains: str | None = None,
+    include_analysis: bool = True,
+    search_mode: str = "exact",
+    fuzzy_distance: int = 1,
+    proximity_window: int = 0,
 ) -> Dict[str, object]:
     summary = load_run_summary(run_summary)
-    normalized = [item.strip().lower() for item in keywords if item.strip()]
+    normalized = normalize_keywords(keywords, search_mode=search_mode)
     if not normalized:
         raise SearchError("at least one keyword is required")
+    normalized_search_mode = normalize_search_mode(search_mode)
+    normalized_fuzzy_distance = max(0, min(int(fuzzy_distance or 0), 2))
+    normalized_proximity_window = max(0, min(int(proximity_window or 0), 100))
     normalized_sources = {item.strip().lower() for item in (sources or []) if item.strip()}
     normalized_extensions = normalize_extensions(extensions or [])
     normalized_path_fragment = (path_contains or "").strip().lower()
@@ -39,13 +63,18 @@ def run_unified_search(
 
     matches: list[dict[str, object]] = []
     ocr_errors: list[dict[str, str]] = []
-    matches.extend(search_docs(outputs, normalized, limit=limit))
-    matches.extend(search_files(outputs, normalized, limit=limit))
-    matches.extend(search_artifacts(outputs, normalized, limit=limit))
-    matches.extend(search_indicators(outputs, normalized, limit=limit))
-    matches.extend(search_timeline(outputs, normalized, limit=limit))
+    search_options = {
+        "search_mode": normalized_search_mode,
+        "fuzzy_distance": normalized_fuzzy_distance,
+        "proximity_window": normalized_proximity_window,
+    }
+    matches.extend(search_docs(outputs, normalized, limit=limit, search_options=search_options))
+    matches.extend(search_files(outputs, normalized, limit=limit, search_options=search_options))
+    matches.extend(search_artifacts(outputs, normalized, limit=limit, search_options=search_options))
+    matches.extend(search_indicators(outputs, normalized, limit=limit, search_options=search_options))
+    matches.extend(search_timeline(outputs, normalized, limit=limit, search_options=search_options))
     if include_ocr:
-        ocr_matches, ocr_errors = search_ocr(outputs, normalized, limit=limit)
+        ocr_matches, ocr_errors = search_ocr(outputs, normalized, limit=limit, search_options=search_options)
         matches.extend(ocr_matches)
     matches = filter_matches(
         matches,
@@ -64,7 +93,7 @@ def run_unified_search(
         for keyword in match.get("matched_keywords", []):
             keyword_counts[str(keyword)] = keyword_counts.get(str(keyword), 0) + 1
 
-    return {
+    payload: Dict[str, object] = {
         "command": "search",
         "generated_at": dt.datetime.now().isoformat(),
         "run_summary": str(summary.get("outputs", {}).get("summary", "")),
@@ -75,19 +104,27 @@ def run_unified_search(
             "sources": sorted(normalized_sources),
             "extensions": sorted(normalized_extensions),
             "path_contains": normalized_path_fragment,
+            **search_options,
         },
         "summary": {
             "match_count": len(matches),
             "source_counts": source_counts,
             "keyword_counts": keyword_counts,
             "ocr_error_count": len(ocr_errors),
+            "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
+            "commercial_grade_ready": False,
         },
         "matches": matches,
         "ocr": {
             "enabled": include_ocr,
             "errors": ocr_errors,
         },
+        "search_native_capabilities": dict(SEARCH_NATIVE_CAPABILITIES),
+        "search_report_grade_assessment": search_report_grade_assessment(),
     }
+    if include_analysis:
+        payload["analysis"] = build_search_analysis(matches, normalized)
+    return payload
 
 
 def load_run_summary(run_summary: Mapping[str, object] | Path) -> Mapping[str, object]:
@@ -104,7 +141,13 @@ def load_run_summary(run_summary: Mapping[str, object] | Path) -> Mapping[str, o
         raise SearchError(f"invalid run summary JSON: {path}") from exc
 
 
-def search_docs(outputs: Mapping[str, object], keywords: Sequence[str], *, limit: int) -> list[dict[str, object]]:
+def search_docs(
+    outputs: Mapping[str, object],
+    keywords: Sequence[str],
+    *,
+    limit: int,
+    search_options: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
     payload = read_json_output(outputs, "docs")
     if not payload:
         return []
@@ -123,7 +166,7 @@ def search_docs(outputs: Mapping[str, object], keywords: Sequence[str], *, limit
             text = extract_text(path, kind)
         except Exception:
             text = ""
-        matched = match_keywords(text, keywords)
+        matched = match_keywords(text, keywords, search_options=search_options)
         if not matched:
             continue
         matches.append(
@@ -134,6 +177,7 @@ def search_docs(outputs: Mapping[str, object], keywords: Sequence[str], *, limit
                 "title": path.name,
                 "matched_keywords": matched,
                 "preview": build_preview(text, matched[0]),
+                "search_match": build_search_match_metadata(text, keywords, search_options=search_options),
                 "pointer": f"/results/{result_index_by_path[str(path)]}" if str(path) in result_index_by_path else "",
                 "metadata": dict(candidate),
             }
@@ -143,7 +187,13 @@ def search_docs(outputs: Mapping[str, object], keywords: Sequence[str], *, limit
     return matches
 
 
-def search_files(outputs: Mapping[str, object], keywords: Sequence[str], *, limit: int) -> list[dict[str, object]]:
+def search_files(
+    outputs: Mapping[str, object],
+    keywords: Sequence[str],
+    *,
+    limit: int,
+    search_options: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
     payload = read_json_output(outputs, "files")
     if not payload:
         return []
@@ -152,7 +202,7 @@ def search_files(outputs: Mapping[str, object], keywords: Sequence[str], *, limi
         if not isinstance(candidate, Mapping):
             continue
         haystack = json.dumps(candidate, ensure_ascii=False, sort_keys=True)
-        matched = match_keywords(haystack, keywords)
+        matched = match_keywords(haystack, keywords, search_options=search_options)
         if not matched:
             continue
         path = str(candidate.get("path", ""))
@@ -164,6 +214,7 @@ def search_files(outputs: Mapping[str, object], keywords: Sequence[str], *, limi
                 "title": str(candidate.get("name") or Path(path).name),
                 "matched_keywords": matched,
                 "preview": path,
+                "search_match": build_search_match_metadata(haystack, keywords, search_options=search_options),
                 "pointer": f"/candidates/{index}",
                 "metadata": dict(candidate),
             }
@@ -173,7 +224,13 @@ def search_files(outputs: Mapping[str, object], keywords: Sequence[str], *, limi
     return matches
 
 
-def search_artifacts(outputs: Mapping[str, object], keywords: Sequence[str], *, limit: int) -> list[dict[str, object]]:
+def search_artifacts(
+    outputs: Mapping[str, object],
+    keywords: Sequence[str],
+    *,
+    limit: int,
+    search_options: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
     matches = []
     for output_name, raw_path in sorted(outputs.items()):
         name = str(output_name)
@@ -188,7 +245,7 @@ def search_artifacts(outputs: Mapping[str, object], keywords: Sequence[str], *, 
             if not isinstance(artifact, Mapping):
                 continue
             haystack = json.dumps(artifact, ensure_ascii=False, sort_keys=True)
-            matched = match_keywords(haystack, keywords)
+            matched = match_keywords(haystack, keywords, search_options=search_options)
             if not matched:
                 continue
             path = str(artifact.get("path", ""))
@@ -201,6 +258,7 @@ def search_artifacts(outputs: Mapping[str, object], keywords: Sequence[str], *, 
                     "title": title,
                     "matched_keywords": matched,
                     "preview": compact_json_preview(artifact),
+                    "search_match": build_search_match_metadata(haystack, keywords, search_options=search_options),
                     "pointer": f"/artifacts/{index}",
                     "metadata": dict(artifact),
                 }
@@ -210,7 +268,13 @@ def search_artifacts(outputs: Mapping[str, object], keywords: Sequence[str], *, 
     return matches
 
 
-def search_timeline(outputs: Mapping[str, object], keywords: Sequence[str], *, limit: int) -> list[dict[str, object]]:
+def search_timeline(
+    outputs: Mapping[str, object],
+    keywords: Sequence[str],
+    *,
+    limit: int,
+    search_options: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
     payload = read_json_output(outputs, "timeline")
     if not payload:
         return []
@@ -219,7 +283,7 @@ def search_timeline(outputs: Mapping[str, object], keywords: Sequence[str], *, l
         if not isinstance(event, Mapping):
             continue
         haystack = json.dumps(event, ensure_ascii=False, sort_keys=True)
-        matched = match_keywords(haystack, keywords)
+        matched = match_keywords(haystack, keywords, search_options=search_options)
         if not matched:
             continue
         matches.append(
@@ -230,6 +294,7 @@ def search_timeline(outputs: Mapping[str, object], keywords: Sequence[str], *, l
                 "title": str(event.get("summary", "timeline event")),
                 "matched_keywords": matched,
                 "preview": compact_json_preview(event),
+                "search_match": build_search_match_metadata(haystack, keywords, search_options=search_options),
                 "pointer": f"/events/{index}",
                 "metadata": dict(event),
             }
@@ -239,7 +304,13 @@ def search_timeline(outputs: Mapping[str, object], keywords: Sequence[str], *, l
     return matches
 
 
-def search_indicators(outputs: Mapping[str, object], keywords: Sequence[str], *, limit: int) -> list[dict[str, object]]:
+def search_indicators(
+    outputs: Mapping[str, object],
+    keywords: Sequence[str],
+    *,
+    limit: int,
+    search_options: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
     payload = read_json_output(outputs, "indicators")
     if not payload:
         return []
@@ -248,7 +319,7 @@ def search_indicators(outputs: Mapping[str, object], keywords: Sequence[str], *,
         if not isinstance(indicator, Mapping):
             continue
         haystack = json.dumps(indicator, ensure_ascii=False, sort_keys=True)
-        matched = match_keywords(haystack, keywords)
+        matched = match_keywords(haystack, keywords, search_options=search_options)
         if not matched:
             continue
         sources = indicator.get("sources")
@@ -264,6 +335,7 @@ def search_indicators(outputs: Mapping[str, object], keywords: Sequence[str], *,
                 "title": f"{indicator_type}: {indicator_value}" if indicator_value else indicator_type,
                 "matched_keywords": matched,
                 "preview": compact_json_preview(indicator),
+                "search_match": build_search_match_metadata(haystack, keywords, search_options=search_options),
                 "pointer": f"/indicators/{index}",
                 "metadata": dict(indicator),
             }
@@ -278,20 +350,62 @@ def search_ocr(
     keywords: Sequence[str],
     *,
     limit: int,
+    search_options: Mapping[str, object] | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, str]]]:
     payload = read_json_output(outputs, "files")
     if not payload:
         return [], []
+    matches = []
+    errors: list[dict[str, str]] = []
+    sidecar_matched_candidate_indices: set[int] = set()
+    for index, candidate in enumerate(payload.get("candidates", [])):
+        if not isinstance(candidate, Mapping):
+            continue
+        path = Path(str(candidate.get("path", "")))
+        if path.suffix.lower() not in IMAGE_EXTS:
+            continue
+        for sidecar in find_ocr_sidecars(path):
+            try:
+                text = sidecar.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                errors.append({"path": str(sidecar), "error": str(exc)})
+                continue
+            matched = match_keywords(text, keywords, search_options=search_options)
+            if not matched:
+                continue
+            matches.append(
+                {
+                    "source": "ocr",
+                    "kind": f"{path.suffix.lower().lstrip('.')}-sidecar",
+                    "path": str(path),
+                    "title": f"{path.name} OCR sidecar",
+                    "matched_keywords": matched,
+                    "preview": build_preview(text, matched[0]),
+                    "search_match": build_search_match_metadata(text, keywords, search_options=search_options),
+                    "pointer": f"/candidates/{index}",
+                    "metadata": {
+                        **dict(candidate),
+                        "ocr_source": "sidecar",
+                        "ocr_sidecar_path": str(sidecar),
+                    },
+                }
+            )
+            sidecar_matched_candidate_indices.add(index)
+            if limit and len(matches) >= limit:
+                return matches, errors
     try:
         import cv2
         import pytesseract
     except ImportError as exc:
+        if matches:
+            errors.append({"path": "", "error": f"OCR engine dependencies unavailable after sidecar search: {exc}"})
+            return matches, errors
         return [], [{"path": "", "error": f"OCR dependencies unavailable: {exc}"}]
 
-    matches = []
-    errors: list[dict[str, str]] = []
     for index, candidate in enumerate(payload.get("candidates", [])):
         if not isinstance(candidate, Mapping):
+            continue
+        if index in sidecar_matched_candidate_indices:
             continue
         path = Path(str(candidate.get("path", "")))
         if path.suffix.lower() not in IMAGE_EXTS:
@@ -304,7 +418,7 @@ def search_ocr(
         except Exception as exc:
             errors.append({"path": str(path), "error": str(exc)})
             continue
-        matched = match_keywords(text, keywords)
+        matched = match_keywords(text, keywords, search_options=search_options)
         if not matched:
             continue
         matches.append(
@@ -315,6 +429,7 @@ def search_ocr(
                 "title": path.name,
                 "matched_keywords": matched,
                 "preview": build_preview(text, matched[0]),
+                "search_match": build_search_match_metadata(text, keywords, search_options=search_options),
                 "pointer": f"/candidates/{index}",
                 "metadata": dict(candidate),
             }
@@ -324,9 +439,209 @@ def search_ocr(
     return matches, errors
 
 
-def match_keywords(text: str, keywords: Sequence[str]) -> list[str]:
+def find_ocr_sidecars(path: Path) -> list[Path]:
+    candidates = [
+        path.with_suffix(path.suffix + ".ocr.txt"),
+        path.with_suffix(path.suffix + ".txt"),
+        path.with_suffix(".ocr.txt"),
+        path.with_suffix(".txt"),
+        path.with_suffix(".srt"),
+        path.with_suffix(".vtt"),
+    ]
+    output = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen or not candidate.is_file():
+            continue
+        seen.add(candidate)
+        output.append(candidate)
+    return output
+
+
+def normalize_search_mode(value: str) -> str:
+    normalized = str(value or "exact").strip().lower()
+    supported = {"exact", "fuzzy", "regex"}
+    if normalized not in supported:
+        raise SearchError(f"unsupported search mode: {value!r}; expected one of: {', '.join(sorted(supported))}")
+    return normalized
+
+
+def normalize_keywords(keywords: Sequence[str], *, search_mode: str) -> list[str]:
+    mode = normalize_search_mode(search_mode)
+    output = []
+    seen = set()
+    for item in keywords:
+        keyword = str(item or "").strip()
+        if not keyword:
+            continue
+        normalized = keyword if mode == "regex" else keyword.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        output.append(normalized)
+    return output
+
+
+def match_keywords(
+    text: str,
+    keywords: Sequence[str],
+    *,
+    search_options: Mapping[str, object] | None = None,
+) -> list[str]:
+    options = search_options or {}
+    mode = normalize_search_mode(str(options.get("search_mode") or "exact"))
+    if mode == "regex":
+        return [keyword for keyword in keywords if regex_keyword_matches(text, keyword)]
+    if mode == "fuzzy":
+        max_distance = max(0, min(int(options.get("fuzzy_distance") or 1), 2))
+        return [keyword for keyword in keywords if fuzzy_keyword_matches(text, keyword, max_distance=max_distance)]
     lower = text.lower()
-    return [keyword for keyword in keywords if keyword in lower]
+    return [keyword for keyword in keywords if exact_or_stem_matches(lower, keyword)]
+
+
+def regex_keyword_matches(text: str, pattern: str) -> bool:
+    try:
+        return re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE) is not None
+    except re.error:
+        return False
+
+
+def exact_or_stem_matches(lower_text: str, keyword: str) -> bool:
+    if keyword in lower_text:
+        return True
+    if not is_simple_word(keyword):
+        return False
+    tokens = set(tokenize_words(lower_text))
+    return any(stem in tokens for stem in keyword_stems(keyword))
+
+
+def fuzzy_keyword_matches(text: str, keyword: str, *, max_distance: int) -> bool:
+    lower = text.lower()
+    if exact_or_stem_matches(lower, keyword):
+        return True
+    if not is_simple_word(keyword):
+        return False
+    keyword_variants = keyword_stems(keyword)
+    for token in tokenize_words(lower):
+        if abs(len(token) - len(keyword)) > max_distance + 1:
+            continue
+        if any(levenshtein_distance(token, variant, max_distance=max_distance) <= max_distance for variant in keyword_variants):
+            return True
+    return False
+
+
+def build_search_match_metadata(
+    text: str,
+    keywords: Sequence[str],
+    *,
+    search_options: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    options = search_options or {}
+    mode = normalize_search_mode(str(options.get("search_mode") or "exact"))
+    proximity_window = max(0, min(int(options.get("proximity_window") or 0), 100))
+    metadata: dict[str, object] = {
+        "mode": mode,
+        "matched_by": mode,
+        "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
+        "ready_for_court_report": False,
+    }
+    if mode == "fuzzy":
+        metadata["fuzzy_distance"] = max(0, min(int(options.get("fuzzy_distance") or 1), 2))
+        metadata["matched_by"] = "fuzzy-or-stem"
+    if proximity_window and len(keywords) >= 2:
+        proximity = proximity_summary(text, keywords, window=proximity_window)
+        metadata["proximity"] = proximity
+        if proximity.get("matched"):
+            metadata["matched_by"] = f"{metadata['matched_by']}+proximity"
+    return metadata
+
+
+def search_report_grade_assessment() -> dict[str, object]:
+    return {
+        "component": "fuzzy-regex-stemming-proximity-search",
+        "status": "implemented-baseline-validation-required",
+        "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
+        "ready_for_court_report": False,
+        "blockers": list(SEARCH_REPORT_GRADE_BLOCKERS),
+        "recommended_validation": [
+            "Record the exact query mode/options with any cited hit.",
+            "Open the source viewer and verify the row, offset, hash, and parser limitations before report inclusion.",
+        ],
+    }
+
+
+def proximity_summary(text: str, keywords: Sequence[str], *, window: int) -> dict[str, object]:
+    tokens = tokenize_words(text.lower())
+    if not tokens:
+        return {"matched": False, "window": window}
+    positions: dict[str, list[int]] = {}
+    for keyword in keywords:
+        if not is_simple_word(keyword):
+            continue
+        stems = set(keyword_stems(keyword))
+        hits = [index for index, token in enumerate(tokens) if token == keyword or token in stems]
+        if hits:
+            positions[keyword] = hits
+    if len(positions) < 2:
+        return {"matched": False, "window": window, "matched_keyword_count": len(positions)}
+    nearest: tuple[int, str, str] | None = None
+    items = list(positions.items())
+    for left_index, (left_keyword, left_positions) in enumerate(items):
+        for right_keyword, right_positions in items[left_index + 1 :]:
+            for left_pos in left_positions:
+                for right_pos in right_positions:
+                    distance = abs(left_pos - right_pos)
+                    if nearest is None or distance < nearest[0]:
+                        nearest = (distance, left_keyword, right_keyword)
+    matched = nearest is not None and nearest[0] <= window
+    return {
+        "matched": matched,
+        "window": window,
+        "nearest_distance": nearest[0] if nearest else None,
+        "nearest_keywords": [nearest[1], nearest[2]] if nearest else [],
+        "matched_keyword_count": len(positions),
+    }
+
+
+def tokenize_words(text: str) -> list[str]:
+    return re.findall(r"[\w가-힣]{2,}", text.lower())
+
+
+def is_simple_word(value: str) -> bool:
+    return re.fullmatch(r"[\w가-힣]{2,}", value.lower()) is not None
+
+
+def keyword_stems(keyword: str) -> set[str]:
+    lower = keyword.lower()
+    stems = {lower}
+    for suffix in ("ing", "edly", "edly", "ed", "es", "s"):
+        if len(lower) > len(suffix) + 3 and lower.endswith(suffix):
+            stems.add(lower[: -len(suffix)])
+    return stems
+
+
+def levenshtein_distance(left: str, right: str, *, max_distance: int) -> int:
+    if left == right:
+        return 0
+    if abs(len(left) - len(right)) > max_distance:
+        return max_distance + 1
+    previous = list(range(len(right) + 1))
+    for left_index, left_char in enumerate(left, start=1):
+        current = [left_index]
+        row_min = current[0]
+        for right_index, right_char in enumerate(right, start=1):
+            cost = 0 if left_char == right_char else 1
+            value = min(
+                current[right_index - 1] + 1,
+                previous[right_index] + 1,
+                previous[right_index - 1] + cost,
+            )
+            current.append(value)
+            row_min = min(row_min, value)
+        if row_min > max_distance:
+            return max_distance + 1
+        previous = current
+    return previous[-1]
 
 
 def normalize_extensions(values: Sequence[str]) -> set[str]:

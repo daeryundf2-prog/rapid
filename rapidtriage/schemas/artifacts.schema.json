@@ -66,6 +66,12 @@
             "type": "integer"
           }
         },
+        "parser_error_count": {
+          "type": "integer"
+        },
+        "collection_status": {
+          "type": "string"
+        },
         "matched_rule_count": {
           "type": "integer"
         },
@@ -134,6 +140,33 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "parser_errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "collector",
+          "error_type",
+          "message"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "collector": {
+            "type": "string"
+          },
+          "error_type": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
           }
         }
       }

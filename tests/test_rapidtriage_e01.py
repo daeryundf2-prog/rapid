@@ -62,6 +62,8 @@ DOS Partition Table
 
             def fake_runner(command):
                 commands.append(list(command))
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
                 if command[0] == "ewfmount":
                     (Path(command[2]) / "ewf1").write_bytes(b"raw")
                     return subprocess.CompletedProcess(command, 0, "", "")
@@ -82,9 +84,18 @@ DOS Partition Table
 
             self.assertEqual(result.partition_start_sector, 2048)
             self.assertTrue((result.extract_dir / "evidence.txt").is_file())
-            self.assertEqual(commands[0][0], "ewfmount")
-            self.assertEqual(commands[1][0], "mmls")
-            self.assertEqual(commands[2][0], "tsk_recover")
+            workflow_commands = [command for command in commands if command[1:] != ["--version"]]
+            self.assertEqual(workflow_commands[0][0], "ewfmount")
+            self.assertEqual(workflow_commands[1][0], "mmls")
+            self.assertEqual(workflow_commands[2][0], "tsk_recover")
+            metadata = result.to_dict()
+            self.assertFalse(metadata["commercial_grade_ready"])
+            self.assertIn("#22", metadata["commercial_gap_ids"])
+            self.assertFalse(metadata["native_capabilities"]["native_e01_segment_metadata_decode"])
+            self.assertEqual(metadata["source_integrity"]["hash_status"], "computed")
+            self.assertTrue(metadata["tool_preflight"])
+            self.assertTrue(metadata["partition_table"][0]["selected_for_recovery"])
+            self.assertEqual(metadata["command_history"][-1]["purpose"], "read-only-filesystem-recovery")
 
     def test_raw_split_image_discovery_sorts_numeric_segments(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -95,6 +106,35 @@ DOS Partition Table
             parts = discover_split_image_parts(root / "case.001")
 
             self.assertEqual([part.name for part in parts], ["case.001", "case.002", "case.003"])
+
+    def test_raw_split_image_metadata_warns_about_missing_segments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            image_path = root / "case.001"
+            image_path.write_bytes(b"part1")
+            (root / "case.003").write_bytes(b"part3")
+
+            def fake_runner(command):
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
+                if command[0] == "mmls":
+                    return subprocess.CompletedProcess(command, 0, "001: 0000002048 0000020000 NTFS\n", "")
+                if command[0] == "tsk_recover":
+                    Path(command[-1]).mkdir(parents=True, exist_ok=True)
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            result = extract_raw_image_to_directory(
+                image_path,
+                root / "stage",
+                runner=fake_runner,
+                tool_resolver=lambda name: f"/usr/bin/{name}",
+            )
+
+            metadata = result.to_dict()
+            self.assertEqual([Path(path).name for path in metadata["image_paths"]], ["case.001", "case.003"])
+            self.assertTrue(metadata["split_part_warnings"])
+            self.assertIn("missing segment", metadata["split_part_warnings"][0])
 
     def test_extract_raw_image_runs_mmls_and_tsk_recover(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -107,6 +147,8 @@ DOS Partition Table
 
             def fake_runner(command):
                 commands.append(list(command))
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
                 if command[0] == "mmls":
                     return subprocess.CompletedProcess(command, 0, "001: 0000002048 0000020000 NTFS\n", "")
                 if command[0] == "tsk_recover":
@@ -126,9 +168,16 @@ DOS Partition Table
             self.assertEqual(result.recovery_mode, "partition-offset")
             self.assertEqual([path.name for path in result.image_paths], ["case.001", "case.002"])
             self.assertTrue((result.extract_dir / "evidence.txt").is_file())
-            self.assertEqual(commands[0][0], "mmls")
-            self.assertEqual(commands[1][0], "tsk_recover")
-            self.assertIn("-o", commands[1])
+            workflow_commands = [command for command in commands if command[1:] != ["--version"]]
+            self.assertEqual(workflow_commands[0][0], "mmls")
+            self.assertEqual(workflow_commands[1][0], "tsk_recover")
+            self.assertIn("-o", workflow_commands[1])
+            metadata = result.to_dict()
+            self.assertFalse(metadata["commercial_grade_ready"])
+            self.assertIn("#23", metadata["commercial_gap_ids"])
+            self.assertFalse(metadata["native_capabilities"]["native_partition_filesystem_parser"])
+            self.assertEqual(metadata["source_integrity"][0]["hash_status"], "computed")
+            self.assertEqual(metadata["partition_table"][0]["selected_for_recovery"], True)
 
     def test_extract_raw_image_falls_back_to_whole_image_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -139,6 +188,8 @@ DOS Partition Table
 
             def fake_runner(command):
                 commands.append(list(command))
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
                 if command[0] == "mmls":
                     return subprocess.CompletedProcess(command, 1, "", "No partition table")
                 if command[0] == "tsk_recover":
@@ -156,7 +207,8 @@ DOS Partition Table
 
             self.assertIsNone(result.partition_start_sector)
             self.assertEqual(result.recovery_mode, "whole-image")
-            self.assertNotIn("-o", commands[1])
+            workflow_commands = [command for command in commands if command[1:] != ["--version"]]
+            self.assertNotIn("-o", workflow_commands[1])
 
     def test_extract_archive_image_uses_available_7zip_tool(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -167,6 +219,8 @@ DOS Partition Table
 
             def fake_runner(command):
                 commands.append(list(command))
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
                 Path(command[3][2:] if command[3].startswith("-o") else command[-1]).mkdir(parents=True, exist_ok=True)
                 if command[0] in {"7z", "7zz"}:
                     out_dir = Path(command[3][2:])
@@ -181,8 +235,10 @@ DOS Partition Table
             )
 
             self.assertEqual(result.tool, "7z")
-            self.assertEqual(commands[0][:3], ["7z", "x", "-y"])
+            workflow_commands = [command for command in commands if command[1:] != ["--version"]]
+            self.assertEqual(workflow_commands[0][:3], ["7z", "x", "-y"])
             self.assertTrue((result.extract_dir / "setup.log").is_file())
+            self.assertFalse(result.to_dict()["commercial_grade_ready"])
 
     def test_extract_virtual_disk_converts_to_raw_then_recovers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -193,6 +249,8 @@ DOS Partition Table
 
             def fake_runner(command):
                 commands.append(list(command))
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
                 if command[:3] == ["qemu-img", "convert", "-O"]:
                     Path(command[-1]).write_bytes(b"converted raw")
                     return subprocess.CompletedProcess(command, 0, "", "")
@@ -212,10 +270,17 @@ DOS Partition Table
             )
 
             self.assertEqual(result.conversion_tool, "qemu-img")
-            self.assertEqual(commands[0][:4], ["qemu-img", "convert", "-O", "raw"])
+            workflow_commands = [command for command in commands if command[1:] != ["--version"]]
+            self.assertEqual(workflow_commands[0][:4], ["qemu-img", "convert", "-O", "raw"])
             self.assertTrue(result.converted_raw_path.is_file())
             self.assertTrue((result.extract_dir / "vm-evidence.txt").is_file())
             self.assertEqual(result.raw_result.partition_start_sector, 2048)
+            metadata = result.to_dict()
+            self.assertFalse(metadata["commercial_grade_ready"])
+            self.assertIn("#24", metadata["commercial_gap_ids"])
+            self.assertFalse(metadata["native_capabilities"]["snapshot_chain_validation"])
+            self.assertEqual(metadata["source_integrity"]["hash_status"], "computed")
+            self.assertEqual(metadata["converted_raw_integrity"]["hash_status"], "computed")
 
     def test_run_triage_accepts_e01_image_and_analyzes_extracted_filesystem(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

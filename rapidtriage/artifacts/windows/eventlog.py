@@ -6,6 +6,7 @@ import hashlib
 import html
 import json
 import re
+import struct
 import xml.etree.ElementTree as ET
 import zlib
 from collections import Counter, defaultdict
@@ -15,7 +16,7 @@ from typing import Iterable, Mapping, NamedTuple, Sequence
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v12"
+PARSER_VERSION = "eventlog-normalized-v14"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
@@ -31,8 +32,50 @@ MAX_NATIVE_EVTX_CHUNKS = 4096
 MAX_NATIVE_EVTX_RECORD_SIZE = 16 * 1024 * 1024
 MAX_NATIVE_EVTX_STRINGS = 200
 MAX_NATIVE_EVTX_BINXML_TOKENS = 500
-NATIVE_EVTX_PARSE_SCOPE = "record-header-binxml-token-string-triage"
+NATIVE_EVTX_PARSE_SCOPE = "record-header-binxml-template-scalar-recovery-triage"
 NATIVE_EVTX_BINXML_STATUS = "not-decoded"
+NATIVE_EVTX_REPORT_GRADE_BLOCKERS = [
+    "provider-message-resource-rendering-not-implemented",
+    "full-binxml-object-model-not-implemented",
+    "broad-deleted-corrupt-record-corpus-validation-required",
+    "chunk-crc-algorithm-variant-validation-required",
+]
+NATIVE_EVTX_CAPABILITIES = {
+    "record_header": True,
+    "file_header": True,
+    "chunk_header": True,
+    "chunk_boundary_context": True,
+    "record_size_trailer_validation": True,
+    "deleted_slack_candidate_labeling": True,
+    "binxml_fragment_token_scan": True,
+    "template_instance_header": True,
+    "template_substitution_values": True,
+    "provider_resource_message_rendering": False,
+    "full_binxml_dom": False,
+    "report_grade_deleted_record_validation": False,
+    "validated_value_types": [
+        "StringType",
+        "AnsiStringType",
+        "Int8Type",
+        "UInt8Type",
+        "Int16Type",
+        "UInt16Type",
+        "Int32Type",
+        "UInt32Type",
+        "Int64Type",
+        "UInt64Type",
+        "Real32Type",
+        "Real64Type",
+        "BoolType",
+        "BinaryType",
+        "GuidType",
+        "FileTimeType",
+        "SysTimeType",
+        "SidType",
+        "HexInt32Type",
+        "HexInt64Type",
+    ],
+}
 
 EVENT_ID_CATEGORIES = {
     "4624": ("logon-success", "Authentication success"),
@@ -748,7 +791,7 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             binxml_promoted,
         )
         integrity = native_evtx_record_integrity(record_blob, offset)
-        chunk_context = native_evtx_chunk_context(blob, offset)
+        chunk_context = native_evtx_chunk_context(blob, offset, len(record_blob))
         binxml_status = str(binxml.get("status") or NATIVE_EVTX_BINXML_STATUS)
         recovery_context = native_evtx_recovery_context(candidate, integrity, chunk_context, binxml_status)
         sequence = native_evtx_sequence(record_id, previous_record_id)
@@ -756,15 +799,30 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
         parameter_candidates = native_evtx_parameter_candidates(native_indicators, binxml)
         raw_preview = str(binxml.get("rendered_preview") or "") or native_evtx_message_preview(native_indicators, searchable_strings)
         field_fidelity = native_evtx_field_fidelity(binxml_status)
+        validation_required = native_evtx_validation_required(binxml_status, recovery_context)
+        validation_reasons = native_evtx_validation_reasons(binxml_status, recovery_context)
         data = {
             "evtx_parse_status": "native-binary-partial",
             "evtx_native_parse_scope": NATIVE_EVTX_PARSE_SCOPE,
             "evtx_binxml_status": binxml_status,
             "evtx_field_fidelity": field_fidelity,
-            "evtx_validation_required": binxml_status not in {"basic-rendered", "template-substituted-partial"},
+            "evtx_validation_required": validation_required,
+            "evtx_validation_reasons": validation_reasons,
             "evtx_validation_guidance": (
                 "Use an EVTX-capable parser export such as EvtxECmd, Hayabusa, Chainsaw, or "
                 "Velociraptor when report-grade Event/System/EventData field fidelity is required."
+            ),
+            "evtx_validation_checks": native_evtx_validation_checks(
+                integrity,
+                chunk_context,
+                recovery_context,
+                binxml,
+            ),
+            "evtx_validation_matrix": native_evtx_validation_matrix(
+                integrity,
+                chunk_context,
+                recovery_context,
+                binxml,
             ),
             "evtx_binxml": binxml,
             "binxml_system_fields": dict(binxml_promoted.get("system_fields") or {}),
@@ -779,7 +837,10 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             "evtx_recovery_context": recovery_context,
             "evtx_recovery_status": recovery_context["status"],
             "evtx_allocation_status": recovery_context["allocation_status"],
+            "evtx_native_capabilities": NATIVE_EVTX_CAPABILITIES,
             "evtx_record_sequence": sequence,
+            "validation_required": validation_required,
+            "caution_labels": recovery_context["caution_labels"] if validation_required else [],
             "extracted_strings": searchable_strings[:MAX_NATIVE_EVTX_STRINGS],
             "extracted_string_count": len(searchable_strings),
             "native_indicators": native_indicators,
@@ -822,6 +883,9 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
         )
         details.update(data)
         details["parser_confidence"] = native_evtx_confidence(details)
+        details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
+        details["commercial_grade_ready"] = details["evtx_report_grade_assessment"]["report_grade_ready"]
+        details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
         yield event_record(path, "eventlog-event", details)
 
 
@@ -973,6 +1037,9 @@ def native_evtx_recovery_context(
 def native_evtx_allocation_status(chunk_context: Mapping[str, object]) -> str:
     if not chunk_context.get("chunk_signature_valid"):
         return "unknown-no-valid-chunk-header"
+    boundary_status = str(chunk_context.get("chunk_boundary_status") or "")
+    if boundary_status in {"record-outside-chunk-bounds", "record-crosses-free-space-boundary"}:
+        return boundary_status
     relative_offset = int(chunk_context.get("record_relative_offset") or 0)
     free_space_offset = int(chunk_context.get("free_space_offset") or 0)
     last_record_offset = int(chunk_context.get("last_record_offset") or 0)
@@ -1005,6 +1072,167 @@ def native_evtx_recovery_confidence(
     return min(0.9, round(score, 2))
 
 
+def native_evtx_validation_required(binxml_status: str, recovery_context: Mapping[str, object]) -> bool:
+    return bool(recovery_context.get("validation_required")) or binxml_status not in {
+        "basic-rendered",
+        "template-substituted-partial",
+    }
+
+
+def native_evtx_validation_reasons(binxml_status: str, recovery_context: Mapping[str, object]) -> list[str]:
+    reasons = [
+        str(item)
+        for item in recovery_context.get("caution_labels", [])
+        if str(item)
+    ] if isinstance(recovery_context.get("caution_labels"), list) else []
+    if binxml_status not in {"basic-rendered", "template-substituted-partial"}:
+        reasons.append(f"binxml-status:{binxml_status or 'unknown'}")
+    return sorted(set(reasons))
+
+
+def native_evtx_validation_checks(
+    integrity: Mapping[str, object],
+    chunk_context: Mapping[str, object],
+    recovery_context: Mapping[str, object],
+    binxml: Mapping[str, object],
+) -> dict[str, object]:
+    decoded_types = Counter(
+        str(item.get("value_type") or "unknown")
+        for item in binxml.get("value_fields", [])
+        if isinstance(item, Mapping) and item.get("value_type")
+    ) if isinstance(binxml.get("value_fields"), list) else Counter()
+    checks = {
+        "record_magic_valid": bool(integrity.get("magic_valid")),
+        "declared_size_valid": bool(integrity.get("declared_size_valid")),
+        "trailing_size_valid": bool(integrity.get("trailing_size_valid")),
+        "chunk_header_present": bool(chunk_context.get("chunk_signature_valid")),
+        "chunk_allocation_status": recovery_context.get("allocation_status", ""),
+        "recovery_status": recovery_context.get("status", ""),
+        "binxml_status": binxml.get("status", NATIVE_EVTX_BINXML_STATUS),
+        "decoded_value_type_counts": counter_items(decoded_types),
+        "template_value_count": int(binxml.get("template_value_count") or 0),
+        "template_ids": list(binxml.get("template_ids") or []) if isinstance(binxml.get("template_ids"), list) else [],
+    }
+    checks["passes_basic_record_integrity"] = (
+        checks["record_magic_valid"]
+        and checks["declared_size_valid"]
+        and checks["trailing_size_valid"]
+    )
+    checks["requires_second_parser"] = bool(recovery_context.get("validation_required")) or checks["binxml_status"] == NATIVE_EVTX_BINXML_STATUS
+    return checks
+
+
+def native_evtx_validation_matrix(
+    integrity: Mapping[str, object],
+    chunk_context: Mapping[str, object],
+    recovery_context: Mapping[str, object],
+    binxml: Mapping[str, object],
+) -> list[dict[str, object]]:
+    binxml_status = str(binxml.get("status") or NATIVE_EVTX_BINXML_STATUS) if isinstance(binxml, Mapping) else NATIVE_EVTX_BINXML_STATUS
+    return [
+        {
+            "id": "record-magic",
+            "label": "EVTX record magic",
+            "passed": bool(integrity.get("magic_valid")),
+            "severity": "critical",
+            "detail": "Record starts with the EVTX record marker.",
+        },
+        {
+            "id": "declared-size",
+            "label": "Declared record size",
+            "passed": bool(integrity.get("declared_size_valid")),
+            "severity": "critical",
+            "detail": f"declared={integrity.get('declared_size', 0)} observed={integrity.get('actual_size', 0)}",
+        },
+        {
+            "id": "trailing-size",
+            "label": "Trailing record size",
+            "passed": bool(integrity.get("trailing_size_valid")),
+            "severity": "high",
+            "detail": f"trailing={integrity.get('trailing_size', 0)}",
+        },
+        {
+            "id": "chunk-context",
+            "label": "Chunk boundary context",
+            "passed": bool(chunk_context.get("chunk_signature_valid")),
+            "severity": "medium",
+            "detail": str(chunk_context.get("chunk_boundary_status") or chunk_context.get("chunk_validation_status") or ""),
+        },
+        {
+            "id": "allocation-region",
+            "label": "Allocated/slack region",
+            "passed": str(recovery_context.get("allocation_status") or "") == "allocated-or-live-record",
+            "severity": "high",
+            "detail": str(recovery_context.get("allocation_status") or ""),
+        },
+        {
+            "id": "binxml-field-decode",
+            "label": "BinXML field decode",
+            "passed": binxml_status in {"basic-rendered", "template-substituted-partial"},
+            "severity": "high",
+            "detail": binxml_status,
+        },
+        {
+            "id": "deleted-corrupt-caution",
+            "label": "Deleted/corrupt caution",
+            "passed": str(recovery_context.get("status") or "") == "recoverable-record",
+            "severity": "critical",
+            "detail": str(recovery_context.get("status") or ""),
+        },
+    ]
+
+
+def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[str, object]:
+    blockers: list[str] = []
+    checks = details.get("evtx_validation_checks") if isinstance(details.get("evtx_validation_checks"), Mapping) else {}
+    message = details.get("message_rendering") if isinstance(details.get("message_rendering"), Mapping) else {}
+    recovery = details.get("evtx_recovery_context") if isinstance(details.get("evtx_recovery_context"), Mapping) else {}
+    chunk = details.get("evtx_chunk_context") if isinstance(details.get("evtx_chunk_context"), Mapping) else {}
+    binxml_status = str(details.get("evtx_binxml_status") or checks.get("binxml_status") or "")
+
+    if not checks.get("passes_basic_record_integrity"):
+        blockers.append("record-integrity-not-proven")
+    if binxml_status not in {"basic-rendered", "template-substituted-partial"}:
+        blockers.append("full-binxml-field-decoding-required")
+    if not chunk.get("chunk_signature_valid"):
+        blockers.append("chunk-boundary-not-validated")
+    if recovery.get("status") != "recoverable-record":
+        blockers.append("deleted-or-corrupt-record-independent-validation-required")
+    if message and message.get("provider_resource_required") and not (
+        isinstance(message.get("provenance"), Mapping)
+        and message["provenance"].get("provider_message_resource_resolved")
+    ):
+        blockers.append("provider-message-resource-rendering-required")
+    if details.get("validation_required"):
+        blockers.append("native-record-validation-required")
+
+    blockers.extend(NATIVE_EVTX_REPORT_GRADE_BLOCKERS)
+    blockers = sorted(set(blockers))
+    report_grade_ready = not blockers
+    if report_grade_ready:
+        status = "report-grade-ready"
+    elif checks.get("passes_basic_record_integrity") and binxml_status in {"basic-rendered", "template-substituted-partial"}:
+        status = "triage-validated-report-grade-blocked"
+    else:
+        status = "validation-required"
+
+    return {
+        "report_grade_ready": report_grade_ready,
+        "status": status,
+        "blockers": blockers,
+        "validated_strengths": [
+            item["id"]
+            for item in details.get("evtx_validation_matrix", [])
+            if isinstance(item, Mapping) and item.get("passed")
+        ],
+        "commercial_gap_ids": ["#1", "#2", "#3"],
+        "next_validation_step": (
+            "Compare this row against an external EVTX parser export and provider message resource rendering before "
+            "using native EVTX rows as report-grade testimony."
+        ),
+    }
+
+
 def native_evtx_record_candidate_record(
     path: Path,
     source_index: int,
@@ -1017,8 +1245,9 @@ def native_evtx_record_candidate_record(
     strings = extract_utf16le_strings(candidate.record_blob)
     indicators = native_evtx_indicators(strings, path)
     integrity = native_evtx_candidate_integrity(candidate)
-    chunk_context = native_evtx_chunk_context(blob, candidate.offset)
+    chunk_context = native_evtx_chunk_context(blob, candidate.offset, len(candidate.record_blob))
     recovery_context = native_evtx_recovery_context(candidate, integrity, chunk_context, NATIVE_EVTX_BINXML_STATUS)
+    validation_checks = native_evtx_validation_checks(integrity, chunk_context, recovery_context, {})
     details = {
         "parser": "windows-eventlog-evtx-native-candidate",
         "parser_version": PARSER_VERSION,
@@ -1040,6 +1269,9 @@ def native_evtx_record_candidate_record(
         "evtx_recovery_context": recovery_context,
         "evtx_recovery_status": recovery_context["status"],
         "evtx_allocation_status": recovery_context["allocation_status"],
+        "evtx_validation_checks": validation_checks,
+        "evtx_validation_matrix": native_evtx_validation_matrix(integrity, chunk_context, recovery_context, {}),
+        "evtx_native_capabilities": NATIVE_EVTX_CAPABILITIES,
         "parser_confidence": recovery_context["confidence"],
         "validation_required": True,
         "caution_labels": recovery_context["caution_labels"],
@@ -1051,6 +1283,9 @@ def native_evtx_record_candidate_record(
             "context before relying on it in a report."
         ),
     }
+    details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
+    details["commercial_grade_ready"] = False
+    details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
     return event_record(path, "eventlog-record-candidate", details)
 
 
@@ -1191,7 +1426,7 @@ def evtx_crc32(value: bytes) -> int:
     return zlib.crc32(value) & 0xFFFFFFFF
 
 
-def native_evtx_chunk_context(blob: bytes, record_offset: int) -> dict[str, object]:
+def native_evtx_chunk_context(blob: bytes, record_offset: int, record_size: int = 0) -> dict[str, object]:
     if record_offset < EVTX_FILE_HEADER_SIZE:
         chunk_offset = 0
     else:
@@ -1199,11 +1434,40 @@ def native_evtx_chunk_context(blob: bytes, record_offset: int) -> dict[str, obje
     signature = blob[chunk_offset : chunk_offset + len(EVTX_CHUNK_SIGNATURE)]
     signature_valid = signature == EVTX_CHUNK_SIGNATURE
     header = native_evtx_chunk_header(blob[chunk_offset : min(len(blob), chunk_offset + EVTX_CHUNK_SIZE)], chunk_offset)
+    relative_offset = record_offset - chunk_offset
+    relative_end_offset = relative_offset + max(record_size, 0)
+    free_space_offset = int(header.get("free_space_offset") or 0)
+    last_record_offset = int(header.get("last_record_offset") or 0)
+    record_within_chunk = 0 <= relative_offset < EVTX_CHUNK_SIZE and relative_end_offset <= EVTX_CHUNK_SIZE
+    record_after_free_space = bool(signature_valid and free_space_offset and relative_offset >= free_space_offset)
+    record_crosses_free_space = bool(
+        signature_valid
+        and free_space_offset
+        and relative_offset < free_space_offset < relative_end_offset
+    )
+    record_after_last_record = bool(signature_valid and last_record_offset and relative_offset > last_record_offset)
+    if not signature_valid:
+        boundary_status = "no-valid-chunk-header"
+    elif not record_within_chunk:
+        boundary_status = "record-outside-chunk-bounds"
+    elif record_after_free_space or record_after_last_record:
+        boundary_status = "slack-or-deleted-region"
+    elif record_crosses_free_space:
+        boundary_status = "record-crosses-free-space-boundary"
+    else:
+        boundary_status = "allocated-record-region"
     return {
         "chunk_offset": chunk_offset,
         "chunk_signature_valid": signature_valid,
         "chunk_validation_status": "header-present" if signature_valid else "missing-or-not-a-chunk-header",
-        "record_relative_offset": record_offset - chunk_offset,
+        "record_relative_offset": relative_offset,
+        "record_relative_end_offset": relative_end_offset,
+        "record_size": record_size,
+        "record_within_chunk_bounds": record_within_chunk,
+        "record_after_free_space": record_after_free_space,
+        "record_crosses_free_space": record_crosses_free_space,
+        "record_after_last_record": record_after_last_record,
+        "chunk_boundary_status": boundary_status,
         "first_event_record_number": header.get("first_event_record_number", 0),
         "last_event_record_number": header.get("last_event_record_number", 0),
         "first_event_record_identifier": header.get("first_event_record_identifier", 0),
@@ -1919,6 +2183,8 @@ def read_inline_binxml_value_text(blob: bytes, offset: int) -> tuple[str, int, s
         0x08: 4,
         0x09: 8,
         0x0A: 8,
+        0x0B: 4,
+        0x0C: 8,
         0x0D: 4,
         0x0F: 16,
         0x11: 8,
@@ -2019,6 +2285,12 @@ def decode_binxml_template_value(value_blob: bytes, value_type: int) -> tuple[st
     if value_type == 0x0D and value_blob:
         value = value_blob[0] != 0
         return str(value).lower(), value
+    if value_type == 0x0B and len(value_blob) >= 4:
+        value = struct.unpack("<f", value_blob[:4])[0]
+        return f"{value:.6g}", value
+    if value_type == 0x0C and len(value_blob) >= 8:
+        value = struct.unpack("<d", value_blob[:8])[0]
+        return f"{value:.12g}", value
     if value_type == 0x0F and len(value_blob) >= 16:
         text = format_guid_le(value_blob[:16])
         return text, text
@@ -2051,6 +2323,8 @@ def binxml_value_type_name(value_type: int) -> str:
         0x08: "UInt32Type",
         0x09: "Int64Type",
         0x0A: "UInt64Type",
+        0x0B: "Real32Type",
+        0x0C: "Real64Type",
         0x0D: "BoolType",
         0x0E: "BinaryType",
         0x0F: "GuidType",
@@ -2351,49 +2625,114 @@ def render_event_message(
     external_message = first_data_text(data, "RenderedMessage", "Message", "MapDescription", "EventMessage")
     template_ids = native_evtx_template_ids(data)
     if external_message:
+        message_source = "imported-export-field"
         return {
             "status": "external-message",
             "message": external_message[:4000],
-            "message_source": "imported-export-field",
+            "message_source": message_source,
+            "rendering_confidence": 0.98,
+            "provider_resource_required": False,
             "provider_name": provider_name,
             "event_id": event_id,
             "event_category": category,
             "template_ids": template_ids,
             "validation_required": False,
+            "rendering_limitations": [],
             "warnings": [],
+            "provenance": event_message_provenance(
+                data=data,
+                is_native_evtx=is_native_evtx,
+                message_source=message_source,
+                renderer="external-export-field",
+                validation_required=False,
+            ),
         }
 
     template = event_message_template(provider_name, event_id)
     if template:
         message, missing_fields = render_message_template(template, data)
+        message_source = "rapidtriage-builtin-event-template"
         return {
             "status": "rendered-builtin-template",
             "message": message[:4000],
-            "message_source": "rapidtriage-builtin-event-template",
+            "message_source": message_source,
+            "rendering_confidence": 0.72 if is_native_evtx else 0.84,
+            "provider_resource_required": is_native_evtx,
             "provider_name": provider_name,
             "event_id": event_id,
             "event_category": category,
             "template_ids": template_ids,
             "missing_fields": missing_fields,
             "validation_required": is_native_evtx,
+            "rendering_limitations": ["provider-resource-not-used"] if is_native_evtx else [],
             "warnings": ["validate-against-provider-message-resource"] if is_native_evtx else [],
+            "provenance": event_message_provenance(
+                data=data,
+                is_native_evtx=is_native_evtx,
+                message_source=message_source,
+                renderer="rapidtriage-builtin-template",
+                validation_required=is_native_evtx,
+            ),
         }
 
     preview = str(data.get("native_message_preview") or raw_preview or "")
     warnings = ["provider-message-resource-not-resolved"] if is_native_evtx else []
     if template_ids and is_native_evtx:
         warnings.append("native-template-id-preserved")
+    message_source = "binxml-rendered-preview" if preview else "unavailable"
     return {
         "status": "unresolved-provider-template" if is_native_evtx else "no-template-available",
         "message": preview[:4000],
-        "message_source": "binxml-rendered-preview" if preview else "unavailable",
+        "message_source": message_source,
+        "rendering_confidence": 0.42 if is_native_evtx and preview else 0.2,
+        "provider_resource_required": is_native_evtx,
         "provider_name": provider_name,
         "event_id": event_id,
         "event_category": category,
         "template_ids": template_ids,
         "validation_required": is_native_evtx,
+        "rendering_limitations": ["provider-message-resource-not-resolved"] if is_native_evtx else [],
         "warnings": warnings,
+        "provenance": event_message_provenance(
+            data=data,
+            is_native_evtx=is_native_evtx,
+            message_source=message_source,
+            renderer="native-binxml-preview" if is_native_evtx and preview else "unresolved",
+            validation_required=is_native_evtx,
+        ),
     }
+
+
+def event_message_provenance(
+    *,
+    data: Mapping[str, object],
+    is_native_evtx: bool,
+    message_source: str,
+    renderer: str,
+    validation_required: bool,
+) -> dict[str, object]:
+    provenance: dict[str, object] = {
+        "message_source": message_source,
+        "renderer": renderer,
+        "provider_message_resource_resolved": False,
+        "validation_required": validation_required,
+    }
+    if not is_native_evtx:
+        provenance["provider_message_resource_resolved"] = message_source == "imported-export-field"
+        return provenance
+
+    binxml = data.get("evtx_binxml") if isinstance(data.get("evtx_binxml"), Mapping) else {}
+    provenance.update(
+        {
+            "native_binxml_status": str(data.get("evtx_binxml_status") or ""),
+            "native_field_fidelity": str(data.get("evtx_field_fidelity") or ""),
+            "native_recovery_status": str(data.get("evtx_recovery_status") or ""),
+            "native_allocation_status": str(data.get("evtx_allocation_status") or ""),
+            "template_ids": native_evtx_template_ids(data),
+            "template_value_count": int(binxml.get("template_value_count") or 0) if isinstance(binxml, Mapping) else 0,
+        }
+    )
+    return provenance
 
 
 def render_message_template(template: str, data: Mapping[str, object]) -> tuple[str, list[str]]:
@@ -2630,6 +2969,8 @@ def build_eventlog_file_record(
             ),
             "native_parser_scope": NATIVE_EVTX_PARSE_SCOPE,
             "native_binxml_status": NATIVE_EVTX_BINXML_STATUS,
+            "native_capabilities": NATIVE_EVTX_CAPABILITIES,
+            "native_report_grade_blockers": NATIVE_EVTX_REPORT_GRADE_BLOCKERS,
             "native_validation_required": True,
             "recommended_parsers": ["EvtxECmd", "Hayabusa", "Chainsaw", "Velociraptor Windows.EventLogs.Evtx"],
             "note": "Binary EVTX detected. RapidTriage emits partial native record rows when record headers and BinXML fields are recoverable; import EvtxECmd/Hayabusa/Chainsaw/Velociraptor JSONL/CSV/XML output for report-grade provider message rendering.",
@@ -2808,6 +3149,8 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
     native_binxml_status_counts: Counter[str] = Counter()
     native_recovery_status_counts: Counter[str] = Counter()
     native_allocation_status_counts: Counter[str] = Counter()
+    native_boundary_status_counts: Counter[str] = Counter()
+    native_report_grade_status_counts: Counter[str] = Counter()
     native_chunk_integrity_counts: Counter[str] = Counter()
     source_paths: set[str] = set()
     timestamps: list[str] = []
@@ -2853,6 +3196,14 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
             increment_counter(native_binxml_status_counts, str(details.get("evtx_binxml_status") or "unknown"))
             increment_counter(native_recovery_status_counts, str(details.get("evtx_recovery_status") or "unknown"))
             increment_counter(native_allocation_status_counts, str(details.get("evtx_allocation_status") or "unknown"))
+            chunk_context = details.get("evtx_chunk_context") if isinstance(details.get("evtx_chunk_context"), Mapping) else {}
+            report_grade = (
+                details.get("evtx_report_grade_assessment")
+                if isinstance(details.get("evtx_report_grade_assessment"), Mapping)
+                else {}
+            )
+            increment_counter(native_boundary_status_counts, str(chunk_context.get("chunk_boundary_status") or "unknown"))
+            increment_counter(native_report_grade_status_counts, str(report_grade.get("status") or "unknown"))
         for flag in details.get("risk_flags") or []:
             text = str(flag)
             if text.startswith("suspicious-term:"):
@@ -2925,6 +3276,14 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         increment_counter(reportability_counts, str(details.get("reportability") or ""))
         increment_counter(native_recovery_status_counts, str(details.get("evtx_recovery_status") or "unknown"))
         increment_counter(native_allocation_status_counts, str(details.get("evtx_allocation_status") or "unknown"))
+        chunk_context = details.get("evtx_chunk_context") if isinstance(details.get("evtx_chunk_context"), Mapping) else {}
+        report_grade = (
+            details.get("evtx_report_grade_assessment")
+            if isinstance(details.get("evtx_report_grade_assessment"), Mapping)
+            else {}
+        )
+        increment_counter(native_boundary_status_counts, str(chunk_context.get("chunk_boundary_status") or "unknown"))
+        increment_counter(native_report_grade_status_counts, str(report_grade.get("status") or "unknown"))
 
     for record in chunk_rows:
         details = record.details
@@ -2974,7 +3333,11 @@ def build_eventlog_summary(root: Path, records: Sequence[ArtifactRecord]) -> Art
         "native_binxml_status_counts": counter_items(native_binxml_status_counts),
         "native_recovery_status_counts": counter_items(native_recovery_status_counts),
         "native_allocation_status_counts": counter_items(native_allocation_status_counts),
+        "native_boundary_status_counts": counter_items(native_boundary_status_counts),
+        "native_report_grade_status_counts": counter_items(native_report_grade_status_counts),
         "native_chunk_integrity_counts": counter_items(native_chunk_integrity_counts),
+        "native_capabilities": NATIVE_EVTX_CAPABILITIES,
+        "native_report_grade_blockers": NATIVE_EVTX_REPORT_GRADE_BLOCKERS,
         "detection_level_counts": counter_items(detection_level_counts),
         "first_event_at": timestamps[0] if timestamps else "",
         "last_event_at": timestamps[-1] if timestamps else "",

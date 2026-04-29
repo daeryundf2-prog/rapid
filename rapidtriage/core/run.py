@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Mapping, Sequence, Union
@@ -29,6 +31,7 @@ from .indicators import build_indicator_summary
 from .input_root import InputRoot, derive_child_input_root, resolve_input_root
 from .reporting import build_run_report_context, render_run_markdown_report
 from .rules import RuleSet, summarize_payload_annotations
+from .silent_failure import build_silent_failure_report
 from .timeline import build_timeline_report, run_timeline
 from .virtual_disk import (
     VirtualDiskExtractionError,
@@ -219,6 +222,8 @@ def run_triage_mode(
     disk_image_metadata_path = output_dir / "rapidtriage-disk-image.json"
     archive_image_metadata_path = output_dir / "rapidtriage-archive-image.json"
     virtual_disk_metadata_path = output_dir / "rapidtriage-virtual-disk.json"
+    fingerprint_path = output_dir / "rapidtriage-run-fingerprint.json"
+    checkpoint_path = output_dir / "rapidtriage-run-checkpoints.json"
 
     if isinstance(image_result, E01ExtractionResult):
         write_result(image_result.to_dict(), e01_metadata_path)
@@ -229,32 +234,52 @@ def run_triage_mode(
     if isinstance(image_result, VirtualDiskExtractionResult):
         write_result(image_result.to_dict(), virtual_disk_metadata_path)
 
+    current_fingerprint = build_run_input_fingerprint(scan_root)
+    previous_fingerprint = (
+        load_reusable_json(
+            fingerprint_path,
+            expected_command="run-fingerprint",
+            required_keys=("fingerprint",),
+        )
+        if fingerprint_path.is_file()
+        else None
+    )
+    resume_disabled_reason = ""
+    effective_resume = resume
+    if resume and previous_fingerprint and previous_fingerprint.get("fingerprint") != current_fingerprint.get("fingerprint"):
+        effective_resume = False
+        resume_disabled_reason = "input fingerprint changed; rebuilding stage outputs"
+    write_result(current_fingerprint, fingerprint_path)
+
     reused_outputs: set[str] = set()
+    checkpoint_records: list[dict[str, object]] = []
 
     manifest_payload, reused = load_or_build_json(
         manifest_path,
-        resume=resume,
+        resume=effective_resume,
         required_keys=("providers",),
         producer=lambda: build_manifest(input_root, profile.keywords),
     )
     if reused:
         reused_outputs.add("manifest")
+    record_run_checkpoint(checkpoint_records, "manifest", manifest_path, reused=reused)
 
     docs_payload, reused = load_or_build_json(
         docs_path,
-        resume=resume and docs_index_path.is_file(),
+        resume=effective_resume and docs_index_path.is_file(),
         expected_command="docs",
         required_keys=("summary", "results"),
         producer=lambda: run_docs_search(scan_input_root, profile.keywords, rule_set=rule_set, index_output=docs_index_path),
     )
     if reused:
         reused_outputs.update({"docs", "docs-index"})
+    record_run_checkpoint(checkpoint_records, "docs", docs_path, reused=reused)
     docs_payload["manifest"] = manifest_payload
     docs_payload["scan_scope_root"] = str(scan_input_root.root_path)
 
     files_payload, reused = load_or_build_json(
         files_path,
-        resume=resume,
+        resume=effective_resume,
         expected_command="files",
         required_keys=("summary", "candidates"),
         producer=lambda: run_files_scan(
@@ -266,6 +291,7 @@ def run_triage_mode(
     )
     if reused:
         reused_outputs.add("files")
+    record_run_checkpoint(checkpoint_records, "files", files_path, reused=reused)
     files_payload["scan_scope_root"] = str(scan_input_root.root_path)
 
     write_result(manifest_payload, manifest_path)
@@ -274,24 +300,25 @@ def run_triage_mode(
 
     artifact_outputs: Dict[str, Path] = {}
     artifact_payloads: Dict[str, Dict[str, object]] = {}
+    artifact_results = collect_artifact_stages(
+        input_root,
+        profile.artifacts_kinds,
+        artifacts_dir=artifacts_dir,
+        resume=effective_resume,
+        rule_set=rule_set,
+    )
     for kind in profile.artifacts_kinds:
-        artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
-        artifact_payload, reused = load_or_build_json(
-            artifact_path,
-            resume=resume,
-            expected_command="artifacts",
-            required_keys=("summary", "artifacts"),
-            producer=lambda kind=kind: run_artifact_collection(input_root, kind=kind, rule_set=rule_set),
-        )
+        artifact_payload, artifact_path, reused = artifact_results[kind]
         if reused:
             reused_outputs.add(f"artifacts-{kind}")
+        record_run_checkpoint(checkpoint_records, f"artifacts-{kind}", artifact_path, reused=reused)
         artifact_outputs[kind] = artifact_path
         artifact_payloads[kind] = artifact_payload
         write_result(artifact_payload, artifact_path)
 
     docs_extract_payload, reused = load_or_build_json(
         docs_extract_manifest,
-        resume=resume,
+        resume=effective_resume,
         expected_command="extract",
         required_keys=("summary", "entries", "skipped"),
         producer=lambda: run_extract(
@@ -307,9 +334,10 @@ def run_triage_mode(
     )
     if reused:
         reused_outputs.add("docs-extract")
+    record_run_checkpoint(checkpoint_records, "docs-extract", docs_extract_manifest, reused=reused)
     files_extract_payload, reused = load_or_build_json(
         files_extract_manifest,
-        resume=resume,
+        resume=effective_resume,
         expected_command="extract",
         required_keys=("summary", "entries", "skipped"),
         producer=lambda: run_extract(
@@ -325,12 +353,13 @@ def run_triage_mode(
     )
     if reused:
         reused_outputs.add("files-extract")
+    record_run_checkpoint(checkpoint_records, "files-extract", files_extract_manifest, reused=reused)
     write_result(docs_extract_payload, docs_extract_manifest)
     write_result(files_extract_payload, files_extract_manifest)
 
     timeline_payload, reused = load_or_build_json(
         timeline_path,
-        resume=resume,
+        resume=effective_resume,
         expected_command="timeline",
         required_keys=("summary", "events"),
         producer=lambda: run_timeline(
@@ -344,6 +373,7 @@ def run_triage_mode(
     )
     if reused:
         reused_outputs.add("timeline")
+    record_run_checkpoint(checkpoint_records, "timeline", timeline_path, reused=reused)
     write_result(timeline_payload, timeline_path)
     timeline_report_path.write_text(build_timeline_report(timeline_payload), encoding="utf-8")
 
@@ -360,7 +390,7 @@ def run_triage_mode(
     }
     indicators_payload, reused = load_or_build_json(
         indicators_path,
-        resume=resume,
+        resume=effective_resume,
         expected_command="indicators",
         required_keys=("summary", "indicators"),
         producer=lambda: build_indicator_summary(
@@ -370,9 +400,21 @@ def run_triage_mode(
     )
     if reused:
         reused_outputs.add("indicators")
+    record_run_checkpoint(checkpoint_records, "indicators", indicators_path, reused=reused)
     write_result(indicators_payload, indicators_path)
+    write_run_checkpoints(
+        checkpoint_path,
+        output_dir=output_dir,
+        input_fingerprint=current_fingerprint,
+        resume_requested=resume,
+        resume_effective=effective_resume,
+        resume_disabled_reason=resume_disabled_reason,
+        checkpoints=checkpoint_records,
+    )
 
     outputs = {
+        "fingerprint": fingerprint_path,
+        "checkpoints": checkpoint_path,
         "manifest": manifest_path,
         "docs": docs_path,
         "docs_index": docs_index_path,
@@ -414,7 +456,14 @@ def run_triage_mode(
             "max_file_count": max_file_count,
             "overwrite": overwrite,
             "resume": resume,
+            "resume_effective": effective_resume,
+            "resume_disabled_reason": resume_disabled_reason,
             "reused_outputs": sorted(reused_outputs),
+            "artifact_scheduler": {
+                "strategy": "parallel-threaded-deterministic-output",
+                "max_workers": artifact_scheduler_workers(profile.artifacts_kinds),
+                "scheduled_count": len(profile.artifacts_kinds),
+            },
         },
         rule_set=rule_set,
         source=build_run_source_record(input_root, image_result=image_result),
@@ -513,6 +562,45 @@ def load_or_build_json(
     return producer(), False
 
 
+def artifact_scheduler_workers(kinds: Sequence[str]) -> int:
+    return max(1, min(4, len(tuple(kinds))))
+
+
+def collect_artifact_stages(
+    input_root: InputRoot,
+    kinds: Sequence[str],
+    *,
+    artifacts_dir: Path,
+    resume: bool,
+    rule_set: RuleSet | None,
+) -> Dict[str, tuple[Dict[str, object], Path, bool]]:
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    results: Dict[str, tuple[Dict[str, object], Path, bool]] = {}
+    pending: list[tuple[str, Path]] = []
+    for kind in kinds:
+        artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
+        reusable = load_reusable_json(
+            artifact_path,
+            expected_command="artifacts",
+            required_keys=("summary", "artifacts"),
+        ) if resume else None
+        if reusable is not None:
+            results[kind] = (reusable, artifact_path, True)
+        else:
+            pending.append((kind, artifact_path))
+
+    if pending:
+        with ThreadPoolExecutor(max_workers=artifact_scheduler_workers(kinds), thread_name_prefix="rapidtriage-artifact") as executor:
+            futures = {
+                executor.submit(run_artifact_collection, input_root, kind=kind, rule_set=rule_set): (kind, path)
+                for kind, path in pending
+            }
+            for future in as_completed(futures):
+                kind, artifact_path = futures[future]
+                results[kind] = (future.result(), artifact_path, False)
+    return results
+
+
 def load_reusable_json(
     path: Path,
     *,
@@ -532,6 +620,93 @@ def load_reusable_json(
     if any(key not in payload for key in required_keys):
         return None
     return payload
+
+
+def build_run_input_fingerprint(root: Path, *, max_files: int = 5000) -> Dict[str, object]:
+    hasher = hashlib.sha256()
+    scanned_files = 0
+    total_size = 0
+    latest_mtime = 0.0
+    truncated = False
+    try:
+        iterator = root.rglob("*") if root.is_dir() else iter([root])
+        for path in iterator:
+            if not path.is_file():
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            relative = str(path.relative_to(root)) if root.is_dir() else path.name
+            hasher.update(relative.replace("\\", "/").lower().encode("utf-8", errors="replace"))
+            hasher.update(str(stat.st_size).encode("ascii"))
+            hasher.update(str(int(stat.st_mtime_ns)).encode("ascii"))
+            scanned_files += 1
+            total_size += stat.st_size
+            latest_mtime = max(latest_mtime, stat.st_mtime)
+            if max_files and scanned_files >= max_files:
+                truncated = True
+                break
+    except OSError:
+        truncated = True
+    return {
+        "command": "run-fingerprint",
+        "generated_at": dt.datetime.now().isoformat(),
+        "root": str(root),
+        "fingerprint": hasher.hexdigest(),
+        "summary": {
+            "scanned_file_count": scanned_files,
+            "total_size_bytes": total_size,
+            "latest_mtime_epoch": latest_mtime,
+            "max_files": max_files,
+            "truncated": truncated,
+        },
+    }
+
+
+def record_run_checkpoint(records: list[dict[str, object]], stage: str, path: Path, *, reused: bool) -> None:
+    records.append(
+        {
+            "stage": stage,
+            "status": "reused" if reused else "completed",
+            "output": str(path),
+            "exists": path.is_file(),
+            "size_bytes": path.stat().st_size if path.is_file() else None,
+            "reused": reused,
+            "recorded_at": dt.datetime.now().isoformat(),
+        }
+    )
+
+
+def write_run_checkpoints(
+    path: Path,
+    *,
+    output_dir: Path,
+    input_fingerprint: Mapping[str, object],
+    resume_requested: bool,
+    resume_effective: bool,
+    resume_disabled_reason: str,
+    checkpoints: Sequence[Mapping[str, object]],
+) -> None:
+    status_counts = Counter(str(item.get("status") or "unknown") for item in checkpoints)
+    payload = {
+        "command": "run-checkpoints",
+        "generated_at": dt.datetime.now().isoformat(),
+        "output_dir": str(output_dir),
+        "resume": {
+            "requested": resume_requested,
+            "effective": resume_effective,
+            "disabled_reason": resume_disabled_reason,
+        },
+        "input_fingerprint": dict(input_fingerprint),
+        "summary": {
+            "checkpoint_count": len(checkpoints),
+            "status_counts": dict(status_counts),
+            "reused_count": sum(1 for item in checkpoints if item.get("reused")),
+        },
+        "checkpoints": [dict(item) for item in checkpoints],
+    }
+    write_result(payload, path)
 
 
 def prepare_run_input_root(
@@ -598,6 +773,8 @@ def build_run_source_record(
             "partition_start_sector": image_result.partition_start_sector,
             "recovery_mode": image_result.recovery_mode,
             "image_paths": [str(path) for path in image_result.image_paths],
+            "source_integrity": list(image_result.source_integrity),
+            "commercial_grade_ready": image_result.commercial_grade_ready,
         }
     if isinstance(image_result, ArchiveImageExtractionResult):
         return {
@@ -606,6 +783,8 @@ def build_run_source_record(
             "analysis_root": str(image_result.extract_dir),
             "stage_dir": str(image_result.stage_dir),
             "tool": image_result.tool,
+            "source_integrity": image_result.source_integrity,
+            "commercial_grade_ready": image_result.commercial_grade_ready,
         }
     if isinstance(image_result, VirtualDiskExtractionResult):
         return {
@@ -617,6 +796,9 @@ def build_run_source_record(
             "conversion_tool": image_result.conversion_tool,
             "partition_start_sector": image_result.raw_result.partition_start_sector,
             "recovery_mode": image_result.raw_result.recovery_mode,
+            "source_integrity": image_result.source_integrity,
+            "converted_raw_integrity": image_result.converted_raw_integrity,
+            "commercial_grade_ready": image_result.commercial_grade_ready,
         }
     return {
         "type": "e01",
@@ -624,6 +806,8 @@ def build_run_source_record(
         "analysis_root": str(image_result.extract_dir),
         "stage_dir": str(image_result.stage_dir),
         "partition_start_sector": image_result.partition_start_sector,
+        "source_integrity": image_result.source_integrity,
+        "commercial_grade_ready": image_result.commercial_grade_ready,
     }
 
 
@@ -684,6 +868,17 @@ def build_run_summary(
         outputs=outputs,
         reused_outputs=reused_outputs,
     )
+    silent_failure = build_silent_failure_report(
+        root=root,
+        docs_payload=docs_payload,
+        files_payload=files_payload,
+        docs_extract_payload=docs_extract_payload,
+        files_extract_payload=files_extract_payload,
+        artifact_payloads=artifact_payloads,
+        timeline_payload=timeline_payload,
+        safety=safety,
+    )
+    step_rows.append(build_silent_failure_step(silent_failure))
     processing_summary = build_processing_summary(step_rows, safety=safety)
 
     payload = {
@@ -705,9 +900,17 @@ def build_run_summary(
             "artifacts_kinds": list(profile.artifacts_kinds),
         },
         "safety": dict(safety),
+        "resource_caps": {
+            "max_extract_size_bytes": safety.get("max_extract_size_bytes", 0),
+            "max_file_count": safety.get("max_file_count", 0),
+            "fingerprint_max_files": 5000,
+            "structured_preview_max_bytes": "see API source-preview constants",
+            "bounded_outputs": True,
+        },
         "outputs": {name: str(path) for name, path in outputs.items()},
         "steps": step_rows,
         "processing": processing_summary,
+        "silent_failure_detection": silent_failure,
         "summary": {
             "document_candidate_count": int(docs_payload.get("summary", {}).get("candidate_count", 0)),
             "document_match_count": int(docs_payload.get("summary", {}).get("match_count", 0)),
@@ -723,6 +926,8 @@ def build_run_summary(
             "files_extracted_count": int(files_extract_payload.get("summary", {}).get("extracted_count", 0)),
             "preferred_location_candidate_count": len(preferred_candidates),
             "timeline_event_count": int(timeline_payload.get("summary", {}).get("event_count", 0)),
+            "silent_failure_risk": bool(silent_failure.get("silent_failure_risk")),
+            "silent_failure_risk_check_count": int(silent_failure.get("risk_check_count", 0)),
         },
         "highlights": {
             "document_hits": summarize_document_hits(docs_payload.get("results", []), limit=5),
@@ -948,6 +1153,36 @@ def build_processing_summary(
         "highest_warning_level": highest_warning_level([str(item["level"]) for item in warnings]),
         "warnings": warnings,
     }
+
+
+def build_silent_failure_step(report: Mapping[str, object]) -> Dict[str, object]:
+    status = str(report.get("status") or "unknown")
+    risk_count = int(report.get("risk_check_count") or 0)
+    check_count = int(report.get("check_count") or 0)
+    level = "none"
+    if status == "failed":
+        level = "failed"
+    elif status == "warning":
+        level = "warning"
+    elif status == "notice":
+        level = "notice"
+    messages = []
+    if level != "none":
+        messages.append(
+            f"Silent-failure detector found {risk_count} risk check(s) across {check_count} checks."
+        )
+    return annotate_step(
+        {
+            "name": "silent-failure-detector",
+            "status": status,
+            "output": "",
+            "check_count": check_count,
+            "risk_check_count": risk_count,
+            "silent_failure_risk": bool(report.get("silent_failure_risk")),
+        },
+        warning_level=level,
+        warning_messages=messages,
+    )
 
 
 def mark_reused_step(row: Dict[str, object], reused_outputs: set[str]) -> Dict[str, object]:

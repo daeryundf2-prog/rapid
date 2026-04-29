@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping, Optional
+from typing import Any, Iterable, Iterator, Mapping, Optional, Sequence
 
 from .docs import extract_text
 from .search import SearchError, load_run_summary
@@ -27,6 +28,7 @@ CITATION_KIND_PREFIXES = {
     "job": "JOB",
     "hash": "HASH",
     "indexed_document": "IDX",
+    "acquisition": "ACQ",
 }
 
 
@@ -87,8 +89,18 @@ class CaseDatabase:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA temp_store = MEMORY")
+        connection.execute("PRAGMA cache_size = -65536")
+        try:
+            connection.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.DatabaseError:
+            pass
         try:
             yield connection
+            try:
+                connection.execute("PRAGMA optimize")
+            except sqlite3.DatabaseError:
+                pass
             connection.commit()
         except Exception:
             connection.rollback()
@@ -543,9 +555,13 @@ class CaseDatabase:
         note: str = "",
         include_in_report: bool = False,
         reviewer: str = "",
+        assignee: str = "",
+        priority: str = "normal",
+        due_at: str = "",
     ) -> dict[str, object]:
         normalized_case_id = normalize_identifier(case_id, fallback="case")
         normalized_tags = normalize_tags(tags or [])
+        normalized_priority = normalize_review_priority(priority)
         timestamp = now_iso()
         with self.connect() as connection:
             apply_schema(connection)
@@ -559,6 +575,7 @@ class CaseDatabase:
                 """,
                 (normalized_case_id, target_type, target_id),
             ).fetchone()
+            previous_review = review_mark_to_dict(existing) if existing is not None else {}
             tags_json = json.dumps(normalized_tags, ensure_ascii=False)
             if existing is None:
                 citation_id = next_citation_id_for_connection(connection, normalized_case_id, "review")
@@ -567,9 +584,9 @@ class CaseDatabase:
                     INSERT INTO review_mark (
                         citation_id, case_id, target_type, target_id, status,
                         verification_status, tags_json, note, include_in_report,
-                        reviewer, created_at, updated_at
+                        reviewer, assignee, priority, due_at, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         citation_id,
@@ -582,6 +599,9 @@ class CaseDatabase:
                         note,
                         1 if include_in_report else 0,
                         reviewer,
+                        assignee,
+                        normalized_priority,
+                        due_at,
                         timestamp,
                         timestamp,
                     ),
@@ -592,7 +612,7 @@ class CaseDatabase:
                     """
                     UPDATE review_mark
                     SET status = ?, verification_status = ?, tags_json = ?, note = ?,
-                        include_in_report = ?, reviewer = ?, updated_at = ?
+                        include_in_report = ?, reviewer = ?, assignee = ?, priority = ?, due_at = ?, updated_at = ?
                     WHERE id = ?
                     """,
                     (
@@ -602,10 +622,40 @@ class CaseDatabase:
                         note,
                         1 if include_in_report else 0,
                         reviewer,
+                        assignee,
+                        normalized_priority,
+                        due_at,
                         timestamp,
                         existing["id"],
                     ),
                 )
+            current_review = {
+                "citation_id": citation_id,
+                "case_id": normalized_case_id,
+                "target_type": target_type,
+                "target_id": target_id,
+                "status": status,
+                "verification_status": verification_status,
+                "tags": normalized_tags,
+                "note": note,
+                "include_in_report": include_in_report,
+                "reviewer": reviewer,
+                "assignee": assignee,
+                "priority": normalized_priority,
+                "due_at": due_at,
+                "updated_at": timestamp,
+            }
+            insert_review_history(
+                connection,
+                case_id=normalized_case_id,
+                review_citation_id=citation_id,
+                target_type=target_type,
+                target_id=target_id,
+                previous_review=previous_review,
+                current_review=current_review,
+                actor=reviewer or "local-user",
+                changed_at=timestamp,
+            )
             connection.execute(
                 """
                 INSERT INTO audit_event (
@@ -630,6 +680,9 @@ class CaseDatabase:
                             "verification_status": verification_status,
                             "tags": normalized_tags,
                             "include_in_report": include_in_report,
+                            "assignee": assignee,
+                            "priority": normalized_priority,
+                            "due_at": due_at,
                         },
                         ensure_ascii=False,
                         sort_keys=True,
@@ -651,6 +704,9 @@ class CaseDatabase:
         note: str = "",
         include_in_report: bool = False,
         reviewer: str = "",
+        assignee: str = "",
+        priority: str = "normal",
+        due_at: str = "",
     ) -> dict[str, object]:
         marks: list[dict[str, object]] = []
         for target in targets:
@@ -669,6 +725,9 @@ class CaseDatabase:
                     note=note,
                     include_in_report=include_in_report,
                     reviewer=reviewer,
+                    assignee=assignee,
+                    priority=priority,
+                    due_at=due_at,
                 )
             )
         return {
@@ -703,6 +762,127 @@ class CaseDatabase:
             ).fetchall()
         return [review_mark_to_dict(row) for row in rows]
 
+    def record_acquisition_metadata(
+        self,
+        *,
+        case_id: str,
+        evidence_source_citation_id: str = "",
+        operator: str = "",
+        acquisition_started_at: str = "",
+        acquisition_completed_at: str = "",
+        source_identifier: str = "",
+        write_blocker: str = "",
+        acquisition_tool: str = "",
+        acquisition_tool_version: str = "",
+        whole_source_sha256: str = "",
+        notes: str = "",
+    ) -> dict[str, object]:
+        normalized_case_id = normalize_identifier(case_id, fallback="case")
+        timestamp = now_iso()
+        with self.connect() as connection:
+            apply_schema(connection)
+            case = connection.execute(
+                "SELECT case_id FROM case_record WHERE case_id = ?",
+                (normalized_case_id,),
+            ).fetchone()
+            if case is None:
+                raise CaseDatabaseError(f"case not found: {normalized_case_id}")
+            normalized_evidence_citation = evidence_source_citation_id.strip()
+            if normalized_evidence_citation:
+                evidence = connection.execute(
+                    """
+                    SELECT citation_id FROM evidence_source
+                    WHERE case_id = ? AND citation_id = ?
+                    LIMIT 1
+                    """,
+                    (normalized_case_id, normalized_evidence_citation),
+                ).fetchone()
+                if evidence is None:
+                    raise CaseDatabaseError(f"evidence source not found: {normalized_evidence_citation}")
+            citation_id = next_citation_id_for_connection(connection, normalized_case_id, "acquisition")
+            connection.execute(
+                """
+                INSERT INTO acquisition_metadata (
+                    citation_id, case_id, evidence_source_citation_id, operator,
+                    acquisition_started_at, acquisition_completed_at, source_identifier,
+                    write_blocker, acquisition_tool, acquisition_tool_version,
+                    whole_source_sha256, notes, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    citation_id,
+                    normalized_case_id,
+                    normalized_evidence_citation,
+                    operator.strip(),
+                    acquisition_started_at.strip(),
+                    acquisition_completed_at.strip(),
+                    source_identifier.strip(),
+                    write_blocker.strip(),
+                    acquisition_tool.strip(),
+                    acquisition_tool_version.strip(),
+                    whole_source_sha256.strip().lower(),
+                    notes.strip(),
+                    timestamp,
+                ),
+            )
+            audit_citation_id = next_citation_id_for_connection(connection, normalized_case_id, "audit")
+            connection.execute(
+                """
+                INSERT INTO audit_event (
+                    citation_id, case_id, actor, action, target_type, target_id,
+                    timestamp, tool_name, tool_version, params_json, result, error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    audit_citation_id,
+                    normalized_case_id,
+                    operator.strip() or "local-user",
+                    "acquisition.metadata.recorded",
+                    "acquisition_metadata",
+                    citation_id,
+                    timestamp,
+                    "rapidtriage",
+                    "",
+                    json.dumps(
+                        {
+                            "evidence_source_citation_id": normalized_evidence_citation,
+                            "source_identifier": source_identifier.strip(),
+                            "write_blocker_recorded": bool(write_blocker.strip()),
+                            "whole_source_sha256_recorded": bool(whole_source_sha256.strip()),
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    "ok",
+                    "",
+                ),
+            )
+            connection.execute(
+                "UPDATE case_record SET updated_at = ? WHERE case_id = ?",
+                (timestamp, normalized_case_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM acquisition_metadata WHERE citation_id = ?",
+                (citation_id,),
+            ).fetchone()
+        return acquisition_metadata_to_dict(row)
+
+    def list_acquisition_metadata(self, case_id: str) -> list[dict[str, object]]:
+        normalized_case_id = normalize_identifier(case_id, fallback="case")
+        with self.connect() as connection:
+            apply_schema(connection)
+            rows = connection.execute(
+                """
+                SELECT * FROM acquisition_metadata
+                WHERE case_id = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (normalized_case_id,),
+            ).fetchall()
+        return [acquisition_metadata_to_dict(row) for row in rows]
+
     def export_reviewed_items(
         self,
         *,
@@ -735,6 +915,13 @@ class CaseDatabase:
                 build_review_export_item(connection, normalized_case_id, review_mark_to_dict(row))
                 for row in review_rows
             ]
+            custody_workflow = build_custody_workflow(connection, normalized_case_id)
+            acquisition_hash_workflow = build_acquisition_hash_workflow(connection, normalized_case_id)
+            audit_integrity = build_audit_integrity_chain(connection, normalized_case_id)
+            acquisition_metadata = build_acquisition_metadata_record(connection, normalized_case_id)
+            timezone_validation = build_timezone_validation(connection, normalized_case_id)
+            clock_skew_analysis = build_clock_skew_analysis(connection, normalized_case_id)
+            contamination_warnings = build_evidence_contamination_warnings(connection, normalized_case_id)
         status_counts: dict[str, int] = {}
         verification_counts: dict[str, int] = {}
         for item in items:
@@ -743,6 +930,17 @@ class CaseDatabase:
             verification = str(review.get("verification_status") or "unverified")
             status_counts[status] = status_counts.get(status, 0) + 1
             verification_counts[verification] = verification_counts.get(verification, 0) + 1
+        validation_warning_count = sum(
+            len(assessment.get("warnings") or [])
+            for item in items
+            for assessment in [item.get("validation_assessment") if isinstance(item.get("validation_assessment"), Mapping) else {}]
+        )
+        legal_limitation_count = sum(
+            len(item.get("legal_limitations") or [])
+            for item in items
+            if isinstance(item.get("legal_limitations"), list)
+        )
+        citation_index = build_report_citation_index(items)
         return {
             "command": "case-db-report-export",
             "generated_at": now_iso(),
@@ -756,7 +954,32 @@ class CaseDatabase:
                 "exported_item_count": len(items),
                 "review_status_counts": status_counts,
                 "verification_status_counts": verification_counts,
+                "review_workflow_gap_ids": ["#51"],
+                "review_assignment_enabled": True,
+                "report_citation_gap_ids": ["#64"],
+                "evidence_selection_gap_ids": ["#65"],
+                "citation_count": len(citation_index),
+                "custody_event_count": custody_workflow["summary"]["custody_event_count"],
+                "acquisition_hash_count": acquisition_hash_workflow["summary"]["hash_count"],
+                "audit_chain_event_count": audit_integrity["summary"]["event_count"],
+                "validation_warning_count": validation_warning_count,
+                "legal_limitation_count": legal_limitation_count,
+                "acquisition_metadata_missing_count": acquisition_metadata["summary"]["missing_required_field_count"],
+                "timezone_missing_count": timezone_validation["summary"]["missing_timezone_count"],
+                "clock_skew_warning_count": clock_skew_analysis["summary"]["warning_count"],
+                "contamination_warning_count": contamination_warnings["summary"]["warning_count"],
             },
+            "citation_index": citation_index,
+            "report_citation_manager": build_report_citation_manager(citation_index),
+            "evidence_selection_version_history": build_evidence_selection_version_history(items),
+            "custody_workflow": custody_workflow,
+            "acquisition_hash_workflow": acquisition_hash_workflow,
+            "audit_integrity": audit_integrity,
+            "reproducibility": build_report_reproducibility_manifest(items, citation_index),
+            "acquisition_metadata": acquisition_metadata,
+            "timezone_validation": timezone_validation,
+            "clock_skew_analysis": clock_skew_analysis,
+            "contamination_warnings": contamination_warnings,
             "items": items,
         }
 
@@ -1091,6 +1314,70 @@ def next_citation_id_for_connection(connection: sqlite3.Connection, case_id: str
     return f"{case['citation_prefix']}-{prefix}-{value:0{CITATION_WIDTH}d}"
 
 
+def insert_review_history(
+    connection: sqlite3.Connection,
+    *,
+    case_id: str,
+    review_citation_id: str,
+    target_type: str,
+    target_id: str,
+    previous_review: Mapping[str, object],
+    current_review: Mapping[str, object],
+    actor: str,
+    changed_at: str,
+) -> None:
+    row = connection.execute(
+        """
+        SELECT COALESCE(MAX(version), 0) AS version
+        FROM review_mark_history
+        WHERE case_id = ? AND target_type = ? AND target_id = ?
+        """,
+        (case_id, target_type, target_id),
+    ).fetchone()
+    version = int(row["version"] or 0) + 1 if row is not None else 1
+    changed_fields = review_changed_fields(previous_review, current_review)
+    connection.execute(
+        """
+        INSERT INTO review_mark_history (
+            case_id, review_citation_id, target_type, target_id, version,
+            changed_at, actor, changed_fields_json, previous_json, current_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            case_id,
+            review_citation_id,
+            target_type,
+            target_id,
+            version,
+            changed_at,
+            actor,
+            json.dumps(changed_fields, ensure_ascii=False, sort_keys=True),
+            json.dumps(previous_review, ensure_ascii=False, sort_keys=True),
+            json.dumps(current_review, ensure_ascii=False, sort_keys=True),
+        ),
+    )
+
+
+def review_changed_fields(previous_review: Mapping[str, object], current_review: Mapping[str, object]) -> list[str]:
+    tracked = (
+        "status",
+        "verification_status",
+        "tags",
+        "note",
+        "include_in_report",
+        "reviewer",
+        "assignee",
+        "priority",
+        "due_at",
+    )
+    return [
+        field
+        for field in tracked
+        if previous_review.get(field) != current_review.get(field)
+    ]
+
+
 def open_case_database(path: Path) -> CaseDatabase:
     database = CaseDatabase(path)
     database.initialize()
@@ -1114,6 +1401,9 @@ def case_record_from_row(row: sqlite3.Row) -> CaseRecord:
 
 def apply_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(SCHEMA_SQL)
+    ensure_column(connection, "review_mark", "assignee", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(connection, "review_mark", "priority", "TEXT NOT NULL DEFAULT 'normal'")
+    ensure_column(connection, "review_mark", "due_at", "TEXT NOT NULL DEFAULT ''")
     current_version = get_schema_version(connection)
     if current_version not in (0, SCHEMA_VERSION):
         raise CaseDatabaseError(f"unsupported case DB schema version: {current_version}")
@@ -1125,6 +1415,12 @@ def apply_schema(connection: sqlite3.Connection) -> None:
         """,
         (str(SCHEMA_VERSION),),
     )
+
+
+def ensure_column(connection: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
+    columns = {str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table_name})")}
+    if column_name not in columns:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
 def get_schema_version(connection: sqlite3.Connection) -> int:
@@ -1599,6 +1895,16 @@ def parse_json_object(value: object) -> dict[str, object]:
     return dict(payload) if isinstance(payload, Mapping) else {}
 
 
+def parse_json_list(value: object) -> list[object]:
+    if isinstance(value, list):
+        return list(value)
+    try:
+        payload = json.loads(str(value or "[]"))
+    except json.JSONDecodeError:
+        return []
+    return list(payload) if isinstance(payload, list) else []
+
+
 def field_label(name: str, value: object) -> str:
     return f"{name}={value}" if value not in (None, "") else ""
 
@@ -2048,10 +2354,598 @@ def build_review_export_item(
         "path": str(enriched.get("path") or ""),
         "preview": str(enriched.get("preview") or ""),
         "review": dict(review),
+        "review_history": load_review_history(connection, case_id, target_type=target_type, target_id=target_id),
         "source_reference": enriched.get("source_reference") or {},
+        "commercial_gap_ids": ["#64", "#65"],
+        "report_citation_status": "citation-linked-validation-required",
+        "evidence_selection_status": "versioned-review-selection",
+        "provenance": build_report_item_provenance(enriched, review),
+        "validation_assessment": build_report_item_validation_assessment(enriched),
+        "legal_limitations": build_report_item_legal_limitations(enriched),
         "review_priority": enriched.get("review_priority") or {},
         "metadata": enriched.get("metadata") or {},
     }
+
+
+def load_review_history(
+    connection: sqlite3.Connection,
+    case_id: str,
+    *,
+    target_type: str,
+    target_id: str,
+) -> list[dict[str, object]]:
+    rows = connection.execute(
+        """
+        SELECT *
+        FROM review_mark_history
+        WHERE case_id = ? AND target_type = ? AND target_id = ?
+        ORDER BY version ASC, id ASC
+        """,
+        (case_id, target_type, target_id),
+    ).fetchall()
+    history = []
+    for row in rows:
+        history.append(
+            {
+                "version": int(row["version"]),
+                "review_citation_id": str(row["review_citation_id"]),
+                "changed_at": str(row["changed_at"]),
+                "actor": str(row["actor"] or ""),
+                "changed_fields": parse_json_list(row["changed_fields_json"]),
+                "previous": parse_json_object(row["previous_json"]),
+                "current": parse_json_object(row["current_json"]),
+                "commercial_gap_ids": ["#65"],
+                "history_status": "immutable-version-row",
+            }
+        )
+    return history
+
+
+def build_report_citation_index(items: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    citations: dict[str, dict[str, object]] = {}
+    for item in items:
+        review_id = str(item.get("review_citation_id") or "")
+        target_id = str(item.get("target_citation_id") or "")
+        if review_id:
+            citations[review_id] = {
+                "citation_id": review_id,
+                "role": "review-decision",
+                "target_type": str(item.get("target_type") or ""),
+                "target_id": str(item.get("target_id") or ""),
+                "title": str(item.get("title") or ""),
+                "commercial_gap_ids": ["#64"],
+                "report_use": "cite-review-decision-with-source-record",
+            }
+        if target_id:
+            citations[target_id] = {
+                "citation_id": target_id,
+                "role": "source-record",
+                "target_type": str(item.get("target_type") or ""),
+                "target_id": str(item.get("target_id") or ""),
+                "title": str(item.get("title") or ""),
+                "path": str(item.get("path") or ""),
+                "source_reference": item.get("source_reference") or {},
+                "commercial_gap_ids": ["#64"],
+                "report_use": "cite-source-record-with-review-decision",
+            }
+    return [citations[key] for key in sorted(citations)]
+
+
+def build_report_citation_manager(citation_index: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    return {
+        "component": "report-citation-manager",
+        "status": "implemented-baseline-validation-required",
+        "commercial_gap_ids": ["#64"],
+        "citation_count": len(citation_index),
+        "ready_for_court_report": False,
+        "blockers": [
+            "citation-index-depends-on-imported-source-reference-completeness",
+            "analyst-must-verify-source-hashes-parser-confidence-and-review-history-before-report-use",
+        ],
+        "recommended_validation": [
+            "Confirm every report item has both a review citation and source-record citation.",
+            "Preserve the exported citation index with the report and source hash manifest.",
+        ],
+    }
+
+
+def build_evidence_selection_version_history(items: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    history_count = sum(len(item.get("review_history") or []) for item in items if isinstance(item.get("review_history"), list))
+    return {
+        "component": "evidence-selection-version-history",
+        "status": "implemented-baseline-validation-required",
+        "commercial_gap_ids": ["#65"],
+        "selected_item_count": len(items),
+        "review_history_count": history_count,
+        "ready_for_court_report": False,
+        "blockers": [
+            "selection-history-is-local-sqlite-not-multi-user-signed-collaboration",
+            "review-inclusion-changes-still-require-source-verification-before-reporting",
+        ],
+        "recommended_validation": [
+            "Review version rows for status, verification, tags, assignee, priority, and include-in-report changes.",
+            "Export the Case DB report JSON with the final report so selection history remains reproducible.",
+        ],
+    }
+
+
+def build_custody_workflow(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+    evidence_rows = connection.execute(
+        """
+        SELECT citation_id, display_name, source_type, original_path, staged_path,
+               size_bytes, hash_sha256, status, added_at
+        FROM evidence_source
+        WHERE case_id = ?
+        ORDER BY id ASC
+        """,
+        (case_id,),
+    ).fetchall()
+    audit_rows = connection.execute(
+        """
+        SELECT citation_id, actor, action, target_type, target_id, timestamp, result
+        FROM audit_event
+        WHERE case_id = ?
+        ORDER BY timestamp ASC, id ASC
+        """,
+        (case_id,),
+    ).fetchall()
+    evidence_sources = [
+        {
+            "citation_id": str(row["citation_id"]),
+            "display_name": str(row["display_name"] or ""),
+            "source_type": str(row["source_type"] or ""),
+            "original_path": str(row["original_path"] or ""),
+            "staged_path": str(row["staged_path"] or ""),
+            "size_bytes": optional_int(row["size_bytes"]),
+            "sha256": str(row["hash_sha256"] or ""),
+            "status": str(row["status"] or ""),
+            "added_at": str(row["added_at"] or ""),
+        }
+        for row in evidence_rows
+    ]
+    custody_events = [
+        {
+            "citation_id": str(row["citation_id"]),
+            "actor": str(row["actor"] or ""),
+            "action": str(row["action"] or ""),
+            "target_type": str(row["target_type"] or ""),
+            "target_id": str(row["target_id"] or ""),
+            "timestamp": str(row["timestamp"] or ""),
+            "result": str(row["result"] or ""),
+        }
+        for row in audit_rows
+    ]
+    return {
+        "status": "case-db-custody-export",
+        "summary": {
+            "evidence_source_count": len(evidence_sources),
+            "custody_event_count": len(custody_events),
+        },
+        "evidence_sources": evidence_sources,
+        "custody_events": custody_events,
+        "limitations": [
+            "This is a Case DB custody export; acquisition device/write-blocker metadata must be recorded separately when available.",
+            "Original evidence images are not copied into report exports.",
+        ],
+    }
+
+
+def build_acquisition_hash_workflow(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+    evidence_rows = connection.execute(
+        """
+        SELECT citation_id, display_name, original_path, size_bytes, hash_md5, hash_sha1, hash_sha256, added_at
+        FROM evidence_source
+        WHERE case_id = ?
+        ORDER BY id ASC
+        """,
+        (case_id,),
+    ).fetchall()
+    hash_rows = connection.execute(
+        """
+        SELECT citation_id, target_type, target_id, hash_scope, algorithm, value, calculated_at
+        FROM hash_record
+        WHERE case_id = ?
+        ORDER BY id ASC
+        """,
+        (case_id,),
+    ).fetchall()
+    hashes = []
+    for row in evidence_rows:
+        algorithms = {
+            "md5": str(row["hash_md5"] or ""),
+            "sha1": str(row["hash_sha1"] or ""),
+            "sha256": str(row["hash_sha256"] or ""),
+        }
+        present = {key: value for key, value in algorithms.items() if value}
+        if present:
+            hashes.append(
+                {
+                    "citation_id": str(row["citation_id"]),
+                    "target_type": "evidence_source",
+                    "target_id": str(row["citation_id"]),
+                    "path": str(row["original_path"] or ""),
+                    "display_name": str(row["display_name"] or ""),
+                    "size_bytes": optional_int(row["size_bytes"]),
+                    "hashes": present,
+                    "calculated_at": str(row["added_at"] or ""),
+                }
+            )
+    for row in hash_rows:
+        hashes.append(
+            {
+                "citation_id": str(row["citation_id"]),
+                "target_type": str(row["target_type"] or ""),
+                "target_id": str(row["target_id"] or ""),
+                "hash_scope": str(row["hash_scope"] or ""),
+                "hashes": {str(row["algorithm"] or ""): str(row["value"] or "")},
+                "calculated_at": str(row["calculated_at"] or ""),
+            }
+        )
+    return {
+        "status": "case-db-hash-export",
+        "summary": {
+            "hash_count": len(hashes),
+            "evidence_source_hash_count": sum(1 for item in hashes if item.get("target_type") == "evidence_source"),
+        },
+        "hashes": hashes,
+        "limitations": [
+            "Folder evidence hashes describe imported files/outputs when available; whole-device acquisition hashes require acquisition metadata.",
+            "Missing hashes should be resolved before court exhibit export.",
+        ],
+    }
+
+
+def build_audit_integrity_chain(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+    rows = connection.execute(
+        """
+        SELECT citation_id, actor, action, target_type, target_id, timestamp,
+               tool_name, tool_version, params_json, result, error
+        FROM audit_event
+        WHERE case_id = ?
+        ORDER BY timestamp ASC, id ASC
+        """,
+        (case_id,),
+    ).fetchall()
+    events = []
+    previous_hash = ""
+    for row in rows:
+        event = {
+            "citation_id": str(row["citation_id"]),
+            "actor": str(row["actor"] or ""),
+            "action": str(row["action"] or ""),
+            "target_type": str(row["target_type"] or ""),
+            "target_id": str(row["target_id"] or ""),
+            "timestamp": str(row["timestamp"] or ""),
+            "tool_name": str(row["tool_name"] or ""),
+            "tool_version": str(row["tool_version"] or ""),
+            "params": parse_json_object(row["params_json"]),
+            "result": str(row["result"] or ""),
+            "error": str(row["error"] or ""),
+            "previous_event_hash": previous_hash,
+        }
+        event_hash = stable_payload_sha256(event)
+        event["event_hash"] = event_hash
+        previous_hash = event_hash
+        events.append(event)
+    return {
+        "status": "tamper-evident-export-chain",
+        "summary": {
+            "event_count": len(events),
+            "head_hash": previous_hash,
+        },
+        "events": events,
+        "limitations": [
+            "This hash chain is generated at export time from Case DB audit rows; external notarization/signing is still required for full immutability.",
+        ],
+    }
+
+
+def build_report_reproducibility_manifest(
+    items: Sequence[Mapping[str, object]],
+    citation_index: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    stable_payload = {
+        "items": items,
+        "citation_index": citation_index,
+    }
+    return {
+        "status": "deterministic-export-manifest",
+        "stable_payload_sha256": stable_payload_sha256(stable_payload),
+        "stable_item_count": len(items),
+        "citation_count": len(citation_index),
+        "deterministic_sort": "review include flag, updated_at, id; citation index sorted by citation_id",
+        "volatile_fields": ["generated_at", "database path", "case updated_at"],
+    }
+
+
+def build_report_item_validation_assessment(enriched: Mapping[str, object]) -> dict[str, object]:
+    source_reference = enriched.get("source_reference") if isinstance(enriched.get("source_reference"), Mapping) else {}
+    metadata = enriched.get("metadata") if isinstance(enriched.get("metadata"), Mapping) else {}
+    warnings: list[str] = []
+    parser_confidence = source_reference.get("parser_confidence") or metadata.get("parser_confidence")
+    reportability = str(source_reference.get("reportability") or metadata.get("reportability") or "")
+    coverage_status = str(source_reference.get("coverage_status") or metadata.get("coverage_status") or "")
+    if not source_reference.get("source_hashes") and not source_reference.get("record_hashes"):
+        warnings.append("source-hash-not-present-in-record")
+    if not parser_confidence:
+        warnings.append("parser-confidence-not-present")
+    if reportability and reportability not in {"reportable", "reviewed-reportable"}:
+        warnings.append(f"reportability-{reportability}")
+    if coverage_status and coverage_status not in {"implemented", "fixture-backed-baseline"}:
+        warnings.append(f"coverage-{coverage_status}")
+    if metadata.get("validation_required") is True:
+        warnings.append("source-parser-validation-required")
+    if metadata.get("commercial_grade_ready") is False:
+        warnings.append("commercial-grade-ready-false")
+    return {
+        "parser_confidence": parser_confidence,
+        "reportability": reportability,
+        "coverage_status": coverage_status,
+        "validation_required": bool(warnings),
+        "warnings": warnings,
+        "guidance": "Resolve validation warnings and verify source evidence before using this item as a final report conclusion.",
+    }
+
+
+def build_report_item_legal_limitations(enriched: Mapping[str, object]) -> list[str]:
+    metadata = enriched.get("metadata") if isinstance(enriched.get("metadata"), Mapping) else {}
+    limitations = metadata.get("legal_limitations") or metadata.get("limitations") or metadata.get("commercial_grade_blockers")
+    if isinstance(limitations, list):
+        return [str(item) for item in limitations if str(item).strip()]
+    source = str(enriched.get("source") or "")
+    if source in {"artifacts", "indicators"}:
+        return ["Artifact parser output should be validated against source evidence before testimony."]
+    if source == "documents":
+        return ["Indexed text can omit formatting, embedded objects, OCR uncertainty, or unsupported encodings."]
+    if source == "files":
+        return ["File metadata alone does not prove user intent or execution."]
+    if source == "timeline":
+        return ["Timeline rows require timezone and source-parser validation before final conclusions."]
+    return ["Review source evidence, hashes, and parser limitations before report use."]
+
+
+def build_acquisition_metadata_record(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+    case = connection.execute("SELECT * FROM case_record WHERE case_id = ?", (case_id,)).fetchone()
+    evidence_rows = connection.execute(
+        """
+        SELECT citation_id, original_path, staged_path, hash_sha256, size_bytes, added_at
+        FROM evidence_source
+        WHERE case_id = ?
+        ORDER BY id ASC
+        """,
+        (case_id,),
+    ).fetchall()
+    metadata_rows = connection.execute(
+        """
+        SELECT * FROM acquisition_metadata
+        WHERE case_id = ?
+        ORDER BY created_at ASC, id ASC
+        """,
+        (case_id,),
+    ).fetchall()
+    required_fields = [
+        "operator",
+        "acquisition_started_at",
+        "acquisition_completed_at",
+        "source_identifier",
+        "write_blocker",
+        "whole_source_sha256",
+    ]
+    acquisition_records = [acquisition_metadata_to_dict(row) for row in metadata_rows]
+    missing_by_record = [
+        {
+            "citation_id": str(record.get("citation_id") or ""),
+            "missing_required_fields": [
+                field for field in required_fields if not str(record.get(field) or "").strip()
+            ],
+        }
+        for record in acquisition_records
+    ]
+    if acquisition_records:
+        missing = sorted(
+            {
+                field
+                for record in acquisition_records
+                for field in required_fields
+                if not str(record.get(field) or "").strip()
+            }
+        )
+    else:
+        missing = list(required_fields)
+    case_metadata = {
+        "examiner": str(case["examiner"] or "") if case else "",
+        "organization": str(case["organization"] or "") if case else "",
+        "case_root": str(case["case_root"] or "") if case else "",
+    }
+    evidence_sources = [
+        {
+            "citation_id": str(row["citation_id"]),
+            "original_path": str(row["original_path"] or ""),
+            "staged_path": str(row["staged_path"] or ""),
+            "size_bytes": optional_int(row["size_bytes"]),
+            "sha256": str(row["hash_sha256"] or ""),
+            "added_at": str(row["added_at"] or ""),
+        }
+        for row in evidence_rows
+    ]
+    status = "metadata-recorded" if acquisition_records and not missing else "metadata-check-required"
+    return {
+        "status": status,
+        "case_metadata": case_metadata,
+        "evidence_sources": evidence_sources,
+        "records": acquisition_records,
+        "missing_by_record": missing_by_record,
+        "required_fields": required_fields,
+        "missing_required_fields": missing,
+        "summary": {
+            "evidence_source_count": len(evidence_sources),
+            "metadata_record_count": len(acquisition_records),
+            "missing_required_field_count": len(missing),
+        },
+        "guidance": "Record acquisition operator, device/source identifier, write-blocker details, acquisition timestamps, and whole-source hashes before final submission.",
+    }
+
+
+def build_timezone_validation(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+    rows = connection.execute(
+        """
+        SELECT timestamp, timezone, timestamp_kind, source, event_type
+        FROM event
+        WHERE case_id = ?
+        ORDER BY timestamp ASC, id ASC
+        """,
+        (case_id,),
+    ).fetchall()
+    missing = 0
+    timezone_counts: dict[str, int] = {}
+    samples = []
+    for row in rows:
+        timezone = str(row["timezone"] or "")
+        if not timezone:
+            missing += 1
+        else:
+            timezone_counts[timezone] = timezone_counts.get(timezone, 0) + 1
+        if len(samples) < 20:
+            samples.append(
+                {
+                    "timestamp": str(row["timestamp"] or ""),
+                    "timezone": timezone,
+                    "timestamp_kind": str(row["timestamp_kind"] or ""),
+                    "source": str(row["source"] or ""),
+                    "event_type": str(row["event_type"] or ""),
+                }
+            )
+    return {
+        "status": "timezone-review-required" if missing else "timezone-fields-present",
+        "summary": {
+            "event_count": len(rows),
+            "missing_timezone_count": missing,
+            "timezone_counts": timezone_counts,
+        },
+        "samples": samples,
+        "guidance": "Preserve original timestamp, source timezone, normalized UTC assumption, and parser-specific timezone notes in final reports.",
+    }
+
+
+def build_clock_skew_analysis(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+    rows = connection.execute(
+        """
+        SELECT timestamp, source, event_type, description
+        FROM event
+        WHERE case_id = ?
+        ORDER BY timestamp ASC, id ASC
+        """,
+        (case_id,),
+    ).fetchall()
+    warnings = []
+    parsed_times: list[dt.datetime] = []
+    now = dt.datetime.now(dt.timezone.utc)
+    for row in rows:
+        parsed = parse_event_timestamp(str(row["timestamp"] or ""))
+        if parsed is None:
+            continue
+        parsed_times.append(parsed)
+        if parsed.year < 1980:
+            warnings.append({"type": "timestamp-before-1980", "timestamp": str(row["timestamp"]), "source": str(row["source"] or "")})
+        if parsed > now + dt.timedelta(days=2):
+            warnings.append({"type": "timestamp-in-future", "timestamp": str(row["timestamp"]), "source": str(row["source"] or "")})
+    return {
+        "status": "warnings-present" if warnings else "no-obvious-clock-skew",
+        "summary": {
+            "event_count": len(rows),
+            "parsed_timestamp_count": len(parsed_times),
+            "warning_count": len(warnings),
+            "earliest_timestamp": min((value.isoformat() for value in parsed_times), default=""),
+            "latest_timestamp": max((value.isoformat() for value in parsed_times), default=""),
+        },
+        "warnings": warnings[:100],
+        "guidance": "Clock skew detection is heuristic; compare against acquisition notes, system timezone, and trusted external timestamps.",
+    }
+
+
+def build_evidence_contamination_warnings(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+    rows = connection.execute(
+        """
+        SELECT citation_id, original_path, staged_path
+        FROM evidence_source
+        WHERE case_id = ?
+        ORDER BY id ASC
+        """,
+        (case_id,),
+    ).fetchall()
+    warnings = []
+    for row in rows:
+        original = Path(str(row["original_path"] or "")).expanduser()
+        staged = Path(str(row["staged_path"] or "")).expanduser()
+        try:
+            if original.exists() and original.is_dir() and (original / "rapidtriage-run-summary.json").exists():
+                warnings.append({"type": "rapidtriage-output-inside-evidence-root", "citation_id": str(row["citation_id"]), "path": str(original)})
+            if original.exists() and original.is_dir() and staged.exists() and is_relative_to(staged.resolve(), original.resolve()):
+                warnings.append({"type": "staged-output-under-evidence-root", "citation_id": str(row["citation_id"]), "path": str(staged)})
+            if original.exists() and original.is_file() and original.stat().st_size == 0:
+                warnings.append({"type": "zero-byte-source", "citation_id": str(row["citation_id"]), "path": str(original)})
+        except OSError:
+            warnings.append({"type": "source-path-stat-failed", "citation_id": str(row["citation_id"]), "path": str(original)})
+    return {
+        "status": "warnings-present" if warnings else "no-obvious-contamination",
+        "summary": {
+            "warning_count": len(warnings),
+        },
+        "warnings": warnings,
+        "guidance": "Use write-blocked sources and keep RapidTriage outputs outside evidence roots whenever possible.",
+    }
+
+
+def parse_event_timestamp(value: str) -> dt.datetime | None:
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def is_relative_to(child: Path, parent: Path) -> bool:
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def build_report_item_provenance(
+    enriched: Mapping[str, object],
+    review: Mapping[str, object],
+) -> dict[str, object]:
+    source_reference = enriched.get("source_reference") if isinstance(enriched.get("source_reference"), Mapping) else {}
+    metadata = enriched.get("metadata") if isinstance(enriched.get("metadata"), Mapping) else {}
+    hashes = source_reference.get("source_hashes") if isinstance(source_reference.get("source_hashes"), Mapping) else {}
+    record_hashes = source_reference.get("record_hashes") if isinstance(source_reference.get("record_hashes"), Mapping) else {}
+    return {
+        "target_citation_id": str(enriched.get("citation_id") or ""),
+        "review_citation_id": str(review.get("citation_id") or ""),
+        "source_path": str(source_reference.get("path") or enriched.get("path") or ""),
+        "hashes": dict(hashes),
+        "record_hashes": dict(record_hashes),
+        "parser": str(source_reference.get("parser") or metadata.get("parser") or ""),
+        "parser_version": str(source_reference.get("parser_version") or metadata.get("parser_version") or ""),
+        "parser_confidence": source_reference.get("parser_confidence") or metadata.get("parser_confidence"),
+        "record_offset": source_reference.get("record_offset"),
+        "source_index": source_reference.get("source_index"),
+        "review_status": str(review.get("status") or ""),
+        "verification_status": str(review.get("verification_status") or ""),
+        "reportability": str(source_reference.get("reportability") or metadata.get("reportability") or ""),
+        "evidence_strength": str(source_reference.get("evidence_strength") or metadata.get("evidence_strength") or ""),
+    }
+
+
+def stable_payload_sha256(payload: Mapping[str, object] | Sequence[Mapping[str, object]]) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def load_review_target_match(
@@ -2200,11 +3094,24 @@ def normalize_tags(tags: Iterable[str]) -> list[str]:
     return normalized
 
 
+def normalize_review_priority(value: str) -> str:
+    normalized = str(value or "normal").strip().lower()
+    aliases = {"medium": "normal", "med": "normal", "p0": "urgent", "p1": "high", "p2": "normal", "p3": "low"}
+    normalized = aliases.get(normalized, normalized)
+    supported = {"urgent", "high", "normal", "low"}
+    if normalized not in supported:
+        raise CaseDatabaseError(f"unsupported review priority {normalized!r}; expected one of: {', '.join(sorted(supported))}")
+    return normalized
+
+
 def review_mark_to_dict(row: sqlite3.Row) -> dict[str, object]:
     try:
         tags = json.loads(str(row["tags_json"] or "[]"))
     except json.JSONDecodeError:
         tags = []
+    assignee = str(row["assignee"] or "") if "assignee" in row.keys() else ""
+    priority = str(row["priority"] or "normal") if "priority" in row.keys() else "normal"
+    due_at = str(row["due_at"] or "") if "due_at" in row.keys() else ""
     return {
         "citation_id": str(row["citation_id"]),
         "case_id": str(row["case_id"]),
@@ -2216,8 +3123,44 @@ def review_mark_to_dict(row: sqlite3.Row) -> dict[str, object]:
         "note": str(row["note"] or ""),
         "include_in_report": bool(row["include_in_report"]),
         "reviewer": str(row["reviewer"] or ""),
+        "assignee": assignee,
+        "priority": priority,
+        "due_at": due_at,
+        "review_workflow": review_workflow_assessment(assignee=assignee, priority=priority, due_at=due_at),
+        "evidence_selection_versioning": {
+            "commercial_gap_ids": ["#65"],
+            "status": "versioned-review-mark",
+            "include_in_report": bool(row["include_in_report"]),
+            "ready_for_court_report": False,
+        },
         "created_at": str(row["created_at"]),
         "updated_at": str(row["updated_at"]),
+    }
+
+
+def review_workflow_assessment(*, assignee: str, priority: str, due_at: str) -> dict[str, object]:
+    return {
+        "commercial_gap_ids": ["#51"],
+        "status": "implemented-baseline-validation-required",
+        "assignment_present": bool(assignee),
+        "priority": priority,
+        "due_at": due_at,
+        "ready_for_court_report": False,
+        "blockers": [
+            "local-single-database-review-workflow-until-role-based-server-is-enabled",
+            "review-status-does-not-replace-source-verification-and-parser-validation",
+        ],
+        "supported_fields": [
+            "status",
+            "verification_status",
+            "reviewer",
+            "assignee",
+            "priority",
+            "due_at",
+            "tags",
+            "include_in_report",
+            "history",
+        ],
     }
 
 
@@ -2240,6 +3183,26 @@ def saved_search_to_dict(row: sqlite3.Row) -> dict[str, object]:
         "created_at": str(row["created_at"]),
         "updated_at": str(row["updated_at"]),
         "last_run_at": str(row["last_run_at"] or ""),
+    }
+
+
+def acquisition_metadata_to_dict(row: sqlite3.Row | None) -> dict[str, object]:
+    if row is None:
+        return {}
+    return {
+        "citation_id": str(row["citation_id"]),
+        "case_id": str(row["case_id"]),
+        "evidence_source_citation_id": str(row["evidence_source_citation_id"] or ""),
+        "operator": str(row["operator"] or ""),
+        "acquisition_started_at": str(row["acquisition_started_at"] or ""),
+        "acquisition_completed_at": str(row["acquisition_completed_at"] or ""),
+        "source_identifier": str(row["source_identifier"] or ""),
+        "write_blocker": str(row["write_blocker"] or ""),
+        "acquisition_tool": str(row["acquisition_tool"] or ""),
+        "acquisition_tool_version": str(row["acquisition_tool_version"] or ""),
+        "whole_source_sha256": str(row["whole_source_sha256"] or ""),
+        "notes": str(row["notes"] or ""),
+        "created_at": str(row["created_at"]),
     }
 
 
@@ -2326,6 +3289,24 @@ CREATE TABLE IF NOT EXISTS hash_record (
     algorithm TEXT NOT NULL,
     value TEXT NOT NULL,
     calculated_at TEXT NOT NULL,
+    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS acquisition_metadata (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    citation_id TEXT NOT NULL UNIQUE,
+    case_id TEXT NOT NULL,
+    evidence_source_citation_id TEXT NOT NULL DEFAULT '',
+    operator TEXT NOT NULL DEFAULT '',
+    acquisition_started_at TEXT NOT NULL DEFAULT '',
+    acquisition_completed_at TEXT NOT NULL DEFAULT '',
+    source_identifier TEXT NOT NULL DEFAULT '',
+    write_blocker TEXT NOT NULL DEFAULT '',
+    acquisition_tool TEXT NOT NULL DEFAULT '',
+    acquisition_tool_version TEXT NOT NULL DEFAULT '',
+    whole_source_sha256 TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
     FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE
 );
 
@@ -2418,8 +3399,26 @@ CREATE TABLE IF NOT EXISTS review_mark (
     note TEXT NOT NULL DEFAULT '',
     include_in_report INTEGER NOT NULL DEFAULT 0,
     reviewer TEXT NOT NULL DEFAULT '',
+    assignee TEXT NOT NULL DEFAULT '',
+    priority TEXT NOT NULL DEFAULT 'normal',
+    due_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS review_mark_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id TEXT NOT NULL,
+    review_citation_id TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    changed_at TEXT NOT NULL,
+    actor TEXT NOT NULL DEFAULT '',
+    changed_fields_json TEXT NOT NULL DEFAULT '[]',
+    previous_json TEXT NOT NULL DEFAULT '{}',
+    current_json TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY (case_id) REFERENCES case_record(case_id) ON DELETE CASCADE
 );
 
@@ -2496,10 +3495,12 @@ CREATE TABLE IF NOT EXISTS job_step (
 CREATE INDEX IF NOT EXISTS idx_evidence_source_case ON evidence_source(case_id);
 CREATE INDEX IF NOT EXISTS idx_file_record_case_path ON file_record(case_id, normalized_path);
 CREATE INDEX IF NOT EXISTS idx_hash_record_case_scope ON hash_record(case_id, hash_scope, algorithm);
+CREATE INDEX IF NOT EXISTS idx_acquisition_metadata_case_source ON acquisition_metadata(case_id, evidence_source_citation_id);
 CREATE INDEX IF NOT EXISTS idx_artifact_case_type ON artifact(case_id, artifact_type);
 CREATE INDEX IF NOT EXISTS idx_event_case_time ON event(case_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_indexed_document_case_source ON indexed_document(case_id, source_type);
 CREATE INDEX IF NOT EXISTS idx_review_mark_case_status ON review_mark(case_id, status, verification_status);
+CREATE INDEX IF NOT EXISTS idx_review_mark_history_target ON review_mark_history(case_id, target_type, target_id, version);
 CREATE INDEX IF NOT EXISTS idx_saved_search_case_name ON saved_search(case_id, name);
 CREATE INDEX IF NOT EXISTS idx_audit_event_case_time ON audit_event(case_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_report_item_case_section ON report_item(case_id, section, order_index);

@@ -9,6 +9,7 @@ from typing import Any
 
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.reporting import build_run_report_context, render_run_markdown_report
+from rapidtriage.core.silent_failure import build_silent_failure_report
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
 
@@ -161,6 +162,31 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("Read-only mode was enabled", report_text)
             self.assertIn("docs-extract` status=`skipped", report_text)
 
+    def test_silent_failure_detector_flags_target_files_without_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            logs = root / "Windows" / "System32" / "winevt" / "Logs"
+            logs.mkdir(parents=True)
+            (logs / "Security.evtx").write_bytes(b"ElfFile\x00")
+
+            report = build_silent_failure_report(
+                root=root,
+                docs_payload={"summary": {"candidate_count": 0, "match_count": 0}},
+                files_payload={"summary": {"scanned_file_count": 1, "candidate_count": 0}},
+                docs_extract_payload={"summary": {"selected_count": 0, "extracted_count": 0, "skipped_count": 0}},
+                files_extract_payload={"summary": {"selected_count": 0, "extracted_count": 0, "skipped_count": 0}},
+                artifact_payloads={"eventlog": {"summary": {"artifact_count": 0, "parser_error_count": 0}}},
+                timeline_payload={"summary": {"event_count": 0}},
+                safety={},
+            )
+
+            self.assertEqual(report["status"], "warning")
+            self.assertTrue(report["silent_failure_risk"])
+            self.assertGreaterEqual(report["risk_check_count"], 1)
+            self.assertEqual(report["target_inventory"]["target_counts"]["eventlog"], 1)
+            warning_ids = {item["id"] for item in report["checks"] if item["level"] == "warning"}
+            self.assertIn("artifact-yield-eventlog", warning_ids)
+
     def test_run_resume_reuses_valid_stage_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "case-root"
@@ -178,7 +204,13 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("docs", summary_payload["safety"]["reused_outputs"])
             self.assertIn("files", summary_payload["safety"]["reused_outputs"])
             self.assertIn("timeline", summary_payload["safety"]["reused_outputs"])
+            self.assertTrue(summary_payload["safety"]["resume_effective"])
             self.assertGreaterEqual(summary_payload["processing"]["reused_output_count"], 5)
+            self.assertIn("checkpoints", summary_payload["outputs"])
+            checkpoints = json.loads((output_dir / "rapidtriage-run-checkpoints.json").read_text(encoding="utf-8"))
+            self.assertEqual(checkpoints["command"], "run-checkpoints")
+            self.assertTrue(checkpoints["resume"]["effective"])
+            self.assertGreaterEqual(checkpoints["summary"]["reused_count"], 5)
 
             step_statuses = {step["name"]: step["status"] for step in summary_payload["steps"]}
             self.assertEqual(step_statuses["docs"], "reused")
@@ -373,6 +405,9 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(Path(summary_payload["outputs"]["summary"]).resolve(), summary_path.resolve())
             self.assertEqual(Path(summary_payload["outputs"]["report"]).resolve(), report_path.resolve())
             self.assertGreaterEqual(summary_payload["summary"]["timeline_event_count"], 1)
+            self.assertIn("silent_failure_detection", summary_payload)
+            self.assertIn("silent_failure_risk", summary_payload["summary"])
+            self.assertIn("silent-failure-detector", {step["name"] for step in summary_payload["steps"]})
             self.assertGreaterEqual(timeline_payload["summary"]["event_count"], 1)
             self.assertIn("recent_file_candidates", summary_payload["highlights"])
             self.assertIn("large_file_candidates", summary_payload["highlights"])
@@ -418,6 +453,7 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("matched rules", report_text.lower())
             self.assertIn("artifact summary", report_text.lower())
             self.assertIn("indicator pivots", report_text.lower())
+            self.assertIn("silent failure detector", report_text.lower())
             self.assertIn("timeline", report_text.lower())
             self.assertIn("extract results", report_text.lower())
 

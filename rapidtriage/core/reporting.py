@@ -33,6 +33,7 @@ def build_run_report_context(
     artifact_outputs = summary.get("artifacts", {})
     keyword_counts = summary.get("matched_keyword_counts", {})
     file_category_counts = summary.get("file_category_counts", {})
+    silent_failure = summary_payload.get("silent_failure_detection", {})
 
     return {
         "overview": {
@@ -75,6 +76,9 @@ def build_run_report_context(
             "warnings": list(processing.get("warnings", [])) if isinstance(processing, Mapping) and isinstance(processing.get("warnings", []), list) else [],
             "decisions": build_processing_decision_rows(steps, processing if isinstance(processing, Mapping) else {}),
         },
+        "silent_failure_detection": build_silent_failure_context(
+            silent_failure if isinstance(silent_failure, Mapping) else {}
+        ),
         "summary": {
             "document_candidate_count": summary["document_candidate_count"],
             "document_match_count": summary["document_match_count"],
@@ -180,11 +184,30 @@ def build_indicator_summary_rows(payload: Mapping[str, object], *, limit: int = 
     return rows
 
 
+def build_silent_failure_context(payload: Mapping[str, object]) -> dict[str, object]:
+    checks = payload.get("checks", [])
+    risk_checks = []
+    if isinstance(checks, list):
+        risk_checks = [
+            dict(item)
+            for item in checks
+            if isinstance(item, Mapping) and str(item.get("level")) in {"warning", "failed"}
+        ]
+    return {
+        "status": str(payload.get("status") or "unknown"),
+        "silent_failure_risk": bool(payload.get("silent_failure_risk")),
+        "check_count": int(payload.get("check_count") or 0),
+        "risk_check_count": int(payload.get("risk_check_count") or 0),
+        "risk_checks": risk_checks,
+    }
+
+
 def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
     overview = report_context["overview"]
     profile = report_context["profile"]
     steps = report_context["steps"]
     processing = report_context["processing"]
+    silent_failure = report_context.get("silent_failure_detection", {})
     summary = report_context["summary"]
 
     lines = [
@@ -233,6 +256,27 @@ def render_run_markdown_report(report_context: Mapping[str, object]) -> str:
             lines.append(f"- `{item.get('step')}` [{item.get('level')}]: {item.get('message')}")
     else:
         lines.append("- none")
+
+    if isinstance(silent_failure, Mapping):
+        lines.extend(
+            [
+                "",
+                "### Silent failure detector",
+                "",
+                f"- Status: `{silent_failure.get('status', 'unknown')}`",
+                f"- Risk detected: `{silent_failure.get('silent_failure_risk', False)}`",
+                f"- Risk checks: `{silent_failure.get('risk_check_count', 0)}` / `{silent_failure.get('check_count', 0)}`",
+            ]
+        )
+        risk_checks = silent_failure.get("risk_checks", [])
+        if isinstance(risk_checks, list) and risk_checks:
+            for item in risk_checks[:10]:
+                if isinstance(item, Mapping):
+                    lines.append(
+                        f"- `{item.get('id', '')}` [{item.get('level', '')}]: {item.get('message', '')} ({item.get('detail', '')})"
+                    )
+        else:
+            lines.append("- No high-risk silent-failure checks were detected.")
 
     lines.extend(["", "### Processing decisions / skipped, capped, reused", ""])
     if processing.get("decisions"):

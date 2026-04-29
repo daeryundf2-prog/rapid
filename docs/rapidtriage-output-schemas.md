@@ -98,6 +98,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `summary`
   - `results`
 - Each result includes `comparison_id`, `status`, `timestamp`, `path`, `left_path`, `right_path`, `summary`, per-field differences, input descriptors, and a bounded unified text diff when both files are safe UTF-8 text under the configured byte cap.
+- With three or more input files, `options.mode` is `multi`, `inputs.baseline` is the first file, `inputs.items` lists every file, and `results[]` contains one pairwise comparison from the baseline to each remaining file.
 - `case` can bookmark `/results/<index>` rows from compare JSON, and `case-report` renders those reviewed rows under `A/B compare review pivots`.
 
 ### `docs`
@@ -139,6 +140,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `categories`
   - `reasons`
 - Default categories include documents, archives, databases, executables, emails, AXIOM-aligned disk/mobile images, memory dumps, vehicle exports, and image/OCR candidates.
+- File scan summaries include `duplicate_group_count` and `duplicate_file_count`; `duplicate_content_groups` contains bounded SHA-256 duplicate groups with representative paths.
 
 ### `extract`
 
@@ -167,6 +169,50 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - from `files`: `categories`
   - from `docs`: `kind`, `matched_keywords`
 
+### `run`
+
+- Output: `rapidtriage-run-summary.json`, `rapidtriage-run-report.md`, `rapidtriage-run-fingerprint.json`, and `rapidtriage-run-checkpoints.json`.
+- Summary `outputs` includes `fingerprint` and `checkpoints` in addition to manifest, docs, files, artifacts, timeline, indicators, report, and extraction manifests.
+- `safety.resume`, `safety.resume_effective`, `safety.resume_disabled_reason`, and `safety.reused_outputs` describe whether stage output reuse was requested, allowed, and applied.
+- `resource_caps` records bounded extraction/fingerprint/preview settings, and `safety.artifact_scheduler` records the bounded parallel artifact scheduler strategy.
+- `rapidtriage-run-fingerprint.json` stores a bounded source tree fingerprint with scanned file count, total size, latest mtime, max files, and truncation status.
+- `rapidtriage-run-checkpoints.json` stores per-stage output paths, existence, size, reused flag, status counts, and the input fingerprint used for resume decisions.
+- Paged API wrappers include `pagination.cursor`, `next_cursor`, and `previous_cursor` alongside offset fields.
+
+### `search`
+
+- Output: `rapidtriage-search.json`
+- Top-level keys:
+  - `command`
+  - `generated_at`
+  - `run_summary`
+  - `keywords`
+  - `options`
+  - `summary`
+  - `matches`
+  - `ocr`
+  - `analysis` unless `--no-analysis` is used
+- Each match includes `source`, `kind`, `path`, `title`, `matched_keywords`, `preview`, `pointer`, `metadata`, and `search_match`.
+- `options.search_mode` is `exact`, `fuzzy`, or `regex`; `search_match` records #61 matching mode, fuzzy distance where applicable, proximity-window result when requested, and validation-required status.
+- `analysis.clusters` groups repeated hits by source, kind, extension, folder, and keyword, with representative match indices, #46 status, and review hints so large searches can be triaged before opening every row.
+- `analysis.entities` extracts bounded pattern/field-based people, account, email, phone, URL, domain, IPv4, and hash pivots linked back to match indices with #47 status.
+- `analysis.graph` emits capped nodes and edges for match-path-keyword-entity relationships for the web relationship view with #48 graph limitations.
+- `analysis.timeline` extracts timestamp anchors from matched metadata and sorts them for quick chronological correlation with #49 validation warnings.
+- `analysis.deduplication` emits #60 duplicate groups with fingerprints, representative previews, match indices, paths, source lists, duplicate/unique counts, candidate duplicate-resolution status, and report-grade validation blockers.
+- `analysis.workbook` creates draft hypotheses, review questions, and next actions with #50 status; it is a triage aid and must be verified against source rows and hashes.
+
+### `source-preview` API
+
+- Endpoint: `GET /api/runs/{run_id}/source-preview?path=...`
+- Common keys: `command`, `path`, `name`, `size`, `mime_type`, `download_url`, `metadata_url`, `search_url`, `viewer_actions`, `viewer_limitations`, `viewer_sandbox`, `viewer_metadata`, `review_workflow`, `compare_workflow`, and `preview_type`.
+- Structured preview types include `text`, `image`, `sqlite`, `json`, `xml`, `email`, `media`, and `hex`.
+- `viewer_sandbox` states read-only bounded rendering, no content execution, active-content blocking status, external-network prohibition, and byte/character caps.
+- Review and compare viewer actions expose #51/#52 status fields for reviewer, assignee, priority, due date, report inclusion, and A/B/C pinning, but final report use still requires source verification.
+- `hex` previews are bounded read-only rows with `offset`, `offset_hex`, `hex`, `ascii`, `bytes_read`, `max_bytes`, `offset_navigation`, #53 assessment, and `truncated`; they are for triage and byte-offset orientation, not a replacement for source-file validation.
+- `sqlite` previews include table profiles, schema SQL, column details, index hints, bounded rows, text-column search support, and #54 assessment.
+- `email` previews include bounded messages plus `threads` and `conversation_view` with `thread_id`, subject, participants, message order, date range, attachment counts, and #55 assessment.
+- `media` previews include MIME type, bounded metadata, WAV duration/channel/sample-rate when available, #57 transcript sidecar rows, cue counts, sidecar hashes when bounded, review-aid validation status, and explicit playback/transcript verification limitations.
+
 ### `indicators`
 
 - Schema: `rapidtriage/schemas/indicators.schema.json`
@@ -182,6 +228,15 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - Supported indicator types are `url`, `domain`, `ip`, `md5`, `sha1`, and `sha256`.
 - Source rows keep the originating run output, output path, JSON pointer, and path/artifact/event context where available.
 - When `--rules` is provided, matching local IOC rules are emitted as `matched_rules`; no external threat-intelligence API is contacted by default.
+- When `--ti-feed` is provided, matching local feed rows are emitted as #63 `ti_enrichment` with `severity`, `classification`, `source`, `note`, feed provenance, validation status, and local-only assessment. `summary.enriched_indicator_count` counts enriched IOCs.
+
+### `case-db-report`
+
+- Output: `case-db-report` JSON from `rapidtriage case-db-report`.
+- Top-level keys include `command`, `generated_at`, `database`, `case`, `options`, `summary`, `citation_index`, and `items`.
+- `citation_index` links #64 review decision citations to source-record citations with target type/id, title, path, source-reference metadata, and report-use hints where available.
+- Each item includes `review_citation_id`, `target_citation_id`, `review`, `review_history`, `source_reference`, `review_priority`, #64/#65 gap metadata, and the underlying source metadata.
+- `review_history` is ordered by version and records #65 changed fields, actor, timestamp, previous state, and current state for report-inclusion and review decision traceability.
 
 ### `submission-manifest`
 
@@ -225,8 +280,9 @@ Android APK collector rows:
 
 - `android-apk-artifacts`
   - `android-apk`
+  - `android-app-data`
 
-Current Android APK rows carry `parser`, `parser_version`, `source_path`, `source_format`, `hashes`, `package`, `version_name`, `permissions`, `dangerous_permissions`, `dex_count`, `native_library_count`, `risk_flags`, and `risk_score` under `details`.
+Current Android APK rows carry `parser`, `parser_version`, `source_path`, `source_format`, `hashes`, `package`, `version_name`, `permissions`, `dangerous_permissions`, `components`, `component_counts`, `dex_count`, `native_library_count`, `entry_hashes`, `native_architectures`, `string_pivots`, `validation_checks`, `commercial_grade_ready`, `commercial_grade_blockers`, `risk_flags`, and `risk_score` under `details`. Android app-data export rows carry package inferred from path, file hashes, category, validation checks, blockers, and legal warnings; file payloads and secrets are not decoded.
 
 Mobile export collector rows:
 
@@ -236,9 +292,26 @@ Mobile export collector rows:
   - `mobile-call`
   - `mobile-app`
   - `mobile-file`
+  - `mobile-account`
+  - `mobile-media`
+  - `mobile-browser`
+  - `mobile-chat-database`
+  - `mobile-correlation-summary`
   - `mobile-export-source`
+  - `ios-backup-file`
+  - `ios-backup-source`
+  - `ios-backup-metadata`
+  - `ios-keychain-inventory`
 
-Current mobile export rows carry `parser`, `parser_version`, `source_path`, `source_format`, `source_tool`, `source_index`, `source_hashes`, normalized timestamps, message participants/text/text hash, contact/call fields, app package/version fields, file path/hash fields, `risk_flags`, and the original normalized row under `raw`.
+Current mobile export rows carry `parser`, `parser_version`, `source_path`, `source_format`, `source_tool`, `source_index`, `source_record_id`, `source_hashes`, normalized timestamps, message service family, conversation IDs/titles, participants, message IDs, text/text hash, media references, reactions, contact/call fields, app package/version fields, file path/hash fields, account identifiers and hashes, media/browser pivots, `validation_checks`, `commercial_grade_ready`, `commercial_grade_blockers`, `legal_warning`, `risk_flags`, and the original normalized row under `raw`. KakaoTalk, WhatsApp, Telegram, Signal, WeChat, LINE, Discord, and Instagram authorized export rows are normalized as service-labeled `mobile-message` candidates; app SQLite/DB candidates emit `mobile-chat-database` inventory rows with table/column/count summaries, message-table candidates, hashes, and no secret/decryption output. `mobile-correlation-summary` rows summarize message/media/contact/call counts, services, participants, schema versions, and correlation readiness checks for unified mobile review. iOS backup rows inventory `Manifest.db` file/domain/path candidates plus Info/Status plist metadata; keychain rows inventory table names, columns, row counts, and redaction status only.
+
+Email artifact rows:
+
+- `email-artifacts`
+  - `email-message`
+  - `email-mailbox`
+
+Current email rows carry `parser`, `parser_version`, `source_path`, `source_format`, `source_hashes`, message IDs, thread parent IDs, subject/from/to/cc/date headers, body previews and hashes, attachment filename/content-type/size/hash metadata, mailbox candidate strings/email/subject pivots for PST/OST/MSG, `validation_checks`, `commercial_grade_ready=false`, `commercial_grade_blockers`, legal warnings, and risk flags. PST/OST/MSG rows are inventory candidates only, not full native mailbox decoding.
 
 Media image collector rows:
 
@@ -246,7 +319,7 @@ Media image collector rows:
   - `media-image`
   - `media-image-unreadable`
 
-Current media image rows carry `parser`, `parser_version`, `source_path`, `source_format`, `hashes`, `width`, `height`, `channel_count`, `perceptual_hash`, `similarity_bucket`, `thumbnail_preview`, `ocr_candidate`, `ocr_plan`, `translation_plan`, `classifier_validation`, and rule-based `visual_classification` under `details` when decoding succeeds. If an OCR sidecar is present, `ocr_sidecar` records source path/size/SHA256, bounded text, text SHA256, language hints, Korean detection, and truncation status.
+Current media image rows carry `parser`, `parser_version`, `source_path`, `source_format`, `hashes`, `width`, `height`, `channel_count`, `perceptual_hash`, `similarity_bucket`, `thumbnail_preview`, `gallery_review_mode`, `ocr_candidate`, `ocr_plan`, `translation_plan`, `ocr_queue_assessment`, `korean_ocr_translation_workflow`, `classifier_validation`, `media_native_capabilities`, `media_report_grade_assessment`, and rule-based `visual_classification` under `details` when decoding succeeds. If OCR or translation sidecars are present, `ocr_sidecar` and `translation_sidecar` record source path/size/SHA256, bounded text, text SHA256, language hints or target language, Korean detection/quality metrics, and truncation status.
 
 Memory Volatility collector rows:
 
@@ -266,8 +339,12 @@ Cloud export collector rows:
   - `cloud-location`
   - `cloud-activity`
   - `cloud-account`
+  - `cloud-mail`
+  - `cloud-file`
+  - `cloud-message`
+  - `cloud-audit`
 
-Current cloud rows carry `parser`, `parser_version`, `source_path`, `source_index`, `source_hashes`, `service`, `event_type`, normalized timestamps, activity titles/products, account profile fields, location latitude/longitude/accuracy, `risk_flags`, and the original row under `raw`.
+Current cloud rows carry `parser`, `parser_version`, `source_path`, `source_index`, `source_hashes`, `commercial_grade_ready=false`, `service`, `event_type`, normalized timestamps, activity titles/products, account profile fields, location latitude/longitude/accuracy, mail subject/from/to/message/body-preview fields, file ID/name/mime/owner/URL fields, Teams/chat message IDs and text hashes, audit operation/actor/IP/user-agent fields, `validation_checks`, `commercial_grade_blockers`, `risk_flags`, and the original row under `raw`.
 
 ### `cloud-collect`
 
@@ -275,7 +352,7 @@ Current cloud rows carry `parser`, `parser_version`, `source_path`, `source_inde
 - Sidecar audit: `rapidtriage-cloud-collect.audit.json`
 - Response folder: `responses/`
 
-Current cloud API collection manifests carry `command`, `generated_at`, `manifest_path`, `manifest_sha256`, `output_dir`, `responses_dir`, `summary`, `requests`, `skipped`, and `import_guidance`. Request rows carry `name`, `service`, `method`, `url`, `url_sha256`, redacted request headers, response status/content type/path/size/SHA256, truncation status, timestamps, and error fields when a request fails. Bearer tokens and API keys are redacted from saved metadata.
+Current cloud API collection manifests carry `command`, `generated_at`, `manifest_path`, `manifest_sha256`, `output_dir`, `responses_dir`, `summary`, `credential_handling`, `requests`, `skipped`, and `import_guidance`. Request rows carry `name`, `service`, `method`, `url`, `url_sha256`, redacted request headers, per-request `credential_handling`, response status/content type/path/size/SHA256, truncation status, timestamps, and error fields when a request fails. Bearer tokens and API keys are redacted from saved metadata and `tokens_written_to_output=false` is recorded.
 
 ## Windows artifact collector rows
 
@@ -291,10 +368,13 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
 - `windows-os-account`
   - `windows-user-profile`
   - `windows-sam-account-candidate`
+  - `windows-sam-group-candidate`
   - `windows-service-config`
   - `windows-mounted-device`
   - `windows-lsa-policy-location`
   - `windows-privilege-assignment`
+  - `windows-group-membership`
+  - `windows-account-lifecycle`
   - `windows-os-account-summary`
 - `windows-execution`
   - `amcache-hive`
@@ -306,6 +386,7 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `srum-database-file`
   - `srum-database-pivot`
   - `srum-table-candidate`
+  - `srum-row-candidate`
   - `srum-network-usage`
   - `srum-app-resource-usage`
 - `windows-filesystem`
@@ -317,6 +398,7 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `windows-search-index-entry`
   - `windows-search-edb-file`
   - `windows-search-edb-pivot`
+  - `windows-search-edb-table-candidate`
   - `windows-search-index-summary`
 - `windows-remote-access`
   - `rdp-config`
@@ -342,6 +424,7 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `registry-summary`
 - `windows-shellbags`
   - `shellbag-key`
+  - `shellbag-native-candidate`
 - `windows-prefetch`
   - `prefetch-file`
   - `prefetch-reference`
@@ -375,11 +458,15 @@ The `manifest-windows-artifacts.json` sample also fixes the current artifact row
   - `linux-cron-entry`
   - `linux-systemd-service`
 
-Current browser rows carry `user`, `browser`, `profile`, `history_count`, `download_count`, `history`, and `downloads` under `details`.
+Current browser rows carry `user`, `browser`, `profile`, `source_profile`, `history_count`, `download_count`, `history`, `downloads`, `internet_usage`, `ai_usage`, `browser_storage_inventory`, `unified_timeline`, `browser_validation_checks`, `privacy_legal_warning`, `commercial_grade_ready=false`, and explicit `commercial_grade_blockers` under `details`. Chromium-family storage inventory rows (`browser-storage-inventory` and `macos-browser-storage-inventory`) use `coverage_status=inventory-candidate` and expose cache/session/extension/sync/cookie/credential/local-storage/IndexedDB presence, file counts, total bytes, bounded sample hashes, sensitivity flags, and legal warnings without decrypting or extracting raw secrets. AI conversation rows expose service-labeled question/answer candidates, source storage kind, profile-relative path, source size/mtime/hash, offset candidates, transcript pair counts, completeness score, orphan counts, pairing confidence summary, source storage summary, validation checks, legal warnings, and `commercial_grade_ready=false`.
 
-Current recent/jumplist rows carry `user`, `entry_name`, `entry_hint`, `size`, `modified_at`, and source SHA256 under `details`. Shortcut rows additionally expose `lnk_parse_status`, `target_path`, `embedded_paths`, `link_flag_names`, target timestamps, `working_dir`, and `command_line_arguments` when the Shell Link header/string data can be decoded. Jump List rows expose `jump_list_parse_status`, `container_hint`, `jumplist_kind`, `application_id_hash`, `ole_parse_status`, `ole_stream_count`, bounded `ole_streams`, embedded path pivots, `destination_count`, `destination_stream_count`, and recoverable `destinations` with Shell Link offsets, stream provenance, target paths, working directories, target timestamps, command-line arguments, and link flag names.
+Current recent/jumplist rows carry `user`, `entry_name`, `entry_hint`, `size`, `modified_at`, and source SHA256 under `details`. Shortcut rows additionally expose `lnk_parse_status`, `target_path`, `embedded_paths`, `link_flag_names`, target timestamps, `working_dir`, and `command_line_arguments` when the Shell Link header/string data can be decoded. Jump List rows expose `jump_list_parse_status`, `container_hint`, `jumplist_kind`, `application_id_hash`, `ole_parse_status`, `ole_stream_count`, bounded `ole_streams` with stream SHA256, embedded path pivots, `destination_count`, `destination_stream_count`, and recoverable `destinations` with Shell Link offsets, stream provenance, stream hashes, target paths, working directories, target timestamps, command-line arguments, and link flag names. Automatic Jump List rows additionally expose bounded DestList metadata candidates when the `DestList` stream is recoverable: `destlist_parse_status`, `destlist_streams`, `destlist_header_candidates`, `destlist_entry_candidates`, `destlist_validation_checks`, parser confidence, validation guidance, and `commercial_grade_blockers` for OS-version-specific field validation, deleted-entry recovery, account attribution, and AppID mapping gaps.
 
-Current Windows parser rows include source validation fields where available: `parser`, `parser_version`, `coverage_status`, `reportability`, `source_path`, `source_format`, `source_hashes`, `parser_confidence`, `evidence_strength`, and a bounded `raw_preview`. EventLog XML/JSON/JSONL/CSV imports emit normalized `event_id`, `event_category`, `event_family`, `event_tags`, `provider_name`, `channel`, `channel_family`, `computer`, `event_created_at`, `data`, `rule`, `risk_flags`, `risk_score`, and `triage_recommendation`; common EventData fields such as `target_user_name`, `subject_user_name`, `logon_type`, `source_ip`, `destination_ip`, `destination_port`, `service_name`, `service_file_name`, `process_name`, `parent_process_name`, `command_line`, `script_block_text`, `query_name`, `target_object`, `image_loaded`, `task_name`, share fields, and failure/status fields are promoted for filtering and reporting. Built-in EventLog detections emit `parser=windows-eventlog-builtin-rulepack`, `rulepack_version`, `matched_event`, `matched_fields`, MITRE-style rule tags, false-positive notes, triage recommendations, and rule IDs for log clearing, encoded PowerShell, RDP logons/sessions, privileged logons, services, scheduled tasks, account changes, group changes, WMI, Defender, Firewall, VSC deletion, USB/device, share access, and Sysmon process/network/DNS/registry/image-load events. EventLog summary rows emit `event_count`, `detection_count`, `parsed_row_count`, `detection_rule_counts`, `detection_level_counts`, `event_id_counts`, `event_category_counts`, `event_family_counts`, `channel_counts`, `channel_family_counts`, `user_counts`, `source_ip_counts`, `process_counts`, `parser_status_counts`, `reportability_counts`, `risk_term_counts`, `native_integrity_counts`, `native_sequence_counts`, `native_channel_hint_counts`, `native_binxml_status_counts`, `high_risk_events`, and `record_sequence_gaps` for large-case review pivots. Binary `.evtx` rows are inventoried as `eventlog-file` with recommended external parsers; native chunk structure rows emit `eventlog-chunk` with chunk header, slack bound, and checksum-observation metadata; recoverable native record headers also emit `eventlog-event` rows with `parser=windows-eventlog-evtx-native`, `coverage_status=native-binary-partial`, `record_id`, `timestamp`, `evtx_file_header`, `evtx_chunk_context`, `evtx_record_offset`, `evtx_record_size`, `evtx_record_sha256`, `evtx_record_integrity`, `evtx_record_sequence`, `evtx_native_parse_scope`, `evtx_binxml_status`, `evtx_field_fidelity`, `evtx_validation_required`, `evtx_binxml` token-scan/template/inline scalar value details, `binxml_system_fields`, `binxml_event_data_fields`, `binxml_user_data_fields`, `native_message_preview`, `native_indicators`, `parameter_candidates`, `extracted_strings`, promoted EventID/provider/channel/computer/level/timestamp/process/thread/command/IP/user candidates, and suspicious-term risk flags. OS/account rows emit profile inventory, NTUSER/UsrClass presence and hashes, computer names, time zones, ProfileList SIDs, admin-group hints, current control set hints, service configuration rows, mounted-device rows, LSA-sensitive-location rows, privilege-assignment rows, last boot/shutdown timestamps, exported account lifecycle hints where registry export data is available, and native SAM account-name/RID key candidates with source hashes, offsets, last-write hints, validation guidance, and risk flags. Execution rows emit Amcache/ShimCache/UserAssist/BAM registry-export hints, native Amcache.hve path/hash candidate pivots, BAM user SID/device paths, ShimCache caveats, SRUM app/network usage imports with byte totals and interface/profile fields, SRUDB ESE inventory metadata/string pivots, native SRUDB app/URL/table candidate rows, and PowerShell history commands with evidence-strength labels and risk flags. Remote access rows emit RDP config destinations, username hints, gateway hosts, RDP cache-file inventory, bounded thumbnail signature pivots, and exported Terminal Server Client destinations. Filesystem rows emit MFT/USN import fields such as record number, parent reference, path, timestamp, deletion hint, and USN reason; native `$MFT` and `$J` rows add source hashes, bounded FILE header samples, native MFT record rows, UTF-16 path pivots, USN record offsets, v2/v3 validation status, reason/source/file-attribute flags, delete/rename hints, parser confidence, and parser guidance. Windows Search index rows inventory `Windows.edb` with ESE header/string/path/URL pivots, emit native EDB path/URL/text pivot rows, and import CSV/JSON exports with `item_path`, `file_name`, `extension`, `title`, `author`, timestamps, URL, and `content_snippet` for keyword search pivots. Registry `.reg` exports emit `key`, `hive_hint`, `value_count`, `values`, `persistence_values`, `usb_device`, `risk_flags`, `registry-user-activity`, and `registry-summary` pivots; user-activity rows promote UserAssist, TypedURLs/TypedPaths, RecentDocs, Run/RunOnce, Explorer/MRU, ShellBags, MountPoints2, Network, and ComDlg32/OpenSavePidlMRU review candidates with parser confidence and validation guidance. Native registry hive rows emit `registry-hive` header metadata with `regf` validity, sequence/dirty state, last-write time, embedded name, source hashes, and parser guidance; `registry-hive-strings` rows expose bounded UTF-16 string, path, URL, and suspicious value pivots; `registry-hive-cell` rows expose bounded hbin-aware `nk`/`vk` key/value cell candidates with offsets, scan method, allocation/deleted-candidate state, names, key last-write hints, value types, risk flags, and summary pivots; `registry-key-tree-node` rows expose best-effort native key paths, parent/subkey/value-list offsets, subkey/value names, last-write hints, allocation state, confidence, and validation guidance; `registry-deleted-cell-candidate`, `registry-key-recovery-candidate`, and `registry-value-recovery-candidate` rows separately surface positive-size free/deleted key/value candidates with caution labels, optional path/data previews, and validation guidance for review workflows. Prefetch inventory rows emit `executable_hint`, `executable_hint_source`, `filename_executable_hint`, `binary_format_detected`, `prefetch_version`, `prefetch_parse_status`, `header_executable_name`, `run_count`, `last_run_at`, `last_run_times`, `referenced_paths`, per-reference `prefetch-reference` rows, `prefetch_hash`, `entry_name`, `size`, `modified_at`, source SHA256, and execution-indicator labels. Windows system rows emit Task Scheduler commands/arguments/action previews, hidden/run-level/logon/start-boundary hints, suspicious scheduled-task risk flags, Defender interesting entries, Firewall blocked/sample entries, WER app/module/bucket fields, WMI repository file inventory with hashes and bounded persistence string/path/URL pivots, and Zone.Identifier host/referrer URLs.
+Current Windows parser rows include source validation fields where available: `parser`, `parser_version`, `coverage_status`, `reportability`, `source_path`, `source_format`, `source_hashes`, `parser_confidence`, `evidence_strength`, and a bounded `raw_preview`. EventLog XML/JSON/JSONL/CSV imports emit normalized `event_id`, `event_category`, `event_family`, `event_tags`, `provider_name`, `channel`, `channel_family`, `computer`, `event_created_at`, `data`, `rule`, `risk_flags`, `risk_score`, and `triage_recommendation`; common EventData fields such as `target_user_name`, `subject_user_name`, `logon_type`, `source_ip`, `destination_ip`, `destination_port`, `service_name`, `service_file_name`, `process_name`, `parent_process_name`, `command_line`, `script_block_text`, `query_name`, `target_object`, `image_loaded`, `task_name`, share fields, and failure/status fields are promoted for filtering and reporting. Built-in EventLog detections emit `parser=windows-eventlog-builtin-rulepack`, `rulepack_version`, `matched_event`, `matched_fields`, MITRE-style rule tags, false-positive notes, triage recommendations, and rule IDs for log clearing, encoded PowerShell, RDP logons/sessions, privileged logons, services, scheduled tasks, account changes, group changes, WMI, Defender, Firewall, VSC deletion, USB/device, share access, and Sysmon process/network/DNS/registry/image-load events. EventLog summary rows emit `event_count`, `detection_count`, `parsed_row_count`, `detection_rule_counts`, `detection_level_counts`, `event_id_counts`, `event_category_counts`, `event_family_counts`, `channel_counts`, `channel_family_counts`, `user_counts`, `source_ip_counts`, `process_counts`, `parser_status_counts`, `reportability_counts`, `risk_term_counts`, `native_integrity_counts`, `native_sequence_counts`, `native_channel_hint_counts`, `native_binxml_status_counts`, `high_risk_events`, and `record_sequence_gaps` for large-case review pivots. Binary `.evtx` rows are inventoried as `eventlog-file` with recommended external parsers; native chunk structure rows emit `eventlog-chunk` with chunk header, slack bound, and checksum-observation metadata; recoverable native record headers also emit `eventlog-event` rows with `parser=windows-eventlog-evtx-native`, `coverage_status=native-binary-partial`, `record_id`, `timestamp`, `evtx_file_header`, `evtx_chunk_context`, `evtx_record_offset`, `evtx_record_size`, `evtx_record_sha256`, `evtx_record_integrity`, `evtx_record_sequence`, `evtx_native_parse_scope`, `evtx_binxml_status`, `evtx_field_fidelity`, `evtx_validation_required`, `evtx_validation_reasons`, `evtx_validation_checks`, `evtx_binxml` token-scan/template/inline scalar value details including decoded value-type counts, `binxml_system_fields`, `binxml_event_data_fields`, `binxml_user_data_fields`, `native_message_preview`, `native_indicators`, `parameter_candidates`, `extracted_strings`, promoted EventID/provider/channel/computer/level/timestamp/process/thread/command/IP/user candidates, and suspicious-term risk flags. OS/account rows emit profile inventory, NTUSER/UsrClass presence and hashes, computer names, time zones, ProfileList SIDs, admin-group hints, current control set hints, service configuration rows, mounted-device rows, LSA-sensitive-location rows with secret value metadata where exported, privilege-assignment rows, last boot/shutdown timestamps, exported account lifecycle rows with RID, UAC labels, disabled/admin hints, SAM F/V binary presence metadata, first-pass SAM F timestamp/RID/UAC candidates, SAM V string candidates, group-membership hints, parser confidence, validation guidance, explicit commercial-readiness blockers, and native SAM account-name/RID key candidates with source hashes, offsets, last-write hints, validation guidance, and risk flags. Execution rows emit Amcache/ShimCache/UserAssist/BAM registry-export hints, native Amcache.hve path/hash candidate pivots, Amcache program/publisher/SHA1/file-description/product metadata, BAM user SID/device paths with FILETIME timestamp sources where present, ShimCache caveats, validation checks, correlation targets, explicit commercial-readiness blockers for native decoding gaps, SRUM app/network usage imports with byte totals and interface/profile fields, SRUDB ESE inventory metadata/string pivots, native SRUDB app/URL/table candidate rows with marker counts and SRUM validation checks, and PowerShell history commands with evidence-strength labels and risk flags. Remote access rows emit RDP config destinations, username hints, gateway hosts, RDP cache-file inventory, bounded thumbnail signature pivots, and exported Terminal Server Client destinations. Filesystem rows emit MFT/USN import fields such as record number, parent reference, path, timestamp, deletion hint, and USN reason; native `$MFT` and `$J` rows add source hashes, bounded FILE header samples, native MFT record rows, UTF-16 path pivots, MFT update-sequence validation, common MFT attribute summaries, FILETIME timestamp validation, resident/nonresident data hints, explicit commercial-readiness blockers, USN bounded scan metadata, record cursor/next-cursor offsets, large-record sizing, v2/v3 reference metadata, filename UTF-16 validation, validation checks, reason/source/file-attribute flags, delete/rename hints, parser confidence, and parser guidance. Windows Search index rows inventory `Windows.edb` with ESE header/string/path/URL/content pivots, native validation metadata, explicit commercial-readiness blockers, table-family marker counts, `windows-search-edb-table-candidate` rows, and CSV/JSON exports with `item_path`, `file_name`, `extension`, `title`, `author`, timestamps, URL, and `content_snippet` for keyword search pivots. Registry `.reg` exports emit `key`, `hive_hint`, `value_count`, `values`, `persistence_values`, `usb_device`, `risk_flags`, `registry-user-activity`, and `registry-summary` pivots; user-activity rows promote UserAssist, TypedURLs/TypedPaths, RecentDocs, Run/RunOnce, Explorer/MRU, ShellBags, MountPoints2, Network, and ComDlg32/OpenSavePidlMRU review candidates with parser confidence and validation guidance. Native registry hive rows emit `registry-hive` header metadata with `regf` validity, sequence/dirty state, last-write time, embedded name, source hashes, and parser guidance; `registry-hive-strings` rows expose bounded UTF-16 string, path, URL, and suspicious value pivots; `registry-hive-cell` rows expose bounded hbin-aware `nk`/`vk` key/value cell candidates with offsets, scan method, allocation/deleted-candidate state, names, key last-write hints, value types, risk flags, and summary pivots; `registry-key-tree-node` rows expose best-effort native key paths, parent/subkey/value-list offsets, linked/missing subkey/value offsets, subkey/value names, last-write hints, allocation state, confidence, validation flags, and validation guidance; `registry-deleted-cell-candidate`, `registry-key-recovery-candidate`, and `registry-value-recovery-candidate` rows separately surface positive-size free/deleted key/value candidates with caution labels, parent-key confidence where available, optional path/data previews, and validation guidance for review workflows. Prefetch inventory rows emit `executable_hint`, `executable_hint_source`, `filename_executable_hint`, `binary_format_detected`, `prefetch_version`, `prefetch_version_metadata`, `prefetch_parse_status`, `header_executable_name`, `run_count`, `last_run_at`, `last_run_times`, `prefetch_validation_checks`, `referenced_paths`, bounded `volume_candidates`, bounded `file_reference_candidates`, per-reference validation-required `prefetch-reference` rows, `prefetch_hash`, `entry_name`, `size`, `modified_at`, source SHA256, execution-indicator labels, `commercial_grade_ready=false`, and explicit commercial-readiness blockers for incomplete file metrics, authoritative volume table, trace-chain/directory, MFT file-reference, and known-answer validation coverage. Windows system rows emit Task Scheduler commands/arguments/action previews, hidden/run-level/logon/start-boundary hints, suspicious scheduled-task risk flags, Defender interesting entries, Firewall blocked/sample entries, WER app/module/bucket fields, WMI repository file inventory with hashes and bounded persistence string/path/URL pivots, and Zone.Identifier host/referrer URLs.
+
+Native SRUDB inventory now also exposes `native_srudb_validation`, table candidate source offsets, and bounded `srum-row-candidate` string-cluster rows with app/user/timestamp/counter candidates. These native SRUM candidates remain validation-required and keep `commercial_grade_ready=false` until full ESE catalog/page/row decoding and known-answer validation are available.
+
+For OS/account specifically, exported group-membership rows now include SID/name source typing, member count semantics, privileged-group flags, validation checks, and native SAM alias-member blockers. SECURITY/LSA secret metadata remains non-decrypting and may include value type, byte count, SHA256, entropy, and timestamp candidates. Native SAM group rows are bounded group/alias key candidates only, with `commercial_grade_ready=false` until native alias-member binary decoding and OS-version validation are complete.
 
 Current macOS parser rows include user profile inventory, Safari/Chromium/Firefox history/download rows, LaunchServices quarantine events, TCC privacy permissions with `service`, `client`, `allowed`, `last_modified_at`, `risk_flags`, and `risk_score`, and LaunchAgent plist fields such as `label`, `program`, `program_arguments`, and `run_at_load`. Native macOS inventory rows for Unified Logs, Spotlight stores, FSEvents, and APFS snapshot hints add source hashes, size, modified time, bounded string/path/URL pivots, risk flags, validation guidance, and reportability fields for search/review before dedicated macOS tooling validation.
 

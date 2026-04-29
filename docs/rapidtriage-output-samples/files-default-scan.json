@@ -38,8 +38,11 @@
       "images": 0
     },
     "newest_modified_at": "2024-02-03T13:05:09",
-    "oldest_modified_at": "2024-02-03T13:05:06"
+    "oldest_modified_at": "2024-02-03T13:05:06",
+    "duplicate_group_count": 0,
+    "duplicate_file_count": 0
   },
+  "duplicate_content_groups": [],
   "candidates": [
     {
       "path": "<ROOT>/bundle.zip",

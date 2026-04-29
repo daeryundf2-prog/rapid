@@ -1,22 +1,130 @@
 from __future__ import annotations
 
 import base64
+import io
 import hashlib
 import re
 from pathlib import Path
 from typing import Iterable
 
-import cv2
+try:
+    import cv2  # type: ignore[import-not-found]
+except ModuleNotFoundError:
+    cv2 = None  # type: ignore[assignment]
+
+try:
+    from PIL import Image
+except ModuleNotFoundError:
+    Image = None  # type: ignore[assignment]
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 
-PARSER_VERSION = "media-image-v3"
+PARSER_VERSION = "media-image-v4"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 THUMBNAIL_MAX_DIMENSION = 128
 THUMBNAIL_MAX_BYTES = 64 * 1024
 OCR_SIDECAR_MAX_CHARS = 20_000
+TRANSLATION_SIDECAR_MAX_CHARS = 20_000
 HANGUL_RE = re.compile(r"[\uac00-\ud7a3\u1100-\u11ff\u3130-\u318f]")
+MEDIA_NATIVE_CAPABILITIES = {
+    "image_gallery_review_metadata": True,
+    "perceptual_hash_similarity_bucket": True,
+    "bounded_thumbnail_preview": True,
+    "ocr_sidecar_import": True,
+    "korean_language_hinting": True,
+    "translation_sidecar_import": True,
+    "deepfake_detection": False,
+    "ml_visual_similarity_clustering": False,
+    "native_ocr_execution": False,
+    "machine_translation_execution": False,
+}
+MEDIA_REPORT_GRADE_BLOCKERS = [
+    "image-similarity-is-perceptual-hash-bucket-not-ml-validated-clustering",
+    "ocr-and-translation-sidecars-are-post-acquisition-review-material",
+    "native-ocr-and-translation-engine-execution-not-bundled",
+    "deepfake-and-sensitive-media-classification-not-implemented",
+]
+
+
+class PillowEncodedBytes:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def tobytes(self) -> bytes:
+        return self._data
+
+
+class PillowMatrix:
+    def __init__(self, image) -> None:
+        self.image = image
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        width, height = self.image.size
+        channels = len(self.image.getbands())
+        if channels == 1:
+            return (height, width)
+        return (height, width, channels)
+
+    def tolist(self) -> list[object]:
+        width, height = self.image.size
+        pixels = list(self.image.getdata())
+        rows: list[object] = []
+        for y in range(height):
+            start = y * width
+            rows.append(list(pixels[start : start + width]))
+        return rows
+
+    def grayscale(self) -> "PillowMatrix":
+        return PillowMatrix(self.image.convert("L"))
+
+    def resized(self, size: tuple[int, int]) -> "PillowMatrix":
+        return PillowMatrix(self.image.resize(size))
+
+    def png_bytes(self) -> bytes:
+        buffer = io.BytesIO()
+        self.image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+class PillowCv2Compat:
+    IMREAD_UNCHANGED = -1
+    COLOR_BGR2GRAY = 6
+    INTER_AREA = 3
+
+    def imread(self, path: str, flags: int = -1):  # noqa: ARG002
+        if Image is None:
+            return None
+        try:
+            with Image.open(path) as image:
+                if image.mode not in {"L", "RGB", "RGBA"}:
+                    image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+                return PillowMatrix(image.copy())
+        except OSError:
+            return None
+
+    def cvtColor(self, image, code: int):  # noqa: N802
+        if isinstance(image, PillowMatrix) and code == self.COLOR_BGR2GRAY:
+            return image.grayscale()
+        return image
+
+    def resize(self, image, size: tuple[int, int], interpolation: int = 3):  # noqa: ARG002
+        if isinstance(image, PillowMatrix):
+            return image.resized(size)
+        return image
+
+    def imencode(self, extension: str, image) -> tuple[bool, PillowEncodedBytes]:
+        if extension.lower() != ".png" or not isinstance(image, PillowMatrix):
+            return False, PillowEncodedBytes(b"")
+        try:
+            return True, PillowEncodedBytes(image.png_bytes())
+        except OSError:
+            return False, PillowEncodedBytes(b"")
+
+
+if cv2 is None:
+    cv2 = PillowCv2Compat()  # type: ignore[assignment]
 
 
 class MediaImageProvider:
@@ -47,6 +155,10 @@ def build_image_record(path: Path) -> ArtifactRecord:
         "hashes": compute_hashes(resolved),
         "parser_confidence": 0.72,
         "parser_confidence_basis": "extension, file signature, bounded decoder/OCR sidecar validation",
+        "commercial_grade_ready": False,
+        "commercial_gap_ids": ["#56", "#58", "#59"],
+        "media_native_capabilities": dict(MEDIA_NATIVE_CAPABILITIES),
+        "media_report_grade_assessment": media_report_grade_assessment(),
     }
     details.update(build_ocr_and_classifier_validation(resolved))
     if not has_plausible_image_signature(resolved):
@@ -76,6 +188,11 @@ def build_image_record(path: Path) -> ArtifactRecord:
                 "perceptual_hash": perceptual_hash,
                 "similarity_bucket": perceptual_hash[:8],
                 "ocr_candidate": True,
+                "gallery_review_mode": image_gallery_review_mode(
+                    perceptual_hash=perceptual_hash,
+                    similarity_bucket=perceptual_hash[:8],
+                    decoded=True,
+                ),
                 "visual_classification": classify_image(width=int(width), height=int(height), channel_count=int(image.shape[2]) if len(image.shape) == 3 else 1),
                 "thumbnail_preview": safe_thumbnail_preview(image),
             }
@@ -92,6 +209,7 @@ def build_image_record(path: Path) -> ArtifactRecord:
 
 def build_ocr_and_classifier_validation(path: Path) -> dict[str, object]:
     sidecar = load_ocr_sidecar(path)
+    translation_sidecar = load_translation_sidecar(path)
     filename_has_hangul = contains_hangul(path.name)
     language_hints = ["kor", "eng"] if filename_has_hangul or sidecar.get("contains_hangul") else ["eng"]
     translation_required = bool(filename_has_hangul or sidecar.get("contains_hangul"))
@@ -101,12 +219,14 @@ def build_ocr_and_classifier_validation(path: Path) -> dict[str, object]:
         "recommended_languages": language_hints,
         "korean_language_pack_required": "kor" in language_hints,
         "validation_status": "review-sidecar-text" if sidecar else "requires-ocr-run",
+        "commercial_gap_ids": ["#58", "#59"],
     }
     translation_plan = {
-        "status": "required-not-run" if translation_required else "not-required",
+        "status": "sidecar-imported" if translation_sidecar else ("required-not-run" if translation_required else "not-required"),
         "source_language_hint": "ko" if translation_required else "unknown",
-        "target_language_hint": "en",
-        "validation_status": "translation-not-run",
+        "target_language_hint": str(translation_sidecar.get("target_language") or "en"),
+        "validation_status": "review-translation-sidecar" if translation_sidecar else "translation-not-run",
+        "commercial_gap_ids": ["#59"],
     }
     classifier_validation = {
         "status": "rule-based-triage",
@@ -118,10 +238,87 @@ def build_ocr_and_classifier_validation(path: Path) -> dict[str, object]:
         "ocr_plan": ocr_plan,
         "translation_plan": translation_plan,
         "classifier_validation": classifier_validation,
+        "ocr_queue_assessment": ocr_queue_assessment(sidecar=sidecar),
+        "korean_ocr_translation_workflow": korean_ocr_translation_workflow(
+            language_hints=language_hints,
+            translation_required=translation_required,
+            translation_sidecar=translation_sidecar,
+        ),
     }
     if sidecar:
         payload["ocr_sidecar"] = sidecar
+    if translation_sidecar:
+        payload["translation_sidecar"] = translation_sidecar
     return payload
+
+
+def image_gallery_review_mode(*, perceptual_hash: str, similarity_bucket: str, decoded: bool) -> dict[str, object]:
+    return {
+        "commercial_gap_ids": ["#56"],
+        "status": "implemented-baseline-validation-required",
+        "decoded": decoded,
+        "perceptual_hash": perceptual_hash,
+        "similarity_bucket": similarity_bucket,
+        "supports": [
+            "thumbnail-preview",
+            "similarity-bucket-filtering",
+            "tag-suggestions",
+            "report-selection-hints",
+            "source-hash-verification",
+        ],
+        "ready_for_court_report": False,
+        "blockers": [
+            "full-gallery-virtualized-review-board-not-yet-dedicated",
+            "visual-similarity-is-hash-bucketed-not-ml-validated",
+            "sensitive-media-and-deepfake-classification-not-implemented",
+        ],
+    }
+
+
+def ocr_queue_assessment(*, sidecar: dict[str, object]) -> dict[str, object]:
+    return {
+        "commercial_gap_ids": ["#58"],
+        "status": "sidecar-imported" if sidecar else "queued-not-run",
+        "ready_for_court_report": False,
+        "blockers": [
+            "ocr-engine-execution-is-external-to-this-parser",
+            "ocr-quality-and-language-pack-validation-required",
+            "sidecar-provenance-must-be-preserved-before-reporting",
+        ],
+    }
+
+
+def korean_ocr_translation_workflow(
+    *,
+    language_hints: list[str],
+    translation_required: bool,
+    translation_sidecar: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "commercial_gap_ids": ["#59"],
+        "language_hints": language_hints,
+        "korean_detected_or_expected": "kor" in language_hints,
+        "translation_required": translation_required,
+        "translation_status": "sidecar-imported" if translation_sidecar else ("required-not-run" if translation_required else "not-required"),
+        "ready_for_court_report": False,
+        "blockers": [
+            "korean-ocr-sidecar-or-engine-output-needs-human-validation",
+            "translation-is-review-aid-not-certified-translation",
+        ],
+    }
+
+
+def media_report_grade_assessment() -> dict[str, object]:
+    return {
+        "status": "triage-only-validation-required",
+        "commercial_gap_ids": ["#56", "#58", "#59"],
+        "ready_for_court_report": False,
+        "blockers": list(MEDIA_REPORT_GRADE_BLOCKERS),
+        "recommended_validation": [
+            "Verify image hashes, thumbnail/source consistency, OCR sidecar provenance, and translation accuracy before report inclusion.",
+            "Use validated media/OCR tools for sensitive image classification, full gallery workflows, and certified translation.",
+        ],
+    }
 
 
 def load_ocr_sidecar(path: Path) -> dict[str, object]:
@@ -149,6 +346,40 @@ def load_ocr_sidecar(path: Path) -> dict[str, object]:
             "language_hint": language_hint_for_text(text),
             "quality_metrics": ocr_quality_metrics(text),
             "truncated": len(text) >= OCR_SIDECAR_MAX_CHARS,
+        }
+    return {}
+
+
+def load_translation_sidecar(path: Path) -> dict[str, object]:
+    candidates = [
+        path.with_name(f"{path.name}.translation.txt"),
+        path.with_name(f"{path.name}.en.txt"),
+        path.with_name(f"{path.stem}.translation.txt"),
+        path.with_name(f"{path.stem}.en.txt"),
+        path.with_suffix(".translation.txt"),
+        path.with_suffix(".en.txt"),
+    ]
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            raw = candidate.read_text(encoding="utf-8", errors="replace")
+            stat = candidate.stat()
+        except OSError:
+            continue
+        text = raw[:TRANSLATION_SIDECAR_MAX_CHARS]
+        return {
+            "source_path": str(candidate.resolve()),
+            "source_format": "text",
+            "source_size": stat.st_size,
+            "source_sha256": hashlib.sha256(candidate.read_bytes()).hexdigest(),
+            "text": text,
+            "text_sha256": hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest(),
+            "character_count": len(text),
+            "source_language": "ko" if contains_hangul(path.name) else "unknown",
+            "target_language": "en",
+            "quality_metrics": ocr_quality_metrics(text),
+            "truncated": len(raw) > TRANSLATION_SIDECAR_MAX_CHARS,
         }
     return {}
 
@@ -222,11 +453,11 @@ def matrix_values(image) -> list[int]:
 
 
 def ensure_sequence(value) -> list[object]:
-    return value if isinstance(value, list) else [value]
+    return list(value) if isinstance(value, (list, tuple)) else [value]
 
 
 def normalized_pixel_value(value) -> int:
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         channel_values = [normalized_pixel_value(channel) for channel in value]
         return int(sum(channel_values) / max(len(channel_values), 1))
     return int(value)

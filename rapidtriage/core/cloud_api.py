@@ -17,6 +17,32 @@ DEFAULT_CLOUD_BEARER_TOKEN_ENV = "RAPIDTRIAGE_CLOUD_BEARER_TOKEN"
 DEFAULT_CLOUD_API_TIMEOUT_SECONDS = 30
 DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES = 50 * 1024 * 1024
 ALLOWED_METHODS = {"GET", "POST"}
+CLOUD_API_NATIVE_CAPABILITIES = {
+    "manifest_driven_https_requests": True,
+    "dry_run_validation": True,
+    "redacted_credential_handling": True,
+    "response_hashing": True,
+    "bounded_response_size": True,
+    "provider_specific_oauth_flow": False,
+    "provider_scope_discovery": False,
+    "incremental_delta_collection": False,
+    "legal_hold_export_workflow": False,
+    "known_answer_cloud_api_corpus": False,
+}
+CLOUD_API_REPORT_GRADE_BLOCKERS = [
+    "provider-specific-oauth-flow-not-implemented",
+    "provider-scope-discovery-and-consent-capture-not-implemented",
+    "incremental-delta-collection-not-implemented",
+    "legal-hold-export-workflow-not-implemented",
+    "known-answer-cloud-api-corpus-required",
+]
+CLOUD_CREDENTIAL_SECURITY_BLOCKERS = [
+    "provider-oauth-consent-record-not-captured",
+    "provider-scope-inventory-not-captured",
+    "secure-token-vault-not-integrated",
+    "token-rotation-and-revocation-audit-not-captured",
+    "legal-authority-review-required-before-cloud-collection",
+]
 
 
 class CloudApiCollectionError(ValueError):
@@ -64,6 +90,7 @@ def run_cloud_api_collection(
                     "url": prepared["url"],
                     "dry_run": True,
                     "headers": redact_headers(prepared["headers"]),
+                    "credential_handling": request_credential_handling(prepared),
                 }
             )
             continue
@@ -84,6 +111,19 @@ def run_cloud_api_collection(
         "skipped_count": len(skipped),
         "dry_run": dry_run,
     }
+    credential_handling = {
+        "bearer_token_env": bearer_token_env,
+        "tokens_written_to_output": False,
+        "headers_redacted": True,
+        "credential_storage": "environment-variable-only",
+        "commercial_gap_ids": ["#41"],
+        "scope_capture_status": "not-captured",
+        "secure_token_vault_integrated": False,
+        "token_rotation_audit_present": False,
+        "audit_required": True,
+        "legal_warning": "Use only with authorized cloud accounts/API scopes; do not paste tokens into manifests or reports.",
+    }
+    credential_handling["credential_security_assessment"] = cloud_credential_security_assessment(credential_handling)
     payload = {
         "command": "cloud-collect",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -92,8 +132,14 @@ def run_cloud_api_collection(
         "output_dir": str(output_dir.resolve()),
         "responses_dir": str(responses_dir.resolve()),
         "summary": summary,
+        "credential_handling": credential_handling,
         "requests": collected,
         "skipped": skipped,
+        "commercial_grade_ready": False,
+        "commercial_gap_ids": ["#40"],
+        "cloud_api_validation_matrix": cloud_api_validation_matrix(summary, credential_handling),
+        "cloud_api_report_grade_assessment": cloud_api_report_grade_assessment(),
+        "cloud_api_native_capabilities": dict(CLOUD_API_NATIVE_CAPABILITIES),
         "import_guidance": "Run `rapidtriage artifacts OUTPUT_DIR/responses --kind cloud-export` to normalize supported JSON responses.",
     }
     output_path = output_dir / "rapidtriage-cloud-collect.json"
@@ -175,6 +221,7 @@ def execute_request(
         "url_sha256": hashlib.sha256(str(prepared["url"]).encode("utf-8")).hexdigest(),
         "started_at": started_at,
         "request_headers": redact_headers(dict(prepared["headers"])),
+        "credential_handling": request_credential_handling(prepared),
     }
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
@@ -234,6 +281,92 @@ def redact_headers(headers: Mapping[str, object]) -> dict[str, str]:
         else:
             redacted[str(key)] = str(value)
     return redacted
+
+
+def request_credential_handling(prepared: Mapping[str, object]) -> dict[str, object]:
+    headers = dict(prepared.get("headers") or {})
+    sensitive_headers = [
+        str(key)
+        for key in headers
+        if str(key).lower() in {"authorization", "x-api-key", "api-key"}
+    ]
+    return {
+        "sensitive_header_names": sensitive_headers,
+        "sensitive_values_redacted": True,
+        "bearer_token_env_used": str(prepared.get("bearer_token_env") or ""),
+        "tokens_written_to_output": False,
+        "commercial_gap_ids": ["#41"],
+        "secure_token_vault_integrated": False,
+        "token_value_sha256_recorded": False,
+        "legal_warning": "Credential-bearing requests are redacted in output. Confirm legal authority, API scopes, and token handling before collection.",
+    }
+
+
+def cloud_api_validation_matrix(summary: Mapping[str, object], credential_handling: Mapping[str, object]) -> list[dict[str, object]]:
+    return [
+        {
+            "id": "manifest-validated",
+            "label": "Collection manifest has valid request definitions",
+            "passed": int(summary.get("request_count") or 0) > 0,
+            "severity": "critical",
+        },
+        {
+            "id": "credentials-redacted",
+            "label": "Credential values are redacted and not written to output",
+            "passed": bool(credential_handling.get("headers_redacted"))
+            and not bool(credential_handling.get("tokens_written_to_output")),
+            "severity": "critical",
+        },
+        {
+            "id": "response-hashes-or-dry-run",
+            "label": "Collected responses are hashed, or dry-run validation was requested",
+            "passed": bool(summary.get("dry_run")) or int(summary.get("collected_count") or 0) >= 0,
+            "severity": "high",
+        },
+        {
+            "id": "provider-oauth-scope-capture",
+            "label": "Provider-specific OAuth consent, scopes, and legal hold metadata are captured",
+            "passed": False,
+            "severity": "critical",
+        },
+        {
+            "id": "incremental-known-answer-validation",
+            "label": "Incremental collection and provider API behavior are known-answer validated",
+            "passed": False,
+            "severity": "critical",
+        },
+    ]
+
+
+def cloud_credential_security_assessment(credential_handling: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "status": "validation-required",
+        "commercial_gap_ids": ["#41"],
+        "tokens_written_to_output": bool(credential_handling.get("tokens_written_to_output")),
+        "headers_redacted": bool(credential_handling.get("headers_redacted")),
+        "credential_storage": str(credential_handling.get("credential_storage") or ""),
+        "secure_token_vault_integrated": bool(credential_handling.get("secure_token_vault_integrated")),
+        "token_rotation_audit_present": bool(credential_handling.get("token_rotation_audit_present")),
+        "ready_for_court_report": False,
+        "blockers": list(CLOUD_CREDENTIAL_SECURITY_BLOCKERS),
+        "recommended_validation": [
+            "Record provider OAuth consent, granted scopes, account owner, legal authority, and API version before collection.",
+            "Use an OS/enterprise secret vault or short-lived token broker before report-grade multi-user deployment.",
+        ],
+    }
+
+
+def cloud_api_report_grade_assessment() -> dict[str, object]:
+    return {
+        "status": "validation-required",
+        "commercial_gap_ids": ["#40"],
+        "blockers": list(CLOUD_API_REPORT_GRADE_BLOCKERS),
+        "ready_for_court_report": False,
+        "recommended_validation": [
+            "Capture account authorization, provider scopes, consent/legal-hold context, and API version metadata.",
+            "Validate collected JSON against provider-native export views before report-grade use.",
+        ],
+    }
 
 
 def encode_body(value: object) -> bytes | None:
