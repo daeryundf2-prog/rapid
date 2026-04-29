@@ -4,10 +4,10 @@ import datetime as dt
 import os
 import stat as stat_module
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from .input_root import InputRoot, resolve_input_root
-from .hash_cache import compute_hashes_cached
+from .hash_cache import HASH_CACHE_GAP_ID, compute_hashes_cached, hash_cache_assessment
 from .models import FileCandidate
 from .rules import RuleSet, annotate_files_payload
 
@@ -23,6 +23,7 @@ DEFAULT_FILE_CATEGORIES: Tuple[str, ...] = (
     "vehicle-images",
     "images",
 )
+DEDUPLICATE_CONTENT_GAP_ID = "#77"
 EXECUTABLE_BITS = stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOTH
 
 CATEGORY_RULES: Dict[str, Dict[str, Tuple[str, ...]]] = {
@@ -331,7 +332,10 @@ def run_files_scan(
             "oldest_modified_at": min(modified_values) if modified_values else None,
             "duplicate_group_count": len(duplicate_groups),
             "duplicate_file_count": sum(int(group["file_count"]) for group in duplicate_groups),
+            "commercial_gap_ids": [HASH_CACHE_GAP_ID, DEDUPLICATE_CONTENT_GAP_ID],
         },
+        "hash_cache_assessment": hash_cache_assessment(),
+        "duplicate_detection_assessment": duplicate_detection_assessment(duplicate_groups),
         "duplicate_content_groups": duplicate_groups,
         "candidates": [item.to_dict() for item in candidates],
     }
@@ -535,8 +539,31 @@ def build_duplicate_content_groups(
                 "size": bucket[0].size,
                 "paths": [candidate.path for candidate in bucket[:20]],
                 "truncated_paths": len(bucket) > 20,
+                "commercial_gap_ids": [DEDUPLICATE_CONTENT_GAP_ID],
+                "duplicate_resolution_status": "hash-identical-candidate",
             }
         )
         if len(groups) >= 50:
             break
     return groups
+
+
+def duplicate_detection_assessment(groups: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    return {
+        "component": "duplicate-file-content-detection",
+        "status": "bounded-sha256-same-size-grouping",
+        "commercial_gap_ids": [DEDUPLICATE_CONTENT_GAP_ID],
+        "duplicate_group_count": len(groups),
+        "duplicate_file_count": sum(int(group.get("file_count") or 0) for group in groups),
+        "ready_for_court_report": False,
+        "supports": [
+            "same-size-candidate-bucketing",
+            "bounded-content-sha256-confirmation",
+            "representative-path-lists",
+        ],
+        "blockers": [
+            "near-duplicate-text-and-media-similarity-are-not-full-file-deduplication",
+            "hashing-is-bounded-to-protect-large-case-responsiveness",
+            "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports",
+        ],
+    }

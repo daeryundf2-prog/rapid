@@ -119,6 +119,12 @@
         "duplicate_file_count": {
           "type": "integer"
         },
+        "commercial_gap_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "matched_rule_count": {
           "type": "integer"
         },
@@ -242,9 +248,26 @@
           },
           "truncated_paths": {
             "type": "boolean"
+          },
+          "commercial_gap_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "duplicate_resolution_status": {
+            "type": "string"
           }
         }
       }
+    },
+    "hash_cache_assessment": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "duplicate_detection_assessment": {
+      "type": "object",
+      "additionalProperties": true
     },
     "rule_set": {
       "type": "object",

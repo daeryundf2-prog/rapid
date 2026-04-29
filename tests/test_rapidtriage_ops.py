@@ -58,17 +58,25 @@ class RapidTriageOpsTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
+        self.assertIn("#105", payload["commercial_gap_ids"])
+        self.assertIn("#106", payload["telemetry"]["commercial_gap_ids"])
         self.assertFalse(payload["telemetry"]["enabled"])
+        self.assertIn("#107", payload["license_activation"]["commercial_gap_ids"])
         self.assertFalse(payload["license_activation"]["required"])
         self.assertEqual(payload["license_activation"]["status"], "operator-provided-file")
         self.assertEqual(len(payload["license_activation"]["license_sha256"]), 64)
         self.assertFalse(payload["license_activation"]["network_activation"])
+        self.assertIn("#108", payload["rbac"]["commercial_gap_ids"])
         self.assertEqual(payload["rbac"]["active_role"], "viewer")
         self.assertTrue(payload["rbac"]["active_role_supported"])
         self.assertNotIn("backup_restore", payload["rbac"]["active_permissions"])
+        self.assertIn("#109", payload["multi_user_case_server"]["commercial_gap_ids"])
         self.assertTrue(payload["multi_user_case_server"]["required_before_enablement"])
+        self.assertIn("#110", payload["collaboration_audit_trail"]["commercial_gap_ids"])
         self.assertEqual(payload["collaboration_audit_trail"]["status"], "case-db-audit-events-with-export-hash-chain")
         self.assertEqual(payload["multi_user_case_server"]["status"], "not-enabled")
+        self.assertIn("#118", payload["security_hardening"]["commercial_gap_ids"])
+        self.assertIn("#119", payload["security_hardening"]["commercial_gap_ids"])
 
     def test_benchmark_command_writes_json_and_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -97,6 +105,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue((output_dir / "rapidtriage-benchmark.md").is_file())
             self.assertGreaterEqual(payload["metrics"]["ingest_seconds"], 0)
             self.assertIn("search_p50_seconds", payload["metrics"])
+            self.assertIn("#66", payload["summary"]["commercial_gap_ids"])
+            self.assertIn("#66", payload["benchmark_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertFalse(payload["benchmark_native_capabilities"]["continuous_10m_record_gate"])
+            self.assertEqual([row["label"] for row in payload["benchmark_scale_matrix"]], ["100k", "1M", "10M"])
 
     def test_stress_plan_command_writes_large_case_runbook(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -128,6 +140,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue((output_dir / "rapidtriage-stress-plan.md").is_file())
             self.assertEqual(payload["scenarios"][1]["size_tb"], 10)
             self.assertIn("parser_crash_rate_percent", payload["failure_thresholds"])
+            self.assertIn("#67", payload["summary"]["commercial_gap_ids"])
+            self.assertIn("#67", payload["stress_test_assessment"]["commercial_gap_ids"])
+            self.assertIn("#67", payload["scenarios"][0]["commercial_gap_ids"])
+            self.assertFalse(payload["stress_native_capabilities"]["actual_1tb_10tb_execution"])
 
     def test_validation_command_writes_release_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -150,6 +166,19 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["score_target"], 100)
             self.assertTrue((output_dir / "rapidtriage-validation-package.json").is_file())
             self.assertTrue((output_dir / "rapidtriage-validation-report.md").is_file())
+            self.assertIn("#85", payload["validation_package_assessment"]["commercial_gap_ids"])
+            self.assertIn("#81", payload["known_answer_validation"]["commercial_gap_ids"])
+            self.assertIn("#82", payload["parser_fixture_corpus"]["commercial_gap_ids"])
+            self.assertIn("#83", payload["parser_false_positive_false_negative_notes"][0]["commercial_gap_ids"])
+            self.assertIn("#84", payload["independent_validation_report"]["commercial_gap_ids"])
+            self.assertIn("#95", payload["external_tool_version_assessment"]["commercial_gap_ids"])
+            self.assertTrue(all("#95" in item["commercial_gap_ids"] for item in payload["external_tool_versions"]))
+            self.assertIn("#101", payload["deployment_operations_gap_ids"])
+            self.assertIn("#120", payload["deployment_operations_gap_ids"])
+            self.assertIn("#101", payload["deployment_operations_assessment"]["commercial_gap_ids"])
+            self.assertIn("#120", payload["deployment_operations_assessment"]["commercial_gap_ids"])
+            artifact_manifest = json.loads((output_dir / "rapidtriage-validation-artifacts.json").read_text(encoding="utf-8"))
+            self.assertIn("#85", artifact_manifest["commercial_gap_ids"])
             check_ids = {item["id"] for item in payload["checks"]}
             self.assertIn("unit-tests", check_ids)
             self.assertIn("known-limitations", check_ids)
@@ -454,6 +483,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(failed.status, "failed")
             self.assertIn(canceled.status, {"queued", "running", "canceled", "failed"})
             self.assertTrue(canceled.cancellation_requested)
+            self.assertIn("#69", canceled.to_dict()["job_queue_assessment"]["commercial_gap_ids"])
+            self.assertIn("#80", canceled.to_dict()["cancellation_retry_assessment"]["commercial_gap_ids"])
+            self.assertTrue(all("#69" in step["commercial_gap_ids"] for step in canceled.to_dict()["steps"]))
+            self.assertTrue(all("#80" in step["operational_gap_ids"] for step in canceled.to_dict()["steps"]))
             store._executor.shutdown(wait=True)
 
     def test_build_release_script_can_assemble_portable_zip_without_building_wheel(self) -> None:
@@ -496,6 +529,9 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("docs/rapidtriage-macos-linux-quickstart.md", names)
             self.assertIn("docs/rapidtriage-fresh-machine-smoke-test.md", names)
             self.assertIn("docs/rapidtriage-support-sla.md", names)
+            self.assertIn("docs/rapidtriage-lts-hotfix-policy.md", names)
+            self.assertIn("docs/rapidtriage-training-curriculum.md", names)
+            self.assertIn("docs/rapidtriage-admin-deployment-guide.md", names)
             self.assertIn("docs/rapidtriage-commercial-parity-backlog.md", names)
             checksums = (output_dir / "SHA256SUMS").read_text(encoding="utf-8")
             self.assertIn("rapidtriage-portable.zip", checksums)
@@ -509,12 +545,25 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("rapidtriage-portable.zip", artifact_names)
             self.assertEqual(manifest["commercial_readiness"]["status"], "commercial-gaps-present")
             self.assertFalse(manifest["commercial_readiness"]["commercial_claim_allowed"])
+            self.assertIn("#101", manifest["commercialization_gap_ids"])
+            self.assertIn("#120", manifest["commercialization_gap_ids"])
+            self.assertIn("#101", manifest["package_readiness"]["windows_signed_installer"]["commercial_gap_ids"])
+            self.assertIn("#102", manifest["package_readiness"]["macos_notarized_package"]["commercial_gap_ids"])
+            self.assertIn("#103", manifest["package_readiness"]["linux_package"]["commercial_gap_ids"])
             self.assertEqual(manifest["package_readiness"]["linux_package"]["status"], "packaging-plan-ready")
+            self.assertIn("#104", manifest["package_readiness"]["auto_update_channel"]["commercial_gap_ids"])
             self.assertEqual(manifest["package_readiness"]["auto_update_channel"]["status"], "manifest-generated")
+            self.assertIn("#112", manifest["package_readiness"]["operations_documents"]["commercial_gap_ids"])
+            self.assertIn("#120", manifest["package_readiness"]["operations_documents"]["commercial_gap_ids"])
             update_manifest = json.loads((output_dir / "update-manifest.json").read_text(encoding="utf-8"))
+            self.assertIn("#104", update_manifest["commercial_gap_ids"])
             self.assertFalse(update_manifest["auto_update_enabled_by_default"])
             packaging_plan = json.loads((output_dir / "packaging-plan.json").read_text(encoding="utf-8"))
+            self.assertIn("#101", packaging_plan["commercial_gap_ids"])
             self.assertEqual(packaging_plan["platform_packages"]["windows"]["current_status"], "external-signing-required")
+            self.assertIn("#101", packaging_plan["platform_packages"]["windows"]["commercial_gap_ids"])
+            self.assertIn("#102", packaging_plan["platform_packages"]["macos"]["commercial_gap_ids"])
+            self.assertIn("#103", packaging_plan["platform_packages"]["linux"]["commercial_gap_ids"])
             self.assertIn("AppImage", packaging_plan["platform_packages"]["linux"]["target_outputs"])
 
             verify = subprocess.run(
@@ -542,6 +591,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
 
             payload = json.loads(Path(report["path"]).read_text(encoding="utf-8"))
+            self.assertIn("#105", payload["commercial_gap_ids"])
             self.assertTrue(payload["local_only"])
             self.assertEqual(payload["context"]["auth_token"], "<redacted>")
             self.assertEqual(payload["exception"]["type"], "RuntimeError")
@@ -560,8 +610,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(backup_exit, 0)
             backup_payload = json.loads(backup_stdout.getvalue())
             self.assertEqual(backup_payload["command"], "case-backup")
+            self.assertIn("#111", backup_payload["commercial_gap_ids"])
             self.assertTrue((backup_dir / "rapidtriage-case-backup-manifest.json").is_file())
             self.assertEqual(backup_payload["schema"]["current_schema_version"], 1)
+            self.assertIn("#111", backup_payload["migration_readiness"]["commercial_gap_ids"])
             self.assertEqual(backup_payload["migration_readiness"]["status"], "ready")
             self.assertTrue(backup_payload["migration_readiness"]["restore_rehearsal_required"])
 
@@ -578,10 +630,34 @@ class RapidTriageOpsTests(unittest.TestCase):
                 )
             self.assertEqual(restore_exit, 0)
             restore_payload = json.loads(restore_stdout.getvalue())
+            self.assertIn("#111", restore_payload["commercial_gap_ids"])
             self.assertTrue(restore_payload["hash_verified"])
             self.assertEqual(restore_payload["schema"]["current_schema_version"], 1)
             self.assertEqual(restore_payload["migration_readiness"]["expected_schema_version"], 1)
             self.assertTrue(restored.is_file())
+
+    def test_dependency_monitoring_script_writes_vulnerability_policy_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "dependency-monitoring.json"
+            result = subprocess.run(
+                [
+                    "python",
+                    "scripts/check-dependencies.py",
+                    "--output",
+                    str(output_path),
+                ],
+                cwd=Path(__file__).resolve().parent.parent,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["command"], "dependency-monitoring")
+            self.assertIn("#120", payload["commercial_gap_ids"])
+            self.assertIn("#120", payload["vulnerability_scan"]["commercial_gap_ids"])
+            self.assertIn("Block release", payload["vulnerability_scan"]["release_policy"])
 
     def test_case_acquisition_command_records_and_lists_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

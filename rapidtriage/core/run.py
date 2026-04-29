@@ -3,6 +3,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import os
+import sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -43,6 +45,12 @@ from .virtual_disk import (
 SUPPORTED_RUN_MODES: tuple[str, ...] = ("seizure", "fraud", "hacking", "recovery")
 IMPLEMENTED_RUN_MODES = set(SUPPORTED_RUN_MODES)
 RUN_DOC_EXTRACT_KINDS = SUPPORTED_DOC_KINDS
+PARSER_CRASH_ISOLATION_GAP_ID = "#71"
+MEMORY_CAP_GAP_ID = "#72"
+INCREMENTAL_INDEXING_GAP_ID = "#68"
+CHECKPOINT_RESUME_GAP_ID = "#70"
+PARALLEL_PARSER_SCHEDULER_GAP_ID = "#75"
+MEMORY_CAP_ENV = "RAPIDTRIAGE_MEMORY_CAP_BYTES"
 
 
 @dataclass(frozen=True)
@@ -185,6 +193,7 @@ def run_triage_mode(
     read_only: bool = False,
     max_extract_size_bytes: int = 0,
     max_file_count: int = 0,
+    memory_cap_bytes: int = 0,
     overwrite: bool = False,
     resume: bool = False,
     rule_set: RuleSet | None = None,
@@ -200,6 +209,8 @@ def run_triage_mode(
     profile = RUN_PROFILES[normalized_mode]
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    effective_memory_cap = resolve_memory_cap_bytes(memory_cap_bytes)
+    enforce_memory_cap("prepare", effective_memory_cap)
     input_root, image_result = prepare_run_input_root(root, input_kind=input_kind, output_dir=output_dir)
     scan_root = resolve_scan_root(input_root.root_path, profile)
     scan_input_root = derive_child_input_root(input_root, scan_root)
@@ -235,6 +246,7 @@ def run_triage_mode(
         write_result(image_result.to_dict(), virtual_disk_metadata_path)
 
     current_fingerprint = build_run_input_fingerprint(scan_root)
+    enforce_memory_cap("fingerprint", effective_memory_cap)
     previous_fingerprint = (
         load_reusable_json(
             fingerprint_path,
@@ -263,6 +275,7 @@ def run_triage_mode(
     if reused:
         reused_outputs.add("manifest")
     record_run_checkpoint(checkpoint_records, "manifest", manifest_path, reused=reused)
+    enforce_memory_cap("manifest", effective_memory_cap)
 
     docs_payload, reused = load_or_build_json(
         docs_path,
@@ -276,6 +289,7 @@ def run_triage_mode(
     record_run_checkpoint(checkpoint_records, "docs", docs_path, reused=reused)
     docs_payload["manifest"] = manifest_payload
     docs_payload["scan_scope_root"] = str(scan_input_root.root_path)
+    enforce_memory_cap("docs", effective_memory_cap)
 
     files_payload, reused = load_or_build_json(
         files_path,
@@ -293,6 +307,7 @@ def run_triage_mode(
         reused_outputs.add("files")
     record_run_checkpoint(checkpoint_records, "files", files_path, reused=reused)
     files_payload["scan_scope_root"] = str(scan_input_root.root_path)
+    enforce_memory_cap("files", effective_memory_cap)
 
     write_result(manifest_payload, manifest_path)
     write_result(docs_payload, docs_path)
@@ -315,6 +330,7 @@ def run_triage_mode(
         artifact_outputs[kind] = artifact_path
         artifact_payloads[kind] = artifact_payload
         write_result(artifact_payload, artifact_path)
+    enforce_memory_cap("artifacts", effective_memory_cap)
 
     docs_extract_payload, reused = load_or_build_json(
         docs_extract_manifest,
@@ -356,6 +372,7 @@ def run_triage_mode(
     record_run_checkpoint(checkpoint_records, "files-extract", files_extract_manifest, reused=reused)
     write_result(docs_extract_payload, docs_extract_manifest)
     write_result(files_extract_payload, files_extract_manifest)
+    enforce_memory_cap("extract", effective_memory_cap)
 
     timeline_payload, reused = load_or_build_json(
         timeline_path,
@@ -376,6 +393,7 @@ def run_triage_mode(
     record_run_checkpoint(checkpoint_records, "timeline", timeline_path, reused=reused)
     write_result(timeline_payload, timeline_path)
     timeline_report_path.write_text(build_timeline_report(timeline_payload), encoding="utf-8")
+    enforce_memory_cap("timeline", effective_memory_cap)
 
     provisional_outputs = {
         "manifest": manifest_path,
@@ -402,6 +420,7 @@ def run_triage_mode(
         reused_outputs.add("indicators")
     record_run_checkpoint(checkpoint_records, "indicators", indicators_path, reused=reused)
     write_result(indicators_payload, indicators_path)
+    enforce_memory_cap("indicators", effective_memory_cap)
     write_run_checkpoints(
         checkpoint_path,
         output_dir=output_dir,
@@ -454,6 +473,10 @@ def run_triage_mode(
             "read_only": read_only,
             "max_extract_size_bytes": max_extract_size_bytes,
             "max_file_count": max_file_count,
+            "memory_cap_bytes": effective_memory_cap,
+            "memory_cap_source": "argument"
+            if memory_cap_bytes
+            else ("environment" if os.environ.get(MEMORY_CAP_ENV) else "unset"),
             "overwrite": overwrite,
             "resume": resume,
             "resume_effective": effective_resume,
@@ -463,6 +486,8 @@ def run_triage_mode(
                 "strategy": "parallel-threaded-deterministic-output",
                 "max_workers": artifact_scheduler_workers(profile.artifacts_kinds),
                 "scheduled_count": len(profile.artifacts_kinds),
+                "commercial_gap_ids": [PARALLEL_PARSER_SCHEDULER_GAP_ID],
+                "assessment": parallel_parser_scheduler_assessment(profile.artifacts_kinds),
             },
         },
         rule_set=rule_set,
@@ -497,6 +522,7 @@ def run_triage_mode(
             "read_only": read_only,
             "max_extract_size_bytes": max_extract_size_bytes,
             "max_file_count": max_file_count,
+            "memory_cap_bytes": effective_memory_cap,
             "overwrite": overwrite,
             "resume": resume,
             "reused_outputs": sorted(reused_outputs),
@@ -566,6 +592,85 @@ def artifact_scheduler_workers(kinds: Sequence[str]) -> int:
     return max(1, min(4, len(tuple(kinds))))
 
 
+def parallel_parser_scheduler_assessment(kinds: Sequence[str]) -> dict[str, object]:
+    scheduled = len(tuple(kinds))
+    return {
+        "component": "parallel-parser-scheduler",
+        "status": "threaded-parser-stage-scheduler-enabled",
+        "commercial_gap_ids": [PARALLEL_PARSER_SCHEDULER_GAP_ID],
+        "scheduled_count": scheduled,
+        "max_workers": artifact_scheduler_workers(kinds),
+        "ready_for_court_report": False,
+        "supports": [
+            "bounded-worker-count",
+            "deterministic-output-paths",
+            "per-parser-result-capture",
+            "resume-aware-skip-of-existing-stage-json",
+        ],
+        "blockers": [
+            "scheduler-is-local-threadpool-not-distributed-priority-queue",
+            "parser-resource-telemetry-is-stage-level-not-live-per-worker",
+            "fairness-and-backpressure-need-terabyte-scale-validation",
+        ],
+    }
+
+
+def resolve_memory_cap_bytes(argument_value: int) -> int:
+    if argument_value > 0:
+        return argument_value
+    raw_value = os.environ.get(MEMORY_CAP_ENV, "")
+    if not raw_value:
+        return 0
+    try:
+        return max(0, int(raw_value))
+    except ValueError:
+        return 0
+
+
+def current_memory_rss_bytes() -> int:
+    try:
+        import resource
+
+        rss = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    except Exception:
+        return 0
+    if sys.platform == "darwin":
+        return rss
+    return rss * 1024
+
+
+def enforce_memory_cap(stage: str, memory_cap_bytes: int) -> None:
+    if memory_cap_bytes <= 0:
+        return
+    current = current_memory_rss_bytes()
+    if current and current > memory_cap_bytes:
+        raise RunModeError(
+            f"memory cap exceeded at stage {stage}: current_rss_bytes={current} cap_bytes={memory_cap_bytes}"
+        )
+
+
+def memory_cap_enforcement_assessment(*, memory_cap_bytes: int) -> dict[str, object]:
+    current_rss = current_memory_rss_bytes()
+    return {
+        "component": "memory-cap-enforcement",
+        "status": "stage-boundary-enforced" if memory_cap_bytes > 0 else "available-not-configured",
+        "commercial_gap_ids": [MEMORY_CAP_GAP_ID],
+        "memory_cap_bytes": memory_cap_bytes,
+        "current_rss_bytes": current_rss,
+        "ready_for_court_report": False,
+        "supports": [
+            "environment-or-cli-configured-memory-cap",
+            "rss-checks-at-run-stage-boundaries",
+            "failure-before-output-corruption-when-cap-is-exceeded",
+        ],
+        "blockers": [
+            "not-a-hard-os-cgroup-or-job-object-limit",
+            "checks-occur-at-safe-stage-boundaries-not-every-allocation",
+            "platform-rss-reporting-differs-across-windows-macos-linux",
+        ],
+    }
+
+
 def collect_artifact_stages(
     input_root: InputRoot,
     kinds: Sequence[str],
@@ -597,8 +702,62 @@ def collect_artifact_stages(
             }
             for future in as_completed(futures):
                 kind, artifact_path = futures[future]
-                results[kind] = (future.result(), artifact_path, False)
+                try:
+                    payload = future.result()
+                except Exception as exc:
+                    payload = isolated_parser_error_payload(kind, input_root=input_root, exc=exc)
+                results[kind] = (payload, artifact_path, False)
     return results
+
+
+def isolated_parser_error_payload(kind: str, *, input_root: InputRoot, exc: Exception) -> Dict[str, object]:
+    message = str(exc) or exc.__class__.__name__
+    return {
+        "command": "artifacts",
+        "kind": kind,
+        "root": str(input_root.root_path),
+        "input_kind": input_root.kind,
+        "generated_at": dt.datetime.now().isoformat(),
+        "summary": {
+            "artifact_count": 0,
+            "artifact_type_counts": {},
+            "parser_error_count": 1,
+            "commercial_gap_ids": [PARSER_CRASH_ISOLATION_GAP_ID],
+            "commercial_grade_ready": False,
+        },
+        "artifacts": [],
+        "parser_errors": [
+            {
+                "kind": kind,
+                "error_type": exc.__class__.__name__,
+                "message": message,
+                "isolated": True,
+                "commercial_gap_ids": [PARSER_CRASH_ISOLATION_GAP_ID],
+                "review_hint": "Treat this parser output as incomplete and validate the source with a trusted parser before reporting.",
+            }
+        ],
+        "parser_crash_isolation": parser_crash_isolation_assessment(error_count=1),
+    }
+
+
+def parser_crash_isolation_assessment(*, error_count: int) -> dict[str, object]:
+    return {
+        "component": "parser-crash-isolation",
+        "status": "isolated-errors-captured" if error_count else "enabled-no-errors",
+        "commercial_gap_ids": [PARSER_CRASH_ISOLATION_GAP_ID],
+        "parser_error_count": error_count,
+        "ready_for_court_report": error_count == 0,
+        "supports": [
+            "per-parser-exception-capture",
+            "failed-parser-json-output",
+            "run-continues-to-later-stages",
+            "warning-surfaced-in-run-summary",
+        ],
+        "blockers": [
+            "native-process-sandboxing-is-not-yet-used-for-every-parser",
+            "corrupt-input-fuzzing-and-crash-corpus-validation-remain-required",
+        ],
+    }
 
 
 def load_reusable_json(
@@ -660,7 +819,14 @@ def build_run_input_fingerprint(root: Path, *, max_files: int = 5000) -> Dict[st
             "latest_mtime_epoch": latest_mtime,
             "max_files": max_files,
             "truncated": truncated,
+            "commercial_gap_ids": [INCREMENTAL_INDEXING_GAP_ID],
+            "commercial_grade_ready": False,
         },
+        "incremental_indexing_assessment": incremental_indexing_assessment(
+            scanned_files=scanned_files,
+            max_files=max_files,
+            truncated=truncated,
+        ),
     }
 
 
@@ -674,6 +840,7 @@ def record_run_checkpoint(records: list[dict[str, object]], stage: str, path: Pa
             "size_bytes": path.stat().st_size if path.is_file() else None,
             "reused": reused,
             "recorded_at": dt.datetime.now().isoformat(),
+            "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
         }
     )
 
@@ -703,10 +870,63 @@ def write_run_checkpoints(
             "checkpoint_count": len(checkpoints),
             "status_counts": dict(status_counts),
             "reused_count": sum(1 for item in checkpoints if item.get("reused")),
+            "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
+            "commercial_grade_ready": False,
         },
+        "checkpoint_resume_assessment": checkpoint_resume_assessment(
+            resume_requested=resume_requested,
+            resume_effective=resume_effective,
+            checkpoints=checkpoints,
+        ),
         "checkpoints": [dict(item) for item in checkpoints],
     }
     write_result(payload, path)
+
+
+def incremental_indexing_assessment(*, scanned_files: int, max_files: int, truncated: bool) -> dict[str, object]:
+    return {
+        "component": "incremental-indexing",
+        "status": "fingerprint-based-reuse-enabled",
+        "commercial_gap_ids": [INCREMENTAL_INDEXING_GAP_ID],
+        "scanned_file_count": scanned_files,
+        "fingerprint_max_files": max_files,
+        "fingerprint_truncated": truncated,
+        "ready_for_court_report": False,
+        "blockers": [
+            "fingerprint-is-bounded-path-size-mtime-metadata-not-full-content-index-delta",
+            "changed-source-disables-reuse-instead-of-per-file-incremental-reindex",
+            "case-db-deduplication-and-reindex-policy-require-large-corpus-validation",
+        ],
+        "recommended_validation": [
+            "Preserve rapidtriage-run-fingerprint.json with resumed run outputs.",
+            "Rebuild outputs when the fingerprint changes or when bounded fingerprint truncation is unacceptable.",
+        ],
+    }
+
+
+def checkpoint_resume_assessment(
+    *,
+    resume_requested: bool,
+    resume_effective: bool,
+    checkpoints: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    return {
+        "component": "stage-checkpoint-resume",
+        "status": "resume-effective" if resume_effective else ("resume-requested-disabled-or-not-reused" if resume_requested else "fresh-run"),
+        "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
+        "checkpoint_count": len(checkpoints),
+        "reused_count": sum(1 for item in checkpoints if item.get("reused")),
+        "ready_for_court_report": False,
+        "blockers": [
+            "checkpointing-reuses-complete-json-stage-outputs-not-mid-parser-state",
+            "failed-or-partial-stage-resume-requires-rebuild-and-review-of-warning-output",
+            "long-running-parser-cooperative-cancellation-remains-limited",
+        ],
+        "recommended_validation": [
+            "Review each checkpoint status, output path, size, and reused flag before relying on resumed results.",
+            "Keep checkpoint and fingerprint files together with the run summary for reproducibility.",
+        ],
+    }
 
 
 def prepare_run_input_root(
@@ -903,6 +1123,7 @@ def build_run_summary(
         "resource_caps": {
             "max_extract_size_bytes": safety.get("max_extract_size_bytes", 0),
             "max_file_count": safety.get("max_file_count", 0),
+            "memory_cap_bytes": safety.get("memory_cap_bytes", 0),
             "fingerprint_max_files": 5000,
             "structured_preview_max_bytes": "see API source-preview constants",
             "bounded_outputs": True,
@@ -1031,17 +1252,21 @@ def build_step_rows(
     ]
     for kind, payload in artifact_payloads.items():
         artifact_count = artifact_count_by_kind[kind]
+        parser_error_count = int(payload.get("summary", {}).get("parser_error_count", 0))
         rows.append(
             mark_reused_step(
                 annotate_step(
                 {
                     "name": f"artifacts-{kind}",
-                    "status": "completed",
+                    "status": "failed_isolated" if parser_error_count else "completed",
                     "output": str(outputs[f"artifacts_{kind}"]),
                     "artifact_count": artifact_count,
+                    "parser_error_count": parser_error_count,
                 },
-                warning_level="notice" if artifact_count == 0 else "none",
-                warning_messages=[f"No {kind} artifact rows were collected."] if artifact_count == 0 else [],
+                warning_level="failed" if parser_error_count else ("notice" if artifact_count == 0 else "none"),
+                warning_messages=[f"{kind} parser reported {parser_error_count} isolated error(s)."]
+                if parser_error_count
+                else ([f"No {kind} artifact rows were collected."] if artifact_count == 0 else []),
                 ),
                 reused_outputs,
             )
@@ -1126,10 +1351,13 @@ def build_processing_summary(
 
     max_extract_size = int(safety.get("max_extract_size_bytes") or 0)
     max_file_count = int(safety.get("max_file_count") or 0)
+    memory_cap_bytes = int(safety.get("memory_cap_bytes") or 0)
     read_only = bool(safety.get("read_only"))
     dry_run = bool(safety.get("dry_run"))
     resume = bool(safety.get("resume"))
     reused_outputs = [str(item) for item in safety.get("reused_outputs", [])] if isinstance(safety.get("reused_outputs"), list) else []
+    parser_error_count = sum(int(step.get("parser_error_count") or 0) for step in steps)
+    artifact_scheduler = safety.get("artifact_scheduler") if isinstance(safety.get("artifact_scheduler"), Mapping) else {}
     profile_label = infer_processing_profile_label(
         read_only=read_only,
         dry_run=dry_run,
@@ -1144,9 +1372,26 @@ def build_processing_summary(
         "resume": resume,
         "reused_output_count": len(reused_outputs),
         "reused_outputs": reused_outputs,
+        "incremental_indexing": {
+            "commercial_gap_ids": [INCREMENTAL_INDEXING_GAP_ID],
+            "status": "fingerprint-controlled-output-reuse",
+            "resume_effective": bool(safety.get("resume_effective")),
+            "resume_disabled_reason": str(safety.get("resume_disabled_reason") or ""),
+        },
+        "checkpoint_resume": {
+            "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
+            "status": "stage-checkpoints-written",
+            "reused_output_count": len(reused_outputs),
+        },
+        "parser_crash_isolation": parser_crash_isolation_assessment(error_count=parser_error_count),
+        "memory_cap_enforcement": memory_cap_enforcement_assessment(memory_cap_bytes=memory_cap_bytes),
+        "parallel_parser_scheduler": artifact_scheduler.get("assessment")
+        if isinstance(artifact_scheduler.get("assessment"), Mapping)
+        else parallel_parser_scheduler_assessment(()),
         "caps": {
             "max_extract_size_bytes": max_extract_size,
             "max_file_count": max_file_count,
+            "memory_cap_bytes": memory_cap_bytes,
         },
         "step_count": len(steps),
         "warning_count": len(warnings),

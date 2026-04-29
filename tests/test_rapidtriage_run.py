@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.core.input_root import InputRoot
 from rapidtriage.core.reporting import build_run_report_context, render_run_markdown_report
+from rapidtriage.core.run import isolated_parser_error_payload, memory_cap_enforcement_assessment
 from rapidtriage.core.silent_failure import build_silent_failure_report
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
@@ -104,6 +106,7 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertIn("--mode", run_help)
         self.assertIn("fraud", run_help)
         self.assertIn("hacking", run_help)
+        self.assertIn("--memory-cap-bytes", run_help)
         self.assertIn("--resume", run_help)
 
     def test_run_fraud_mode_writes_component_outputs_summary_and_report(self) -> None:
@@ -117,6 +120,21 @@ class RapidTriageRunTests(unittest.TestCase):
 
     def test_run_recovery_mode_writes_component_outputs_summary_and_report(self) -> None:
         self.assert_run_mode_outputs("recovery")
+
+    def test_parser_crash_isolation_payload_and_memory_cap_assessment_are_machine_readable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload = isolated_parser_error_payload(
+                "eventlog",
+                input_root=InputRoot(source_path=tmp_dir, root_path=Path(tmp_dir), kind="directory"),
+                exc=RuntimeError("synthetic parser crash"),
+            )
+            self.assertEqual(payload["summary"]["parser_error_count"], 1)
+            self.assertIn("#71", payload["parser_errors"][0]["commercial_gap_ids"])
+            self.assertIn("#71", payload["parser_crash_isolation"]["commercial_gap_ids"])
+
+        assessment = memory_cap_enforcement_assessment(memory_cap_bytes=123456)
+        self.assertEqual(assessment["memory_cap_bytes"], 123456)
+        self.assertIn("#72", assessment["commercial_gap_ids"])
 
     def test_run_supports_read_only_extract_safety(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -206,11 +224,24 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("timeline", summary_payload["safety"]["reused_outputs"])
             self.assertTrue(summary_payload["safety"]["resume_effective"])
             self.assertGreaterEqual(summary_payload["processing"]["reused_output_count"], 5)
+            self.assertIn("#68", summary_payload["processing"]["incremental_indexing"]["commercial_gap_ids"])
+            self.assertIn("#70", summary_payload["processing"]["checkpoint_resume"]["commercial_gap_ids"])
+            self.assertIn("#71", summary_payload["processing"]["parser_crash_isolation"]["commercial_gap_ids"])
+            self.assertIn("#72", summary_payload["processing"]["memory_cap_enforcement"]["commercial_gap_ids"])
+            self.assertIn("#75", summary_payload["processing"]["parallel_parser_scheduler"]["commercial_gap_ids"])
+            self.assertIn("#75", summary_payload["safety"]["artifact_scheduler"]["commercial_gap_ids"])
+            self.assertEqual(summary_payload["resource_caps"]["memory_cap_bytes"], 0)
             self.assertIn("checkpoints", summary_payload["outputs"])
             checkpoints = json.loads((output_dir / "rapidtriage-run-checkpoints.json").read_text(encoding="utf-8"))
             self.assertEqual(checkpoints["command"], "run-checkpoints")
             self.assertTrue(checkpoints["resume"]["effective"])
             self.assertGreaterEqual(checkpoints["summary"]["reused_count"], 5)
+            self.assertIn("#70", checkpoints["summary"]["commercial_gap_ids"])
+            self.assertIn("#70", checkpoints["checkpoint_resume_assessment"]["commercial_gap_ids"])
+            self.assertIn("#70", checkpoints["checkpoints"][0]["commercial_gap_ids"])
+            fingerprint = json.loads((output_dir / "rapidtriage-run-fingerprint.json").read_text(encoding="utf-8"))
+            self.assertIn("#68", fingerprint["summary"]["commercial_gap_ids"])
+            self.assertIn("#68", fingerprint["incremental_indexing_assessment"]["commercial_gap_ids"])
 
             step_statuses = {step["name"]: step["status"] for step in summary_payload["steps"]}
             self.assertEqual(step_statuses["docs"], "reused")

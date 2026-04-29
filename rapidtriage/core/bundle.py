@@ -14,6 +14,9 @@ from .case_report import build_case_report_markdown, report_export_csp, write_ca
 from .docs import write_result
 from .submission import build_submission_manifest, compute_hashes
 
+COURT_EXHIBIT_EXPORT_GAP_ID = "#94"
+TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID = "#100"
+
 
 class BundleError(ValueError):
     """Raised when a submission bundle cannot be created."""
@@ -329,9 +332,11 @@ def build_court_exhibit_index(
         "command": "court-exhibit-index",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "case_id": str(manifest.get("case_id") or ""),
+        "commercial_gap_ids": [COURT_EXHIBIT_EXPORT_GAP_ID],
         "summary": {
             "exhibit_item_count": len(exhibit_items),
             "output_hash_count": len(output_hashes),
+            "commercial_gap_ids": [COURT_EXHIBIT_EXPORT_GAP_ID],
         },
         "exhibits": exhibit_items,
         "output_hashes": output_hashes,
@@ -366,9 +371,11 @@ def build_tamper_evident_audit_bundle(*, output_paths: Sequence[tuple[str, Path]
     return {
         "command": "tamper-evident-audit-bundle",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "commercial_gap_ids": [TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID],
         "summary": {
             "entry_count": len(entries),
             "head_hash": previous_hash,
+            "commercial_gap_ids": [TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID],
         },
         "entries": entries,
         "verification_steps": [

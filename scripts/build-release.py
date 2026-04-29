@@ -16,6 +16,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from rapidtriage.core.commercial_readiness import build_commercial_readiness_report
 
+WINDOWS_SIGNED_INSTALLER_GAP_ID = "#101"
+MACOS_NOTARIZED_PACKAGE_GAP_ID = "#102"
+LINUX_PACKAGE_GAP_ID = "#103"
+AUTO_UPDATE_CHANNEL_GAP_ID = "#104"
+RELEASE_NOTES_CHANGELOG_GAP_ID = "#112"
+LTS_HOTFIX_POLICY_GAP_ID = "#113"
+SUPPORT_SLA_GAP_ID = "#114"
+TRAINING_CURRICULUM_GAP_ID = "#115"
+ANALYST_QUICKSTART_LAB_GAP_ID = "#116"
+ADMIN_DEPLOYMENT_GUIDE_GAP_ID = "#117"
+SECURITY_HARDENING_REVIEW_GAP_ID = "#118"
+MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID = "#119"
+DEPENDENCY_VULNERABILITY_MONITORING_GAP_ID = "#120"
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build RapidTriage release artifacts")
@@ -56,6 +70,9 @@ def main(argv: list[str] | None = None) -> int:
         add_if_exists(archive, repo / "docs" / "rapidtriage-release-checklist.md", "docs/rapidtriage-release-checklist.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-release-notes-template.md", "docs/rapidtriage-release-notes-template.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-support-sla.md", "docs/rapidtriage-support-sla.md")
+        add_if_exists(archive, repo / "docs" / "rapidtriage-lts-hotfix-policy.md", "docs/rapidtriage-lts-hotfix-policy.md")
+        add_if_exists(archive, repo / "docs" / "rapidtriage-training-curriculum.md", "docs/rapidtriage-training-curriculum.md")
+        add_if_exists(archive, repo / "docs" / "rapidtriage-admin-deployment-guide.md", "docs/rapidtriage-admin-deployment-guide.md")
         add_if_exists(archive, repo / "scripts" / "start-rapidtriage.sh", "scripts/start-rapidtriage.sh")
         add_if_exists(archive, repo / "scripts" / "smoke-test-rapidtriage.sh", "scripts/smoke-test-rapidtriage.sh")
         add_if_exists(archive, repo / "scripts" / "summarize-smoke.py", "scripts/summarize-smoke.py")
@@ -146,6 +163,21 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
             "platform": platform.platform(),
         },
         "artifacts": artifacts,
+        "commercialization_gap_ids": [
+            WINDOWS_SIGNED_INSTALLER_GAP_ID,
+            MACOS_NOTARIZED_PACKAGE_GAP_ID,
+            LINUX_PACKAGE_GAP_ID,
+            AUTO_UPDATE_CHANNEL_GAP_ID,
+            RELEASE_NOTES_CHANGELOG_GAP_ID,
+            LTS_HOTFIX_POLICY_GAP_ID,
+            SUPPORT_SLA_GAP_ID,
+            TRAINING_CURRICULUM_GAP_ID,
+            ANALYST_QUICKSTART_LAB_GAP_ID,
+            ADMIN_DEPLOYMENT_GUIDE_GAP_ID,
+            SECURITY_HARDENING_REVIEW_GAP_ID,
+            MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID,
+            DEPENDENCY_VULNERABILITY_MONITORING_GAP_ID,
+        ],
         "commercial_readiness": {
             "status": commercial_readiness.get("status") if commercial_readiness else "not-generated",
             "commercial_claim_allowed": commercial_readiness.get("commercial_claim_allowed", False)
@@ -160,22 +192,48 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
         "package_readiness": {
             "windows_signed_installer": {
                 "status": "external-required",
+                "commercial_gap_ids": [WINDOWS_SIGNED_INSTALLER_GAP_ID],
                 "required_evidence": ["Authenticode signature", "timestamp authority", "fresh Windows smoke test"],
             },
             "macos_notarized_package": {
                 "status": "external-required",
+                "commercial_gap_ids": [MACOS_NOTARIZED_PACKAGE_GAP_ID],
                 "required_evidence": ["codesign verification", "notarization ticket", "Gatekeeper assessment"],
             },
             "linux_package": {
                 "status": "packaging-plan-ready",
+                "commercial_gap_ids": [LINUX_PACKAGE_GAP_ID],
                 "supported_outputs": ["portable zip", "wheel", "sdist"],
                 "future_outputs": ["deb", "rpm", "AppImage"],
                 "plan": "packaging-plan.json",
             },
             "auto_update_channel": {
                 "status": "manifest-generated",
+                "commercial_gap_ids": [AUTO_UPDATE_CHANNEL_GAP_ID],
                 "manifest": "update-manifest.json",
                 "enterprise_disable_supported": True,
+            },
+            "operations_documents": {
+                "status": "packaged",
+                "commercial_gap_ids": [
+                    RELEASE_NOTES_CHANGELOG_GAP_ID,
+                    LTS_HOTFIX_POLICY_GAP_ID,
+                    SUPPORT_SLA_GAP_ID,
+                    TRAINING_CURRICULUM_GAP_ID,
+                    ANALYST_QUICKSTART_LAB_GAP_ID,
+                    ADMIN_DEPLOYMENT_GUIDE_GAP_ID,
+                    SECURITY_HARDENING_REVIEW_GAP_ID,
+                    MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID,
+                    DEPENDENCY_VULNERABILITY_MONITORING_GAP_ID,
+                ],
+                "documents": [
+                    "docs/rapidtriage-release-notes-template.md",
+                    "docs/rapidtriage-lts-hotfix-policy.md",
+                    "docs/rapidtriage-support-sla.md",
+                    "docs/rapidtriage-training-curriculum.md",
+                    "docs/rapidtriage-admin-deployment-guide.md",
+                    "docs/rapidtriage-security-policy.md",
+                ],
             },
         },
         "required_followup_evidence": [
@@ -193,6 +251,12 @@ def write_packaging_plan(output_dir: Path) -> None:
     plan = {
         "name": "rapidtriage-packaging-plan",
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "commercial_gap_ids": [
+            WINDOWS_SIGNED_INSTALLER_GAP_ID,
+            MACOS_NOTARIZED_PACKAGE_GAP_ID,
+            LINUX_PACKAGE_GAP_ID,
+            AUTO_UPDATE_CHANNEL_GAP_ID,
+        ],
         "local_outputs": {
             "portable_zip": {
                 "path": "rapidtriage-portable.zip",
@@ -207,11 +271,13 @@ def write_packaging_plan(output_dir: Path) -> None:
             "update_manifest": {
                 "path": "update-manifest.json",
                 "status": "manual-channel-generated",
+                "commercial_gap_ids": [AUTO_UPDATE_CHANNEL_GAP_ID],
                 "enterprise_disable": True,
             },
         },
         "platform_packages": {
             "windows": {
+                "commercial_gap_ids": [WINDOWS_SIGNED_INSTALLER_GAP_ID],
                 "target_outputs": ["msi", "exe"],
                 "current_status": "external-signing-required",
                 "build_steps": [
@@ -228,6 +294,7 @@ def write_packaging_plan(output_dir: Path) -> None:
                 ],
             },
             "macos": {
+                "commercial_gap_ids": [MACOS_NOTARIZED_PACKAGE_GAP_ID],
                 "target_outputs": ["pkg", "dmg"],
                 "current_status": "external-codesign-notarization-required",
                 "build_steps": [
@@ -244,6 +311,7 @@ def write_packaging_plan(output_dir: Path) -> None:
                 ],
             },
             "linux": {
+                "commercial_gap_ids": [LINUX_PACKAGE_GAP_ID],
                 "target_outputs": ["deb", "rpm", "AppImage"],
                 "current_status": "portable-zip-wheel-ready-package-wrapper-pending",
                 "build_steps": [
@@ -318,6 +386,7 @@ def write_update_manifest(output_dir: Path) -> None:
     manifest = {
         "name": "rapidtriage-update-manifest",
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "commercial_gap_ids": [AUTO_UPDATE_CHANNEL_GAP_ID],
         "channel": "manual",
         "auto_update_enabled_by_default": False,
         "enterprise_disable": True,

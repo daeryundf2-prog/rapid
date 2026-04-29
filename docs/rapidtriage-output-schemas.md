@@ -140,7 +140,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `categories`
   - `reasons`
 - Default categories include documents, archives, databases, executables, emails, AXIOM-aligned disk/mobile images, memory dumps, vehicle exports, and image/OCR candidates.
-- File scan summaries include `duplicate_group_count` and `duplicate_file_count`; `duplicate_content_groups` contains bounded SHA-256 duplicate groups with representative paths.
+- File scan summaries include #76 hash-cache and #77 duplicate-detection metadata. `duplicate_group_count` and `duplicate_file_count` summarize `duplicate_content_groups`, which contains bounded SHA-256 duplicate groups with representative paths.
 
 ### `extract`
 
@@ -176,8 +176,15 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `safety.resume`, `safety.resume_effective`, `safety.resume_disabled_reason`, and `safety.reused_outputs` describe whether stage output reuse was requested, allowed, and applied.
 - `resource_caps` records bounded extraction/fingerprint/preview settings, and `safety.artifact_scheduler` records the bounded parallel artifact scheduler strategy.
 - `rapidtriage-run-fingerprint.json` stores a bounded source tree fingerprint with scanned file count, total size, latest mtime, max files, and truncation status.
-- `rapidtriage-run-checkpoints.json` stores per-stage output paths, existence, size, reused flag, status counts, and the input fingerprint used for resume decisions.
-- Paged API wrappers include `pagination.cursor`, `next_cursor`, and `previous_cursor` alongside offset fields.
+- `rapidtriage-run-fingerprint.json` stores #68 bounded path/size/mtime fingerprint metadata, truncation status, and incremental-indexing validation guidance.
+- `rapidtriage-run-checkpoints.json` stores #70 per-stage output paths, existence, size, reused flag, status counts, resume assessment, and the input fingerprint used for resume decisions.
+- Run `processing` now includes #71 parser-crash isolation, #72 memory-cap enforcement, and #75 parallel parser scheduler assessments. Isolated parser failures are written as parser-specific artifact JSON with `parser_errors` instead of silently dropping the stage.
+- Validation packages include #81 known-answer manifest status, #82 parser fixture corpus coverage, #83 parser false-positive/false-negative notes, #84 independent validation report hash metadata, and #85 validation package/hash-manifest assessment fields.
+- Case DB report exports include #86 custody workflow, #87 acquisition hash workflow, #88 export-time audit hash chain, #89 deterministic report reproducibility hash, and #90 source provenance metadata on each selected report item.
+- Report items also include #91 parser confidence scoring, #92 validation-required warning metadata, and #93 legal limitation assessment. Reviewer bundles include #94 court exhibit index metadata, and validation packages include #95 external tool version capture assessment.
+- Case DB report exports additionally expose #96 acquisition/write-blocker metadata validation, #97 timezone normalization checks, #98 clock-skew warnings, and #99 evidence-contamination warnings. Reviewer bundles include #100 tamper-evident audit-bundle hash-chain metadata.
+- Release and operations outputs expose #101 Windows signing evidence gates, #102 macOS notarization gates, #103 Linux package gates, #104 manual update-manifest policy, #105 local crash reporting, #106 telemetry-free local-only mode, #107 offline license handling, #108 role policy, #109 multi-user server guardrails, #110 collaboration audit-trail scope, #111 backup/restore migration readiness, #112 release notes discipline, #113 LTS/hotfix policy, #114 support SLA template, #115 training curriculum, #116 analyst quickstart lab, #117 admin deployment guide, #118 hardening review baseline, #119 malicious-evidence sandboxing limits, and #120 dependency vulnerability monitoring.
+- Paged API wrappers include #78 `pagination.cursor`, `next_cursor`, `previous_cursor`, offset fields, and pagination assessment metadata. Web tables expose #79 bounded rendering notices when a result array is larger than the DOM row window.
 
 ### `search`
 
@@ -206,7 +213,8 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - Endpoint: `GET /api/runs/{run_id}/source-preview?path=...`
 - Common keys: `command`, `path`, `name`, `size`, `mime_type`, `download_url`, `metadata_url`, `search_url`, `viewer_actions`, `viewer_limitations`, `viewer_sandbox`, `viewer_metadata`, `review_workflow`, `compare_workflow`, and `preview_type`.
 - Structured preview types include `text`, `image`, `sqlite`, `json`, `xml`, `email`, `media`, and `hex`.
-- `viewer_sandbox` states read-only bounded rendering, no content execution, active-content blocking status, external-network prohibition, and byte/character caps.
+- `viewer_sandbox` states #73 read-only bounded rendering, no content execution, active-content blocking status, external-network prohibition, byte/character caps, and sandbox limitations.
+- SQLite previews include #74 `large_sqlite_fts_optimization` metadata and an explicit optimization assessment so large tables stay bounded in the viewer while indexed case search handles broader review.
 - Review and compare viewer actions expose #51/#52 status fields for reviewer, assignee, priority, due date, report inclusion, and A/B/C pinning, but final report use still requires source verification.
 - `hex` previews are bounded read-only rows with `offset`, `offset_hex`, `hex`, `ascii`, `bytes_read`, `max_bytes`, `offset_navigation`, #53 assessment, and `truncated`; they are for triage and byte-offset orientation, not a replacement for source-file validation.
 - `sqlite` previews include table profiles, schema SQL, column details, index hints, bounded rows, text-column search support, and #54 assessment.

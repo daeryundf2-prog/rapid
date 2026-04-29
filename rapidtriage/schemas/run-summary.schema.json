@@ -159,6 +159,8 @@
         "read_only",
         "max_extract_size_bytes",
         "max_file_count",
+        "memory_cap_bytes",
+        "memory_cap_source",
         "overwrite",
         "resume",
         "reused_outputs"
@@ -175,6 +177,12 @@
         },
         "max_file_count": {
           "type": "integer"
+        },
+        "memory_cap_bytes": {
+          "type": "integer"
+        },
+        "memory_cap_source": {
+          "type": "string"
         },
         "overwrite": {
           "type": "boolean"
@@ -200,7 +208,9 @@
           "required": [
             "strategy",
             "max_workers",
-            "scheduled_count"
+            "scheduled_count",
+            "commercial_gap_ids",
+            "assessment"
           ],
           "properties": {
             "strategy": {
@@ -211,6 +221,16 @@
             },
             "scheduled_count": {
               "type": "integer"
+            },
+            "commercial_gap_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assessment": {
+              "type": "object",
+              "additionalProperties": true
             }
           }
         }
@@ -260,6 +280,11 @@
         "resume",
         "reused_output_count",
         "reused_outputs",
+        "incremental_indexing",
+        "checkpoint_resume",
+        "parser_crash_isolation",
+        "memory_cap_enforcement",
+        "parallel_parser_scheduler",
         "caps",
         "step_count",
         "warning_count",
@@ -291,9 +316,29 @@
             "type": "string"
           }
         },
+        "incremental_indexing": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "checkpoint_resume": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "parser_crash_isolation": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "memory_cap_enforcement": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "parallel_parser_scheduler": {
+          "type": "object",
+          "additionalProperties": true
+        },
         "caps": {
           "type": "object",
-          "additionalProperties": false,
+          "additionalProperties": true,
           "required": [
             "max_extract_size_bytes",
             "max_file_count"

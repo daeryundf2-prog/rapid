@@ -33,6 +33,7 @@ from ..core.docs import SUPPORTED_DOC_EXTS, extract_text
 from ..core.doctor import run_doctor
 from ..core.enterprise import build_enterprise_policy
 from ..core.evidence import identify_evidence, supported_evidence_formats
+from ..core.hash_cache import hash_cache_assessment
 from ..core.jobs import RunJobStore, RunRequest, default_job_store, is_relative_to, run_output_dir
 from ..core.keyword_packs import KeywordPackError, keyword_pack_library_assessment, list_keyword_packs, resolve_keyword_packs
 from ..core.run import RunModeError
@@ -66,6 +67,11 @@ VIEWER_WORKFLOW_GAP_IDS = {
     "media": "#57",
     "ocr_queue": "#58",
     "korean_ocr": "#59",
+    "preview_sandbox": "#73",
+    "sqlite_performance": "#74",
+    "hash_cache": "#76",
+    "pagination": "#78",
+    "ui_virtualization": "#79",
 }
 
 
@@ -79,6 +85,7 @@ class RunCreateRequest(BaseModel):
     read_only: bool = False
     max_extract_size_bytes: int = 0
     max_file_count: int = 0
+    memory_cap_bytes: int = 0
     overwrite: bool = False
     resume: bool = False
     wait: bool = False
@@ -516,6 +523,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             read_only=request.read_only,
             max_extract_size_bytes=request.max_extract_size_bytes,
             max_file_count=request.max_file_count,
+            memory_cap_bytes=request.memory_cap_bytes,
             overwrite=request.overwrite,
             resume=request.resume,
         )
@@ -987,8 +995,26 @@ def paginate_payload(
         "next_cursor": encode_pagination_cursor(end) if end < total else None,
         "previous_cursor": encode_pagination_cursor(max(0, offset - limit)) if offset > 0 else None,
         "has_more": end < total,
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["pagination"]],
+        "pagination_assessment": pagination_assessment(collection_name, total=total, returned=max(0, end - offset)),
     }
     return page
+
+
+def pagination_assessment(collection_name: str, *, total: int, returned: int) -> dict[str, object]:
+    return {
+        "component": "artifact-pagination-cursor-api",
+        "status": "offset-compatible-cursor-pagination",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["pagination"]],
+        "collection": collection_name,
+        "total": total,
+        "returned": returned,
+        "ready_for_court_report": False,
+        "blockers": [
+            "cursor-is-offset-token-not-snapshot-isolated-database-cursor",
+            "search-endpoints-still-return-bounded-result-sets-before-case-db-pagination",
+        ],
+    }
 
 
 def encode_pagination_cursor(offset: int) -> str:
@@ -1358,6 +1384,7 @@ def source_viewer_sandbox(source_path: Path, *, suffix: str, mime_type: str, max
     }
     return {
         "mode": "read-only-bounded-preview",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["preview_sandbox"]],
         "executes_content": False,
         "active_content_blocked": active_content,
         "path_redaction": "display-basename-in-summary-use-full-path-only-for-authorized-source-actions",
@@ -1369,6 +1396,14 @@ def source_viewer_sandbox(source_path: Path, *, suffix: str, mime_type: str, max
             "Preview routes never execute scripts, macros, HTML, SVG, or embedded active content.",
             "Use source metadata/hash actions for verification before report inclusion.",
         ],
+        "preview_sandbox_assessment": source_viewer_component_assessment(
+            VIEWER_WORKFLOW_GAP_IDS["preview_sandbox"],
+            "preview-sandboxing",
+            [
+                "preview-is-application-level-bounded-rendering-not-a-separate-os-sandbox",
+                "malicious-codecs-and-office-macros-require-external-sandboxed-tooling-before-opening-originals",
+            ],
+        ),
     }
 
 
@@ -1436,13 +1471,14 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
             "parser_version": SOURCE_VIEWER_VERSION,
             "table_limit": SQLITE_PREVIEW_TABLE_LIMIT,
             "row_limit": SQLITE_PREVIEW_ROW_LIMIT,
-            "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["sqlite"]],
+            "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["sqlite"], VIEWER_WORKFLOW_GAP_IDS["sqlite_performance"]],
         },
         "sqlite": {
             "table_count": len(tables),
             "database_metadata": database_metadata,
             "tables": previews,
             "table_profiles": build_sqlite_table_profiles(previews),
+            "large_sqlite_fts_optimization": sqlite_fts_optimization_metadata(database_metadata, previews),
             "table_limit": SQLITE_PREVIEW_TABLE_LIMIT,
             "row_limit": SQLITE_PREVIEW_ROW_LIMIT,
             "column_limit": SQLITE_PREVIEW_COLUMN_LIMIT,
@@ -1456,6 +1492,14 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
                     "wal/journal-replay-and-deleted-row-recovery-not-implemented-in-viewer",
                 ],
             ),
+            "sqlite_fts_optimization_assessment": source_viewer_component_assessment(
+                VIEWER_WORKFLOW_GAP_IDS["sqlite_performance"],
+                "large-sqlite-fts-optimization",
+                [
+                    "sqlite-source-preview-does-not-materialize-full-external-index",
+                    "very-large-wal/journal-and-deleted-row-analysis-requires-dedicated-parser",
+                ],
+            ),
             "review_features": [
                 "read-only-uri-open",
                 "schema-sql",
@@ -1463,6 +1507,7 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
                 "bounded-row-preview",
                 "text-column-keyword-search",
                 "table-profile-summary",
+                "large-sqlite-optimization-metadata",
             ],
         },
     }
@@ -2187,6 +2232,9 @@ def sqlite_database_metadata(connection: sqlite3.Connection, source_path: Path) 
             row = None
         if row is not None:
             metadata[key] = row[0]
+    page_size = optional_int_for_api(metadata.get("page_size")) or 0
+    page_count = optional_int_for_api(metadata.get("page_count")) or 0
+    metadata["estimated_database_bytes"] = page_size * page_count if page_size and page_count else source_path.stat().st_size
     try:
         database_rows = connection.execute("PRAGMA database_list").fetchall()
         metadata["database_list"] = [
@@ -2302,6 +2350,39 @@ def build_sqlite_table_profiles(previews: Sequence[Mapping[str, object]]) -> lis
     return profiles
 
 
+def sqlite_fts_optimization_metadata(
+    database_metadata: Mapping[str, object],
+    previews: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    row_counts = [
+        int(table.get("row_count") or 0)
+        for table in previews
+        if isinstance(table.get("row_count"), int)
+    ]
+    total_preview_rows = sum(row_counts)
+    text_column_count = 0
+    for table in previews:
+        for column in table.get("column_details", []) if isinstance(table.get("column_details"), list) else []:
+            if isinstance(column, Mapping) and str(column.get("type") or "").upper() in {"", "TEXT", "VARCHAR", "CHAR", "CLOB"}:
+                text_column_count += 1
+    return {
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["sqlite_performance"]],
+        "status": "bounded-read-only-preview-with-fts-aware-guidance",
+        "page_size": database_metadata.get("page_size"),
+        "page_count": database_metadata.get("page_count"),
+        "estimated_database_bytes": database_metadata.get("estimated_database_bytes"),
+        "preview_table_count": len(previews),
+        "preview_row_count": total_preview_rows,
+        "searchable_text_column_count": text_column_count,
+        "recommended_large_case_strategy": [
+            "Use indexed case search for imported artifacts/documents instead of loading huge SQLite tables in the browser.",
+            "Use current-file source-search for targeted keyword hits, then verify row/table context in the source viewer.",
+            "Keep row previews bounded and paginate/cursor through API results for case-scale review.",
+        ],
+        "ready_for_court_report": False,
+    }
+
+
 def quote_sqlite_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
@@ -2346,10 +2427,12 @@ def build_source_metadata(source_path: Path, *, include_hashes: bool) -> Dict[st
         "mime_type": mime_type,
         "hashes": {},
         "hash_status": "not-requested",
+        "hash_cache_assessment": hash_cache_assessment(),
     }
     if include_hashes:
         payload["hashes"] = compute_hashes(source_path)
         payload["hash_status"] = "computed"
+        payload["hash_cache_assessment"] = hash_cache_assessment()
     return payload
 
 

@@ -15,6 +15,19 @@ from .submission import compute_hashes
 
 
 SCHEMA_VERSION = 1
+LARGE_SQLITE_FTS_GAP_ID = "#74"
+CHAIN_OF_CUSTODY_GAP_ID = "#86"
+ACQUISITION_HASH_GAP_ID = "#87"
+IMMUTABLE_AUDIT_GAP_ID = "#88"
+REPORT_REPRODUCIBILITY_GAP_ID = "#89"
+SOURCE_PROVENANCE_GAP_ID = "#90"
+PARSER_CONFIDENCE_GAP_ID = "#91"
+VALIDATION_WARNING_UX_GAP_ID = "#92"
+LEGAL_LIMITATION_GAP_ID = "#93"
+WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID = "#96"
+TIMEZONE_NORMALIZATION_GAP_ID = "#97"
+CLOCK_SKEW_ANALYSIS_GAP_ID = "#98"
+EVIDENCE_CONTAMINATION_WARNING_GAP_ID = "#99"
 CITATION_WIDTH = 6
 CITATION_KIND_PREFIXES = {
     "evidence": "EVID",
@@ -115,6 +128,7 @@ class CaseDatabase:
                 "path": str(self.path),
                 "schema_version": get_schema_version(connection),
                 "tables": list_tables(connection),
+                "large_sqlite_fts_optimization": case_db_fts_optimization_assessment(connection),
             }
 
     def schema_version(self) -> int:
@@ -958,6 +972,24 @@ class CaseDatabase:
                 "review_assignment_enabled": True,
                 "report_citation_gap_ids": ["#64"],
                 "evidence_selection_gap_ids": ["#65"],
+                "forensic_integrity_gap_ids": [
+                    CHAIN_OF_CUSTODY_GAP_ID,
+                    ACQUISITION_HASH_GAP_ID,
+                    IMMUTABLE_AUDIT_GAP_ID,
+                    REPORT_REPRODUCIBILITY_GAP_ID,
+                    SOURCE_PROVENANCE_GAP_ID,
+                    WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID,
+                    TIMEZONE_NORMALIZATION_GAP_ID,
+                    CLOCK_SKEW_ANALYSIS_GAP_ID,
+                    EVIDENCE_CONTAMINATION_WARNING_GAP_ID,
+                ],
+                "parser_confidence_gap_ids": [PARSER_CONFIDENCE_GAP_ID],
+                "validation_warning_ux_gap_ids": [VALIDATION_WARNING_UX_GAP_ID],
+                "legal_limitation_gap_ids": [LEGAL_LIMITATION_GAP_ID],
+                "acquisition_metadata_gap_ids": [WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID],
+                "timezone_validation_gap_ids": [TIMEZONE_NORMALIZATION_GAP_ID],
+                "clock_skew_gap_ids": [CLOCK_SKEW_ANALYSIS_GAP_ID],
+                "contamination_warning_gap_ids": [EVIDENCE_CONTAMINATION_WARNING_GAP_ID],
                 "citation_count": len(citation_index),
                 "custody_event_count": custody_workflow["summary"]["custody_event_count"],
                 "acquisition_hash_count": acquisition_hash_workflow["summary"]["hash_count"],
@@ -1442,6 +1474,41 @@ def list_tables(connection: sqlite3.Connection) -> list[str]:
 
 def table_columns(connection: sqlite3.Connection, table_name: str) -> list[str]:
     return [str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table_name})")]
+
+
+def case_db_fts_optimization_assessment(connection: sqlite3.Connection) -> dict[str, object]:
+    indexes = [
+        str(row["name"])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%' ORDER BY name"
+        ).fetchall()
+    ]
+    fts_tables = [
+        str(row["name"])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '%_fts' ORDER BY name"
+        ).fetchall()
+    ]
+    return {
+        "component": "case-db-large-sqlite-fts",
+        "status": "fts5-and-hot-path-indexes-enabled",
+        "commercial_gap_ids": [LARGE_SQLITE_FTS_GAP_ID],
+        "fts_tables": fts_tables,
+        "index_count": len(indexes),
+        "hot_path_indexes": indexes,
+        "sqlite_pragmas": {
+            "foreign_keys": True,
+            "temp_store": "MEMORY",
+            "cache_size_kib": 65536,
+            "journal_mode": "WAL-when-supported",
+            "optimize_on_close": True,
+        },
+        "ready_for_court_report": False,
+        "blockers": [
+            "10m-record-benchmark-and-query-plan-regression-gates-remain-required",
+            "external-source-sqlite-wal/journal-replay-is-not-part-of-case-db-indexing",
+        ],
+    }
 
 
 def count_rows(connection: sqlite3.Connection, table_name: str, case_id: str) -> int:
@@ -2356,12 +2423,13 @@ def build_review_export_item(
         "review": dict(review),
         "review_history": load_review_history(connection, case_id, target_type=target_type, target_id=target_id),
         "source_reference": enriched.get("source_reference") or {},
-        "commercial_gap_ids": ["#64", "#65"],
+        "commercial_gap_ids": ["#64", "#65", PARSER_CONFIDENCE_GAP_ID, VALIDATION_WARNING_UX_GAP_ID, LEGAL_LIMITATION_GAP_ID],
         "report_citation_status": "citation-linked-validation-required",
         "evidence_selection_status": "versioned-review-selection",
         "provenance": build_report_item_provenance(enriched, review),
         "validation_assessment": build_report_item_validation_assessment(enriched),
         "legal_limitations": build_report_item_legal_limitations(enriched),
+        "legal_limitations_assessment": build_legal_limitations_assessment(enriched),
         "review_priority": enriched.get("review_priority") or {},
         "metadata": enriched.get("metadata") or {},
     }
@@ -2517,9 +2585,11 @@ def build_custody_workflow(connection: sqlite3.Connection, case_id: str) -> dict
     ]
     return {
         "status": "case-db-custody-export",
+        "commercial_gap_ids": [CHAIN_OF_CUSTODY_GAP_ID],
         "summary": {
             "evidence_source_count": len(evidence_sources),
             "custody_event_count": len(custody_events),
+            "commercial_gap_ids": [CHAIN_OF_CUSTODY_GAP_ID],
         },
         "evidence_sources": evidence_sources,
         "custody_events": custody_events,
@@ -2583,9 +2653,11 @@ def build_acquisition_hash_workflow(connection: sqlite3.Connection, case_id: str
         )
     return {
         "status": "case-db-hash-export",
+        "commercial_gap_ids": [ACQUISITION_HASH_GAP_ID],
         "summary": {
             "hash_count": len(hashes),
             "evidence_source_hash_count": sum(1 for item in hashes if item.get("target_type") == "evidence_source"),
+            "commercial_gap_ids": [ACQUISITION_HASH_GAP_ID],
         },
         "hashes": hashes,
         "limitations": [
@@ -2629,9 +2701,11 @@ def build_audit_integrity_chain(connection: sqlite3.Connection, case_id: str) ->
         events.append(event)
     return {
         "status": "tamper-evident-export-chain",
+        "commercial_gap_ids": [IMMUTABLE_AUDIT_GAP_ID],
         "summary": {
             "event_count": len(events),
             "head_hash": previous_hash,
+            "commercial_gap_ids": [IMMUTABLE_AUDIT_GAP_ID],
         },
         "events": events,
         "limitations": [
@@ -2650,6 +2724,7 @@ def build_report_reproducibility_manifest(
     }
     return {
         "status": "deterministic-export-manifest",
+        "commercial_gap_ids": [REPORT_REPRODUCIBILITY_GAP_ID],
         "stable_payload_sha256": stable_payload_sha256(stable_payload),
         "stable_item_count": len(items),
         "citation_count": len(citation_index),
@@ -2678,6 +2753,7 @@ def build_report_item_validation_assessment(enriched: Mapping[str, object]) -> d
     if metadata.get("commercial_grade_ready") is False:
         warnings.append("commercial-grade-ready-false")
     return {
+        "commercial_gap_ids": [PARSER_CONFIDENCE_GAP_ID, VALIDATION_WARNING_UX_GAP_ID],
         "parser_confidence": parser_confidence,
         "reportability": reportability,
         "coverage_status": coverage_status,
@@ -2702,6 +2778,21 @@ def build_report_item_legal_limitations(enriched: Mapping[str, object]) -> list[
     if source == "timeline":
         return ["Timeline rows require timezone and source-parser validation before final conclusions."]
     return ["Review source evidence, hashes, and parser limitations before report use."]
+
+
+def build_legal_limitations_assessment(enriched: Mapping[str, object]) -> dict[str, object]:
+    limitations = build_report_item_legal_limitations(enriched)
+    return {
+        "component": "artifact-legal-limitation-statement",
+        "status": "present" if limitations else "missing",
+        "commercial_gap_ids": [LEGAL_LIMITATION_GAP_ID],
+        "limitation_count": len(limitations),
+        "ready_for_court_report": False,
+        "blockers": [
+            "limitation-text-is-template-or-parser-provided-and-requires-analyst-review",
+            "jurisdiction-specific-admissibility-language-is-operator-owned",
+        ],
+    }
 
 
 def build_acquisition_metadata_record(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
@@ -2771,6 +2862,7 @@ def build_acquisition_metadata_record(connection: sqlite3.Connection, case_id: s
     status = "metadata-recorded" if acquisition_records and not missing else "metadata-check-required"
     return {
         "status": status,
+        "commercial_gap_ids": [WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID],
         "case_metadata": case_metadata,
         "evidence_sources": evidence_sources,
         "records": acquisition_records,
@@ -2781,6 +2873,16 @@ def build_acquisition_metadata_record(connection: sqlite3.Connection, case_id: s
             "evidence_source_count": len(evidence_sources),
             "metadata_record_count": len(acquisition_records),
             "missing_required_field_count": len(missing),
+            "commercial_gap_ids": [WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID],
+        },
+        "validation_assessment": {
+            "commercial_gap_ids": [WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID],
+            "write_blocker_recorded": any(str(record.get("write_blocker") or "").strip() for record in acquisition_records),
+            "whole_source_hash_recorded": any(
+                str(record.get("whole_source_sha256") or "").strip() for record in acquisition_records
+            ),
+            "ready_for_submission": bool(acquisition_records and not missing),
+            "missing_required_fields": missing,
         },
         "guidance": "Record acquisition operator, device/source identifier, write-blocker details, acquisition timestamps, and whole-source hashes before final submission.",
     }
@@ -2817,12 +2919,20 @@ def build_timezone_validation(connection: sqlite3.Connection, case_id: str) -> d
             )
     return {
         "status": "timezone-review-required" if missing else "timezone-fields-present",
+        "commercial_gap_ids": [TIMEZONE_NORMALIZATION_GAP_ID],
         "summary": {
             "event_count": len(rows),
             "missing_timezone_count": missing,
             "timezone_counts": timezone_counts,
+            "commercial_gap_ids": [TIMEZONE_NORMALIZATION_GAP_ID],
         },
         "samples": samples,
+        "validation_assessment": {
+            "commercial_gap_ids": [TIMEZONE_NORMALIZATION_GAP_ID],
+            "original_timestamp_preserved": True,
+            "normalized_utc_assumption": "timestamps are interpreted as UTC when parser/source timezone is absent",
+            "review_required": bool(missing),
+        },
         "guidance": "Preserve original timestamp, source timezone, normalized UTC assumption, and parser-specific timezone notes in final reports.",
     }
 
@@ -2851,14 +2961,22 @@ def build_clock_skew_analysis(connection: sqlite3.Connection, case_id: str) -> d
             warnings.append({"type": "timestamp-in-future", "timestamp": str(row["timestamp"]), "source": str(row["source"] or "")})
     return {
         "status": "warnings-present" if warnings else "no-obvious-clock-skew",
+        "commercial_gap_ids": [CLOCK_SKEW_ANALYSIS_GAP_ID],
         "summary": {
             "event_count": len(rows),
             "parsed_timestamp_count": len(parsed_times),
             "warning_count": len(warnings),
             "earliest_timestamp": min((value.isoformat() for value in parsed_times), default=""),
             "latest_timestamp": max((value.isoformat() for value in parsed_times), default=""),
+            "commercial_gap_ids": [CLOCK_SKEW_ANALYSIS_GAP_ID],
         },
         "warnings": warnings[:100],
+        "validation_assessment": {
+            "commercial_gap_ids": [CLOCK_SKEW_ANALYSIS_GAP_ID],
+            "heuristic_only": True,
+            "baseline_required": "Compare host/device time against acquisition notes and trusted external events.",
+            "review_required": bool(warnings),
+        },
         "guidance": "Clock skew detection is heuristic; compare against acquisition notes, system timezone, and trusted external timestamps.",
     }
 
@@ -2888,10 +3006,23 @@ def build_evidence_contamination_warnings(connection: sqlite3.Connection, case_i
             warnings.append({"type": "source-path-stat-failed", "citation_id": str(row["citation_id"]), "path": str(original)})
     return {
         "status": "warnings-present" if warnings else "no-obvious-contamination",
+        "commercial_gap_ids": [EVIDENCE_CONTAMINATION_WARNING_GAP_ID],
         "summary": {
             "warning_count": len(warnings),
+            "commercial_gap_ids": [EVIDENCE_CONTAMINATION_WARNING_GAP_ID],
         },
         "warnings": warnings,
+        "validation_assessment": {
+            "commercial_gap_ids": [EVIDENCE_CONTAMINATION_WARNING_GAP_ID],
+            "write_blocker_integration": "not-connected",
+            "review_required": bool(warnings),
+            "checks": [
+                "rapidtriage-output-inside-evidence-root",
+                "staged-output-under-evidence-root",
+                "zero-byte-source",
+                "source-path-stat-failed",
+            ],
+        },
         "guidance": "Use write-blocked sources and keep RapidTriage outputs outside evidence roots whenever possible.",
     }
 
@@ -2926,6 +3057,7 @@ def build_report_item_provenance(
     hashes = source_reference.get("source_hashes") if isinstance(source_reference.get("source_hashes"), Mapping) else {}
     record_hashes = source_reference.get("record_hashes") if isinstance(source_reference.get("record_hashes"), Mapping) else {}
     return {
+        "commercial_gap_ids": [SOURCE_PROVENANCE_GAP_ID],
         "target_citation_id": str(enriched.get("citation_id") or ""),
         "review_citation_id": str(review.get("citation_id") or ""),
         "source_path": str(source_reference.get("path") or enriched.get("path") or ""),

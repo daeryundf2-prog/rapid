@@ -8,6 +8,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+DEPENDENCY_VULNERABILITY_MONITORING_GAP_ID = "#120"
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Write a local dependency vulnerability monitoring baseline")
@@ -30,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = {
         "command": "dependency-monitoring",
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "commercial_gap_ids": [DEPENDENCY_VULNERABILITY_MONITORING_GAP_ID],
         "python": sys.executable,
         "pip_list": {
             "return_code": pip_list.returncode,
@@ -37,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
             "error": pip_list.stderr.strip(),
         },
         "vulnerability_scan": {
+            "commercial_gap_ids": [DEPENDENCY_VULNERABILITY_MONITORING_GAP_ID],
             "tool": "pip-audit",
             "available": pip_audit.returncode != 1 or bool(pip_audit.stdout.strip()),
             "return_code": pip_audit.returncode,

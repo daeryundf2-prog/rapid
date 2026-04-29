@@ -18,6 +18,34 @@ from .enterprise import build_enterprise_policy
 VALIDATION_JSON_NAME = "rapidtriage-validation-package.json"
 VALIDATION_MARKDOWN_NAME = "rapidtriage-validation-report.md"
 VALIDATION_ARTIFACTS_NAME = "rapidtriage-validation-artifacts.json"
+KNOWN_ANSWER_TEST_GAP_ID = "#81"
+PARSER_FIXTURE_CORPUS_GAP_ID = "#82"
+PARSER_FP_FN_GAP_ID = "#83"
+INDEPENDENT_VALIDATION_GAP_ID = "#84"
+VALIDATION_PACKAGE_GAP_ID = "#85"
+EXTERNAL_TOOL_VERSION_GAP_ID = "#95"
+DEPLOYMENT_OPERATIONS_GAP_IDS = [
+    "#101",
+    "#102",
+    "#103",
+    "#104",
+    "#105",
+    "#106",
+    "#107",
+    "#108",
+    "#109",
+    "#110",
+    "#111",
+    "#112",
+    "#113",
+    "#114",
+    "#115",
+    "#116",
+    "#117",
+    "#118",
+    "#119",
+    "#120",
+]
 
 PARSER_FIXTURE_AREAS: tuple[dict[str, object], ...] = (
     {
@@ -190,12 +218,16 @@ def build_validation_package(
             "artifact_manifest": str(artifacts_path),
         },
         "checks": build_validation_checks(),
+        "validation_package_assessment": build_validation_package_assessment(output_dir),
         "known_answer_validation": build_known_answer_validation(known_answer_manifest),
         "parser_fixture_corpus": build_parser_fixture_corpus(fixture_root),
         "parser_false_positive_false_negative_notes": build_parser_false_positive_false_negative_notes(),
         "independent_validation_report": build_independent_validation_report(independent_report),
         "external_tool_versions": build_external_tool_versions(),
+        "external_tool_version_assessment": build_external_tool_version_assessment(),
         "enterprise_policy": build_enterprise_policy(),
+        "deployment_operations_gap_ids": DEPLOYMENT_OPERATIONS_GAP_IDS,
+        "deployment_operations_assessment": build_deployment_operations_assessment(),
         "commercial_readiness_gate": commercial_readiness_gate,
         "commercial_gap_assessment": build_commercial_gap_assessment(),
         "release_artifact_requirements": build_release_artifact_requirements(),
@@ -270,6 +302,7 @@ def build_known_answer_validation(manifest_path: Path | None = None) -> dict[str
         manifest_status = "loaded-with-open-results"
     return {
         "status": manifest_status,
+        "commercial_gap_ids": [KNOWN_ANSWER_TEST_GAP_ID],
         "manifest_path": str(manifest_path.expanduser().resolve()) if manifest_path else "",
         "manifest_error": manifest_error,
         "dataset_count": len(datasets),
@@ -288,6 +321,48 @@ def build_known_answer_validation(manifest_path: Path | None = None) -> dict[str
             },
         ],
         "release_gate": "known-answer manifest should be attached for any parser claimed report-grade",
+        "ready_for_court_report": manifest_status == "all-passed",
+        "blockers": [
+            "known-answer-manifest-not-attached" if manifest_path is None else "review-open-known-answer-results",
+            "public-corpus-coverage-must-match-claimed-parser-scope",
+        ],
+    }
+
+
+def build_validation_package_assessment(output_dir: Path) -> dict[str, object]:
+    return {
+        "component": "tool-validation-package",
+        "status": "json-markdown-hash-manifest-generated",
+        "commercial_gap_ids": [VALIDATION_PACKAGE_GAP_ID],
+        "output_dir": str(output_dir),
+        "outputs": [VALIDATION_JSON_NAME, VALIDATION_MARKDOWN_NAME, VALIDATION_ARTIFACTS_NAME],
+        "ready_for_court_report": False,
+        "supports": [
+            "known-answer-manifest-ingest",
+            "parser-fixture-corpus-inventory",
+            "parser-false-positive-false-negative-notes",
+            "independent-report-hash-attachment",
+            "validation-output-hash-manifest",
+        ],
+        "blockers": [
+            "package-generation-does-not-prove-tests-were-run-unless-evidence-is-attached",
+            "independent-lab-validation-remains-operator-owned",
+            "court-admissibility-depends-on-jurisdiction-lab-policy-and-expert-testimony",
+        ],
+    }
+
+
+def build_deployment_operations_assessment() -> dict[str, object]:
+    return {
+        "status": "repo-evidence-and-operator-gates-present",
+        "commercial_gap_ids": DEPLOYMENT_OPERATIONS_GAP_IDS,
+        "code_owned_items": ["#104", "#105", "#106", "#107", "#108", "#110", "#111", "#112", "#113", "#115", "#116", "#117", "#118", "#119", "#120"],
+        "external_operator_items": ["#101", "#102", "#103", "#109", "#114"],
+        "release_guidance": [
+            "Attach signing/notarization/package smoke evidence before claiming native installer parity.",
+            "Keep telemetry and crash reporting local-only unless a separately reviewed enterprise service is deployed.",
+            "Run backup/restore, dependency monitoring, validation package, benchmark, and smoke checks for each release.",
+        ],
     }
 
 
@@ -309,6 +384,7 @@ def build_parser_fixture_corpus(fixture_root: Path) -> dict[str, object]:
                 "test_file_count": len(test_files),
                 "expected_edge_cases": list(area["expected_edge_cases"]),
                 "fixture_backed": bool(fixture_paths or test_files),
+                "commercial_gap_ids": [PARSER_FIXTURE_CORPUS_GAP_ID],
                 "release_gate": "add at least one fixture/test before changing parser output semantics",
             }
         )
@@ -318,18 +394,27 @@ def build_parser_fixture_corpus(fixture_root: Path) -> dict[str, object]:
         "parser_area_count": len(rows),
         "fixture_backed_count": covered,
         "coverage_status": "fixture-backed-baseline" if covered == len(rows) else "fixture-gaps-present",
+        "commercial_gap_ids": [PARSER_FIXTURE_CORPUS_GAP_ID],
+        "ready_for_court_report": covered == len(rows),
         "areas": rows,
     }
 
 
 def build_parser_false_positive_false_negative_notes() -> list[dict[str, object]]:
-    return [dict(item) for item in PARSER_FALSE_POSITIVE_NOTES]
+    rows = []
+    for item in PARSER_FALSE_POSITIVE_NOTES:
+        row = dict(item)
+        row["commercial_gap_ids"] = [PARSER_FP_FN_GAP_ID]
+        row["ready_for_court_report"] = False
+        rows.append(row)
+    return rows
 
 
 def build_independent_validation_report(report_path: Path | None = None) -> dict[str, object]:
     if report_path is None:
         return {
             "status": "not-attached",
+            "commercial_gap_ids": [INDEPENDENT_VALIDATION_GAP_ID],
             "report_path": "",
             "sha256": "",
             "required_signoffs": ["independent-reviewer", "forensic-lead", "release-owner"],
@@ -340,12 +425,14 @@ def build_independent_validation_report(report_path: Path | None = None) -> dict
                 "false positive/false negative notes",
                 "legal/report wording review",
             ],
+            "ready_for_court_report": False,
         }
     resolved = report_path.expanduser().resolve()
     if not resolved.is_file():
         raise ValidationError(f"independent validation report not found: {resolved}")
     return {
         "status": "attached",
+        "commercial_gap_ids": [INDEPENDENT_VALIDATION_GAP_ID],
         "report_path": str(resolved),
         "sha256": compute_sha256(resolved),
         "size_bytes": resolved.stat().st_size,
@@ -357,6 +444,7 @@ def build_independent_validation_report(report_path: Path | None = None) -> dict
             "false positive/false negative notes",
             "legal/report wording review",
         ],
+        "ready_for_court_report": True,
     }
 
 
@@ -375,6 +463,7 @@ def build_validation_artifact_manifest(output_dir: Path, paths: tuple[Path, ...]
         "command": "validation-artifact-manifest",
         "generated_at": now_iso(),
         "output_dir": str(output_dir),
+        "commercial_gap_ids": [VALIDATION_PACKAGE_GAP_ID],
         "artifact_count": len(artifacts),
         "artifacts": artifacts,
         "tamper_note": "Recompute SHA256 values before release publication; this manifest covers the validation package outputs.",
@@ -399,6 +488,7 @@ def build_external_tool_versions() -> list[dict[str, object]]:
             rows.append(
                 {
                     "name": name,
+                    "commercial_gap_ids": [EXTERNAL_TOOL_VERSION_GAP_ID],
                     "available": False,
                     "path": "",
                     "version_output": "",
@@ -420,6 +510,7 @@ def build_external_tool_versions() -> list[dict[str, object]]:
             rows.append(
                 {
                     "name": name,
+                    "commercial_gap_ids": [EXTERNAL_TOOL_VERSION_GAP_ID],
                     "available": True,
                     "path": path,
                     "command": " ".join(actual_command),
@@ -432,6 +523,7 @@ def build_external_tool_versions() -> list[dict[str, object]]:
             rows.append(
                 {
                     "name": name,
+                    "commercial_gap_ids": [EXTERNAL_TOOL_VERSION_GAP_ID],
                     "available": True,
                     "path": path,
                     "command": " ".join(actual_command),
@@ -440,6 +532,19 @@ def build_external_tool_versions() -> list[dict[str, object]]:
                 }
             )
     return rows
+
+
+def build_external_tool_version_assessment() -> dict[str, object]:
+    return {
+        "component": "external-tool-version-capture",
+        "status": "release-validation-tool-preflight",
+        "commercial_gap_ids": [EXTERNAL_TOOL_VERSION_GAP_ID],
+        "ready_for_court_report": False,
+        "blockers": [
+            "per-run-external-parser-version-capture-is-not-complete-for-every-import",
+            "operator-must-preserve-original-tool-logs-for-acquisition-and-parser-validation",
+        ],
+    }
 
 
 def build_validation_checks() -> list[dict[str, object]]:

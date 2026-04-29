@@ -263,6 +263,11 @@ def canonicalize_docs(payload: dict[str, Any]) -> dict[str, Any]:
 def canonicalize_files(payload: dict[str, Any]) -> dict[str, Any]:
     canonical = dict(payload)
     canonical["candidates"] = sorted(canonical["candidates"], key=lambda item: item["path"])
+    cache = canonical.get("hash_cache_assessment")
+    if isinstance(cache, dict):
+        cache["entry_count"] = "<HASH_CACHE_ENTRY_COUNT>"
+        cache["hit_count"] = "<HASH_CACHE_HIT_COUNT>"
+        cache["miss_count"] = "<HASH_CACHE_MISS_COUNT>"
     return canonical
 
 

@@ -1048,6 +1048,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--read-only", action="store_true", help="Run triage without copying evidence files during extract stages")
     run.add_argument("--max-extract-size-bytes", type=int, default=0, help="Cap total copied bytes per extract stage (0 means unlimited)")
     run.add_argument("--max-file-count", type=int, default=0, help="Cap copied files per extract stage (0 means unlimited)")
+    run.add_argument("--memory-cap-bytes", type=int, default=0, help="Stop the run at safe stage boundaries if RSS exceeds this value (0 also honors RAPIDTRIAGE_MEMORY_CAP_BYTES when set)")
     run.add_argument("--overwrite", action="store_true", help="Allow extract stages to overwrite existing output files")
     run.add_argument("--resume", action="store_true", help="Reuse valid existing stage JSON outputs in OUTPUT_DIR and rerun missing or invalid stages")
     add_rules_argument(run)
@@ -2453,6 +2454,7 @@ def main(argv=None) -> int:
                 read_only=args.read_only,
                 max_extract_size_bytes=args.max_extract_size_bytes,
                 max_file_count=args.max_file_count,
+                memory_cap_bytes=args.memory_cap_bytes,
                 overwrite=args.overwrite,
                 resume=args.resume,
                 rule_set=rule_set,

@@ -11,6 +11,7 @@ from typing import Mapping
 
 
 DEFAULT_CRASH_DIR = Path.home() / ".rapidtriage" / "crash-reports"
+CRASH_REPORTING_GAP_ID = "#105"
 
 
 def crash_log_dir() -> Path:
@@ -31,6 +32,7 @@ def write_crash_report(
         "command": "crash-report",
         "crash_id": crash_id,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "commercial_gap_ids": [CRASH_REPORTING_GAP_ID],
         "local_only": True,
         "privacy_note": "Crash reports are written locally and are never uploaded by RapidTriage.",
         "exception": {

@@ -4,6 +4,15 @@ import hashlib
 import os
 from pathlib import Path
 
+CRASH_REPORTING_GAP_ID = "#105"
+LOCAL_ONLY_ENTERPRISE_GAP_ID = "#106"
+LICENSE_ACTIVATION_GAP_ID = "#107"
+RBAC_GAP_ID = "#108"
+MULTI_USER_CASE_SERVER_GAP_ID = "#109"
+COLLABORATION_AUDIT_TRAIL_GAP_ID = "#110"
+SECURITY_HARDENING_REVIEW_GAP_ID = "#118"
+MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID = "#119"
+
 
 def build_enterprise_policy() -> dict[str, object]:
     auth_required = bool(os.environ.get("RAPIDTRIAGE_AUTH_TOKEN"))
@@ -19,18 +28,37 @@ def build_enterprise_policy() -> dict[str, object]:
     return {
         "command": "enterprise-policy",
         "policy_version": "enterprise-policy-v2",
+        "commercial_gap_ids": [
+            CRASH_REPORTING_GAP_ID,
+            LOCAL_ONLY_ENTERPRISE_GAP_ID,
+            LICENSE_ACTIVATION_GAP_ID,
+            RBAC_GAP_ID,
+            MULTI_USER_CASE_SERVER_GAP_ID,
+            COLLABORATION_AUDIT_TRAIL_GAP_ID,
+            SECURITY_HARDENING_REVIEW_GAP_ID,
+            MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID,
+        ],
         "telemetry": {
+            "commercial_gap_ids": [LOCAL_ONLY_ENTERPRISE_GAP_ID],
             "enabled": False,
             "default": "local-only",
             "evidence_uploads": False,
             "crash_uploads": False,
         },
+        "crash_reporting": {
+            "commercial_gap_ids": [CRASH_REPORTING_GAP_ID],
+            "status": "local-redacted-files-only",
+            "uploads_enabled": False,
+            "operator_upload_required": True,
+        },
         "network": {
+            "commercial_gap_ids": [LOCAL_ONLY_ENTERPRISE_GAP_ID, SECURITY_HARDENING_REVIEW_GAP_ID],
             "default_bind": "127.0.0.1",
             "remote_requires_auth_token": True,
             "auth_token_configured": auth_required,
         },
         "license_activation": {
+            "commercial_gap_ids": [LICENSE_ACTIVATION_GAP_ID],
             "required": False,
             "mode": "offline-not-enforced",
             "license_file": license_record.get("path", ""),
@@ -46,6 +74,7 @@ def build_enterprise_policy() -> dict[str, object]:
             ],
         },
         "rbac": {
+            "commercial_gap_ids": [RBAC_GAP_ID],
             "status": "single-user-local-policy-documented",
             "active_role": configured_role,
             "active_role_supported": configured_role in roles,
@@ -60,6 +89,7 @@ def build_enterprise_policy() -> dict[str, object]:
             "enforcement_scope": "documented local policy; API token gates remote access, per-action RBAC enforcement remains future multi-user work",
         },
         "multi_user_case_server": {
+            "commercial_gap_ids": [MULTI_USER_CASE_SERVER_GAP_ID],
             "enabled": False,
             "status": "not-enabled",
             "reason": "RapidTriage remains local-first; shared case server requires auth, locking, migrations, and security review.",
@@ -78,12 +108,20 @@ def build_enterprise_policy() -> dict[str, object]:
             ],
         },
         "collaboration_audit_trail": {
+            "commercial_gap_ids": [COLLABORATION_AUDIT_TRAIL_GAP_ID],
             "status": "case-db-audit-events-with-export-hash-chain",
             "scope": "review/search/import/export actions are recorded in Case DB audit_event rows when using Case DB workflows",
             "recorded_fields": ["actor", "action", "target_type", "target_id", "timestamp", "tool_name", "params_json", "result", "error"],
             "tamper_evidence": "Case DB report exports and reviewer bundles include export-time audit hash chains.",
             "identity_model": "single local actor or caller-supplied reviewer until multi-user identity is implemented",
             "multi_user_conflict_handling": "not-enabled",
+        },
+        "security_hardening": {
+            "commercial_gap_ids": [SECURITY_HARDENING_REVIEW_GAP_ID, MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID],
+            "status": "documented-local-baseline",
+            "preview_sandboxing": "read-only bounded previews with active-content blocking metadata",
+            "parser_sandboxing": "parser crash isolation exists; OS-level parser sandbox remains external hardening work",
+            "independent_review_required": True,
         },
     }
 

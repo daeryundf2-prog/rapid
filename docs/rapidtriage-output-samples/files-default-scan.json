@@ -40,7 +40,53 @@
     "newest_modified_at": "2024-02-03T13:05:09",
     "oldest_modified_at": "2024-02-03T13:05:06",
     "duplicate_group_count": 0,
-    "duplicate_file_count": 0
+    "duplicate_file_count": 0,
+    "commercial_gap_ids": [
+      "#76",
+      "#77"
+    ]
+  },
+  "hash_cache_assessment": {
+    "component": "file-hash-cache",
+    "status": "in-process-path-size-mtime-cache",
+    "commercial_gap_ids": [
+      "#76"
+    ],
+    "algorithm_count": 3,
+    "algorithms": [
+      "md5",
+      "sha1",
+      "sha256"
+    ],
+    "entry_count": "<HASH_CACHE_ENTRY_COUNT>",
+    "hit_count": "<HASH_CACHE_HIT_COUNT>",
+    "miss_count": "<HASH_CACHE_MISS_COUNT>",
+    "ready_for_court_report": false,
+    "blockers": [
+      "cache-is-process-local-not-persistent-across-restarts",
+      "cache-key-uses-path-size-mtime-not-verified-content-addressed-store",
+      "large-scale-hash-cache-hit-ratio-validation-remains-required"
+    ]
+  },
+  "duplicate_detection_assessment": {
+    "component": "duplicate-file-content-detection",
+    "status": "bounded-sha256-same-size-grouping",
+    "commercial_gap_ids": [
+      "#77"
+    ],
+    "duplicate_group_count": 0,
+    "duplicate_file_count": 0,
+    "ready_for_court_report": false,
+    "supports": [
+      "same-size-candidate-bucketing",
+      "bounded-content-sha256-confirmation",
+      "representative-path-lists"
+    ],
+    "blockers": [
+      "near-duplicate-text-and-media-similarity-are-not-full-file-deduplication",
+      "hashing-is-bounded-to-protect-large-case-responsiveness",
+      "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports"
+    ]
   },
   "duplicate_content_groups": [],
   "candidates": [

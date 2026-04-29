@@ -16,6 +16,8 @@ from .run import RunModeError, run_triage_mode
 
 RUN_STATUSES = ("queued", "running", "completed", "failed", "canceled")
 JOB_STEP_NAMES = ("prepare", "triage", "persist", "finalize")
+BACKGROUND_JOB_GAP_ID = "#69"
+LONG_RUNNING_JOB_GAP_ID = "#80"
 
 
 def now_iso() -> str:
@@ -33,6 +35,7 @@ class RunRequest:
     read_only: bool = False
     max_extract_size_bytes: int = 0
     max_file_count: int = 0
+    memory_cap_bytes: int = 0
     overwrite: bool = False
     resume: bool = False
 
@@ -47,6 +50,7 @@ class RunRequest:
             "read_only": self.read_only,
             "max_extract_size_bytes": self.max_extract_size_bytes,
             "max_file_count": self.max_file_count,
+            "memory_cap_bytes": self.memory_cap_bytes,
             "overwrite": self.overwrite,
             "resume": self.resume,
         }
@@ -63,6 +67,7 @@ class RunRequest:
             read_only=bool(payload.get("read_only", False)),
             max_extract_size_bytes=int(payload.get("max_extract_size_bytes") or 0),
             max_file_count=int(payload.get("max_file_count") or 0),
+            memory_cap_bytes=int(payload.get("memory_cap_bytes") or 0),
             overwrite=bool(payload.get("overwrite", False)),
             resume=bool(payload.get("resume", False)),
         )
@@ -100,6 +105,8 @@ class RunJob:
             "request": self.request.to_dict(),
             "steps": self.steps,
             "cancellation_requested": self.cancellation_requested,
+            "job_queue_assessment": job_queue_assessment(self),
+            "cancellation_retry_assessment": cancellation_retry_assessment(self),
         }
         if self.summary:
             outputs = self.summary.get("outputs", {})
@@ -242,6 +249,7 @@ class RunJobStore:
             read_only=bool(safety_options.get("read_only", False)),
             max_extract_size_bytes=int(safety_options.get("max_extract_size_bytes") or 0),
             max_file_count=int(safety_options.get("max_file_count") or 0),
+            memory_cap_bytes=int(safety_options.get("memory_cap_bytes") or 0),
             overwrite=bool(safety_options.get("overwrite", False)),
         )
         imported_at = now_iso()
@@ -405,6 +413,8 @@ def default_job_steps() -> List[Dict[str, object]]:
             "started_at": None,
             "completed_at": None,
             "message": "",
+            "commercial_gap_ids": [BACKGROUND_JOB_GAP_ID],
+            "operational_gap_ids": [BACKGROUND_JOB_GAP_ID, LONG_RUNNING_JOB_GAP_ID],
         }
         for name in JOB_STEP_NAMES
     ]
@@ -423,6 +433,8 @@ def update_step(steps: List[Dict[str, object]], name: str, status: str, *, messa
                     "started_at": None,
                     "completed_at": None,
                     "message": "",
+                    "commercial_gap_ids": [BACKGROUND_JOB_GAP_ID],
+                    "operational_gap_ids": [BACKGROUND_JOB_GAP_ID, LONG_RUNNING_JOB_GAP_ID],
                 }
             )
     timestamp = now_iso()
@@ -434,12 +446,60 @@ def update_step(steps: List[Dict[str, object]], name: str, status: str, *, messa
             step["retry_count"] = int(step.get("retry_count") or 0) + 1
         step["status"] = status
         step["message"] = message
+        step["commercial_gap_ids"] = [BACKGROUND_JOB_GAP_ID]
+        step["operational_gap_ids"] = [BACKGROUND_JOB_GAP_ID, LONG_RUNNING_JOB_GAP_ID]
         if status == "running" and not step.get("started_at"):
             step["started_at"] = timestamp
         if status in {"completed", "failed", "skipped", "canceled"}:
             step["completed_at"] = timestamp
         break
     return output
+
+
+def job_queue_assessment(job: RunJob) -> Dict[str, object]:
+    return {
+        "component": "background-job-queue",
+        "status": "implemented-baseline-validation-required",
+        "commercial_gap_ids": [BACKGROUND_JOB_GAP_ID],
+        "job_status": job.status,
+        "cancellation_requested": job.cancellation_requested,
+        "step_count": len(job.steps),
+        "ready_for_court_report": False,
+        "supports": [
+            "queued-running-completed-failed-canceled-status",
+            "state-file-persistence",
+            "queued-job-cancel",
+            "failed-or-canceled-retry",
+            "step-progress-messages",
+        ],
+        "blockers": [
+            "running-parser-cancellation-is-cooperative-and-stage-boundary-limited",
+            "job-queue-is-local-process-threadpool-not-distributed-worker-system",
+            "per-parser-progress-percent-and-resource-telemetry-remain-limited",
+        ],
+    }
+
+
+def cancellation_retry_assessment(job: RunJob) -> Dict[str, object]:
+    return {
+        "component": "long-running-job-cancellation-retry",
+        "status": "cooperative-cancel-and-failed-canceled-retry-enabled",
+        "commercial_gap_ids": [LONG_RUNNING_JOB_GAP_ID],
+        "job_status": job.status,
+        "cancellation_requested": job.cancellation_requested,
+        "retry_supported_for": ["failed", "canceled"],
+        "ready_for_court_report": False,
+        "supports": [
+            "queued-job-cancel",
+            "running-job-cancel-request-record",
+            "failed-or-canceled-run-retry",
+            "state-file-persisted-cancel-flag",
+        ],
+        "blockers": [
+            "running-parser-cancel-is-cooperative-and-stage-boundary-limited",
+            "partial-output-cleanup-and-resume-policy-still-needs-large-case-validation",
+        ],
+    }
 
 
 def execute_run_request(request: RunRequest, *, run_id: str | None = None) -> Dict[str, object]:
@@ -462,6 +522,7 @@ def execute_run_request(request: RunRequest, *, run_id: str | None = None) -> Di
             read_only=request.read_only,
             max_extract_size_bytes=request.max_extract_size_bytes,
             max_file_count=request.max_file_count,
+            memory_cap_bytes=request.memory_cap_bytes,
             overwrite=request.overwrite,
             resume=request.resume,
             rule_set=rule_set,

@@ -85,6 +85,7 @@ rapidtriage case-review ./case.db --case-id CASE-001 --target-type artifact --ta
 ```
 
 Every Case DB review update is versioned. `case-db-report` includes both a #64 `citation_index` and each item’s #65 `review_history`, so a reviewer can see when an item became report-worthy, who changed it, and which source citation the decision refers to.
+Report exports also include #86 chain-of-custody workflow rows, #87 acquisition/file hash workflow rows, #88 export-time audit hash chains, #89 deterministic reproducibility hashes, #90 per-item source provenance, #91 parser-confidence scoring, #92 validation-warning metadata, and #93 legal limitation statements. Case DB report exports also summarize #96 acquisition/write-blocker metadata, #97 timezone validation, #98 clock-skew checks, and #99 contamination warnings. Treat these as release/report evidence packages; they still need acquisition notes, write-blocker records, source validation, and analyst sign-off for formal submission.
 
 For A/B/C evidence review, pass three or more files to `compare`; the first path is treated as the baseline and each following file becomes a pairwise comparison row:
 
@@ -105,7 +106,7 @@ rapidtriage benchmark --output-dir ./bench-100k --file-count 100000 --resume
 
 Each run writes `rapidtriage-run-fingerprint.json` and `rapidtriage-run-checkpoints.json`. Resume only reuses stage JSON when the bounded input fingerprint is unchanged; if source metadata changes, RapidTriage disables reuse and records the reason in `safety.resume_disabled_reason`.
 
-Run summaries also include `resource_caps` and artifact scheduler metadata. Artifact parsers are isolated per kind, so one parser failure is recorded in that parser output instead of aborting the whole run. Source previews include `viewer_sandbox` metadata showing that active content is not executed and previews are read-only/bounded.
+Run summaries also include `resource_caps` and artifact scheduler metadata. Artifact parsers are isolated per kind (#71), so one parser failure is recorded in that parser output instead of aborting the whole run. Set `--memory-cap-bytes` or `RAPIDTRIAGE_MEMORY_CAP_BYTES` to stop at safe stage boundaries when RSS exceeds the cap (#72). Source previews include #73 `viewer_sandbox` metadata showing that active content is not executed and previews are read-only/bounded. SQLite and Case DB search paths expose #74 FTS/index optimization metadata, while artifact stages expose #75 parallel scheduler assessment.
 
 For high-volume review, paged API responses include both offsets and cursor tokens:
 
@@ -113,7 +114,7 @@ For high-volume review, paged API responses include both offsets and cursor toke
 pagination.next_cursor = offset:1000
 ```
 
-Use the cursor on the next request to avoid keeping giant result arrays in the browser. File scans also report bounded `duplicate_content_groups`, and repeated hash requests reuse an in-process path/size/mtime cache.
+Use the cursor on the next request to avoid keeping giant result arrays in the browser. Paged responses expose #78 pagination assessment metadata, visible tables expose #79 bounded-DOM virtualization notices, file scans report #77 bounded `duplicate_content_groups`, and repeated hash requests expose #76 in-process path/size/mtime hash-cache metadata. Long-running web jobs expose #80 cancellation/retry assessment; running parser cancellation is still cooperative and stage-boundary limited.
 
 Before running a large mounted image, use `collect-plan` to preview high-value Windows/macOS artifact locations without copying files or hashing the whole tree:
 
@@ -435,7 +436,7 @@ rapidtriage benchmark --output-dir ./benchmark-small --file-count 1000 --json
 rapidtriage stress-plan --output-dir ./stress-plan --size-tb 1 --size-tb 10 --json
 ```
 
-`stress-plan` does not generate terabytes of synthetic evidence. It writes a repeatable 1TB-10TB validation runbook with wall-clock estimates, output reserve, checkpoint interval, resource caps, stop thresholds, and the evidence bundle expected for a defensible stress run.
+`benchmark` records #66 scale-target metadata for 100k, 1M, and 10M record claims, including p50/p95 search latency, records/sec, peak memory, and validation blockers. `stress-plan` does not generate terabytes of synthetic evidence. It writes a #67 repeatable 1TB-10TB validation runbook with wall-clock estimates, output reserve, checkpoint interval, resource caps, stop thresholds, and the evidence bundle expected for a defensible stress run.
 
 The command writes JSON and Markdown with ingest time, search p50/p95, peak memory, output size, and result counts.
 
@@ -457,13 +458,13 @@ rapidtriage validation \
   --overwrite --json
 ```
 
-The package writes JSON, Markdown, and a validation artifact hash manifest. It lists required checks, NIST CFReDS/CFTT-style known-answer datasets, parser fixture corpus coverage, parser-specific false-positive/false-negative notes, independent validation report SHA256, user-facing documents, known limitations, chain-of-custody expectations, release artifact requirements, signing/notarization evidence, and support SLA template. Treat it as the release evidence checklist that should sit next to benchmark output, sample-case output, checksums, SBOM/dependency inventory, and build artifacts.
+The package writes JSON, Markdown, and a validation artifact hash manifest. It lists required checks, #81 NIST CFReDS/CFTT-style known-answer datasets, #82 parser fixture corpus coverage, #83 parser-specific false-positive/false-negative notes, #84 independent validation report SHA256, #85 validation-package automation metadata, user-facing documents, known limitations, chain-of-custody expectations, release artifact requirements, signing/notarization evidence, and support SLA template. Treat it as the release evidence checklist that should sit next to benchmark output, sample-case output, checksums, SBOM/dependency inventory, and build artifacts.
 
-Release builds created by `scripts/build-release.py` now include `release-manifest.json`, `SHA256SUMS`, `dependency-inventory.txt`, `packaging-plan.json`, `packaging-plan.md`, and `update-manifest.json`. The packaging plan records Windows Authenticode, macOS codesign/notarization, Linux deb/rpm/AppImage, smoke-test, and required evidence gates. The update manifest is manual/local by default and records artifact hashes, rollback guidance, enterprise-disable status, and signature policy; public auto-update distribution still requires signed hosting infrastructure.
+Release builds created by `scripts/build-release.py` now include `release-manifest.json`, `SHA256SUMS`, `dependency-inventory.txt`, `packaging-plan.json`, `packaging-plan.md`, and `update-manifest.json`. Reviewer bundles include #94 court exhibit indexes and #100 tamper-evident audit-bundle hash chains for generated outputs. The packaging plan records #101 Windows Authenticode, #102 macOS codesign/notarization, #103 Linux deb/rpm/AppImage, #104 update-channel, smoke-test, and required evidence gates. The release ZIP also carries #112 release notes, #113 LTS/hotfix policy, #114 support SLA, #115 training curriculum, #116 quickstart lab material, #117 admin deployment guidance, #118 hardening guidance, #119 malicious-evidence handling notes, and #120 dependency monitoring script. The update manifest is manual/local by default and records artifact hashes, rollback guidance, enterprise-disable status, and signature policy; public auto-update distribution still requires signed hosting infrastructure.
 
 The web/API process writes local-only crash reports for unhandled exceptions. Set `RAPIDTRIAGE_CRASH_LOG_DIR` or launch with `rapidtriage web --crash-log-dir ./crash-reports` to choose the directory. Crash reports redact sensitive context keys and are never uploaded automatically.
 
-For enterprise review, run `rapidtriage enterprise-policy --json` or open `/api/enterprise/policy`. This records the current local-only telemetry stance, remote-auth requirement, offline license-file hash/status when configured, documented local roles, role permission matrix, export-control notes, multi-user server disabled guardrails, required capabilities before enabling a shared server, and Case DB audit-trail/hash-chain scope.
+For enterprise review, run `rapidtriage enterprise-policy --json` or open `/api/enterprise/policy`. This records #105 local-only crash reporting, #106 telemetry-free local-only mode, #107 offline license-file hash/status when configured, #108 documented local roles, role permission matrix, export-control notes, #109 multi-user server disabled guardrails, #110 Case DB audit-trail/hash-chain scope, and #118/#119 security/sandboxing limits.
 
 Back up Case DB work before upgrades or handoff:
 
@@ -472,7 +473,7 @@ rapidtriage case-backup ./case.db --output-dir ./case-backup --json
 rapidtriage case-restore ./case-backup/rapidtriage-case-backup-manifest.json --output ./case-restored.db --json
 ```
 
-The backup manifest records schema version, table inventory, migration readiness, and restore-rehearsal steps. Treat a restored copy as the upgrade test target before opening the original database with a newer release.
+The #111 backup manifest records schema version, table inventory, migration readiness, and restore-rehearsal steps. Treat a restored copy as the upgrade test target before opening the original database with a newer release.
 
 Record acquisition/write-blocker metadata before final reporting:
 

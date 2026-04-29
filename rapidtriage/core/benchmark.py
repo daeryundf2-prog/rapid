@@ -16,6 +16,25 @@ from .search import run_unified_search
 DEFAULT_BENCHMARK_FILE_COUNT = 100
 DEFAULT_BENCHMARK_KEYWORD = "password"
 DEFAULT_STRESS_SIZE_TB = (1, 5, 10)
+BENCHMARK_GAP_ID = "#66"
+STRESS_TEST_GAP_ID = "#67"
+BENCHMARK_SCALE_TARGETS = (100_000, 1_000_000, 10_000_000)
+BENCHMARK_NATIVE_CAPABILITIES = {
+    "synthetic_case_generation": True,
+    "existing_root_benchmark": True,
+    "ingest_timing": True,
+    "search_p50_p95_latency": True,
+    "peak_python_memory_tracking": True,
+    "published_hardware_matrix": False,
+    "continuous_10m_record_gate": False,
+}
+STRESS_NATIVE_CAPABILITIES = {
+    "stress_runbook_generation": True,
+    "tb_scale_resource_estimation": True,
+    "checkpoint_resume_requirements": True,
+    "actual_1tb_10tb_execution": False,
+    "independent_reproduction_logs": False,
+}
 
 
 def now_iso() -> str:
@@ -103,7 +122,12 @@ def run_benchmark(
             "search_match_count": search_payload.get("summary", {}).get("match_count", 0)
             if isinstance(search_payload.get("summary"), Mapping)
             else 0,
+            "commercial_gap_ids": [BENCHMARK_GAP_ID],
+            "commercial_grade_ready": False,
         },
+        "benchmark_native_capabilities": dict(BENCHMARK_NATIVE_CAPABILITIES),
+        "benchmark_scale_matrix": build_benchmark_scale_matrix(file_count=file_count),
+        "benchmark_report_grade_assessment": benchmark_report_grade_assessment(file_count=file_count),
         "outputs": {
             "json": str(json_path),
             "markdown": str(markdown_path),
@@ -153,7 +177,11 @@ def build_stress_test_plan(
             "scenario_count": len(scenarios),
             "largest_size_tb": max(evidence_sizes_tb) if evidence_sizes_tb else 0,
             "requires_real_validation": True,
+            "commercial_gap_ids": [STRESS_TEST_GAP_ID],
+            "commercial_grade_ready": False,
         },
+        "stress_native_capabilities": dict(STRESS_NATIVE_CAPABILITIES),
+        "stress_test_assessment": stress_test_assessment(scenarios=scenarios),
         "scenarios": scenarios,
         "runbook": [
             "Run on a write-blocked copy or mounted read-only extraction root; never mutate source evidence.",
@@ -202,6 +230,74 @@ def build_stress_scenario(*, size_tb: int, expected_throughput_mb_s: float) -> d
             "crash report directory",
             "parser warning inventory",
             "validation known-answer sample",
+        ],
+        "commercial_gap_ids": [STRESS_TEST_GAP_ID],
+        "validation_status": "runbook-generated-real-hardware-run-required",
+    }
+
+
+def build_benchmark_scale_matrix(*, file_count: int) -> list[dict[str, object]]:
+    rows = []
+    for target in BENCHMARK_SCALE_TARGETS:
+        rows.append(
+            {
+                "target_records": target,
+                "label": scale_label(target),
+                "covered_by_this_run": file_count >= target,
+                "commercial_gap_ids": [BENCHMARK_GAP_ID],
+                "required_evidence": [
+                    "benchmark JSON",
+                    "benchmark Markdown",
+                    "hardware profile",
+                    "run summary",
+                    "search latency distribution",
+                ],
+            }
+        )
+    return rows
+
+
+def scale_label(target: int) -> str:
+    if target >= 1_000_000:
+        return f"{target // 1_000_000}M"
+    return f"{target // 1_000}k"
+
+
+def benchmark_report_grade_assessment(*, file_count: int) -> dict[str, object]:
+    covered = [row["label"] for row in build_benchmark_scale_matrix(file_count=file_count) if row["covered_by_this_run"]]
+    return {
+        "component": "100k-1m-10m-record-benchmark",
+        "status": "benchmark-run-captured" if covered else "small-benchmark-only",
+        "commercial_gap_ids": [BENCHMARK_GAP_ID],
+        "covered_scale_labels": covered,
+        "ready_for_court_report": False,
+        "blockers": [
+            "published-hardware-and-os-matrix-required-for-performance-claims",
+            "1m-and-10m-record-runs-should-be-executed-outside-unit-tests",
+            "benchmark-results-are-operational-evidence-not-forensic-findings",
+        ],
+        "recommended_validation": [
+            "Preserve benchmark JSON/Markdown, run summary, hardware profile, dependency versions, and sample evidence manifest.",
+            "Compare p50/p95 search latency and ingest records/sec against release thresholds before claiming large-case readiness.",
+        ],
+    }
+
+
+def stress_test_assessment(*, scenarios: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "component": "1tb-10tb-evidence-stress-test",
+        "status": "stress-runbook-generated-real-validation-required",
+        "commercial_gap_ids": [STRESS_TEST_GAP_ID],
+        "scenario_sizes_tb": [scenario.get("size_tb") for scenario in scenarios],
+        "ready_for_court_report": False,
+        "blockers": [
+            "stress-plan-does-not-generate-or-process-terabytes-of-evidence",
+            "actual-1tb-10tb-hardware-runs-and-bottleneck-logs-remain-required",
+            "independent-reproduction-logs-are-required-before-commercial-claims",
+        ],
+        "recommended_validation": [
+            "Run the generated runbook on representative hardware with read-only evidence and resume enabled.",
+            "Archive crash logs, checkpoint files, output hashes, resource telemetry, and known-answer validation samples.",
         ],
     }
 

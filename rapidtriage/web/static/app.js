@@ -47,6 +47,11 @@ const RUN_MODE_COLLECTORS = {
 };
 const PAGE_SIZE = 250;
 const VIRTUAL_TABLE_ROW_LIMIT = 300;
+const VIRTUALIZATION_ASSESSMENT = {
+  commercial_gap_ids: ["#79"],
+  status: "bounded-dom-window",
+  row_limit: VIRTUAL_TABLE_ROW_LIMIT,
+};
 const COMPARE_LIMIT = 6;
 const VIEW_GROUPS = [
   {
@@ -3434,7 +3439,8 @@ function renderVirtualizationNotice(rows, visibleRows, label) {
   if (total <= visible) return "";
   return `
     <div class="pagination-bar">
-      <span>Rendering ${visible} of ${total} ${escapeHtml(label)} to keep the browser responsive. Narrow the search, use filters, or page API-backed tabs for the rest.</span>
+      <span data-commercial-gap="#79">Rendering ${visible} of ${total} ${escapeHtml(label)} to keep the browser responsive. Narrow the search, use filters, or page API-backed tabs for the rest.</span>
+      <small>${escapeHtml(VIRTUALIZATION_ASSESSMENT.status)} · max ${VIRTUALIZATION_ASSESSMENT.row_limit} rows · ${escapeHtml(VIRTUALIZATION_ASSESSMENT.commercial_gap_ids.join(","))}</small>
     </div>
   `;
 }

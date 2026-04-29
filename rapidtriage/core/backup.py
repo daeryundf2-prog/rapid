@@ -15,6 +15,7 @@ class BackupError(ValueError):
 
 
 BACKUP_MANIFEST_NAME = "rapidtriage-case-backup-manifest.json"
+BACKUP_RESTORE_MIGRATION_GAP_ID = "#111"
 
 
 def build_case_backup(*, database_path: Path, output_dir: Path, overwrite: bool = False) -> dict[str, object]:
@@ -43,6 +44,7 @@ def build_case_backup(*, database_path: Path, output_dir: Path, overwrite: bool 
     manifest = {
         "command": "case-backup",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "commercial_gap_ids": [BACKUP_RESTORE_MIGRATION_GAP_ID],
         "database": str(source),
         "output_dir": str(destination_dir),
         "schema": inspect_case_database_schema(source),
@@ -80,6 +82,7 @@ def restore_case_backup(*, manifest_path: Path, output_path: Path, overwrite: bo
     return {
         "command": "case-restore",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "commercial_gap_ids": [BACKUP_RESTORE_MIGRATION_GAP_ID],
         "manifest": str(manifest_file),
         "restored_database": str(destination),
         "hashes": hashes,
@@ -122,6 +125,7 @@ def build_migration_readiness(path: Path) -> dict[str, object]:
     expected = schema.get("expected_schema_version")
     return {
         "status": "ready" if current == expected else "review-required",
+        "commercial_gap_ids": [BACKUP_RESTORE_MIGRATION_GAP_ID],
         "current_schema_version": current,
         "expected_schema_version": expected,
         "backup_before_migration": True,
