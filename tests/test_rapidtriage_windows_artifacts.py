@@ -812,6 +812,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(lifecycle["details"]["account_security_context"]["privileged_group_count"], 1)
             self.assertIn("S-1-5-32-544", lifecycle["details"]["account_security_context"]["group_sid_candidates"])
             self.assertEqual(lifecycle["details"]["account_security_context"]["inherited_privilege_count"], 1)
+            account_profile = lifecycle["details"]["account_privilege_deep_parse_profile"]
+            self.assertEqual(account_profile["commercial_gap_id"], "#6")
+            self.assertEqual(account_profile["target_artifacts"], ["SAM", "SECURITY", "SYSTEM"])
+            self.assertTrue(account_profile["decoded_components"]["sam_fv_candidate_fields"])
+            self.assertTrue(account_profile["decoded_components"]["privilege_rights_export_mapping"])
+            self.assertTrue(account_profile["not_yet_report_grade"]["sam_alias_member_binary_decode"])
+            self.assertIn("decode SAM alias/member binary values for actual group membership", account_profile["required_independent_checks"])
             inherited_debug = lifecycle["details"]["account_security_context"]["inherited_privileges"][0]
             self.assertEqual(inherited_debug["privilege"], "SeDebugPrivilege")
             self.assertEqual(inherited_debug["via_groups"], ["Administrators"])
@@ -835,6 +842,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(alice_sam["details"]["validation_required"])
             self.assertIn("#6", alice_sam["details"]["os_account_report_grade_assessment"]["commercial_gap_ids"])
             self.assertFalse(alice_sam["details"]["os_account_native_capabilities"]["native_sam_alias_member_binary_decode"])
+            self.assertEqual(
+                alice_sam["details"]["account_privilege_deep_parse_profile"]["artifact_scope"],
+                "native-sam-account-key-candidate",
+            )
             self.assertEqual(len(alice_sam["details"]["source_hashes"]["sha256"]), 64)
             admin_group = next(item for item in sam_group_candidates if item["details"]["group_name_candidate"] == "Administrators")
             self.assertFalse(admin_group["details"]["commercial_grade_ready"])
@@ -920,6 +931,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 exported_amcache["details"]["amcache_evidence"]["execution_caveat"],
                 "Amcache supports program presence/install/execution-related pivots but is not standalone proof of execution.",
             )
+            self.assertEqual(exported_amcache["details"]["amcache_schema_profile"]["commercial_gap_id"], "#7")
+            self.assertEqual(exported_amcache["details"]["amcache_schema_profile"]["source_format"], "reg")
+            self.assertFalse(exported_amcache["details"]["amcache_schema_profile"]["standalone_execution_proof"])
+            self.assertTrue(exported_amcache["details"]["amcache_schema_profile"]["schema_components"]["root_file_paths"])
             self.assertTrue(exported_amcache["details"]["validation_checks"]["has_hash"])
             self.assertFalse(exported_amcache["details"]["commercial_grade_ready"])
             self.assertIn("native-amcache-schema-decoding-required", exported_amcache["details"]["commercial_grade_blockers"])
@@ -933,6 +948,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 native_amcache_hive["details"]["amcache_hive_evidence"]["schema_decode_status"],
                 "not-implemented-string-pivot-only",
             )
+            self.assertEqual(native_amcache_hive["details"]["amcache_schema_profile"]["current_decode_level"], "native-string-pivot-only")
             self.assertEqual(bam["details"]["user_sid"], "S-1-5-21-1000")
             self.assertEqual(bam["details"]["timestamp"], "2024-04-01T06:07:08+00:00")
             self.assertEqual(bam["details"]["timestamp_source"], "bam_value_filetime")
@@ -942,6 +958,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 "bam-dam-last-execution-filetime-candidate",
             )
             self.assertTrue(bam["details"]["bam_dam_evidence"]["requires_native_system_hive_validation"])
+            self.assertEqual(bam["details"]["bam_dam_decode_profile"]["commercial_gap_id"], "#9")
+            self.assertTrue(bam["details"]["bam_dam_decode_profile"]["decoded_components"]["filetime_timestamp"])
+            self.assertEqual(
+                bam["details"]["bam_dam_decode_profile"]["timestamp_semantics"],
+                "bam-dam-last-execution-filetime-candidate",
+            )
             self.assertTrue(bam["details"]["validation_checks"]["has_timestamp"])
             self.assertFalse(bam["details"]["commercial_grade_ready"])
             self.assertIn("native-system-hive-bam-decoding-required", bam["details"]["commercial_grade_blockers"])
@@ -955,6 +977,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 "ShimCache/AppCompatCache can show program presence/order, but it is not standalone proof of execution.",
             )
             self.assertTrue(shimcache["details"]["shimcache_evidence"]["requires_os_version_layout_validation"])
+            self.assertEqual(shimcache["details"]["shimcache_execution_caveat_profile"]["commercial_gap_id"], "#8")
+            self.assertFalse(shimcache["details"]["shimcache_execution_caveat_profile"]["standalone_execution_proof"])
+            self.assertIn(
+                "preserve the UX warning that ShimCache is not proof of execution",
+                shimcache["details"]["shimcache_execution_caveat_profile"]["required_independent_checks"],
+            )
             self.assertIn("Prefetch", shimcache["details"]["validation_checks"]["correlation_targets"])
             self.assertIn("native-appcompatcache-layout-decoding-required", shimcache["details"]["commercial_grade_blockers"])
             self.assertIn("#8", shimcache["details"]["execution_report_grade_assessment"]["commercial_gap_ids"])
@@ -975,6 +1003,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(srum_database_rows[0]["details"]["source_path"], str(fixture.srum_db.resolve()))
             self.assertTrue(srum_database_rows[0]["details"]["ese_header"]["signature_valid"])
             self.assertTrue(srum_database_rows[0]["details"]["srum_database_evidence"]["ese_signature_valid"])
+            self.assertEqual(srum_database_rows[0]["details"]["srum_ese_validation_profile"]["commercial_gap_id"], "#10")
+            self.assertEqual(srum_database_rows[0]["details"]["srum_ese_validation_profile"]["artifact_scope"], "database")
+            self.assertTrue(srum_database_rows[0]["details"]["srum_ese_validation_profile"]["decoded_components"]["ese_header"])
             self.assertEqual(
                 srum_database_rows[0]["details"]["srum_database_evidence"]["schema_decode_status"],
                 "not-implemented-header-and-string-pivot-only",
@@ -996,6 +1027,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(any(item["details"]["url"] == "https://download.example/tools/installer.exe" for item in srum_pivots))
             self.assertTrue(all(item["details"]["validation_required"] for item in srum_pivots))
             self.assertTrue(all(item["details"]["srum_pivot_evidence"]["pivot_basis"] == "native-ese-string-pivot" for item in srum_pivots))
+            self.assertTrue(all(item["details"]["srum_ese_validation_profile"]["artifact_scope"] == "string-pivot" for item in srum_pivots))
             srum_row_candidate = next(item for item in srum_row_candidates if item["details"]["app_id"] == "powershell.exe")
             self.assertEqual(srum_row_candidate["details"]["table_family"], "network-usage")
             self.assertEqual(srum_row_candidate["details"]["bytes_received"], 2048)
@@ -1005,11 +1037,15 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 "not-implemented-string-cluster-only",
             )
             self.assertGreaterEqual(srum_row_candidate["details"]["srum_row_evidence"]["counter_candidate_count"], 1)
+            self.assertEqual(srum_row_candidate["details"]["srum_ese_validation_profile"]["artifact_scope"], "row-candidate")
+            self.assertGreaterEqual(srum_row_candidate["details"]["srum_ese_validation_profile"]["evidence_fields"]["counter_candidate_count"], 1)
             self.assertTrue(srum_row_candidate["details"]["validation_checks"]["requires_srum_parser"])
             self.assertFalse(srum_row_candidate["details"]["commercial_grade_ready"])
             self.assertIn("native-ese-page-row-decoding-required", srum_row_candidate["details"]["commercial_grade_blockers"])
             srum_table = next(item for item in artifacts if item["artifact_type"] == "srum-table-candidate" and item["details"]["table_family"] == "network-usage")
             self.assertGreaterEqual(srum_table["details"]["matched_marker_count"], 1)
+            self.assertEqual(srum_table["details"]["srum_ese_validation_profile"]["artifact_scope"], "table-candidate")
+            self.assertEqual(srum_table["details"]["srum_ese_validation_profile"]["evidence_fields"]["table_family"], "network-usage")
             self.assertTrue(srum_table["details"]["validation_checks"]["has_source_offsets"])
             self.assertTrue(srum_table["details"]["validation_checks"]["requires_srum_parser"])
             summary = next(item for item in artifacts if item["artifact_type"] == "windows-execution-summary")

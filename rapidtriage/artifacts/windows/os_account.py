@@ -11,7 +11,7 @@ from ...core.models import ArtifactRecord
 from .common import build_forensic_review
 from .registry import MAX_HIVE_CELL_SCAN_BYTES, iter_registry_cell_candidates, parse_registry_hive_header
 
-PARSER_VERSION = "windows-os-account-v8"
+PARSER_VERSION = "windows-os-account-v9"
 USER_PROFILE_ROOT = "Users"
 REGISTRY_EXPORT_EXT = ".reg"
 SAM_HIVE_NAME = "SAM"
@@ -298,6 +298,16 @@ def sam_account_candidate_details(
         "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
         "os_account_report_grade_assessment": report_grade,
         "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
+        "account_privilege_deep_parse_profile": account_privilege_deep_parse_profile(
+            artifact_scope="native-sam-account-key-candidate",
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            evidence_fields={
+                "user_name_candidate": user_name,
+                "rid_hex": rid_hex,
+                "allocation_status": str(candidate.get("allocation_status") or ""),
+            },
+        ),
         "commercial_grade_ready": False,
         "commercial_grade_blockers": report_grade["blockers"],
         "validation_guidance": "Native SAM rows identify account-name/RID key candidates only; validate full F/V account attributes with a dedicated SAM parser before final testimony.",
@@ -362,6 +372,16 @@ def sam_group_candidate_details(
         "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
         "os_account_report_grade_assessment": report_grade,
         "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
+        "account_privilege_deep_parse_profile": account_privilege_deep_parse_profile(
+            artifact_scope="native-sam-group-alias-candidate",
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            evidence_fields={
+                "group_name_candidate": group_name,
+                "alias_rid_hex": alias_rid_hex,
+                "allocation_status": str(candidate.get("allocation_status") or ""),
+            },
+        ),
         "validation_guidance": "Native SAM group rows identify group/alias key candidates only; validate membership from alias member binary attributes with a dedicated SAM parser before final testimony.",
         "commercial_grade_ready": False,
         "commercial_grade_blockers": report_grade["blockers"],
@@ -755,6 +775,17 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
                 "os_account_report_grade_assessment": report_grade,
                 "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
+                "account_privilege_deep_parse_profile": account_privilege_deep_parse_profile(
+                    artifact_scope="account-lifecycle-security-context",
+                    validation_checks=validation_checks,
+                    report_grade=report_grade,
+                    evidence_fields={
+                        "user_name": user_name,
+                        "rid": rid,
+                        "group_count": len(group_rows),
+                        "inherited_privilege_count": security_context.get("inherited_privilege_count", 0),
+                    },
+                ),
                 "forensic_review": build_forensic_review(
                     gap_id="#6",
                     artifact_goal="SAM/SECURITY/SYSTEM account and privilege context",
@@ -963,6 +994,56 @@ def security_policy_validation_checks(item: dict[str, object]) -> dict[str, obje
         "timestamp_candidate_count": sum(1 for value in metadata_values if value.get("timestamp_candidate")),
         "secret_decryption_attempted": False,
         "requires_legal_authorization": True,
+    }
+
+
+def account_privilege_deep_parse_profile(
+    *,
+    artifact_scope: str,
+    validation_checks: Mapping[str, object],
+    report_grade: Mapping[str, object],
+    evidence_fields: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "profile_version": "account-privilege-deep-parser-v1",
+        "commercial_gap_id": "#6",
+        "artifact_scope": artifact_scope,
+        "target_artifacts": ["SAM", "SECURITY", "SYSTEM"],
+        "current_decode_level": "partial-native-and-reg-export-correlation",
+        "decoded_components": {
+            "sam_f_value_export_candidate": bool(validation_checks.get("has_sam_f_value")),
+            "sam_v_value_export_candidate": bool(validation_checks.get("has_sam_v_value")),
+            "sam_fv_candidate_fields": bool(validation_checks.get("native_sam_fv_candidate_decoding_available")),
+            "sam_alias_key_candidates": bool(
+                validation_checks.get("has_builtin_alias_rid_candidate")
+                or validation_checks.get("has_group_name")
+                or validation_checks.get("has_group_name_candidate")
+            ),
+            "privilege_rights_export_mapping": bool(validation_checks.get("has_privilege") or evidence_fields.get("inherited_privilege_count")),
+            "security_secret_metadata_inventory": bool(
+                validation_checks.get("has_secret_name") or validation_checks.get("has_exported_values")
+            ),
+        },
+        "not_yet_report_grade": {
+            "full_os_version_sam_fv_layout": not OS_ACCOUNT_NATIVE_CAPABILITIES["full_os_version_sam_fv_layout_validation"],
+            "sam_alias_member_binary_decode": not OS_ACCOUNT_NATIVE_CAPABILITIES["native_sam_alias_member_binary_decode"],
+            "security_secret_decryption": not OS_ACCOUNT_NATIVE_CAPABILITIES["security_secret_decryption"],
+            "domain_context_resolution": not OS_ACCOUNT_NATIVE_CAPABILITIES["domain_controller_context_resolution"],
+            "transaction_log_replay": not OS_ACCOUNT_NATIVE_CAPABILITIES["transaction_log_replay"],
+        },
+        "evidence_fields": dict(evidence_fields),
+        "required_independent_checks": [
+            "validate SAM F/V offsets and field semantics by Windows build",
+            "decode SAM alias/member binary values for actual group membership",
+            "replay SAM/SECURITY/SYSTEM transaction logs before final state claims",
+            "cross-check privilege assignments with LSA policy/secedit output",
+            "correlate local/domain SID context before admin-right conclusions",
+        ],
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": list(report_grade.get("blockers") or []),
+        "legal_handling": "SECURITY secrets are inventoried as metadata only; decryption requires explicit lawful authority and audit logging.",
     }
 
 

@@ -1641,7 +1641,7 @@
             "ntuser_dat_hashes": {},
             "ntuser_dat_present": false,
             "parser": "windows-user-profile-inventory",
-            "parser_version": "windows-os-account-v8",
+            "parser_version": "windows-os-account-v9",
             "profile_modified_at": "2024-03-05T06:06:06+00:00",
             "profile_path": "<ROOT>/Users/alice",
             "reportability": "triage",
@@ -1966,7 +1966,7 @@
             "note": "SRUDB.dat is inventoried directly with bounded ESE header/string pivots; use a dedicated SRUM parser for full table decoding and timeline-grade rows.",
             "parser": "windows-srum-ese-inventory",
             "parser_confidence": 0.65,
-            "parser_version": "windows-execution-v7",
+            "parser_version": "windows-execution-v8",
             "path_candidates": [
               "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
             ],
@@ -1999,6 +1999,50 @@
               "url_pivot_count": 1,
               "validation_required": true,
               "validation_status": "header-size-page-aligned"
+            },
+            "srum_ese_validation_profile": {
+              "artifact_family": "srum-srudb-ese",
+              "artifact_scope": "database",
+              "commercial_gap_id": "#10",
+              "commercial_grade_blockers": [
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "large-known-answer-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:native-table-catalog-decoding-available",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "commercial_grade_ready": false,
+              "current_decode_level": "source-export-or-native-header-string-candidate",
+              "decoded_components": {
+                "ese_header": true,
+                "ese_signature": true,
+                "native_catalog_decoding": false,
+                "row_level_decoding": false,
+                "row_string_candidates": true,
+                "table_family_candidates": true
+              },
+              "evidence_fields": {
+                "ese_signature_valid": true,
+                "page_size": 8192,
+                "row_candidate_count": 1,
+                "table_candidate_count": 3
+              },
+              "profile_version": "srum-ese-validation-v1",
+              "report_grade_ready": false,
+              "required_independent_checks": [
+                "decode ESE catalog pages and tagged columns",
+                "map SRUM table GUIDs to Windows build-specific schemas",
+                "decode row-level timestamps, SIDs, app IDs, counters, and network profiles",
+                "validate 100k+ row cursor behavior against SrumECmd/libesedb known-answer outputs",
+                "document counter units and timezone normalization before report export"
+              ]
             },
             "string_scan_bytes": 16384,
             "suspicious_strings": [
@@ -2160,7 +2204,7 @@
             },
             "parser": "windows-srum-ese-string-pivot",
             "parser_confidence": 0.4,
-            "parser_version": "windows-execution-v7",
+            "parser_version": "windows-execution-v8",
             "raw_preview": "SruDbTable=NetworkUsage Application=powershell.exe UserSid=S-1-5-21-1000 Timestamp=2024-04-01T05:06:07Z BytesSent=512 BytesReceived=2048 InterfaceLuid=12 NetworkProfile=CorpWiFi Url=https://download.example/tools/installer.exe",
             "reportability": "triage",
             "risk_flags": [
@@ -2173,6 +2217,49 @@
             },
             "source_index": 3,
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
+            "srum_ese_validation_profile": {
+              "artifact_family": "srum-srudb-ese",
+              "artifact_scope": "string-pivot",
+              "commercial_gap_id": "#10",
+              "commercial_grade_blockers": [
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:has-app-id",
+                "validation-check-failed:native-table-catalog-decoding-available",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "commercial_grade_ready": false,
+              "current_decode_level": "source-export-or-native-header-string-candidate",
+              "decoded_components": {
+                "ese_header": true,
+                "ese_signature": true,
+                "native_catalog_decoding": false,
+                "row_level_decoding": false,
+                "row_string_candidates": false,
+                "table_family_candidates": false
+              },
+              "evidence_fields": {
+                "app_id": "",
+                "candidate_kind": "string",
+                "url": "https://download.example/tools/installer.exe"
+              },
+              "profile_version": "srum-ese-validation-v1",
+              "report_grade_ready": false,
+              "required_independent_checks": [
+                "decode ESE catalog pages and tagged columns",
+                "map SRUM table GUIDs to Windows build-specific schemas",
+                "decode row-level timestamps, SIDs, app IDs, counters, and network profiles",
+                "validate 100k+ row cursor behavior against SrumECmd/libesedb known-answer outputs",
+                "document counter units and timezone normalization before report export"
+              ]
+            },
             "srum_pivot_evidence": {
               "candidate_kind": "string",
               "candidate_value": "SruDbTable=NetworkUsage Application=powershell.exe UserSid=S-1-5-21-1000 Timestamp=2024-04-01T05:06:07Z BytesSent=512 BytesReceived=2048 InterfaceLuid=12 NetworkProfile=CorpWiFi Url=https://download.example/tools/installer.exe",
@@ -2333,7 +2420,7 @@
             },
             "parser": "windows-srum-ese-string-pivot",
             "parser_confidence": 0.4,
-            "parser_version": "windows-execution-v7",
+            "parser_version": "windows-execution-v8",
             "raw_preview": "https://download.example/tools/installer.exe",
             "reportability": "triage",
             "risk_flags": [
@@ -2346,6 +2433,49 @@
             },
             "source_index": 1,
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
+            "srum_ese_validation_profile": {
+              "artifact_family": "srum-srudb-ese",
+              "artifact_scope": "string-pivot",
+              "commercial_gap_id": "#10",
+              "commercial_grade_blockers": [
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:has-app-id",
+                "validation-check-failed:native-table-catalog-decoding-available",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "commercial_grade_ready": false,
+              "current_decode_level": "source-export-or-native-header-string-candidate",
+              "decoded_components": {
+                "ese_header": true,
+                "ese_signature": true,
+                "native_catalog_decoding": false,
+                "row_level_decoding": false,
+                "row_string_candidates": false,
+                "table_family_candidates": false
+              },
+              "evidence_fields": {
+                "app_id": "",
+                "candidate_kind": "url",
+                "url": "https://download.example/tools/installer.exe"
+              },
+              "profile_version": "srum-ese-validation-v1",
+              "report_grade_ready": false,
+              "required_independent_checks": [
+                "decode ESE catalog pages and tagged columns",
+                "map SRUM table GUIDs to Windows build-specific schemas",
+                "decode row-level timestamps, SIDs, app IDs, counters, and network profiles",
+                "validate 100k+ row cursor behavior against SrumECmd/libesedb known-answer outputs",
+                "document counter units and timezone normalization before report export"
+              ]
+            },
             "srum_pivot_evidence": {
               "candidate_kind": "url",
               "candidate_value": "https://download.example/tools/installer.exe",
@@ -2506,7 +2636,7 @@
             },
             "parser": "windows-srum-ese-string-pivot",
             "parser_confidence": 0.4,
-            "parser_version": "windows-execution-v7",
+            "parser_version": "windows-execution-v8",
             "raw_preview": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
             "reportability": "triage",
             "risk_flags": [],
@@ -2517,6 +2647,49 @@
             },
             "source_index": 0,
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
+            "srum_ese_validation_profile": {
+              "artifact_family": "srum-srudb-ese",
+              "artifact_scope": "string-pivot",
+              "commercial_gap_id": "#10",
+              "commercial_grade_blockers": [
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:has-url",
+                "validation-check-failed:native-table-catalog-decoding-available",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "commercial_grade_ready": false,
+              "current_decode_level": "source-export-or-native-header-string-candidate",
+              "decoded_components": {
+                "ese_header": true,
+                "ese_signature": true,
+                "native_catalog_decoding": false,
+                "row_level_decoding": false,
+                "row_string_candidates": false,
+                "table_family_candidates": false
+              },
+              "evidence_fields": {
+                "app_id": "powershell.exe",
+                "candidate_kind": "path",
+                "url": ""
+              },
+              "profile_version": "srum-ese-validation-v1",
+              "report_grade_ready": false,
+              "required_independent_checks": [
+                "decode ESE catalog pages and tagged columns",
+                "map SRUM table GUIDs to Windows build-specific schemas",
+                "decode row-level timestamps, SIDs, app IDs, counters, and network profiles",
+                "validate 100k+ row cursor behavior against SrumECmd/libesedb known-answer outputs",
+                "document counter units and timezone normalization before report export"
+              ]
+            },
             "srum_pivot_evidence": {
               "candidate_kind": "path",
               "candidate_value": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
@@ -2677,7 +2850,7 @@
             },
             "parser": "windows-srum-ese-string-pivot",
             "parser_confidence": 0.4,
-            "parser_version": "windows-execution-v7",
+            "parser_version": "windows-execution-v8",
             "raw_preview": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
             "reportability": "triage",
             "risk_flags": [],
@@ -2688,6 +2861,49 @@
             },
             "source_index": 2,
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
+            "srum_ese_validation_profile": {
+              "artifact_family": "srum-srudb-ese",
+              "artifact_scope": "string-pivot",
+              "commercial_gap_id": "#10",
+              "commercial_grade_blockers": [
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:has-url",
+                "validation-check-failed:native-table-catalog-decoding-available",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "commercial_grade_ready": false,
+              "current_decode_level": "source-export-or-native-header-string-candidate",
+              "decoded_components": {
+                "ese_header": true,
+                "ese_signature": true,
+                "native_catalog_decoding": false,
+                "row_level_decoding": false,
+                "row_string_candidates": false,
+                "table_family_candidates": false
+              },
+              "evidence_fields": {
+                "app_id": "powershell.exe",
+                "candidate_kind": "string",
+                "url": ""
+              },
+              "profile_version": "srum-ese-validation-v1",
+              "report_grade_ready": false,
+              "required_independent_checks": [
+                "decode ESE catalog pages and tagged columns",
+                "map SRUM table GUIDs to Windows build-specific schemas",
+                "decode row-level timestamps, SIDs, app IDs, counters, and network profiles",
+                "validate 100k+ row cursor behavior against SrumECmd/libesedb known-answer outputs",
+                "document counter units and timezone normalization before report export"
+              ]
+            },
             "srum_pivot_evidence": {
               "candidate_kind": "string",
               "candidate_value": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
@@ -2875,7 +3091,7 @@
             "network_profile": "CorpWiFi",
             "parser": "windows-srum-ese-row-candidate",
             "parser_confidence": 0.62,
-            "parser_version": "windows-execution-v7",
+            "parser_version": "windows-execution-v8",
             "raw_preview": "SruDbTable=NetworkUsage Application=powershell.exe UserSid=S-1-5-21-1000 Timestamp=2024-04-01T05:06:07Z BytesSent=512 BytesReceived=2048 InterfaceLuid=12 NetworkProfile=CorpWiFi Url=https://download.example/tools/installer.exe",
             "reportability": "review",
             "risk_flags": [
@@ -2890,6 +3106,50 @@
             "source_index": 0,
             "source_offset": 8334,
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
+            "srum_ese_validation_profile": {
+              "artifact_family": "srum-srudb-ese",
+              "artifact_scope": "row-candidate",
+              "commercial_gap_id": "#10",
+              "commercial_grade_blockers": [
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "known-answer-row-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:has-executable-path",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "commercial_grade_ready": false,
+              "current_decode_level": "source-export-or-native-header-string-candidate",
+              "decoded_components": {
+                "ese_header": true,
+                "ese_signature": true,
+                "native_catalog_decoding": false,
+                "row_level_decoding": false,
+                "row_string_candidates": true,
+                "table_family_candidates": false
+              },
+              "evidence_fields": {
+                "app_id": "powershell.exe",
+                "counter_candidate_count": 2,
+                "table_family": "network-usage",
+                "timestamp": "2024-04-01T05:06:07+00:00"
+              },
+              "profile_version": "srum-ese-validation-v1",
+              "report_grade_ready": false,
+              "required_independent_checks": [
+                "decode ESE catalog pages and tagged columns",
+                "map SRUM table GUIDs to Windows build-specific schemas",
+                "decode row-level timestamps, SIDs, app IDs, counters, and network profiles",
+                "validate 100k+ row cursor behavior against SrumECmd/libesedb known-answer outputs",
+                "document counter units and timezone normalization before report export"
+              ]
+            },
             "srum_row_evidence": {
               "candidate_basis": "bounded-native-string-row-cluster",
               "counter_candidate_count": 2,
@@ -3053,7 +3313,7 @@
             ],
             "parser": "windows-srum-ese-table-candidate",
             "parser_confidence": 0.66,
-            "parser_version": "windows-execution-v7",
+            "parser_version": "windows-execution-v8",
             "raw_preview": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe NetworkUsage SruDbTable=NetworkUsage Application=powershell.exe UserSid=S-1-5-21-1000 Timestamp=2024-04-01T05:06:07Z BytesSent=512 BytesReceived=2048 InterfaceLuid=12 NetworkProfile=CorpWiFi Url=https://download.example/tools/installer.exe",
             "reportability": "triage",
             "risk_flags": [
@@ -3070,6 +3330,47 @@
               8334
             ],
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
+            "srum_ese_validation_profile": {
+              "artifact_family": "srum-srudb-ese",
+              "artifact_scope": "table-candidate",
+              "commercial_gap_id": "#10",
+              "commercial_grade_blockers": [
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "commercial_grade_ready": false,
+              "current_decode_level": "source-export-or-native-header-string-candidate",
+              "decoded_components": {
+                "ese_header": true,
+                "ese_signature": true,
+                "native_catalog_decoding": false,
+                "row_level_decoding": false,
+                "row_string_candidates": false,
+                "table_family_candidates": true
+              },
+              "evidence_fields": {
+                "matched_marker_count": 8,
+                "source_offset_count": 2,
+                "table_family": "network-usage"
+              },
+              "profile_version": "srum-ese-validation-v1",
+              "report_grade_ready": false,
+              "required_independent_checks": [
+                "decode ESE catalog pages and tagged columns",
+                "map SRUM table GUIDs to Windows build-specific schemas",
+                "decode row-level timestamps, SIDs, app IDs, counters, and network profiles",
+                "validate 100k+ row cursor behavior against SrumECmd/libesedb known-answer outputs",
+                "document counter units and timezone normalization before report export"
+              ]
+            },
             "table_family": "network-usage",
             "validation_checks": {
               "has_source_offsets": true,
@@ -3202,7 +3503,7 @@
             ],
             "parser": "windows-srum-ese-table-candidate",
             "parser_confidence": 0.42,
-            "parser_version": "windows-execution-v7",
+            "parser_version": "windows-execution-v8",
             "raw_preview": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe NetworkUsage SruDbTable=NetworkUsage Application=powershell.exe UserSid=S-1-5-21-1000 Timestamp=2024-04-01T05:06:07Z BytesSent=512 BytesReceived=2048 InterfaceLuid=12 NetworkProfile=CorpWiFi Url=https://download.example/tools/installer.exe",
             "reportability": "triage",
             "risk_flags": [
@@ -3218,6 +3519,47 @@
               8334
             ],
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
+            "srum_ese_validation_profile": {
+              "artifact_family": "srum-srudb-ese",
+              "artifact_scope": "table-candidate",
+              "commercial_gap_id": "#10",
+              "commercial_grade_blockers": [
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "commercial_grade_ready": false,
+              "current_decode_level": "source-export-or-native-header-string-candidate",
+              "decoded_components": {
+                "ese_header": true,
+                "ese_signature": true,
+                "native_catalog_decoding": false,
+                "row_level_decoding": false,
+                "row_string_candidates": false,
+                "table_family_candidates": true
+              },
+              "evidence_fields": {
+                "matched_marker_count": 1,
+                "source_offset_count": 1,
+                "table_family": "app-resource"
+              },
+              "profile_version": "srum-ese-validation-v1",
+              "report_grade_ready": false,
+              "required_independent_checks": [
+                "decode ESE catalog pages and tagged columns",
+                "map SRUM table GUIDs to Windows build-specific schemas",
+                "decode row-level timestamps, SIDs, app IDs, counters, and network profiles",
+                "validate 100k+ row cursor behavior against SrumECmd/libesedb known-answer outputs",
+                "document counter units and timezone normalization before report export"
+              ]
+            },
             "table_family": "app-resource",
             "validation_checks": {
               "has_source_offsets": true,
@@ -3352,7 +3694,7 @@
             ],
             "parser": "windows-srum-ese-table-candidate",
             "parser_confidence": 0.5,
-            "parser_version": "windows-execution-v7",
+            "parser_version": "windows-execution-v8",
             "raw_preview": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe NetworkUsage SruDbTable=NetworkUsage Application=powershell.exe UserSid=S-1-5-21-1000 Timestamp=2024-04-01T05:06:07Z BytesSent=512 BytesReceived=2048 InterfaceLuid=12 NetworkProfile=CorpWiFi Url=https://download.example/tools/installer.exe",
             "reportability": "triage",
             "risk_flags": [
@@ -3368,6 +3710,47 @@
               8334
             ],
             "source_path": "<ROOT>/Windows/System32/sru/SRUDB.dat",
+            "srum_ese_validation_profile": {
+              "artifact_family": "srum-srudb-ese",
+              "artifact_scope": "table-candidate",
+              "commercial_gap_id": "#10",
+              "commercial_grade_blockers": [
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "commercial_grade_ready": false,
+              "current_decode_level": "source-export-or-native-header-string-candidate",
+              "decoded_components": {
+                "ese_header": true,
+                "ese_signature": true,
+                "native_catalog_decoding": false,
+                "row_level_decoding": false,
+                "row_string_candidates": false,
+                "table_family_candidates": true
+              },
+              "evidence_fields": {
+                "matched_marker_count": 3,
+                "source_offset_count": 1,
+                "table_family": "user"
+              },
+              "profile_version": "srum-ese-validation-v1",
+              "report_grade_ready": false,
+              "required_independent_checks": [
+                "decode ESE catalog pages and tagged columns",
+                "map SRUM table GUIDs to Windows build-specific schemas",
+                "decode row-level timestamps, SIDs, app IDs, counters, and network profiles",
+                "validate 100k+ row cursor behavior against SrumECmd/libesedb known-answer outputs",
+                "document counter units and timezone normalization before report export"
+              ]
+            },
             "table_family": "user",
             "validation_checks": {
               "has_source_offsets": true,
@@ -3519,7 +3902,7 @@
               "srum_table_marker_candidates": true
             },
             "parser": "windows-execution-summary",
-            "parser_version": "windows-execution-v7",
+            "parser_version": "windows-execution-v8",
             "report_grade_blockers": [
               "native-amcache-schema-decoding-required",
               "native-appcompatcache-layout-decoding-required",
