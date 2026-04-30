@@ -307,7 +307,7 @@ def read_chatlog_messages(
     room_title: str,
     analysis_method: str,
 ) -> list[dict[str, object]]:
-    connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro&immutable=1", uri=True)
     connection.row_factory = sqlite3.Row
     try:
         table = connection.execute(

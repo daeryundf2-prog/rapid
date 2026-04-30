@@ -2600,7 +2600,7 @@ def extract_postpatch_chat_room_previews(
         if not database or not database.exists() or not database.is_file():
             continue
         try:
-            connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+            connection = sqlite3.connect(sqlite_readonly_uri(database, immutable=True), uri=True)
         except sqlite3.Error:
             continue
         try:
@@ -3107,7 +3107,7 @@ def inspect_memory_sqlite_tables(
     include_row_preview: bool,
     max_rows_per_table: int,
 ) -> list[dict[str, object]]:
-    connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    connection = sqlite3.connect(sqlite_readonly_uri(path, immutable=True), uri=True)
     try:
         rows = connection.execute(
             "select name, sql from sqlite_master where type='table' and name not like 'sqlite_%' order by name"
@@ -3161,6 +3161,15 @@ def preview_sqlite_value(value: object) -> object:
         }
     text = str(value)
     return text[:500]
+
+
+def sqlite_readonly_uri(path: Path, *, immutable: bool = False) -> str:
+    suffix = "?mode=ro"
+    if immutable:
+        # Decrypted KakaoTalk EDBs are evidence copies. Opening as immutable avoids
+        # SQLite trying to create WAL/SHM sidecars in read-only or temporary folders.
+        suffix += "&immutable=1"
+    return f"{path.resolve().as_uri()}{suffix}"
 
 
 def run_kakaotalk_userdir_bruteforce(
@@ -4688,7 +4697,7 @@ def inspect_decrypted_sqlite(
     include_message_preview: bool,
     max_messages: int,
 ) -> dict[str, object]:
-    connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    connection = sqlite3.connect(sqlite_readonly_uri(path, immutable=True), uri=True)
     try:
         tables = list_tables(connection)
         candidates = []
@@ -4780,7 +4789,7 @@ def extract_kakaotalk_attachment_rows(
     if remaining <= 0:
         return []
     chat_id = chat_id_from_path(sqlite_path)
-    connection = sqlite3.connect(f"{sqlite_path.resolve().as_uri()}?mode=ro", uri=True)
+    connection = sqlite3.connect(sqlite_readonly_uri(sqlite_path, immutable=True), uri=True)
     connection.row_factory = sqlite3.Row
     rows: list[dict[str, object]] = []
     try:
