@@ -11,7 +11,8 @@ RapidTriage separates EVTX record recovery from report-grade provider message re
 - Recoverable `Event/System` and `EventData` fields are promoted into `extracted_fields` for search/review pivots.
 - TemplateInstance records preserve template IDs, template body object-model data, value specs, substitution values, and decoded substitution text where possible.
 - Message rendering emits built-in validation-required templates for selected high-value event IDs such as 4104, 4624, 4688, 7045, and 1102.
-- `provider_message_resource_resolved` remains `false` until provider DLL/resource-table rendering is implemented and validated.
+- `rapidtriage artifacts --kind eventlog --eventlog-message-catalog catalog.json` can load a curated provider/event template catalog. Matching entries render before built-in fallbacks and record catalog path/source/locale provenance.
+- Native rows without an explicit catalog keep `provider_message_resource_resolved=false` until provider DLL/resource-table rendering is implemented and validated.
 
 ## Report-Grade Target
 
@@ -26,3 +27,4 @@ Report-grade rendering requires:
 ## Safety Rule
 
 Built-in messages are useful for analyst triage, but must stay `validation_required=true` and must not be represented as court-ready provider-rendered event messages.
+Curated provider catalogs may mark `provider_message_resource_resolved=true`, but reports must preserve the catalog provenance so the analyst can prove which manifest/resource extraction was used.

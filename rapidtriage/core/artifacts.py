@@ -22,12 +22,15 @@ def run_artifact_collection(
     kind: str,
     input_kind: str | None = None,
     rule_set: RuleSet | None = None,
+    collector_options: Dict[str, object] | None = None,
 ) -> Dict[str, object]:
     input_root = resolve_input_root(root, kind=input_kind)
     try:
         collector = get_artifact_collector(kind)
     except KeyError as exc:
         raise ArtifactCollectionError(str(exc)) from exc
+    if collector_options and hasattr(collector, "with_options"):
+        collector = collector.with_options(**collector_options)
 
     parser_errors: list[dict[str, str]] = []
     collection_status = "completed"

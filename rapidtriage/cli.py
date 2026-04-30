@@ -255,6 +255,10 @@ def build_parser() -> argparse.ArgumentParser:
     artifacts.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
     artifacts.add_argument("--kind", required=True, choices=sorted(SUPPORTED_ARTIFACT_KINDS), help="Artifact collector kind")
     artifacts.add_argument("--output", help="JSON output path (default: ./rapidtriage-artifacts-KIND.json)")
+    artifacts.add_argument(
+        "--eventlog-message-catalog",
+        help="JSON provider/event message catalog for --kind eventlog rendering",
+    )
     add_rules_argument(artifacts)
 
     kakao_decrypt = sub.add_parser(
@@ -3353,13 +3357,24 @@ def main(argv=None) -> int:
         return 0
 
     if args.command == "artifacts":
+        if args.eventlog_message_catalog and args.kind != "eventlog":
+            parser.error("--eventlog-message-catalog can only be used with --kind eventlog")
         output = (
             Path(args.output).expanduser().resolve()
             if args.output
             else (Path.cwd() / f"rapidtriage-artifacts-{args.kind}.json").resolve()
         )
+        collector_options = {}
+        if args.eventlog_message_catalog:
+            collector_options["message_catalog_path"] = Path(args.eventlog_message_catalog).expanduser().resolve()
         try:
-            payload = run_artifact_collection(root, kind=args.kind, input_kind=args.input_kind, rule_set=rule_set)
+            payload = run_artifact_collection(
+                root,
+                kind=args.kind,
+                input_kind=args.input_kind,
+                rule_set=rule_set,
+                collector_options=collector_options,
+            )
         except ArtifactCollectionError as exc:
             parser.error(str(exc))
         write_result(payload, output)
@@ -3367,7 +3382,13 @@ def main(argv=None) -> int:
         write_audit_record(
             audit_output,
             command="artifacts",
-            options={"kind": args.kind, "output": str(output), "input_kind": args.input_kind, "rules": args.rules},
+            options={
+                "kind": args.kind,
+                "output": str(output),
+                "input_kind": args.input_kind,
+                "rules": args.rules,
+                "eventlog_message_catalog": args.eventlog_message_catalog,
+            },
             input_root=input_root,
             output_files=[("artifacts-json", output)],
         )

@@ -612,6 +612,63 @@ PROVIDER_EVENT_MESSAGE_TEMPLATES = {
 }
 
 
+def load_event_message_catalog(path: Path) -> dict[str, dict[str, dict[str, object]]]:
+    """Load a curated provider/event message catalog.
+
+    Supported JSON shapes:
+    - {"templates": [{"provider": "...", "event_id": "4624", "message": "..."}]}
+    - {"providers": {"Provider Name": {"4624": "..."}}}
+    - {"Provider Name": {"4624": "..."}}
+    """
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    catalog: dict[str, dict[str, dict[str, object]]] = {}
+
+    def add_entry(provider: object, event_id: object, entry: object) -> None:
+        provider_key = normalize_provider_catalog_key(str(provider or ""))
+        event_key = normalize_event_id(str(event_id or ""))
+        if not provider_key or not event_key:
+            return
+        if isinstance(entry, Mapping):
+            message = str(entry.get("message") or entry.get("template") or "")
+            metadata = dict(entry)
+        else:
+            message = str(entry or "")
+            metadata = {"message": message}
+        if not message:
+            return
+        metadata["message"] = message
+        metadata.setdefault("catalog_path", str(path.resolve()))
+        catalog.setdefault(provider_key, {})[event_key] = metadata
+
+    if isinstance(payload, Mapping):
+        templates = payload.get("templates")
+        if isinstance(templates, list):
+            for item in templates:
+                if not isinstance(item, Mapping):
+                    continue
+                add_entry(
+                    item.get("provider") or item.get("provider_name") or item.get("source"),
+                    item.get("event_id") or item.get("eventid") or item.get("id"),
+                    item,
+                )
+        providers = payload.get("providers") if isinstance(payload.get("providers"), Mapping) else payload
+        if isinstance(providers, Mapping):
+            for provider, events in providers.items():
+                if str(provider) == "templates" or not isinstance(events, Mapping):
+                    continue
+                for event_id, entry in events.items():
+                    add_entry(provider, event_id, entry)
+    return catalog
+
+
+def normalize_provider_catalog_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
 class NativeEvtxRecordCandidate(NamedTuple):
     offset: int
     declared_size: int
@@ -627,12 +684,26 @@ class WindowsEventLogProvider:
     description = "Windows Event Log EVTX inventory and XML/JSON/JSONL/CSV event imports"
     target_platform = "windows"
 
+    def __init__(self, message_catalog_path: Path | None = None):
+        self.message_catalog_path = message_catalog_path
+        self._message_catalog: dict[str, dict[str, dict[str, object]]] | None = None
+
+    def with_options(self, **options: object) -> "WindowsEventLogProvider":
+        catalog = options.get("message_catalog_path")
+        return WindowsEventLogProvider(Path(str(catalog)).expanduser().resolve() if catalog else self.message_catalog_path)
+
     def supported(self) -> bool:
         return True
+
+    def message_catalog(self) -> dict[str, dict[str, dict[str, object]]]:
+        if self._message_catalog is None:
+            self._message_catalog = load_event_message_catalog(self.message_catalog_path) if self.message_catalog_path else {}
+        return self._message_catalog
 
     def collect(self, root: Path) -> Iterable[ArtifactRecord]:
         records: list[ArtifactRecord] = []
         seen: set[Path] = set()
+        message_catalog = self.message_catalog()
         for path in candidate_eventlog_paths(root):
             resolved = path.resolve()
             if resolved in seen or not path.is_file():
@@ -640,13 +711,13 @@ class WindowsEventLogProvider:
             seen.add(resolved)
             suffix = path.suffix.lower()
             if suffix == ".xml":
-                records.extend(collect_xml_events(path))
+                records.extend(collect_xml_events(path, message_catalog=message_catalog))
             elif suffix in {".json", ".jsonl", ".ndjson"}:
-                records.extend(collect_json_like_events(path))
+                records.extend(collect_json_like_events(path, message_catalog=message_catalog))
             elif suffix == ".csv":
-                records.extend(collect_csv_events(path))
+                records.extend(collect_csv_events(path, message_catalog=message_catalog))
             elif suffix == ".evtx":
-                native_records = list(collect_native_evtx_events(path))
+                native_records = list(collect_native_evtx_events(path, message_catalog=message_catalog))
                 records.extend(native_records)
                 native_event_count = sum(1 for record in native_records if record.artifact_type == "eventlog-event")
                 native_candidate_count = sum(1 for record in native_records if record.artifact_type == "eventlog-record-candidate")
@@ -680,7 +751,11 @@ def candidate_eventlog_paths(root: Path) -> Iterable[Path]:
             yield path
 
 
-def collect_xml_events(path: Path) -> Iterable[ArtifactRecord]:
+def collect_xml_events(
+    path: Path,
+    *,
+    message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
+) -> Iterable[ArtifactRecord]:
     try:
         tree = ET.parse(path)
     except (ET.ParseError, OSError):
@@ -720,11 +795,16 @@ def collect_xml_events(path: Path) -> Iterable[ArtifactRecord]:
             task=text_from_child(system, "Task"),
             opcode=text_from_child(system, "Opcode"),
             keywords=text_from_child(system, "Keywords"),
+            message_catalog=message_catalog,
         )
         yield event_record(path, "eventlog-event", details)
 
 
-def collect_json_like_events(path: Path) -> Iterable[ArtifactRecord]:
+def collect_json_like_events(
+    path: Path,
+    *,
+    message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
+) -> Iterable[ArtifactRecord]:
     source_hashes = file_hashes(path)
     for index, row in enumerate(iter_json_rows(path)):
         details = details_from_mapping(
@@ -734,12 +814,17 @@ def collect_json_like_events(path: Path) -> Iterable[ArtifactRecord]:
             source_path=path,
             source_index=index,
             source_hashes=source_hashes,
+            message_catalog=message_catalog,
         )
         artifact_type = "eventlog-detection" if is_detection_row(details) else "eventlog-event"
         yield event_record(path, artifact_type, details)
 
 
-def collect_csv_events(path: Path) -> Iterable[ArtifactRecord]:
+def collect_csv_events(
+    path: Path,
+    *,
+    message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
+) -> Iterable[ArtifactRecord]:
     source_hashes = file_hashes(path)
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -752,6 +837,7 @@ def collect_csv_events(path: Path) -> Iterable[ArtifactRecord]:
                     source_path=path,
                     source_index=index,
                     source_hashes=source_hashes,
+                    message_catalog=message_catalog,
                 )
                 artifact_type = "eventlog-detection" if is_detection_row(details) else "eventlog-event"
                 yield event_record(path, artifact_type, details)
@@ -759,7 +845,11 @@ def collect_csv_events(path: Path) -> Iterable[ArtifactRecord]:
         return
 
 
-def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
+def collect_native_evtx_events(
+    path: Path,
+    *,
+    message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
+) -> Iterable[ArtifactRecord]:
     try:
         blob = path.read_bytes()
     except OSError:
@@ -884,6 +974,7 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             thread_id=str(system_fields.get("ThreadID") or ""),
             process_name=str(native_indicators.get("process_name") or ""),
             command_line=str(native_indicators.get("command_line") or raw_preview),
+            message_catalog=message_catalog,
         )
         details.update(data)
         details["parser_confidence"] = native_evtx_confidence(details)
@@ -1260,7 +1351,14 @@ def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[s
     if details.get("validation_required"):
         blockers.append("native-record-validation-required")
 
-    blockers.extend(NATIVE_EVTX_REPORT_GRADE_BLOCKERS)
+    static_blockers = list(NATIVE_EVTX_REPORT_GRADE_BLOCKERS)
+    if (
+        isinstance(message.get("provenance"), Mapping)
+        and message["provenance"].get("provider_message_resource_resolved")
+        and "provider-message-resource-rendering-not-implemented" in static_blockers
+    ):
+        static_blockers.remove("provider-message-resource-rendering-not-implemented")
+    blockers.extend(static_blockers)
     blockers = sorted(set(blockers))
     report_grade_ready = not blockers
     if report_grade_ready:
@@ -2708,6 +2806,7 @@ def details_from_mapping(
     source_path: Path,
     source_index: int,
     source_hashes: Mapping[str, str],
+    message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> dict[str, object]:
     lowered = {normalize_key(key): value for key, value in row.items()}
     event_id = first_value(lowered, "eventid", "event_id", "id", "eid")
@@ -2738,6 +2837,7 @@ def details_from_mapping(
         rule_id=str(first_value(lowered, "ruleid", "rule_id", "sigmaid", "sigma_id") or ""),
         rule_level=str(first_value(lowered, "rulelevel", "rule_level", "level", "severity", "criticality") or ""),
         mitre_tags=split_tags(first_value(lowered, "mitretags", "mitre_tags", "mitre", "tags")),
+        message_catalog=message_catalog,
     )
     return details
 
@@ -2750,6 +2850,7 @@ def render_event_message(
     data: Mapping[str, object],
     raw_preview: str,
     is_native_evtx: bool,
+    message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> dict[str, object]:
     external_message = first_data_text(data, "RenderedMessage", "Message", "MapDescription", "EventMessage")
     template_ids = native_evtx_template_ids(data)
@@ -2774,6 +2875,44 @@ def render_event_message(
                 message_source=message_source,
                 renderer="external-export-field",
                 validation_required=False,
+            ),
+        }
+
+    catalog_entry = event_message_catalog_entry(message_catalog or {}, provider_name, event_id)
+    if catalog_entry:
+        message, missing_fields, used_fields = render_message_template(str(catalog_entry["message"]), data)
+        validation_required = bool(catalog_entry.get("validation_required", False))
+        message_source = "provider-message-catalog"
+        return {
+            "status": "rendered-provider-catalog-template",
+            "message": message[:4000],
+            "message_source": message_source,
+            "rendering_confidence": 0.91 if is_native_evtx else 0.94,
+            "provider_resource_required": False,
+            "provider_name": provider_name,
+            "event_id": event_id,
+            "event_category": category,
+            "template_ids": template_ids,
+            "used_fields": used_fields,
+            "missing_fields": missing_fields,
+            "available_field_summary": event_message_field_summary(data),
+            "validation_required": validation_required,
+            "rendering_limitations": [],
+            "warnings": [str(item) for item in catalog_entry.get("warnings", []) if str(item)]
+            if isinstance(catalog_entry.get("warnings"), list)
+            else [],
+            "provenance": event_message_provenance(
+                data=data,
+                is_native_evtx=is_native_evtx,
+                message_source=message_source,
+                renderer="provider-message-catalog",
+                validation_required=validation_required,
+                provider_message_resource_resolved=True,
+                provider_message_resource_source={
+                    "catalog_path": str(catalog_entry.get("catalog_path") or ""),
+                    "source": str(catalog_entry.get("source") or catalog_entry.get("version") or ""),
+                    "locale": str(catalog_entry.get("locale") or ""),
+                },
             ),
         }
 
@@ -2842,15 +2981,21 @@ def event_message_provenance(
     message_source: str,
     renderer: str,
     validation_required: bool,
+    provider_message_resource_resolved: bool = False,
+    provider_message_resource_source: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     provenance: dict[str, object] = {
         "message_source": message_source,
         "renderer": renderer,
-        "provider_message_resource_resolved": False,
+        "provider_message_resource_resolved": provider_message_resource_resolved,
         "validation_required": validation_required,
     }
+    if provider_message_resource_source:
+        provenance["provider_message_resource_source"] = dict(provider_message_resource_source)
     if not is_native_evtx:
-        provenance["provider_message_resource_resolved"] = message_source == "imported-export-field"
+        provenance["provider_message_resource_resolved"] = (
+            provider_message_resource_resolved or message_source == "imported-export-field"
+        )
         return provenance
 
     binxml = data.get("evtx_binxml") if isinstance(data.get("evtx_binxml"), Mapping) else {}
@@ -2911,6 +3056,37 @@ def event_message_template(provider_name: str, event_id: str) -> str:
     return EVENT_MESSAGE_TEMPLATES.get(event_id, "")
 
 
+def event_message_catalog_entry(
+    catalog: Mapping[str, Mapping[str, Mapping[str, object]]],
+    provider_name: str,
+    event_id: str,
+) -> Mapping[str, object] | None:
+    if not catalog:
+        return None
+    provider_key = normalize_provider_catalog_key(provider_name)
+    normalized_event_id = normalize_event_id(event_id)
+    for key in provider_catalog_keys(provider_key):
+        provider_catalog = catalog.get(key)
+        if isinstance(provider_catalog, Mapping):
+            entry = provider_catalog.get(normalized_event_id)
+            if isinstance(entry, Mapping) and entry.get("message"):
+                return entry
+    wildcard = catalog.get("*") or catalog.get("any")
+    if isinstance(wildcard, Mapping):
+        entry = wildcard.get(normalized_event_id)
+        if isinstance(entry, Mapping) and entry.get("message"):
+            return entry
+    return None
+
+
+def provider_catalog_keys(provider_key: str) -> list[str]:
+    keys = [provider_key]
+    for marker in PROVIDER_EVENT_MESSAGE_TEMPLATES:
+        if marker in provider_key:
+            keys.append(marker)
+    return list(dict.fromkeys(key for key in keys if key))
+
+
 def native_evtx_template_ids(data: Mapping[str, object]) -> list[str]:
     binxml = data.get("evtx_binxml") if isinstance(data, Mapping) else {}
     if not isinstance(binxml, Mapping):
@@ -2956,6 +3132,7 @@ def normalize_event_details(
     rule_id: str = "",
     rule_level: str = "",
     mitre_tags: list[str] | None = None,
+    message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> dict[str, object]:
     normalized_event_id = normalize_event_id(event_id)
     target_user_name = first_data_text(data, "TargetUserName", "TargetUser", "AccountName")
@@ -3014,6 +3191,7 @@ def normalize_event_details(
         data=data,
         raw_preview=raw_preview,
         is_native_evtx=is_native_evtx,
+        message_catalog=message_catalog,
     )
     return {
         "parser": parser,

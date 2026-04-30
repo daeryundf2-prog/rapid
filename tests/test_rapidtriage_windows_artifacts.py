@@ -236,6 +236,74 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn(r"C:\Users\alice\Documents\Incident Notes.docx", automatic["details"]["embedded_paths"])
             self.assertEqual(custom["details"]["destinations"][0]["target_path"], r"C:\Users\alice\Downloads\installer.exe")
 
+    def test_eventlog_collector_uses_provider_message_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            logs = root / "Windows" / "System32" / "winevt" / "Logs"
+            logs.mkdir(parents=True)
+            event_xml = logs / "CustomProvider.xml"
+            event_xml.write_text(
+                """<Events><Event>
+  <System>
+    <Provider Name="Custom-Provider"/>
+    <EventID>9001</EventID>
+    <EventRecordID>7</EventRecordID>
+    <Channel>Custom/Operational</Channel>
+    <TimeCreated SystemTime="2026-04-30T01:02:03Z"/>
+    <Computer>HOST1</Computer>
+  </System>
+  <EventData>
+    <Data Name="User">alice</Data>
+    <Data Name="Action">opened case</Data>
+  </EventData>
+</Event></Events>""",
+                encoding="utf-8",
+            )
+            catalog = root / "message-catalog.json"
+            catalog.write_text(
+                json.dumps(
+                    {
+                        "templates": [
+                            {
+                                "provider": "Custom-Provider",
+                                "event_id": "9001",
+                                "message": "Custom provider event. User={User}; action={Action}.",
+                                "source": "unit-test-provider-manifest",
+                                "locale": "en-US",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output = root / "eventlog.json"
+
+            self.assertEqual(
+                main(
+                    [
+                        "artifacts",
+                        str(root),
+                        "--kind",
+                        "eventlog",
+                        "--eventlog-message-catalog",
+                        str(catalog),
+                        "--output",
+                        str(output),
+                    ]
+                ),
+                0,
+            )
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            event = next(item for item in payload["artifacts"] if item["artifact_type"] == "eventlog-event")
+            rendering = event["details"]["message_rendering"]
+            self.assertEqual(rendering["status"], "rendered-provider-catalog-template")
+            self.assertEqual(event["details"]["event_message"], "Custom provider event. User=alice; action=opened case.")
+            self.assertTrue(rendering["provenance"]["provider_message_resource_resolved"])
+            self.assertEqual(
+                rendering["provenance"]["provider_message_resource_source"]["source"],
+                "unit-test-provider-manifest",
+            )
+
     def test_eventlog_collector_normalizes_exports_detections_and_evtx_inventory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
