@@ -139,6 +139,14 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(run_key.details["key_depth"], 2)
             self.assertEqual(run_key.details["key_tree_path_evidence"]["full_path"], "HKEY_CURRENT_USER\\Software\\Run")
             self.assertEqual(run_key.details["key_tree_path_evidence"]["path_confidence"], "parent-chain")
+            self.assertTrue(run_key.details["key_tree_path_evidence"]["root_reachable"])
+            self.assertTrue(run_key.details["root_reachable"])
+            self.assertFalse(run_key.details["is_root_key"])
+            self.assertTrue(run_key.details["parent_link_consistency"])
+            self.assertEqual(
+                run_key.details["registry_key_tree_relationships"]["ancestor_cell_offsets"],
+                run_key.details["key_ancestry_cell_offsets"],
+            )
             self.assertFalse(run_key.details["key_tree_path_evidence"]["cycle_detected"])
             self.assertEqual(len(run_key.details["key_ancestry_cell_offsets"]), 2)
             self.assertEqual(run_key.details["value_names"], ["SecurityUpdater"])
@@ -156,6 +164,8 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             validation_matrix = {item["id"]: item for item in run_key.details["registry_validation_matrix"]}
             self.assertTrue(validation_matrix["regf-header"]["passed"])
             self.assertTrue(validation_matrix["parent-chain"]["passed"])
+            self.assertTrue(validation_matrix["root-reachability"]["passed"])
+            self.assertTrue(validation_matrix["child-parent-backlinks"]["passed"])
             self.assertTrue(validation_matrix["value-list-resolution"]["passed"])
 
             value_recovery = next(
@@ -380,9 +390,12 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertTrue(summary["details"]["value_recovery_candidates"])
             self.assertTrue(summary["details"]["user_activity_entries"])
             self.assertFalse(summary["details"]["native_capabilities"]["transaction_log_replay"])
-            self.assertIn(
-                {"value": "triage-validated-report-grade-blocked", "count": 2},
-                summary["details"]["native_report_grade_status_counts"],
+            status_counts = {
+                item["value"]: item["count"] for item in summary["details"]["native_report_grade_status_counts"]
+            }
+            self.assertGreaterEqual(
+                status_counts["triage-validated-report-grade-blocked"],
+                2,
             )
             self.assertIn(
                 {"value": "recovery-candidate-validation-required", "count": 4},

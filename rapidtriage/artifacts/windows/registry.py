@@ -424,6 +424,7 @@ def build_registry_key_tree_records(
         for candidate in candidates
         if candidate.get("cell_kind") == "value"
     }
+    root_cell_offset = registry_relative_to_file_offset(int(metadata.get("root_cell_offset") or 0))
     for index, key_node in enumerate(key_nodes):
         value_offsets = registry_value_offsets_for_key(blob, key_node)
         value_cells = [value_by_offset[offset] for offset in value_offsets if offset in value_by_offset]
@@ -435,13 +436,20 @@ def build_registry_key_tree_records(
             if offset in key_by_offset and key_by_offset[offset].get("name")
         ]
         missing_subkey_offsets = [offset for offset in subkey_offsets if offset not in key_by_offset]
-        key_path, path_confidence = registry_key_path_for_node(key_node, key_by_offset)
+        key_path, path_confidence = registry_key_path_for_node(key_node, key_by_offset, root_cell_offset=root_cell_offset)
         path_evidence = registry_key_path_evidence(
             hive_hint_from_path(path),
             key_node,
             key_by_offset,
             key_path,
             path_confidence,
+            root_cell_offset=root_cell_offset,
+        )
+        relationship_profile = registry_key_tree_relationship_profile(
+            key_node,
+            key_by_offset,
+            subkey_offsets,
+            root_cell_offset,
         )
         allocation_status = str(key_node.get("allocation_status") or "")
         validation_flags = registry_key_tree_validation_flags(
@@ -449,6 +457,7 @@ def build_registry_key_tree_records(
             path_confidence,
             missing_subkey_offsets,
             missing_value_offsets,
+            relationship_profile,
         )
         validation_required = bool(validation_flags)
         risk_flags = registry_cell_risk_flags(key_node)
@@ -458,6 +467,7 @@ def build_registry_key_tree_records(
             missing_subkey_offsets,
             missing_value_offsets,
             bool(metadata.get("regf_valid")),
+            relationship_profile,
         )
         report_grade_assessment = registry_report_grade_assessment(
             validation_matrix,
@@ -490,6 +500,11 @@ def build_registry_key_tree_records(
                 "key_depth": path_evidence["relative_depth"],
                 "key_ancestry_cell_offsets": path_evidence["ancestry_cell_offsets"],
                 "key_tree_path_evidence": path_evidence,
+                "registry_key_tree_relationships": relationship_profile,
+                "root_cell_offset": root_cell_offset,
+                "is_root_key": relationship_profile["is_root_key"],
+                "root_reachable": relationship_profile["root_reachable"],
+                "parent_link_consistency": relationship_profile["parent_link_consistency"],
                 "name": key_node.get("name", ""),
                 "name_encoding": key_node.get("name_encoding", ""),
                 "cell_offset": key_node.get("cell_offset", 0),
@@ -1531,11 +1546,13 @@ def registry_value_parent_map(
 def registry_key_path_for_node(
     key_node: Mapping[str, object],
     key_by_offset: Mapping[int, Mapping[str, object]],
+    *,
+    root_cell_offset: int = 0,
 ) -> tuple[str, str]:
     names = [str(key_node.get("name") or "")]
     current = key_node
     seen = {int(key_node.get("cell_offset") or 0)}
-    confidence = "orphan-name"
+    confidence = "root-cell" if root_cell_offset and int(key_node.get("cell_offset") or 0) == root_cell_offset else "orphan-name"
     for _ in range(32):
         parent_offset = int(current.get("parent_cell_offset") or 0)
         if not parent_offset or parent_offset in seen or parent_offset not in key_by_offset:
@@ -1557,6 +1574,8 @@ def registry_key_path_evidence(
     key_by_offset: Mapping[int, Mapping[str, object]],
     key_path: str,
     path_confidence: str,
+    *,
+    root_cell_offset: int = 0,
 ) -> dict[str, object]:
     current = key_node
     seen: set[int] = set()
@@ -1584,6 +1603,7 @@ def registry_key_path_evidence(
         current = parent
         max_depth_reached = depth == 32
     components = [component for component in key_path.split("\\") if component]
+    root_reachable = bool(root_cell_offset and (root_cell_offset in offsets_from_leaf or int(key_node.get("cell_offset") or 0) == root_cell_offset))
     return {
         "hive_hint": hive_hint,
         "full_path": f"{hive_hint}\\{key_path}" if key_path else hive_hint,
@@ -1592,10 +1612,79 @@ def registry_key_path_evidence(
         "relative_depth": len(components),
         "path_confidence": path_confidence,
         "ancestry_cell_offsets": list(reversed(offsets_from_leaf)),
+        "root_cell_offset": root_cell_offset,
+        "root_reachable": root_reachable,
         "missing_parent_cell_offset": missing_parent_offset,
         "cycle_detected": cycle_detected,
         "max_depth_reached": max_depth_reached,
     }
+
+
+def registry_key_tree_relationship_profile(
+    key_node: Mapping[str, object],
+    key_by_offset: Mapping[int, Mapping[str, object]],
+    subkey_offsets: Sequence[int],
+    root_cell_offset: int,
+) -> dict[str, object]:
+    cell_offset = int(key_node.get("cell_offset") or 0)
+    parent_offset = int(key_node.get("parent_cell_offset") or 0)
+    is_root_key = bool(root_cell_offset and cell_offset == root_cell_offset)
+    ancestry_offsets = registry_key_ancestry_offsets(key_node, key_by_offset)
+    root_reachable = is_root_key or (root_cell_offset in ancestry_offsets)
+    child_backlinks: list[dict[str, object]] = []
+    missing_backlinks: list[int] = []
+    for offset in subkey_offsets:
+        child = key_by_offset.get(offset)
+        if child is None:
+            continue
+        child_parent = int(child.get("parent_cell_offset") or 0)
+        linked = child_parent == cell_offset
+        child_backlinks.append(
+            {
+                "child_cell_offset": offset,
+                "child_name": str(child.get("name") or ""),
+                "child_parent_cell_offset": child_parent,
+                "parent_backlink_confirmed": linked,
+            }
+        )
+        if not linked:
+            missing_backlinks.append(offset)
+    parent_link_consistency = is_root_key or bool(parent_offset and parent_offset in key_by_offset)
+    return {
+        "profile_version": "registry-key-tree-relationships-v1",
+        "root_cell_offset": root_cell_offset,
+        "cell_offset": cell_offset,
+        "is_root_key": is_root_key,
+        "root_reachable": root_reachable,
+        "parent_cell_offset": parent_offset,
+        "parent_link_consistency": parent_link_consistency,
+        "ancestor_cell_offsets": ancestry_offsets,
+        "child_backlink_count": len(child_backlinks),
+        "child_backlinks": child_backlinks[:100],
+        "missing_child_backlink_cell_offsets": missing_backlinks,
+        "relationship_validation_required": bool(missing_backlinks or (not root_reachable and root_cell_offset)),
+    }
+
+
+def registry_key_ancestry_offsets(
+    key_node: Mapping[str, object],
+    key_by_offset: Mapping[int, Mapping[str, object]],
+) -> list[int]:
+    current = key_node
+    seen: set[int] = set()
+    offsets: list[int] = []
+    for _ in range(33):
+        cell_offset = int(current.get("cell_offset") or 0)
+        if not cell_offset or cell_offset in seen:
+            break
+        seen.add(cell_offset)
+        offsets.append(cell_offset)
+        parent_offset = int(current.get("parent_cell_offset") or 0)
+        parent = key_by_offset.get(parent_offset)
+        if parent is None:
+            break
+        current = parent
+    return list(reversed(offsets))
 
 
 def nearest_preceding_key(
@@ -1617,16 +1706,22 @@ def registry_key_tree_validation_flags(
     path_confidence: str,
     missing_subkey_offsets: Sequence[int],
     missing_value_offsets: Sequence[int],
+    relationship_profile: Mapping[str, object] | None = None,
 ) -> list[str]:
     flags: list[str] = []
+    relationship_profile = relationship_profile or {}
     if key_node.get("allocation_status") != "allocated":
         flags.append("deleted-or-free-key-cell")
-    if path_confidence != "parent-chain":
+    if path_confidence not in {"parent-chain", "root-cell"}:
         flags.append(f"path-confidence:{path_confidence}")
     if missing_subkey_offsets:
         flags.append("subkey-list-has-unresolved-cells")
     if missing_value_offsets:
         flags.append("value-list-has-unresolved-cells")
+    if relationship_profile.get("root_cell_offset") and not relationship_profile.get("root_reachable"):
+        flags.append("root-cell-not-reachable")
+    if relationship_profile.get("missing_child_backlink_cell_offsets"):
+        flags.append("subkey-parent-backlink-mismatch")
     return flags
 
 
@@ -1636,7 +1731,9 @@ def registry_key_tree_validation_matrix(
     missing_subkey_offsets: Sequence[int],
     missing_value_offsets: Sequence[int],
     hive_valid: bool,
+    relationship_profile: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
+    relationship_profile = relationship_profile or {}
     return [
         {
             "id": "regf-header",
@@ -1655,9 +1752,23 @@ def registry_key_tree_validation_matrix(
         {
             "id": "parent-chain",
             "label": "Parent-chain path reconstruction",
-            "passed": path_confidence == "parent-chain",
+            "passed": path_confidence in {"parent-chain", "root-cell"},
             "severity": "high",
             "detail": path_confidence,
+        },
+        {
+            "id": "root-reachability",
+            "label": "Root-cell reachability",
+            "passed": bool(relationship_profile.get("root_reachable")),
+            "severity": "high",
+            "detail": f"root={relationship_profile.get('root_cell_offset', 0)} cell={relationship_profile.get('cell_offset', 0)}",
+        },
+        {
+            "id": "child-parent-backlinks",
+            "label": "Child parent backlinks",
+            "passed": not bool(relationship_profile.get("missing_child_backlink_cell_offsets")),
+            "severity": "medium",
+            "detail": f"missing={len(relationship_profile.get('missing_child_backlink_cell_offsets', []) or [])}",
         },
         {
             "id": "subkey-list-resolution",
