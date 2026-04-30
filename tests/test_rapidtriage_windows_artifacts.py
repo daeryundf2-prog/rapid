@@ -654,6 +654,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 "allocation:slack-or-deleted-candidate",
                 native_evtx["details"]["evtx_recovery_evidence"]["evidence_reasons"],
             )
+            recovery_profile = native_evtx["details"]["evtx_recovery_validation_profile"]
+            self.assertEqual(recovery_profile["candidate_class"], "slack-or-deleted-record")
+            self.assertFalse(recovery_profile["reportable_without_secondary_validation"])
+            self.assertIn("known-answer-deleted-record-fixture-match", recovery_profile["required_independent_checks"])
             self.assertGreaterEqual(
                 native_evtx["details"]["evtx_recovery_evidence"]["record_relative_offset"],
                 native_evtx["details"]["evtx_recovery_evidence"]["free_space_offset"],
@@ -708,6 +712,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(candidate["evtx_recovery_evidence"]["candidate_reason"], "record-extends-past-eof")
             self.assertIn("candidate:record-extends-past-eof", candidate["evtx_recovery_evidence"]["evidence_reasons"])
             self.assertIn("binxml:not-decoded", candidate["evtx_recovery_evidence"]["evidence_reasons"])
+            self.assertEqual(
+                candidate["evtx_recovery_validation_profile"]["candidate_class"],
+                "corrupt-or-truncated-record",
+            )
+            self.assertIn(
+                "known-answer-corrupt-record-fixture-match",
+                candidate["evtx_recovery_validation_profile"]["required_independent_checks"],
+            )
             self.assertEqual(candidate["evtx_report_grade_assessment"]["status"], "validation-required")
             self.assertIn("record-integrity-not-proven", candidate["evtx_report_grade_assessment"]["blockers"])
             self.assertTrue(candidate["validation_required"])

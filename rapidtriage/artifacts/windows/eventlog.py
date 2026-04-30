@@ -885,6 +885,7 @@ def collect_native_evtx_events(
         binxml_status = str(binxml.get("status") or NATIVE_EVTX_BINXML_STATUS)
         recovery_context = native_evtx_recovery_context(candidate, integrity, chunk_context, binxml_status)
         recovery_evidence = native_evtx_recovery_evidence(candidate, integrity, chunk_context, recovery_context, binxml_status)
+        recovery_validation_profile = native_evtx_recovery_validation_profile(recovery_context, recovery_evidence)
         sequence = native_evtx_sequence(record_id, previous_record_id)
         previous_record_id = record_id or previous_record_id
         parameter_candidates = native_evtx_parameter_candidates(native_indicators, binxml)
@@ -929,6 +930,7 @@ def collect_native_evtx_events(
             "evtx_record_integrity": integrity,
             "evtx_recovery_context": recovery_context,
             "evtx_recovery_evidence": recovery_evidence,
+            "evtx_recovery_validation_profile": recovery_validation_profile,
             "evtx_recovery_status": recovery_context["status"],
             "evtx_allocation_status": recovery_context["allocation_status"],
             "evtx_native_capabilities": NATIVE_EVTX_CAPABILITIES,
@@ -1173,6 +1175,64 @@ def native_evtx_recovery_evidence(
     }
 
 
+def native_evtx_recovery_validation_profile(
+    recovery_context: Mapping[str, object],
+    recovery_evidence: Mapping[str, object],
+) -> dict[str, object]:
+    status = str(recovery_context.get("status") or "")
+    allocation_status = str(recovery_context.get("allocation_status") or "")
+    if status == "recoverable-record":
+        fixture_class = "allocated-live-record"
+        required_checks = [
+            "record-header-size-trailer-match",
+            "chunk-boundary-context-valid",
+            "binxml-field-decode-review",
+        ]
+        reportable_without_secondary = False
+    elif status == "slack-or-deleted-record-candidate":
+        fixture_class = "slack-or-deleted-record"
+        required_checks = [
+            "second-parser-record-offset-confirmation",
+            "chunk-free-space-boundary-confirmation",
+            "adjacent-record-sequence-review",
+            "known-answer-deleted-record-fixture-match",
+        ]
+        reportable_without_secondary = False
+    elif status == "corrupt-record-candidate":
+        fixture_class = "corrupt-or-truncated-record"
+        required_checks = [
+            "second-parser-corrupt-record-confirmation",
+            "record-size-and-eof-boundary-review",
+            "manual-hex-offset-review",
+            "known-answer-corrupt-record-fixture-match",
+        ]
+        reportable_without_secondary = False
+    else:
+        fixture_class = "unknown-recovery-candidate"
+        required_checks = [
+            "manual-hex-offset-review",
+            "second-parser-confirmation",
+            "known-answer-fixture-match",
+        ]
+        reportable_without_secondary = False
+    return {
+        "profile_version": "evtx-recovery-validation-v1",
+        "candidate_class": fixture_class,
+        "recovery_status": status,
+        "allocation_status": allocation_status,
+        "confidence": float(recovery_context.get("confidence") or 0),
+        "reportable_without_secondary_validation": reportable_without_secondary,
+        "required_independent_checks": required_checks,
+        "evidence_reasons": list(recovery_evidence.get("evidence_reasons") or [])
+        if isinstance(recovery_evidence.get("evidence_reasons"), list)
+        else [],
+        "known_answer_corpus_requirement": (
+            "Validate this candidate class against live, slack/deleted, and corrupt/truncated EVTX fixtures "
+            "before using it as standalone testimony."
+        ),
+    }
+
+
 def native_evtx_allocation_status(chunk_context: Mapping[str, object]) -> str:
     if not chunk_context.get("chunk_signature_valid"):
         return "unknown-no-valid-chunk-header"
@@ -1406,6 +1466,7 @@ def native_evtx_record_candidate_record(
         recovery_context,
         NATIVE_EVTX_BINXML_STATUS,
     )
+    recovery_validation_profile = native_evtx_recovery_validation_profile(recovery_context, recovery_evidence)
     validation_checks = native_evtx_validation_checks(integrity, chunk_context, recovery_context, {})
     details = {
         "parser": "windows-eventlog-evtx-native-candidate",
@@ -1427,6 +1488,7 @@ def native_evtx_record_candidate_record(
         "evtx_chunk_context": chunk_context,
         "evtx_recovery_context": recovery_context,
         "evtx_recovery_evidence": recovery_evidence,
+        "evtx_recovery_validation_profile": recovery_validation_profile,
         "evtx_recovery_status": recovery_context["status"],
         "evtx_allocation_status": recovery_context["allocation_status"],
         "evtx_validation_checks": validation_checks,
