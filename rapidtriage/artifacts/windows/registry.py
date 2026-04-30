@@ -306,6 +306,13 @@ def build_registry_hive_cell_record(
 ) -> ArtifactRecord:
     name = str(candidate.get("name") or "")
     risk_flags = registry_cell_risk_flags(candidate)
+    recovery_evidence = registry_recovery_evidence(candidate, "deleted-or-free-cell")
+    recovery_profile = registry_recovery_validation_profile(
+        candidate,
+        recovery_evidence,
+        "deleted-or-free-cell",
+        validation_checks=[],
+    )
     return ArtifactRecord(
         provider=WindowsRegistryProvider.name,
         artifact_type="registry-hive-cell",
@@ -362,6 +369,13 @@ def build_registry_deleted_cell_record(
 ) -> ArtifactRecord:
     name = str(candidate.get("name") or "")
     risk_flags = registry_cell_risk_flags(candidate)
+    recovery_evidence = registry_recovery_evidence(candidate, "deleted-or-free-cell")
+    recovery_profile = registry_recovery_validation_profile(
+        candidate,
+        recovery_evidence,
+        "deleted-or-free-cell",
+        validation_checks=[],
+    )
     return ArtifactRecord(
         provider=WindowsRegistryProvider.name,
         artifact_type="registry-deleted-cell-candidate",
@@ -379,7 +393,8 @@ def build_registry_deleted_cell_record(
             "hive_hint": hive_hint_from_path(path),
             "parser_confidence": 0.5 if metadata.get("regf_valid") else 0.2,
             "evidence_strength": "registry-deleted-cell-candidate",
-            "registry_recovery_evidence": registry_recovery_evidence(candidate, "deleted-or-free-cell"),
+            "registry_recovery_evidence": recovery_evidence,
+            "registry_recovery_validation_profile": recovery_profile,
             "validation_required": True,
             "validation_guidance": "Positive-size hive cells can represent free space that still contains old nk/vk structures; validate with a dedicated registry parser before final testimony.",
             "cell_kind": candidate.get("cell_kind", ""),
@@ -573,6 +588,18 @@ def build_registry_key_recovery_records(
             extra_blockers=["deleted-key-parent-chain-independent-validation-required"],
             gap_ids=["#5"],
         )
+        recovery_evidence = registry_recovery_evidence(
+            candidate,
+            "deleted-or-free-key-cell",
+            path_confidence=path_confidence,
+            recovered_path=f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+        )
+        recovery_profile = registry_recovery_validation_profile(
+            candidate,
+            recovery_evidence,
+            "deleted-or-free-key-cell",
+            validation_checks=validation_matrix,
+        )
         yield ArtifactRecord(
             provider=WindowsRegistryProvider.name,
             artifact_type="registry-key-recovery-candidate",
@@ -590,12 +617,8 @@ def build_registry_key_recovery_records(
                 "hive_hint": hive_hint_from_path(path),
                 "parser_confidence": registry_key_tree_confidence(candidate, path_confidence, bool(metadata.get("regf_valid"))),
                 "evidence_strength": "registry-deleted-key-candidate",
-                "registry_recovery_evidence": registry_recovery_evidence(
-                    candidate,
-                    "deleted-or-free-key-cell",
-                    path_confidence=path_confidence,
-                    recovered_path=f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
-                ),
+                "registry_recovery_evidence": recovery_evidence,
+                "registry_recovery_validation_profile": recovery_profile,
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
@@ -665,6 +688,19 @@ def build_registry_value_recovery_records(
             extra_blockers=["deleted-value-parent-data-independent-validation-required"],
             gap_ids=["#5"],
         )
+        recovery_evidence = registry_recovery_evidence(
+            candidate,
+            "deleted-or-free-value-cell",
+            parent_confidence=parent_confidence,
+            parent_path=parent_path,
+            decoded_data_present=bool(decoded_data),
+        )
+        recovery_profile = registry_recovery_validation_profile(
+            candidate,
+            recovery_evidence,
+            "deleted-or-free-value-cell",
+            validation_checks=validation_matrix,
+        )
         yield ArtifactRecord(
             provider=WindowsRegistryProvider.name,
             artifact_type="registry-value-recovery-candidate",
@@ -682,13 +718,8 @@ def build_registry_value_recovery_records(
                 "hive_hint": hive_hint_from_path(path),
                 "parser_confidence": 0.54 if metadata.get("regf_valid") else 0.22,
                 "evidence_strength": "registry-deleted-value-candidate",
-                "registry_recovery_evidence": registry_recovery_evidence(
-                    candidate,
-                    "deleted-or-free-value-cell",
-                    parent_confidence=parent_confidence,
-                    parent_path=parent_path,
-                    decoded_data_present=bool(decoded_data),
-                ),
+                "registry_recovery_evidence": recovery_evidence,
+                "registry_recovery_validation_profile": recovery_profile,
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
@@ -760,6 +791,69 @@ def registry_recovery_evidence(
         "decoded_data_present": decoded_data_present,
         "validation_required": True,
         "evidence_reasons": sorted(set(evidence_reasons)),
+    }
+
+
+def registry_recovery_validation_profile(
+    candidate: Mapping[str, object],
+    recovery_evidence: Mapping[str, object],
+    candidate_kind: str,
+    *,
+    validation_checks: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    cell_kind = str(candidate.get("cell_kind") or "")
+    signature = str(candidate.get("cell_signature") or "")
+    failed_checks = [
+        str(item.get("id"))
+        for item in validation_checks
+        if isinstance(item, Mapping) and not item.get("passed")
+    ]
+    required_checks = [
+        "hive-allocator-positive-size-confirmation",
+        "second-registry-parser-offset-confirmation",
+        "transaction-log-replay-or-explicit-absence",
+        "known-answer-deleted-cell-fixture-match",
+    ]
+    if cell_kind == "key-node":
+        candidate_class = "deleted-key-cell"
+        required_checks.extend(
+            [
+                "parent-chain-and-root-reachability-review",
+                "last-write-timestamp-plausibility-review",
+            ]
+        )
+    elif cell_kind == "value":
+        candidate_class = "deleted-value-cell"
+        required_checks.extend(
+            [
+                "parent-key-link-confirmation",
+                "value-data-allocation-and-type-review",
+            ]
+        )
+    else:
+        candidate_class = "deleted-generic-cell"
+        required_checks.append("manual-cell-structure-review")
+    return {
+        "profile_version": "registry-deleted-cell-validation-v1",
+        "candidate_class": candidate_class,
+        "candidate_kind": candidate_kind,
+        "cell_kind": cell_kind,
+        "cell_signature": signature,
+        "cell_offset": int(candidate.get("cell_offset") or 0),
+        "cell_relative_offset": int(candidate.get("cell_relative_offset") or 0),
+        "allocation_status": str(candidate.get("allocation_status") or ""),
+        "positive_size_free_cell": bool(recovery_evidence.get("positive_size_free_cell")),
+        "signature_confirmed": signature in {"nk", "vk"},
+        "path_confidence": str(recovery_evidence.get("path_confidence") or ""),
+        "parent_confidence": str(recovery_evidence.get("parent_confidence") or ""),
+        "decoded_data_present": bool(recovery_evidence.get("decoded_data_present")),
+        "failed_validation_checks": failed_checks,
+        "reportable_without_secondary_validation": False,
+        "required_independent_checks": sorted(set(required_checks)),
+        "known_answer_corpus_requirement": (
+            "Validate deleted/free registry nk/vk candidates against allocated, deleted, overwritten, "
+            "and false-positive hive fixtures before using them as standalone testimony."
+        ),
     }
 
 

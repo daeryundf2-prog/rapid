@@ -192,6 +192,19 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "parent:key-value-list",
                 value_recovery.details["registry_recovery_evidence"]["evidence_reasons"],
             )
+            self.assertEqual(
+                value_recovery.details["registry_recovery_validation_profile"]["candidate_class"],
+                "deleted-value-cell",
+            )
+            self.assertFalse(
+                value_recovery.details["registry_recovery_validation_profile"][
+                    "reportable_without_secondary_validation"
+                ]
+            )
+            self.assertIn(
+                "parent-key-link-confirmation",
+                value_recovery.details["registry_recovery_validation_profile"]["required_independent_checks"],
+            )
             self.assertIn("#5", value_recovery.details["registry_report_grade_assessment"]["commercial_gap_ids"])
             self.assertIn(
                 "deleted-or-free-cell-independent-validation-required",
@@ -200,6 +213,20 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             value_matrix = {item["id"]: item for item in value_recovery.details["registry_validation_matrix"]}
             self.assertTrue(value_matrix["deleted-value-cell"]["passed"])
             self.assertTrue(value_matrix["parent-key-link"]["passed"])
+            key_recovery = next(
+                record
+                for record in records
+                if record.artifact_type == "registry-key-recovery-candidate"
+                and record.details["name"] == "DeletedRun"
+            )
+            self.assertEqual(
+                key_recovery.details["registry_recovery_validation_profile"]["candidate_class"],
+                "deleted-key-cell",
+            )
+            self.assertIn(
+                "parent-chain-and-root-reachability-review",
+                key_recovery.details["registry_recovery_validation_profile"]["required_independent_checks"],
+            )
 
     def test_manifest_collects_browser_and_recent_file_artifacts_from_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -324,12 +351,27 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertGreaterEqual(len(deleted_cells), 2)
             self.assertTrue(all(artifact["details"]["validation_required"] for artifact in deleted_cells))
             self.assertTrue(all(artifact["details"]["registry_recovery_evidence"]["validation_required"] for artifact in deleted_cells))
+            self.assertTrue(
+                all(
+                    not artifact["details"]["registry_recovery_validation_profile"][
+                        "reportable_without_secondary_validation"
+                    ]
+                    for artifact in deleted_cells
+                )
+            )
             self.assertTrue(any(artifact["details"]["name"] == "SecurityUpdater" for artifact in deleted_cells))
             key_recovery = [
                 artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-key-recovery-candidate"
             ]
             self.assertTrue(any(artifact["details"]["name"] == "DeletedRun" for artifact in key_recovery))
             self.assertTrue(all(artifact["details"]["validation_required"] for artifact in key_recovery))
+            self.assertTrue(
+                all(
+                    artifact["details"]["registry_recovery_validation_profile"]["candidate_class"]
+                    == "deleted-key-cell"
+                    for artifact in key_recovery
+                )
+            )
             self.assertTrue(
                 any(
                     "allocator:positive-size-free-cell" in artifact["details"]["registry_recovery_evidence"]["evidence_reasons"]
@@ -341,6 +383,13 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             ]
             self.assertTrue(any(artifact["details"]["name"] == "SecurityUpdater" for artifact in value_recovery))
             self.assertTrue(all(artifact["details"]["validation_required"] for artifact in value_recovery))
+            self.assertTrue(
+                all(
+                    artifact["details"]["registry_recovery_validation_profile"]["candidate_class"]
+                    == "deleted-value-cell"
+                    for artifact in value_recovery
+                )
+            )
             run_key = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-run-key")
             self.assertIn("SecurityUpdater", run_key["details"]["values"])
             self.assertEqual(run_key["details"]["persistence_values"][0]["value_name"], "SecurityUpdater")
