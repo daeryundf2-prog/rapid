@@ -64,24 +64,43 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("sha256", message["details"]["source_hashes"])
             self.assertIn("message_text_sha256", message["details"])
             self.assertIn("#26", message["details"]["mobile_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(message["details"]["forensic_review"]["gap_id"], "#26")
             self.assertFalse(message["details"]["mobile_native_capabilities"]["proprietary_vendor_package_decode"])
 
             chat_messages = [
                 artifact
                 for artifact in payload["artifacts"]
                 if artifact["artifact_type"] == "mobile-message"
-                and artifact["details"]["service_family"] in {"kakaotalk", "whatsapp", "telegram", "signal", "line", "discord", "instagram"}
+                and artifact["details"]["service_family"]
+                in {"kakaotalk", "whatsapp", "telegram", "signal", "line", "discord", "instagram", "facebook-messenger"}
             ]
-            self.assertGreaterEqual(len(chat_messages), 7)
+            self.assertGreaterEqual(len(chat_messages), 8)
             services = {artifact["details"]["service"] for artifact in chat_messages}
-            self.assertTrue({"KakaoTalk", "WhatsApp", "Telegram", "Signal", "LINE", "Discord", "Instagram"}.issubset(services))
+            self.assertTrue(
+                {"KakaoTalk", "WhatsApp", "Telegram", "Signal", "LINE", "Discord", "Instagram", "Facebook Messenger"}.issubset(
+                    services
+                )
+            )
             kakao = next(artifact for artifact in chat_messages if artifact["details"]["service"] == "KakaoTalk")
             self.assertEqual(kakao["details"]["conversation_title"], "Case Room")
             self.assertEqual(kakao["details"]["reaction"], "👍")
             self.assertTrue(kakao["details"]["validation_checks"]["service_detected"])
             self.assertFalse(kakao["details"]["validation_checks"]["app_schema_validated"])
             self.assertIn("#31", kakao["details"]["chat_app_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(kakao["details"]["chat_app_forensic_review"]["gap_id"], "#31")
             self.assertFalse(kakao["details"]["chat_app_native_capabilities"]["service_specific_native_database_decode"])
+            self.assertTrue(kakao["details"]["chat_app_scope_profile"]["known_profile"])
+            self.assertIn("schema-version-known-answer", {item["id"] for item in kakao["details"]["chat_app_issue_matrix"]})
+            self.assertEqual(
+                kakao["details"]["kakaotalk_compatibility_assessment"]["status"],
+                "post-bigbang-legacy-method-not-applicable",
+            )
+            self.assertIn(
+                "kakaotalk-post-2025-08-bigbang",
+                {item["id"] for item in kakao["details"]["chat_app_issue_matrix"]},
+            )
+            facebook = next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Facebook Messenger")
+            self.assertEqual(facebook["details"]["chat_app_forensic_review"]["gap_id"], "#35")
             self.assertIn(
                 "#32",
                 next(artifact for artifact in chat_messages if artifact["details"]["service"] == "WhatsApp")["details"][
@@ -128,6 +147,7 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(ios_file["details"]["domain"], "AppDomain-com.apple.MobileSMS")
             self.assertIn("message-store-candidate", ios_file["details"]["risk_flags"])
             self.assertIn("#27", ios_file["details"]["mobile_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(ios_file["details"]["forensic_review"]["gap_id"], "#27")
             self.assertFalse(ios_file["details"]["mobile_native_capabilities"]["ios_protected_file_decryption"])
 
             keychain = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "ios-keychain-inventory")
@@ -135,6 +155,7 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertTrue(keychain["details"]["validation_checks"]["values_redacted"])
             self.assertIn("sensitive-artifact-redacted", keychain["details"]["risk_flags"])
             self.assertIn("#28", keychain["details"]["mobile_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(keychain["details"]["forensic_review"]["gap_id"], "#28")
             self.assertFalse(keychain["details"]["mobile_native_capabilities"]["ios_keychain_secret_decryption"])
 
             chat_db = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-chat-database")
@@ -144,6 +165,7 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertTrue(chat_db["details"]["validation_checks"]["sample_values_redacted"])
             self.assertIn("mobile-chat-database", chat_db["details"]["risk_flags"])
             self.assertIn("#32", chat_db["details"]["chat_app_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(chat_db["details"]["chat_app_forensic_review"]["gap_id"], "#32")
 
             summaries = [artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-correlation-summary"]
             self.assertTrue(any(summary["details"]["message_count"] >= 7 for summary in summaries))
@@ -153,6 +175,8 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("#43", messenger_summary["details"]["mobile_correlation_report_grade_assessment"]["commercial_gap_ids"])
             self.assertIn("#44", messenger_summary["details"]["mobile_correlation_report_grade_assessment"]["commercial_gap_ids"])
             self.assertIn("#45", messenger_summary["details"]["mobile_correlation_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(messenger_summary["details"]["forensic_review"]["gap_id"], "#43")
+            self.assertFalse(messenger_summary["details"]["forensic_review"]["report_grade_ready"])
             self.assertGreaterEqual(messenger_summary["details"]["media_message_link_count"], 1)
             self.assertEqual(
                 messenger_summary["details"]["message_media_links"][0]["validation_status"],
@@ -252,6 +276,7 @@ def write_mobile_export_fixtures(root: Path) -> None:
                     "Message": "카카오톡 사건 대화",
                     "Reaction": "👍",
                     "Media Path": "/KakaoTalk/Chats/IMG_0001.jpg",
+                    "App Version": "25.7.2",
                     "Timestamp": "2026-04-26T05:00:00Z",
                 },
                 {
@@ -303,6 +328,14 @@ def write_mobile_export_fixtures(root: Path) -> None:
                     "Sender": "alice",
                     "Text": "Instagram direct export row",
                     "Timestamp": "2026-04-26T05:06:00Z",
+                },
+                {
+                    "Service": "Facebook Messenger",
+                    "Thread ID": "fb-thread-1",
+                    "Message ID": "fb-msg-1",
+                    "Sender": "alice",
+                    "Text": "Facebook Messenger export row",
+                    "Timestamp": "2026-04-26T05:07:00Z",
                 },
             ]
         ),

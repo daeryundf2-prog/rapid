@@ -273,6 +273,11 @@ def build_known_answer_validation(manifest_path: Path | None = None) -> dict[str
             expected = item.get("expected")
             if not isinstance(expected, Mapping):
                 expected = {}
+            raw_backlog_items = item.get("backlog_items") or item.get("commercial_items") or item.get("item_numbers")
+            if isinstance(raw_backlog_items, (str, int)):
+                raw_backlog_items = [raw_backlog_items]
+            if not isinstance(raw_backlog_items, list):
+                raw_backlog_items = []
             evidence_paths = item.get("evidence_paths")
             if not isinstance(evidence_paths, list):
                 evidence_paths = []
@@ -284,6 +289,7 @@ def build_known_answer_validation(manifest_path: Path | None = None) -> dict[str
                     "source": str(item.get("source") or ""),
                     "corpus_family": str(item.get("corpus_family") or item.get("family") or ""),
                     "status": str(item.get("status") or "not-run"),
+                    "backlog_items": [str(value).lstrip("#") for value in raw_backlog_items],
                     "expected": dict(expected),
                     "evidence_paths": normalized_paths,
                     "evidence_paths_present": all(Path(path).expanduser().exists() for path in normalized_paths),

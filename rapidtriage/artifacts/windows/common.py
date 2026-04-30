@@ -8,6 +8,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from ..review import build_forensic_review
+
 
 WINDOWS_USERS_DIRNAME = "Users"
 

@@ -8,7 +8,7 @@ from typing import Iterable
 
 from ...core.audit import compute_sha256
 from ...core.models import ArtifactRecord
-from .common import isoformat_from_timestamp
+from .common import build_forensic_review, isoformat_from_timestamp
 
 PARSER_VERSION = "windows-system-v6"
 TASKS_ROOT = ("Windows", "System32", "Tasks")
@@ -195,6 +195,16 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
                 "system_validation_matrix": system_validation_matrix("task-scheduler", validation_checks),
                 "system_report_grade_assessment": system_report_grade_assessment("task-scheduler", validation_checks),
                 "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
+                "forensic_review": system_forensic_review(
+                    "task-scheduler",
+                    [
+                        f"task_uri={uri}",
+                        f"command={command}",
+                        f"trigger_count={len(trigger_details)}",
+                        f"principal_count={len(principal_details)}",
+                    ],
+                    validation_checks,
+                ),
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": [
                     "task-cache-registry-correlation-not-implemented",
@@ -259,6 +269,11 @@ def collect_defender_support(root: Path) -> Iterable[ArtifactRecord]:
                 "system_validation_matrix": system_validation_matrix("defender", validation_checks),
                 "system_report_grade_assessment": system_report_grade_assessment("defender", validation_checks),
                 "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
+                "forensic_review": system_forensic_review(
+                    "defender",
+                    [f"entry_count={len(lines)}", f"interesting_entry_count={len(interesting)}"],
+                    validation_checks,
+                ),
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": SYSTEM_REPORT_GRADE_BLOCKERS,
                 "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
@@ -302,6 +317,14 @@ def collect_firewall_logs(root: Path) -> Iterable[ArtifactRecord]:
                 "system_validation_matrix": system_validation_matrix("firewall", validation_checks),
                 "system_report_grade_assessment": system_report_grade_assessment("firewall", validation_checks),
                 "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
+                "forensic_review": system_forensic_review(
+                    "firewall",
+                    [
+                        f"entry_count={len(rows)}",
+                        f"blocked_count={sum(1 for row in rows if row.get('action', '').upper() == 'DROP')}",
+                    ],
+                    validation_checks,
+                ),
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": SYSTEM_REPORT_GRADE_BLOCKERS,
                 "modified_at": isoformat_from_timestamp(stat_result.st_mtime),
@@ -704,6 +727,25 @@ def system_report_grade_assessment(artifact_family: str, checks: dict[str, objec
     }
 
 
+def system_forensic_review(
+    artifact_family: str,
+    primary_evidence: list[str],
+    validation_checks: dict[str, object],
+) -> dict[str, object]:
+    return build_forensic_review(
+        gap_id="#18",
+        artifact_goal=f"Windows {artifact_family} artifact semantics, risk rules, and correlation evidence",
+        primary_evidence=primary_evidence,
+        validation_required=True,
+        report_grade_assessment=system_report_grade_assessment(artifact_family, validation_checks),
+        blockers=SYSTEM_REPORT_GRADE_BLOCKERS,
+        caveats=[
+            "This row is triage-grade until correlated with EVTX, registry, filesystem timeline, and known-answer fixtures.",
+            "Report conclusions should cite the source hash and unresolved critical validation checks.",
+        ],
+    )
+
+
 def windows_executable_name(command: str) -> str:
     cleaned = command.strip().strip('"').strip("'")
     if not cleaned:
@@ -765,6 +807,16 @@ def normalized_wer_report(path: Path, fields: dict[str, str]) -> dict[str, objec
         "system_validation_matrix": system_validation_matrix("wer", validation_checks),
         "system_report_grade_assessment": system_report_grade_assessment("wer", validation_checks),
         "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
+        "forensic_review": system_forensic_review(
+            "wer",
+            [
+                f"application={app_name}",
+                f"fault_module={module_name}",
+                f"exception_code={exception_code}",
+                f"report_id={report_id}",
+            ],
+            validation_checks,
+        ),
         "commercial_grade_ready": False,
         "commercial_grade_blockers": WER_REPORT_GRADE_BLOCKERS,
         "validation_guidance": (
@@ -913,6 +965,15 @@ def wmi_repository_pivots(path: Path) -> dict[str, object]:
         "system_validation_matrix": system_validation_matrix("wmi", validation_checks),
         "system_report_grade_assessment": system_report_grade_assessment("wmi", validation_checks),
         "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
+        "forensic_review": system_forensic_review(
+            "wmi",
+            [
+                f"interesting_strings={len(interesting)}",
+                f"path_candidates={len(path_candidates)}",
+                f"url_candidates={len(url_candidates)}",
+            ],
+            validation_checks,
+        ),
         "commercial_grade_ready": False,
         "commercial_grade_blockers": SYSTEM_REPORT_GRADE_BLOCKERS,
         "recommended_parsers": ["PyWMIPersistenceFinder", "python-cim", "Velociraptor WMI artifacts"],

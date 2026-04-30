@@ -379,6 +379,7 @@ def build_registry_deleted_cell_record(
             "hive_hint": hive_hint_from_path(path),
             "parser_confidence": 0.5 if metadata.get("regf_valid") else 0.2,
             "evidence_strength": "registry-deleted-cell-candidate",
+            "registry_recovery_evidence": registry_recovery_evidence(candidate, "deleted-or-free-cell"),
             "validation_required": True,
             "validation_guidance": "Positive-size hive cells can represent free space that still contains old nk/vk structures; validate with a dedicated registry parser before final testimony.",
             "cell_kind": candidate.get("cell_kind", ""),
@@ -435,6 +436,13 @@ def build_registry_key_tree_records(
         ]
         missing_subkey_offsets = [offset for offset in subkey_offsets if offset not in key_by_offset]
         key_path, path_confidence = registry_key_path_for_node(key_node, key_by_offset)
+        path_evidence = registry_key_path_evidence(
+            hive_hint_from_path(path),
+            key_node,
+            key_by_offset,
+            key_path,
+            path_confidence,
+        )
         allocation_status = str(key_node.get("allocation_status") or "")
         validation_flags = registry_key_tree_validation_flags(
             key_node,
@@ -478,6 +486,10 @@ def build_registry_key_tree_records(
                 "tree_node_index": index,
                 "key_path": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
                 "key_path_confidence": path_confidence,
+                "key_path_components": path_evidence["relative_components"],
+                "key_depth": path_evidence["relative_depth"],
+                "key_ancestry_cell_offsets": path_evidence["ancestry_cell_offsets"],
+                "key_tree_path_evidence": path_evidence,
                 "name": key_node.get("name", ""),
                 "name_encoding": key_node.get("name_encoding", ""),
                 "cell_offset": key_node.get("cell_offset", 0),
@@ -563,6 +575,12 @@ def build_registry_key_recovery_records(
                 "hive_hint": hive_hint_from_path(path),
                 "parser_confidence": registry_key_tree_confidence(candidate, path_confidence, bool(metadata.get("regf_valid"))),
                 "evidence_strength": "registry-deleted-key-candidate",
+                "registry_recovery_evidence": registry_recovery_evidence(
+                    candidate,
+                    "deleted-or-free-key-cell",
+                    path_confidence=path_confidence,
+                    recovered_path=f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+                ),
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
@@ -649,6 +667,13 @@ def build_registry_value_recovery_records(
                 "hive_hint": hive_hint_from_path(path),
                 "parser_confidence": 0.54 if metadata.get("regf_valid") else 0.22,
                 "evidence_strength": "registry-deleted-value-candidate",
+                "registry_recovery_evidence": registry_recovery_evidence(
+                    candidate,
+                    "deleted-or-free-value-cell",
+                    parent_confidence=parent_confidence,
+                    parent_path=parent_path,
+                    decoded_data_present=bool(decoded_data),
+                ),
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
@@ -678,6 +703,49 @@ def build_registry_value_recovery_records(
                 "raw_preview": f"deleted/free value {candidate.get('name', '')}".strip(),
             },
         )
+
+
+def registry_recovery_evidence(
+    candidate: Mapping[str, object],
+    candidate_kind: str,
+    *,
+    path_confidence: str = "",
+    recovered_path: str = "",
+    parent_confidence: str = "",
+    parent_path: str = "",
+    decoded_data_present: bool = False,
+) -> dict[str, object]:
+    allocation_status = str(candidate.get("allocation_status") or "")
+    cell_size = int(candidate.get("cell_size") or 0)
+    evidence_reasons: list[str] = []
+    if allocation_status == "free-or-deleted-candidate":
+        evidence_reasons.append("allocator:positive-size-free-cell")
+    if str(candidate.get("cell_signature") or "") in {"nk", "vk"}:
+        evidence_reasons.append(f"signature:{candidate.get('cell_signature')}")
+    if recovered_path:
+        evidence_reasons.append(f"path:{path_confidence or 'unknown'}")
+    if parent_path:
+        evidence_reasons.append(f"parent:{parent_confidence or 'unknown'}")
+    if decoded_data_present:
+        evidence_reasons.append("value-data:preview-decoded")
+    return {
+        "candidate_kind": candidate_kind,
+        "cell_kind": str(candidate.get("cell_kind") or ""),
+        "cell_signature": str(candidate.get("cell_signature") or ""),
+        "cell_offset": int(candidate.get("cell_offset") or 0),
+        "cell_relative_offset": int(candidate.get("cell_relative_offset") or 0),
+        "hbin_offset": int(candidate.get("hbin_offset") or 0),
+        "cell_size": cell_size,
+        "allocation_status": allocation_status,
+        "positive_size_free_cell": allocation_status == "free-or-deleted-candidate" and cell_size > 0,
+        "path_confidence": path_confidence,
+        "recovered_path": recovered_path,
+        "parent_confidence": parent_confidence,
+        "parent_path": parent_path,
+        "decoded_data_present": decoded_data_present,
+        "validation_required": True,
+        "evidence_reasons": sorted(set(evidence_reasons)),
+    }
 
 
 def build_registry_record(
@@ -1483,6 +1551,53 @@ def registry_key_path_for_node(
     return "\\".join(names), confidence
 
 
+def registry_key_path_evidence(
+    hive_hint: str,
+    key_node: Mapping[str, object],
+    key_by_offset: Mapping[int, Mapping[str, object]],
+    key_path: str,
+    path_confidence: str,
+) -> dict[str, object]:
+    current = key_node
+    seen: set[int] = set()
+    offsets_from_leaf: list[int] = []
+    missing_parent_offset = 0
+    cycle_detected = False
+    max_depth_reached = False
+    for depth in range(33):
+        cell_offset = int(current.get("cell_offset") or 0)
+        if cell_offset in seen:
+            cycle_detected = True
+            break
+        seen.add(cell_offset)
+        offsets_from_leaf.append(cell_offset)
+        parent_offset = int(current.get("parent_cell_offset") or 0)
+        if not parent_offset:
+            break
+        if parent_offset in seen:
+            cycle_detected = True
+            break
+        parent = key_by_offset.get(parent_offset)
+        if parent is None:
+            missing_parent_offset = parent_offset
+            break
+        current = parent
+        max_depth_reached = depth == 32
+    components = [component for component in key_path.split("\\") if component]
+    return {
+        "hive_hint": hive_hint,
+        "full_path": f"{hive_hint}\\{key_path}" if key_path else hive_hint,
+        "relative_path": key_path,
+        "relative_components": components,
+        "relative_depth": len(components),
+        "path_confidence": path_confidence,
+        "ancestry_cell_offsets": list(reversed(offsets_from_leaf)),
+        "missing_parent_cell_offset": missing_parent_offset,
+        "cycle_detected": cycle_detected,
+        "max_depth_reached": max_depth_reached,
+    }
+
+
 def nearest_preceding_key(
     value_cell: Mapping[str, object],
     key_by_offset: Mapping[int, Mapping[str, object]],
@@ -1675,9 +1790,10 @@ def registry_value_data_preview(blob: bytes, value_cell: Mapping[str, object]) -
         raw = int(value_cell.get("value_data_relative_offset") or 0).to_bytes(4, "little")[:value_size]
     else:
         data_offset = int(value_cell.get("value_data_offset") or 0)
-        if data_offset <= 0 or data_offset + value_size > len(blob):
+        data_start = data_offset + 4
+        if data_offset <= 0 or data_start + value_size > len(blob):
             return ""
-        raw = blob[data_offset : data_offset + value_size]
+        raw = blob[data_start : data_start + value_size]
     value_type = str(value_cell.get("value_type") or "")
     if value_type in {"REG_SZ", "REG_EXPAND_SZ"}:
         return decode_utf16le_string(raw) or raw.decode("latin-1", errors="replace").rstrip("\x00")

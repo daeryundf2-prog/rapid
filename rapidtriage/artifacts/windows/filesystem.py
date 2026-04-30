@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 from ...core.models import ArtifactRecord
+from .common import build_forensic_review
 
 PARSER_VERSION = "windows-filesystem-v5"
 SUPPORTED_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
@@ -347,6 +348,7 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
         "validation_warnings": list(record.get("validation_warnings") or []),
         "validation_checks": dict(record.get("validation_checks") or {}),
         "parser_confidence": record.get("parser_confidence", 0.0),
+        "mft_record_evidence": mft_record_evidence(record, file_path),
         "evidence_strength": "ntfs-mft-native-attribute-metadata",
         "validation_required": True,
         "commercial_grade_ready": False,
@@ -368,6 +370,23 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
     )
     details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
     details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
+    details["forensic_review"] = build_forensic_review(
+        gap_id="#12",
+        artifact_goal="$MFT native FILE record evidence",
+        primary_evidence=[
+            f"record={details['record_number']}" if details.get("record_number") else "",
+            f"path={details['file_path']}" if details.get("file_path") else "",
+            f"timestamp={details['timestamp']}" if details.get("timestamp") else "",
+            f"attributes={details['attribute_count']}",
+        ],
+        validation_required=True,
+        report_grade_assessment=details["ntfs_report_grade_assessment"],
+        commercial_grade_ready=False,
+        caveats=[
+            "Attribute-list extension resolution is not complete.",
+            "Full-volume parent path reconstruction is not validated.",
+        ],
+    )
     return ArtifactRecord(
         provider=WindowsFilesystemProvider.name,
         artifact_type="mft-record",
@@ -427,6 +446,7 @@ def build_native_usn_record(path: Path, record: Mapping[str, object], index: int
         "validation_warnings": list(record.get("validation_warnings") or []),
         "validation_checks": dict(record.get("validation_checks") or {}),
         "parser_confidence": record.get("parser_confidence", 0.0),
+        "usn_record_evidence": usn_record_evidence(record),
         "evidence_strength": "ntfs-usn-native-record",
         "validation_required": True,
         "commercial_grade_ready": False,
@@ -448,6 +468,23 @@ def build_native_usn_record(path: Path, record: Mapping[str, object], index: int
     )
     details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
     details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
+    details["forensic_review"] = build_forensic_review(
+        gap_id="#13",
+        artifact_goal="$UsnJrnl native change record evidence",
+        primary_evidence=[
+            f"file={details['file_path']}" if details.get("file_path") else "",
+            f"timestamp={details['timestamp']}" if details.get("timestamp") else "",
+            f"reason={','.join(details.get('reason_flags') or [])}" if details.get("reason_flags") else "",
+            f"cursor={details['record_cursor']}",
+        ],
+        validation_required=True,
+        report_grade_assessment=details["ntfs_report_grade_assessment"],
+        commercial_grade_ready=False,
+        caveats=[
+            "Full USN replay and path-cache correlation are not complete.",
+            "Large-corpus pagination requires separate validation.",
+        ],
+    )
     return ArtifactRecord(
         provider=WindowsFilesystemProvider.name,
         artifact_type="usn-record",
@@ -455,6 +492,125 @@ def build_native_usn_record(path: Path, record: Mapping[str, object], index: int
         supported=True,
         details=details,
     )
+
+
+def mft_record_evidence(record: Mapping[str, object], file_path: str) -> dict[str, object]:
+    attributes = list(record.get("attributes") or [])
+    standard_information = record.get("standard_information") if isinstance(record.get("standard_information"), Mapping) else {}
+    file_name_entries = list(record.get("file_name_entries") or [])
+    data_attributes = list(record.get("data_attributes") or [])
+    resident_hashes = [
+        dict(item.get("resident_data_hashes") or {})
+        for item in data_attributes
+        if isinstance(item, Mapping) and item.get("resident_data_hashes")
+    ]
+    nonresident_previews = [
+        list(item.get("runlist_preview") or [])
+        for item in data_attributes
+        if isinstance(item, Mapping) and not bool(item.get("resident"))
+    ]
+    sequence_validation = record.get("sequence_validation") if isinstance(record.get("sequence_validation"), Mapping) else {}
+    timestamp_validation = record.get("timestamp_validation") if isinstance(record.get("timestamp_validation"), Mapping) else {}
+    validation_checks = record.get("validation_checks") if isinstance(record.get("validation_checks"), Mapping) else {}
+    return {
+        "record_identity": {
+            "record_number": record.get("record_number_candidate", ""),
+            "sequence_number": record.get("sequence_number", 0),
+            "base_file_reference": record.get("base_file_reference", 0),
+            "record_offset": record.get("record_offset", 0),
+        },
+        "path_evidence": {
+            "primary_path": file_path,
+            "file_name_entry_count": len(file_name_entries),
+            "parent_reference_decoded": dict(file_name_entries[0].get("parent_reference") or {})
+            if file_name_entries and isinstance(file_name_entries[0], Mapping)
+            else {},
+        },
+        "state_evidence": {
+            "in_use": bool(record.get("in_use")),
+            "deleted_hint": not bool(record.get("in_use")),
+            "directory": bool(record.get("directory")),
+            "hard_link_count": record.get("hard_link_count", 0),
+        },
+        "attribute_evidence": {
+            "attribute_count": len(attributes),
+            "attribute_types": list(record.get("attribute_types") or []),
+            "standard_information_present": bool(standard_information),
+            "file_name_attribute_count": len(file_name_entries),
+            "data_attribute_count": len(data_attributes),
+            "resident_data_hashes": resident_hashes,
+            "nonresident_runlist_preview_count": sum(1 for item in nonresident_previews if item),
+        },
+        "validation_evidence": {
+            "record_validation_status": record.get("validation_status", "unknown"),
+            "sequence_fixup_status": sequence_validation.get("status", ""),
+            "timestamp_validation_status": timestamp_validation.get("status", ""),
+            "critical_checks_passed": [
+                key
+                for key in (
+                    "magic_valid",
+                    "sequence_fixup_valid",
+                    "has_standard_information_attribute",
+                    "has_file_name_attribute",
+                    "timestamp_fields_present",
+                )
+                if bool(validation_checks.get(key))
+            ],
+            "validation_warnings": list(record.get("validation_warnings") or []),
+        },
+        "report_limitations": [
+            "attribute-list extension records are not resolved",
+            "full-volume parent path reconstruction is not validated",
+            "nonresident data run decoding is preview-only",
+        ],
+    }
+
+
+def usn_record_evidence(record: Mapping[str, object]) -> dict[str, object]:
+    validation_checks = record.get("validation_checks") if isinstance(record.get("validation_checks"), Mapping) else {}
+    return {
+        "record_identity": {
+            "major_version": record.get("major_version", 0),
+            "minor_version": record.get("minor_version", 0),
+            "usn": record.get("usn", 0),
+            "record_cursor": record.get("record_cursor", record.get("record_offset", 0)),
+            "next_record_cursor": record.get("next_record_cursor", 0),
+        },
+        "file_reference_evidence": {
+            "file_reference_number_decoded": dict(record.get("file_reference_number_decoded") or {}),
+            "parent_file_reference_number_decoded": dict(record.get("parent_file_reference_number_decoded") or {}),
+            "file_name": str(record.get("file_name") or ""),
+        },
+        "change_evidence": {
+            "reason_flags": list(record.get("reason_flags") or []),
+            "rename_hint": str(record.get("rename_hint") or ""),
+            "deleted_hint": bool(record.get("deleted_hint")),
+            "file_attribute_names": list(record.get("file_attribute_names") or []),
+            "timestamp": str(record.get("timestamp") or ""),
+        },
+        "validation_evidence": {
+            "record_validation_status": record.get("validation_status", "unknown"),
+            "filename_decode_status": str(record.get("file_name_decode_status") or ""),
+            "record_size_class": str(record.get("record_size_class") or ""),
+            "critical_checks_passed": [
+                key
+                for key in (
+                    "record_length_aligned",
+                    "record_cursor_progresses",
+                    "filename_bounds_valid",
+                    "filename_utf16_valid",
+                    "filetime_plausible",
+                    "version_supported",
+                )
+                if bool(validation_checks.get(key))
+            ],
+            "validation_warnings": list(record.get("validation_warnings") or []),
+        },
+        "report_limitations": [
+            "full journal replay and path cache correlation are not complete",
+            "large-corpus cursor pagination requires separate validation",
+        ],
+    }
 
 
 def artifact_family(path: Path) -> str:

@@ -101,6 +101,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("cookie-value-decryption-and-legal-opt-in-not-implemented", chrome["details"]["commercial_grade_blockers"])
             self.assertIn("#19", chrome["details"]["browser_report_grade_assessment"]["commercial_gap_ids"])
             self.assertIn("#20", chrome["details"]["browser_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(chrome["details"]["forensic_review"]["gap_id"], "#20")
+            self.assertFalse(chrome["details"]["forensic_review"]["report_grade_ready"])
             self.assertFalse(chrome["details"]["browser_native_capabilities"]["full_cache_entry_decode"])
             self.assertEqual(chrome["details"]["unified_timeline_count"], 2)
             self.assertEqual(chrome["details"]["unified_timeline"][0]["timeline_type"], "visit")
@@ -113,6 +115,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertGreaterEqual(ai_usage["details"]["ai_conversation_candidate_count"], 2)
             self.assertFalse(ai_usage["details"]["commercial_grade_ready"])
             self.assertIn("#20", ai_usage["details"]["browser_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(ai_usage["details"]["forensic_review"]["gap_id"], "#21")
             self.assertEqual(ai_usage["details"]["ai_usage"][0]["ai_service"], "ChatGPT")
             self.assertEqual(ai_usage["details"]["ai_usage"][0]["url"], fixture.ai_visit.url)
             self.assertEqual(ai_usage["details"]["ai_usage"][0]["prompt_hint"], "timeline analysis for evtx")
@@ -128,6 +131,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(ai_conversation["details"]["transcript_validation_checks"]["has_source_hashes"])
             self.assertFalse(ai_conversation["details"]["transcript_validation_checks"]["service_side_export_validated"])
             self.assertIn("#21", ai_conversation["details"]["browser_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(ai_conversation["details"]["forensic_review"]["gap_id"], "#21")
             self.assertFalse(ai_conversation["details"]["browser_native_capabilities"]["service_side_transcript_export_validation"])
             self.assertIn(
                 ai_conversation["details"]["transcript_validation_status"],
@@ -147,7 +151,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(storage_inventory["details"]["coverage_status"], "inventory-candidate")
             self.assertGreaterEqual(storage_inventory["details"]["sensitive_inventory_count"], 3)
             self.assertIn("#19", storage_inventory["details"]["browser_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(storage_inventory["details"]["forensic_review"]["gap_id"], "#19")
             self.assertIn("#42", storage_inventory["details"]["browser_secret_handling_assessment"]["commercial_gap_ids"])
+            self.assertEqual(storage_inventory["details"]["secret_handling_forensic_review"]["gap_id"], "#42")
             self.assertFalse(storage_inventory["details"]["browser_native_capabilities"]["cookie_value_decryption"])
             self.assertFalse(storage_inventory["details"]["browser_native_capabilities"]["password_cookie_session_secret_extraction"])
             self.assertFalse(storage_inventory["details"]["validation_checks"]["raw_secret_values_extracted"])
@@ -181,6 +187,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("ARCHIVE", details["file_attribute_names"])
             self.assertFalse(details["commercial_grade_ready"])
             self.assertIn("#17", details["recent_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(details["forensic_review"]["gap_id"], "#17")
+            self.assertFalse(details["forensic_review"]["report_grade_ready"])
             self.assertFalse(details["recent_native_capabilities"]["full_shell_item_property_store_decode"])
             self.assertTrue(details["validation_checks"]["has_tracker_data"])
             self.assertEqual(details["validation_checks"]["extra_data_block_count"], 1)
@@ -196,18 +204,35 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(automatic["details"]["destlist_stream_count"], 1)
             self.assertEqual(automatic["details"]["destlist_entry_candidate_count"], 1)
             self.assertTrue(automatic["details"]["destlist_validation_checks"]["declared_count_matches_candidates"])
+            self.assertEqual(automatic["details"]["jumplist_evidence"]["container"]["kind"], "automatic")
+            self.assertIn("DestList", automatic["details"]["jumplist_evidence"]["container"]["stream_names"])
+            self.assertEqual(
+                automatic["details"]["jumplist_evidence"]["destlist"]["parse_status"],
+                "parsed-candidate",
+            )
+            self.assertEqual(automatic["details"]["jumplist_evidence"]["destlist"]["candidate_count"], 1)
             self.assertFalse(automatic["details"]["validation_checks"]["destlist_report_grade"])
             self.assertIn(
                 "destlist-os-version-specific-field-validation-required",
                 automatic["details"]["commercial_grade_blockers"],
             )
             self.assertIn("#14", automatic["details"]["recent_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(automatic["details"]["forensic_review"]["gap_id"], "#14")
+            self.assertIn("JumpList", automatic["details"]["forensic_review"]["artifact_goal"])
             self.assertFalse(automatic["details"]["recent_native_capabilities"]["destlist_deleted_entry_recovery"])
             self.assertEqual(automatic["details"]["destination_count"], 1)
             self.assertEqual(automatic["details"]["destinations"][0]["target_path"], r"C:\Users\alice\Documents\Incident Notes.docx")
             self.assertTrue(automatic["details"]["destinations"][0]["has_tracker_data"])
             self.assertEqual(automatic["details"]["destinations"][0]["stream_path"], "1")
             self.assertEqual(automatic["details"]["destinations"][0]["destlist_validation_status"], "candidate-linked-lnk-stream")
+            self.assertEqual(
+                automatic["details"]["jumplist_evidence"]["destinations"][0]["target_path"],
+                r"C:\Users\alice\Documents\Incident Notes.docx",
+            )
+            self.assertEqual(
+                automatic["details"]["jumplist_evidence"]["destinations"][0]["destlist_validation_status"],
+                "candidate-linked-lnk-stream",
+            )
             self.assertIn(r"C:\Users\alice\Documents\Incident Notes.docx", automatic["details"]["embedded_paths"])
             self.assertEqual(custom["details"]["destinations"][0]["target_path"], r"C:\Users\alice\Downloads\installer.exe")
 
@@ -287,6 +312,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_evtx["details"]["binxml_event_data_fields"]["RiskRatio"], "0.25")
             self.assertEqual(native_evtx["details"]["binxml_event_data_fields"]["ActivityGuid"], "33221100-5544-7766-8899-aabbccddeeff")
             self.assertEqual(native_evtx["details"]["binxml_event_data_fields"]["PayloadHash"], "feedface")
+            self.assertIn(
+                {"index": 0, "name": "CommandLine", "value": "powershell -enc NativeFixture", "path": "Event/EventData/CommandLine", "value_type": "StringType", "confidence": "binxml-value-text"},
+                native_evtx["details"]["binxml_event_data_sequence"],
+            )
+            self.assertEqual(
+                native_evtx["details"]["binxml_event_data_values_by_name"]["CommandLine"],
+                ["powershell -enc NativeFixture"],
+            )
             self.assertEqual(native_evtx["details"]["process_id"], "4321")
             self.assertEqual(native_evtx["details"]["thread_id"], "8765")
             self.assertEqual(native_evtx["details"]["user_sid"], "S-1-5-21-111-222-333-1001")
@@ -300,6 +333,18 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 native_evtx["details"]["message_rendering"]["provenance"]["provider_message_resource_resolved"]
             )
             self.assertIn("PowerShell script block", native_evtx["details"]["event_message"])
+            self.assertIn(
+                {"expression": "ScriptBlockText|CommandLine|Payload", "field": "CommandLine"},
+                native_evtx["details"]["message_rendering"]["used_fields"],
+            )
+            self.assertIn(
+                "CommandLine",
+                native_evtx["details"]["message_rendering"]["available_field_summary"]["event_data_field_names"],
+            )
+            self.assertIn(
+                "Event/EventData/CommandLine",
+                native_evtx["details"]["message_rendering"]["available_field_summary"]["binxml_value_field_paths"],
+            )
             self.assertEqual(native_evtx["details"]["native_indicators"]["channel_hint_source"], "record-string")
             self.assertEqual(native_evtx["details"]["evtx_record_integrity"]["declared_size_valid"], True)
             self.assertEqual(native_evtx["details"]["evtx_record_integrity"]["trailing_size_valid"], True)
@@ -336,8 +381,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             }
             self.assertGreaterEqual(decoded_type_counts["Real64Type"], 1)
             self.assertGreaterEqual(decoded_type_counts["Real32Type"], 1)
+            self.assertTrue(native_evtx["details"]["evtx_validation_checks"]["value_field_map_present"])
+            self.assertEqual(native_evtx["details"]["evtx_validation_checks"]["template_substitution_count"], 0)
             self.assertIn("<Event><System>", native_evtx["details"]["native_message_preview"])
             self.assertIn("powershell -enc NativeFixture", native_evtx["details"]["evtx_binxml"]["rendered_preview"])
+            self.assertEqual(
+                native_evtx["details"]["evtx_binxml"]["value_field_map"]["Event/EventData/CommandLine"],
+                ["powershell -enc NativeFixture"],
+            )
             self.assertTrue(
                 any(item["name"] == "CommandLine" for item in native_evtx["details"]["evtx_binxml"]["elements"])
             )
@@ -456,11 +507,25 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertEqual(native_evtx["details"]["binxml_system_fields"]["EventID"], "4104")
             self.assertEqual(native_evtx["details"]["binxml_event_data_fields"]["CommandLine"], "powershell -enc TemplateValue")
+            self.assertEqual(
+                native_evtx["details"]["binxml_event_data_sequence"][0]["value"],
+                "powershell -enc TemplateValue",
+            )
+            self.assertEqual(
+                native_evtx["details"]["binxml_event_data_values_by_name"]["CommandLine"],
+                ["powershell -enc TemplateValue"],
+            )
             self.assertEqual(native_evtx["details"]["evtx_binxml"]["template_values"][0]["value_type"], "StringType")
+            self.assertEqual(native_evtx["details"]["evtx_binxml"]["template_substitution_count"], 1)
+            self.assertEqual(native_evtx["details"]["evtx_validation_checks"]["template_substitution_count"], 1)
             self.assertEqual(native_evtx["details"]["message_rendering"]["provenance"]["template_value_count"], 1)
             self.assertEqual(
                 native_evtx["details"]["message_rendering"]["provenance"]["native_binxml_status"],
                 "template-substituted-partial",
+            )
+            self.assertEqual(
+                native_evtx["details"]["message_rendering"]["available_field_summary"]["template_substitution_count"],
+                1,
             )
             self.assertTrue(
                 any(
@@ -514,6 +579,18 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 native_evtx["details"]["evtx_recovery_context"]["caution_labels"],
             )
             self.assertEqual(
+                native_evtx["details"]["evtx_recovery_evidence"]["allocation_status"],
+                "slack-or-deleted-candidate",
+            )
+            self.assertIn(
+                "allocation:slack-or-deleted-candidate",
+                native_evtx["details"]["evtx_recovery_evidence"]["evidence_reasons"],
+            )
+            self.assertGreaterEqual(
+                native_evtx["details"]["evtx_recovery_evidence"]["record_relative_offset"],
+                native_evtx["details"]["evtx_recovery_evidence"]["free_space_offset"],
+            )
+            self.assertEqual(
                 native_evtx["details"]["message_rendering"]["provenance"]["native_recovery_status"],
                 "slack-or-deleted-record-candidate",
             )
@@ -559,6 +636,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(candidate["record_id"], "890")
             self.assertEqual(candidate["evtx_recovery_status"], "corrupt-record-candidate")
             self.assertEqual(candidate["evtx_record_integrity"]["candidate_reason"], "record-extends-past-eof")
+            self.assertFalse(candidate["evtx_recovery_evidence"]["parseable_record"])
+            self.assertEqual(candidate["evtx_recovery_evidence"]["candidate_reason"], "record-extends-past-eof")
+            self.assertIn("candidate:record-extends-past-eof", candidate["evtx_recovery_evidence"]["evidence_reasons"])
+            self.assertIn("binxml:not-decoded", candidate["evtx_recovery_evidence"]["evidence_reasons"])
             self.assertEqual(candidate["evtx_report_grade_assessment"]["status"], "validation-required")
             self.assertIn("record-integrity-not-proven", candidate["evtx_report_grade_assessment"]["blockers"])
             self.assertTrue(candidate["validation_required"])
@@ -626,6 +707,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("full-native-sam-fv-layout-validation-required", lifecycle["details"]["commercial_grade_blockers"])
             self.assertEqual(lifecycle["details"]["os_account_report_grade_assessment"]["status"], "validation-required")
             self.assertIn("#6", lifecycle["details"]["os_account_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(lifecycle["details"]["forensic_review"]["gap_id"], "#6")
+            self.assertEqual(lifecycle["details"]["forensic_review"]["review_status"], "triage-review")
+            self.assertTrue(lifecycle["details"]["forensic_review"]["validation_required"])
             self.assertFalse(lifecycle["details"]["os_account_native_capabilities"]["security_secret_decryption"])
             lifecycle_matrix = {item["id"]: item for item in lifecycle["details"]["os_account_validation_matrix"]}
             self.assertTrue(lifecycle_matrix["has-sam-f-value"]["passed"])
@@ -644,6 +728,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("privileged-group-membership-hint", lifecycle["details"]["risk_flags"])
             self.assertEqual(lifecycle["details"]["group_membership_hints"][0]["group_name"], "Administrators")
             self.assertEqual(lifecycle["details"]["group_membership_hints"][0]["match_types"], ["name", "rid-sid-tail"])
+            self.assertEqual(lifecycle["details"]["group_membership_hints"][0]["group_sid_candidates"], ["S-1-5-32-544"])
+            self.assertEqual(lifecycle["details"]["account_security_context"]["privileged_group_count"], 1)
+            self.assertIn("S-1-5-32-544", lifecycle["details"]["account_security_context"]["group_sid_candidates"])
+            self.assertEqual(lifecycle["details"]["account_security_context"]["inherited_privilege_count"], 1)
+            inherited_debug = lifecycle["details"]["account_security_context"]["inherited_privileges"][0]
+            self.assertEqual(inherited_debug["privilege"], "SeDebugPrivilege")
+            self.assertEqual(inherited_debug["via_groups"], ["Administrators"])
+            self.assertIn("high-risk-privilege", inherited_debug["risk_flags"])
             group = next(item for item in group_rows if item["details"]["group_name"] == "Administrators")
             self.assertFalse(group["details"]["commercial_grade_ready"])
             self.assertEqual(group["details"]["member_count"], 1)
@@ -651,6 +743,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("not proven", group["details"]["member_count_semantics"])
             self.assertIn("member-sid", group["details"]["membership_source_types"])
             self.assertIn("member-name", group["details"]["membership_source_types"])
+            self.assertEqual(group["details"]["group_sid_candidates"], ["S-1-5-32-544"])
             self.assertTrue(group["details"]["validation_checks"]["requires_native_sam_alias_validation"])
             self.assertIn("#6", group["details"]["os_account_report_grade_assessment"]["commercial_gap_ids"])
             self.assertIn("privileged-group-membership-hint", group["details"]["risk_flags"])
@@ -688,6 +781,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(lsa_secret["details"]["secret_value_metadata"]["SecDesc"]["contains_nonzero_bytes"])
             privilege = next(item for item in privileges if item["details"]["privilege"] == "SeDebugPrivilege")
             self.assertIn("S-1-5-32-544", privilege["details"]["assigned_sids"])
+            self.assertEqual(
+                privilege["details"]["assigned_principal_hints"],
+                [{"sid": "S-1-5-32-544", "principal": "Administrators", "principal_type": "builtin-alias"}],
+            )
             self.assertIn("high-risk-privilege", privilege["details"]["risk_flags"])
 
     def test_windows_execution_collector_maps_registry_and_powershell_history(self) -> None:
@@ -731,32 +828,77 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(exported_amcache["details"]["publisher"], "Example Publisher")
             self.assertEqual(exported_amcache["details"]["sha1"], "0123456789abcdef0123456789abcdef01234567")
             self.assertEqual(exported_amcache["details"]["file_description"], "Example Application Binary")
+            self.assertEqual(exported_amcache["details"]["amcache_evidence"]["file_name"], "app.exe")
+            self.assertTrue(exported_amcache["details"]["amcache_evidence"]["path_present"])
+            self.assertTrue(exported_amcache["details"]["amcache_evidence"]["hash_present"])
+            self.assertEqual(
+                exported_amcache["details"]["amcache_evidence"]["sha1_candidates"],
+                ["0123456789abcdef0123456789abcdef01234567"],
+            )
+            self.assertIn("publisher", exported_amcache["details"]["amcache_evidence"]["metadata_fields_present"])
+            self.assertEqual(
+                exported_amcache["details"]["amcache_evidence"]["execution_caveat"],
+                "Amcache supports program presence/install/execution-related pivots but is not standalone proof of execution.",
+            )
             self.assertTrue(exported_amcache["details"]["validation_checks"]["has_hash"])
             self.assertFalse(exported_amcache["details"]["commercial_grade_ready"])
             self.assertIn("native-amcache-schema-decoding-required", exported_amcache["details"]["commercial_grade_blockers"])
             self.assertIn("#7", exported_amcache["details"]["execution_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(exported_amcache["details"]["forensic_review"]["gap_id"], "#7")
+            self.assertIn("Amcache", exported_amcache["details"]["forensic_review"]["artifact_goal"])
             self.assertFalse(exported_amcache["details"]["execution_native_capabilities"]["native_amcache_schema_decode"])
+            native_amcache_hive = next(item for item in artifacts if item["artifact_type"] == "amcache-hive")
+            self.assertGreaterEqual(native_amcache_hive["details"]["amcache_hive_evidence"]["candidate_path_count"], 1)
+            self.assertEqual(
+                native_amcache_hive["details"]["amcache_hive_evidence"]["schema_decode_status"],
+                "not-implemented-string-pivot-only",
+            )
             self.assertEqual(bam["details"]["user_sid"], "S-1-5-21-1000")
             self.assertEqual(bam["details"]["timestamp"], "2024-04-01T06:07:08+00:00")
             self.assertEqual(bam["details"]["timestamp_source"], "bam_value_filetime")
+            self.assertEqual(bam["details"]["bam_dam_evidence"]["user_sid"], "S-1-5-21-1000")
+            self.assertEqual(
+                bam["details"]["bam_dam_evidence"]["timestamp_semantics"],
+                "bam-dam-last-execution-filetime-candidate",
+            )
+            self.assertTrue(bam["details"]["bam_dam_evidence"]["requires_native_system_hive_validation"])
             self.assertTrue(bam["details"]["validation_checks"]["has_timestamp"])
             self.assertFalse(bam["details"]["commercial_grade_ready"])
             self.assertIn("native-system-hive-bam-decoding-required", bam["details"]["commercial_grade_blockers"])
             self.assertIn("#9", bam["details"]["execution_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(bam["details"]["forensic_review"]["gap_id"], "#9")
             self.assertIn("bam-execution-indicator", bam["details"]["risk_flags"])
             self.assertTrue(shimcache["details"]["validation_required"])
             self.assertEqual(shimcache["details"]["execution_caveat"], "Presence in ShimCache is not proof the executable ran.")
+            self.assertEqual(
+                shimcache["details"]["shimcache_evidence"]["execution_caveat"],
+                "ShimCache/AppCompatCache can show program presence/order, but it is not standalone proof of execution.",
+            )
+            self.assertTrue(shimcache["details"]["shimcache_evidence"]["requires_os_version_layout_validation"])
             self.assertIn("Prefetch", shimcache["details"]["validation_checks"]["correlation_targets"])
             self.assertIn("native-appcompatcache-layout-decoding-required", shimcache["details"]["commercial_grade_blockers"])
             self.assertIn("#8", shimcache["details"]["execution_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(shimcache["details"]["forensic_review"]["gap_id"], "#8")
             self.assertEqual(srum_rows[0]["details"]["app_id"], "powershell.exe")
             self.assertEqual(srum_rows[0]["details"]["bytes_received"], 2048)
             self.assertEqual(srum_rows[0]["details"]["bytes_total"], 2560)
             self.assertEqual(srum_rows[0]["details"]["network_profile"], "CorpWiFi")
             self.assertTrue(srum_rows[0]["details"]["validation_checks"]["has_network_counters"])
+            self.assertEqual(srum_rows[0]["details"]["srum_usage_evidence"]["table_family"], "network-usage")
+            self.assertIn("bytes_received", srum_rows[0]["details"]["srum_usage_evidence"]["counter_fields_present"])
+            self.assertEqual(
+                srum_rows[0]["details"]["srum_usage_evidence"]["counter_normalization_status"],
+                "normalized-from-source-tool-export",
+            )
+            self.assertEqual(srum_rows[0]["details"]["forensic_review"]["gap_id"], "#10")
             self.assertEqual(srum_rows[0]["details"]["source_path"], str(fixture.srum_csv.resolve()))
             self.assertEqual(srum_database_rows[0]["details"]["source_path"], str(fixture.srum_db.resolve()))
             self.assertTrue(srum_database_rows[0]["details"]["ese_header"]["signature_valid"])
+            self.assertTrue(srum_database_rows[0]["details"]["srum_database_evidence"]["ese_signature_valid"])
+            self.assertEqual(
+                srum_database_rows[0]["details"]["srum_database_evidence"]["schema_decode_status"],
+                "not-implemented-header-and-string-pivot-only",
+            )
             self.assertTrue(srum_database_rows[0]["details"]["validation_checks"]["ese_signature_valid"])
             self.assertEqual(
                 srum_database_rows[0]["details"]["native_srudb_validation"]["validation_status"],
@@ -767,15 +909,22 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertFalse(srum_database_rows[0]["details"]["commercial_grade_ready"])
             self.assertIn("native-srum-row-decoding-required", srum_database_rows[0]["details"]["commercial_grade_blockers"])
             self.assertIn("#10", srum_database_rows[0]["details"]["execution_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(srum_database_rows[0]["details"]["forensic_review"]["gap_id"], "#10")
             self.assertFalse(srum_database_rows[0]["details"]["execution_native_capabilities"]["native_srum_page_row_decode"])
             self.assertTrue(any("powershell.exe" in value.lower() for value in srum_database_rows[0]["details"]["path_candidates"]))
             self.assertTrue(any(item["details"]["app_id"] == "powershell.exe" for item in srum_pivots))
             self.assertTrue(any(item["details"]["url"] == "https://download.example/tools/installer.exe" for item in srum_pivots))
             self.assertTrue(all(item["details"]["validation_required"] for item in srum_pivots))
+            self.assertTrue(all(item["details"]["srum_pivot_evidence"]["pivot_basis"] == "native-ese-string-pivot" for item in srum_pivots))
             srum_row_candidate = next(item for item in srum_row_candidates if item["details"]["app_id"] == "powershell.exe")
             self.assertEqual(srum_row_candidate["details"]["table_family"], "network-usage")
             self.assertEqual(srum_row_candidate["details"]["bytes_received"], 2048)
             self.assertEqual(srum_row_candidate["details"]["timestamp"], "2024-04-01T05:06:07+00:00")
+            self.assertEqual(
+                srum_row_candidate["details"]["srum_row_evidence"]["row_level_decode_status"],
+                "not-implemented-string-cluster-only",
+            )
+            self.assertGreaterEqual(srum_row_candidate["details"]["srum_row_evidence"]["counter_candidate_count"], 1)
             self.assertTrue(srum_row_candidate["details"]["validation_checks"]["requires_srum_parser"])
             self.assertFalse(srum_row_candidate["details"]["commercial_grade_ready"])
             self.assertIn("native-ese-page-row-decoding-required", srum_row_candidate["details"]["commercial_grade_blockers"])
@@ -813,6 +962,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertFalse(details["commercial_grade_ready"])
             self.assertIn("Full file metrics array decoding", details["commercial_readiness_blockers"][0])
             self.assertIn("#16", details["prefetch_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(details["forensic_review"]["gap_id"], "#16")
+            self.assertFalse(details["forensic_review"]["report_grade_ready"])
             self.assertFalse(details["prefetch_native_capabilities"]["full_file_metrics_array_decode"])
             self.assertEqual(details["prefetch_version_metadata"]["layout_name"], "windows-10")
             self.assertEqual(details["prefetch_version_metadata"]["run_count_offset_hex"], "0xd0")
@@ -835,6 +986,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(references[0]["details"]["validation_required"])
             self.assertFalse(references[0]["details"]["commercial_grade_ready"])
             self.assertIn("#16", references[0]["details"]["prefetch_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(references[0]["details"]["forensic_review"]["gap_id"], "#16")
 
     def test_windows_prefetch_collector_is_available_as_dedicated_artifacts_kind(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -956,12 +1108,35 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_mft[0]["details"]["file_name_entries"][0]["file_name"], "deleted.txt")
             self.assertEqual(native_mft[0]["details"]["parent_reference_decoded"]["record_number"], 5)
             self.assertTrue(native_mft[0]["details"]["data_attributes"][0]["resident"])
+            self.assertEqual(native_mft[0]["details"]["mft_record_evidence"]["record_identity"]["sequence_number"], 3)
+            self.assertEqual(
+                native_mft[0]["details"]["mft_record_evidence"]["path_evidence"]["primary_path"],
+                r"C:\Users\alice\Desktop\deleted.txt",
+            )
+            self.assertEqual(
+                native_mft[0]["details"]["mft_record_evidence"]["path_evidence"]["parent_reference_decoded"]["record_number"],
+                5,
+            )
+            self.assertTrue(native_mft[0]["details"]["mft_record_evidence"]["state_evidence"]["in_use"])
+            self.assertIn(
+                "$STANDARD_INFORMATION",
+                native_mft[0]["details"]["mft_record_evidence"]["attribute_evidence"]["attribute_types"],
+            )
+            self.assertEqual(
+                native_mft[0]["details"]["mft_record_evidence"]["validation_evidence"]["sequence_fixup_status"],
+                "valid",
+            )
+            self.assertIn(
+                "magic_valid",
+                native_mft[0]["details"]["mft_record_evidence"]["validation_evidence"]["critical_checks_passed"],
+            )
             self.assertFalse(native_mft[0]["details"]["commercial_grade_ready"])
             self.assertIn(
                 "attribute-list-extension-record-resolution-not-implemented",
                 native_mft[0]["details"]["commercial_grade_blockers"],
             )
             self.assertIn("#12", native_mft[0]["details"]["ntfs_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(native_mft[0]["details"]["forensic_review"]["gap_id"], "#12")
             self.assertFalse(native_mft[0]["details"]["ntfs_native_capabilities"]["mft_attribute_list_resolution"])
             self.assertTrue(native_mft[0]["details"]["validation_required"])
             self.assertIn({"value": "valid", "count": 1}, mft_files[0]["details"]["sequence_validation_counts"])
@@ -992,10 +1167,25 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_usn[0]["details"]["next_record_cursor"], native_usn[1]["details"]["record_cursor"])
             self.assertEqual(native_usn[0]["details"]["file_reference_number_decoded"]["record_number"], 42)
             self.assertEqual(native_usn[0]["details"]["parent_file_reference_number_decoded"]["record_number"], 5)
+            self.assertEqual(
+                native_usn[0]["details"]["usn_record_evidence"]["file_reference_evidence"]["file_name"],
+                "deleted.txt",
+            )
+            self.assertIn("FILE_DELETE", native_usn[0]["details"]["usn_record_evidence"]["change_evidence"]["reason_flags"])
+            self.assertTrue(native_usn[0]["details"]["usn_record_evidence"]["change_evidence"]["deleted_hint"])
+            self.assertEqual(
+                native_usn[0]["details"]["usn_record_evidence"]["validation_evidence"]["record_validation_status"],
+                "valid",
+            )
+            self.assertIn(
+                "filename_utf16_valid",
+                native_usn[0]["details"]["usn_record_evidence"]["validation_evidence"]["critical_checks_passed"],
+            )
             self.assertTrue(native_usn[0]["details"]["validation_checks"]["record_cursor_progresses"])
             self.assertTrue(native_usn[0]["details"]["validation_checks"]["filename_utf16_valid"])
             self.assertFalse(native_usn[0]["details"]["commercial_grade_ready"])
             self.assertIn("#13", native_usn[0]["details"]["ntfs_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(native_usn[0]["details"]["forensic_review"]["gap_id"], "#13")
             self.assertFalse(native_usn[0]["details"]["ntfs_native_capabilities"]["usn_full_journal_replay"])
             self.assertEqual(native_usn[1]["details"]["major_version"], 3)
             self.assertEqual(native_usn[1]["details"]["file_path"], "renamed.txt")
@@ -1022,8 +1212,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             entries = [item for item in artifacts if item["artifact_type"] == "windows-search-index-entry"]
             edb_files = [item for item in artifacts if item["artifact_type"] == "windows-search-edb-file"]
             edb_pivots = [item for item in artifacts if item["artifact_type"] == "windows-search-edb-pivot"]
+            edb_page_candidates = [
+                item for item in artifacts if item["artifact_type"] == "windows-search-edb-page-candidate"
+            ]
             edb_table_candidates = [
                 item for item in artifacts if item["artifact_type"] == "windows-search-edb-table-candidate"
+            ]
+            edb_row_candidates = [
+                item for item in artifacts if item["artifact_type"] == "windows-search-edb-row-candidate"
             ]
             summary = next(item for item in artifacts if item["artifact_type"] == "windows-search-index-summary")
 
@@ -1042,14 +1238,38 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertFalse(edb_files[0]["details"]["commercial_grade_ready"])
             self.assertIn("native-ese-catalog-decoding-required", edb_files[0]["details"]["commercial_grade_blockers"])
             self.assertIn("#11", edb_files[0]["details"]["search_index_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(edb_files[0]["details"]["forensic_review"]["gap_id"], "#11")
             self.assertFalse(edb_files[0]["details"]["search_index_native_capabilities"]["native_row_level_decode"])
+            self.assertTrue(edb_files[0]["details"]["search_index_native_capabilities"]["native_page_map_triage"])
+            self.assertEqual(
+                edb_files[0]["details"]["edb_analysis_method"]["method_id"],
+                "ese-page-map-string-correlation-v1",
+            )
+            self.assertTrue(edb_files[0]["details"]["native_validation"]["page_map_built"])
             self.assertFalse(edb_files[0]["details"]["native_validation"]["row_level_decoding_available"])
+            self.assertGreaterEqual(edb_files[0]["details"]["native_candidate_metadata"]["page_count_scanned"], 1)
+            self.assertGreaterEqual(edb_files[0]["details"]["native_candidate_metadata"]["page_candidate_count"], 1)
             self.assertGreaterEqual(edb_files[0]["details"]["native_candidate_metadata"]["table_candidate_count"], 3)
+            self.assertGreaterEqual(edb_files[0]["details"]["native_candidate_metadata"]["row_candidate_count"], 1)
+            self.assertEqual(
+                edb_files[0]["details"]["native_validation"]["row_candidate_decode_status"],
+                "correlated-native-string-candidates-only",
+            )
             self.assertTrue(any(item["details"]["file_name"] == "Incident Notes.docx" for item in edb_pivots))
             self.assertTrue(any(item["details"]["url"] == "https://example.com/browser-history" for item in edb_pivots))
             self.assertTrue(any(item["details"]["candidate_kind"] == "content" for item in edb_pivots))
             self.assertTrue(all(item["details"]["validation_required"] for item in edb_pivots))
             self.assertTrue(all(not item["details"]["commercial_grade_ready"] for item in edb_pivots))
+            self.assertTrue(edb_page_candidates)
+            page_candidate = edb_page_candidates[0]
+            self.assertEqual(page_candidate["details"]["candidate_basis"]["method_id"], "ese-page-map-string-correlation-v1")
+            self.assertGreaterEqual(page_candidate["details"]["page_index"], 1)
+            self.assertGreaterEqual(page_candidate["details"]["page_offset"], 8192)
+            self.assertEqual(len(page_candidate["details"]["page_sha256"]), 64)
+            self.assertTrue(page_candidate["details"]["path_candidates"])
+            self.assertTrue(page_candidate["details"]["content_candidates"])
+            self.assertIn("property-store", page_candidate["details"]["table_marker_hits"])
+            self.assertFalse(page_candidate["details"]["commercial_grade_ready"])
             self.assertTrue(any(item["details"]["table_family"] == "property-store" for item in edb_table_candidates))
             self.assertTrue(any(item["details"]["table_family"] == "content-index" for item in edb_table_candidates))
             self.assertTrue(any(item["details"]["table_family"] == "deleted-state" for item in edb_table_candidates))
@@ -1057,10 +1277,27 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(
                 all(not item["details"]["validation_checks"]["row_level_decoding_available"] for item in edb_table_candidates)
             )
+            self.assertTrue(any(item["details"]["file_name"] == "Incident Notes.docx" for item in edb_row_candidates))
+            row_candidate = next(item for item in edb_row_candidates if item["details"]["file_name"] == "Incident Notes.docx")
+            self.assertEqual(row_candidate["details"]["item_path"], r"C:\Users\alice\Documents\Incident Notes.docx")
+            self.assertIn("encoded powershell", row_candidate["details"]["content_snippet"])
+            self.assertEqual(row_candidate["details"]["deleted_state"], "candidate-marker-present")
+            self.assertEqual(row_candidate["details"]["timestamp_source"], "not-decoded-native-edb")
+            self.assertEqual(
+                row_candidate["details"]["candidate_basis"]["correlation_method"],
+                "path-content-url-position-correlation",
+            )
+            self.assertIn("search-index-suspicious-row-text", row_candidate["details"]["risk_flags"])
+            self.assertTrue(row_candidate["details"]["validation_required"])
+            self.assertFalse(row_candidate["details"]["commercial_grade_ready"])
+            self.assertIn("#11", row_candidate["details"]["search_index_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(row_candidate["details"]["forensic_review"]["gap_id"], "#11")
             self.assertEqual(summary["details"]["entry_count"], 1)
             self.assertEqual(summary["details"]["inventory_count"], 1)
             self.assertGreaterEqual(summary["details"]["edb_pivot_count"], 2)
+            self.assertGreaterEqual(summary["details"]["edb_page_candidate_count"], 1)
             self.assertGreaterEqual(summary["details"]["edb_table_candidate_count"], 3)
+            self.assertGreaterEqual(summary["details"]["edb_row_candidate_count"], 1)
             self.assertGreater(summary["details"]["edb_string_hit_count"], 0)
             self.assertIn({"value": ".docx", "count": 1}, summary["details"]["extension_counts"])
             self.assertIn({"value": "property-store", "count": 1}, summary["details"]["table_family_counts"])

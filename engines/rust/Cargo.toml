@@ -1,0 +1,11 @@
+[workspace]
+members = [
+  "crates/rapidcore",
+  "crates/rapid-worker",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Proprietary"
+repository = "https://github.com/daeryundf2-prog/rapid"

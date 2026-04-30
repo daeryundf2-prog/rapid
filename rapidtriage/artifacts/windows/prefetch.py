@@ -6,7 +6,7 @@ from typing import Iterable
 
 from ...core.audit import compute_sha256
 from ...core.models import ArtifactRecord
-from .common import isoformat_from_timestamp
+from .common import build_forensic_review, isoformat_from_timestamp
 
 PREFETCH_ROOT = ("Windows", "Prefetch")
 PARSER_VERSION = "prefetch-inventory-v7"
@@ -99,6 +99,8 @@ class WindowsPrefetchProvider:
             filename_executable_hint = executable_hint(path.name)
             header_executable_name = str(header.get("header_executable_name") or "")
             source_hashes = {"sha256": compute_sha256(path)}
+            validation_checks = header.get("prefetch_validation_checks") or {}
+            report_grade = prefetch_report_grade_assessment(validation_checks)
             yield ArtifactRecord(
                 provider=self.name,
                 artifact_type="prefetch-file",
@@ -128,13 +130,27 @@ class WindowsPrefetchProvider:
                     "commercial_grade_ready": False,
                     "commercial_grade_blockers": list(PREFETCH_REPORT_GRADE_BLOCKERS),
                     "commercial_readiness_blockers": list(PREFETCH_COMMERCIAL_BLOCKERS),
-                    "prefetch_validation_matrix": prefetch_validation_matrix(
-                        header.get("prefetch_validation_checks") or {}
-                    ),
-                    "prefetch_report_grade_assessment": prefetch_report_grade_assessment(
-                        header.get("prefetch_validation_checks") or {}
-                    ),
+                    "prefetch_validation_matrix": prefetch_validation_matrix(validation_checks),
+                    "prefetch_report_grade_assessment": report_grade,
                     "prefetch_native_capabilities": dict(PREFETCH_NATIVE_CAPABILITIES),
+                    "forensic_review": build_forensic_review(
+                        gap_id="#16",
+                        artifact_goal="Prefetch execution, run count, last-run, volume and file-reference evidence",
+                        primary_evidence=[
+                            f"executable={header_executable_name or filename_executable_hint}",
+                            f"version={header.get('prefetch_version', '')}",
+                            f"run_count={header.get('run_count', 0)}",
+                            f"last_run_at={header.get('last_run_at', '')}",
+                            f"referenced_paths={header.get('referenced_path_count', 0)}",
+                        ],
+                        validation_required=True,
+                        report_grade_assessment=report_grade,
+                        blockers=PREFETCH_REPORT_GRADE_BLOCKERS,
+                        caveats=[
+                            "Execution indicator only; correlate with Amcache, ShimCache, SRUM, BAM, EVTX, MFT and USN.",
+                            "Full file metrics and authoritative volume table are not native-report-grade yet.",
+                        ],
+                    ),
                     "note": "Prefetch triage parser uses version-specific common-header offsets plus bounded native candidates; validate critical findings with a dedicated parser such as PECmd.",
                 },
             )
@@ -274,6 +290,8 @@ def build_prefetch_reference_record(
     source_hashes: dict[str, str],
 ) -> ArtifactRecord:
     executable_name = str(header.get("header_executable_name") or executable_hint(path.name))
+    validation_checks = header.get("prefetch_validation_checks") or {}
+    report_grade = prefetch_report_grade_assessment(validation_checks)
     return ArtifactRecord(
         provider=WindowsPrefetchProvider.name,
         artifact_type="prefetch-reference",
@@ -305,11 +323,22 @@ def build_prefetch_reference_record(
             "commercial_grade_ready": False,
             "commercial_grade_blockers": list(PREFETCH_REPORT_GRADE_BLOCKERS),
             "commercial_readiness_blockers": list(PREFETCH_COMMERCIAL_BLOCKERS),
-            "prefetch_validation_matrix": prefetch_validation_matrix(header.get("prefetch_validation_checks") or {}),
-            "prefetch_report_grade_assessment": prefetch_report_grade_assessment(
-                header.get("prefetch_validation_checks") or {}
-            ),
+            "prefetch_validation_matrix": prefetch_validation_matrix(validation_checks),
+            "prefetch_report_grade_assessment": report_grade,
             "prefetch_native_capabilities": dict(PREFETCH_NATIVE_CAPABILITIES),
+            "forensic_review": build_forensic_review(
+                gap_id="#16",
+                artifact_goal="Prefetch referenced file/volume pivot evidence",
+                primary_evidence=[
+                    f"executable={executable_name}",
+                    f"referenced_path={referenced_path}",
+                    f"last_run_at={header.get('last_run_at', '')}",
+                ],
+                validation_required=True,
+                report_grade_assessment=report_grade,
+                blockers=PREFETCH_REPORT_GRADE_BLOCKERS,
+                caveats=["Reference rows are bounded native string pivots, not complete decoded file metrics entries."],
+            ),
             "validation_guidance": "Prefetch reference rows are recovered from bounded native strings; validate complete file metrics and volumes with PECmd before final testimony.",
             "raw_preview": referenced_path,
         },

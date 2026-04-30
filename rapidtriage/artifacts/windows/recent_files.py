@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterable, Sequence, Tuple
 
 from ...core.models import ArtifactRecord
-from .common import isoformat_from_timestamp, iter_windows_user_homes
+from .common import build_forensic_review, isoformat_from_timestamp, iter_windows_user_homes
 
 RECENT_ROOT = ("AppData", "Roaming", "Microsoft", "Windows", "Recent")
 PARSER_VERSION = "windows-recent-files-v4"
@@ -238,6 +238,23 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
         "recent_validation_matrix": recent_validation_matrix(validation_checks),
         "recent_report_grade_assessment": report_grade,
         "recent_native_capabilities": JUMPLIST_CAPABILITIES,
+        "forensic_review": build_forensic_review(
+            gap_id="#17",
+            artifact_goal="Shell Link target, timestamps, LinkInfo, StringData, ExtraData and tracker evidence",
+            primary_evidence=[
+                f"target_path={target_path}",
+                f"embedded_paths={len(paths)}",
+                f"extra_data_blocks={len(extra_data_blocks)}",
+                f"tracker_present={bool(tracker_data)}",
+            ],
+            validation_required=True,
+            report_grade_assessment=report_grade,
+            blockers=report_grade["blockers"],
+            caveats=[
+                "Full shell item property-store semantics and broad known-answer validation are still required.",
+                "Use target timestamps as link metadata, not proof that the target file currently exists.",
+            ],
+        ),
         "commercial_grade_ready": False,
         "commercial_grade_blockers": report_grade["blockers"],
     }
@@ -426,6 +443,7 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         gap_ids=["#14"],
         blockers=jumplist_commercial_blockers(destlist_metadata),
     )
+    evidence = jumplist_evidence(path, artifact_type, data, stream_summaries, destinations, destlist_metadata)
     return {
         "jump_list_parse_status": "parsed-ole-stream-lnk" if ole_streams and destinations else "parsed-embedded-lnk" if destinations else "inventory",
         "coverage_status": "native-destlist-candidate" if destlist_metadata.get("destlist_parse_status") == "parsed-candidate" else "mapped",
@@ -443,10 +461,28 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         "destination_count": len(destinations),
         "destination_stream_count": len({str(destination.get("stream_path") or "") for destination in destinations if destination.get("stream_path")}),
         "destinations": destinations,
+        "jumplist_evidence": evidence,
         "validation_checks": validation_checks,
         "recent_validation_matrix": recent_validation_matrix(validation_checks),
         "recent_report_grade_assessment": report_grade,
         "recent_native_capabilities": JUMPLIST_CAPABILITIES,
+        "forensic_review": build_forensic_review(
+            gap_id="#14",
+            artifact_goal="JumpList DestList and embedded LNK destination evidence",
+            primary_evidence=[
+                f"app_id_hash={path.stem.split('.', 1)[0]}",
+                f"destinations={len(destinations)}",
+                f"streams={len(ole_streams)}",
+                f"destlist={destlist_metadata.get('destlist_parse_status', '')}",
+            ],
+            validation_required=True,
+            report_grade_assessment=report_grade,
+            commercial_grade_ready=False,
+            caveats=[
+                "DestList fields are candidate-level and OS-version validation is incomplete.",
+                "Deleted JumpList entry recovery is not report-grade.",
+            ],
+        ),
         "validation_guidance": (
             "Jump List rows recover OLE stream provenance, embedded Shell Link destinations, and bounded DestList metadata candidates. "
             "Validate OS-version-specific DestList field semantics, deleted entries, and account context with a dedicated Jump List parser before final testimony."
@@ -454,6 +490,48 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         "commercial_grade_blockers": report_grade["blockers"],
         **destlist_metadata,
         "note": "OLE Jump List streams are traversed when recoverable; DestList rows are exposed as metadata candidates and embedded Shell Link/path extraction is provided for triage search.",
+    }
+
+
+def jumplist_evidence(
+    path: Path,
+    artifact_type: str,
+    data: bytes,
+    stream_summaries: Sequence[dict[str, object]],
+    destinations: Sequence[dict[str, object]],
+    destlist_metadata: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "container": {
+            "application_id_hash": path.stem.split(".", 1)[0],
+            "kind": "automatic" if artifact_type == "jumplist-automatic" else "custom",
+            "container_hint": "ole-compound-file" if data.startswith(CFB_SIGNATURE) else "custom-binary",
+            "ole_stream_count": len(stream_summaries),
+            "stream_names": [str(item.get("name") or "") for item in stream_summaries],
+        },
+        "destlist": {
+            "parse_status": destlist_metadata.get("destlist_parse_status", ""),
+            "declared_entry_count": destlist_metadata.get("destlist_declared_entry_count", 0),
+            "candidate_count": destlist_metadata.get("destlist_entry_candidate_count", 0),
+            "validation_checks": dict(destlist_metadata.get("destlist_validation_checks") or {}),
+        },
+        "destinations": [
+            {
+                "target_path": str(destination.get("target_path") or ""),
+                "stream_path": str(destination.get("stream_path") or ""),
+                "lnk_offset": destination.get("lnk_offset", 0),
+                "has_tracker_data": bool(destination.get("has_tracker_data")),
+                "destlist_entry_offset_candidate": destination.get("destlist_entry_offset_candidate"),
+                "destlist_validation_status": destination.get("destlist_validation_status", ""),
+                "filetime_candidates": list(destination.get("destlist_filetime_candidates") or [])[:4],
+            }
+            for destination in destinations[:50]
+        ],
+        "review_guidance": [
+            "compare target_path with DestList path candidate and LNK stream path",
+            "verify application ID mapping before attributing the source application",
+            "treat deleted DestList entries as unsupported until slack recovery is validated",
+        ],
     }
 
 

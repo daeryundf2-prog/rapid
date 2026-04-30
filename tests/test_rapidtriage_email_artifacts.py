@@ -30,7 +30,7 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             self.assertEqual(artifact_types, {"email-message", "email-mailbox"})
             messages = [artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "email-message"]
             mailboxes = [artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "email-mailbox"]
-            self.assertGreaterEqual(len(messages), 2)
+            self.assertGreaterEqual(len(messages), 4)
             self.assertGreaterEqual(len(mailboxes), 3)
 
             eml = next(artifact for artifact in messages if artifact["details"]["source_format"] == "eml")
@@ -39,13 +39,25 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             self.assertIn("sensitive-email-content", eml["details"]["risk_flags"])
             self.assertFalse(eml["details"]["commercial_grade_ready"])
             self.assertIn("#36", eml["details"]["email_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(eml["details"]["forensic_review"]["gap_id"], "#36")
             self.assertFalse(eml["details"]["email_native_capabilities"]["native_pst_ost_msg_object_decode"])
+            self.assertEqual(eml["details"]["email_format_profile"]["family"], "internet-message")
+            self.assertIn("auth-signature-crypto", {item["id"] for item in eml["details"]["email_issue_matrix"]})
+
+            emlx = next(artifact for artifact in messages if artifact["details"]["source_format"] == "emlx")
+            self.assertEqual(emlx["details"]["email_format_profile"]["family"], "apple-mail-message")
+
+            maildir = next(artifact for artifact in messages if artifact["details"]["source_format"] == "maildir")
+            self.assertEqual(maildir["details"]["subject"], "maildir fixture")
 
             pst = next(artifact for artifact in mailboxes if artifact["details"]["source_format"] == "pst")
             self.assertIn("alice@example.test", pst["details"]["email_candidates"])
             self.assertIn("mailbox-container-candidate", pst["details"]["risk_flags"])
             self.assertFalse(pst["details"]["validation_checks"]["native_mailbox_decoding_available"])
             self.assertIn("#36", pst["details"]["commercial_gap_ids"])
+            self.assertEqual(pst["details"]["forensic_review"]["gap_id"], "#36")
+            self.assertEqual(pst["details"]["email_format_profile"]["support_tier"], "bounded-string-inventory")
+            self.assertIn("mapi-native-object-decode", {item["id"] for item in pst["details"]["email_issue_matrix"]})
 
 
 def write_email_fixture(root: Path) -> None:
@@ -67,6 +79,23 @@ def write_email_fixture(root: Path) -> None:
         "secret mailbox keyword\n",
         encoding="utf-8",
     )
+
+    emlx = EmailMessage()
+    emlx["From"] = "apple@example.test"
+    emlx["To"] = "bob@example.test"
+    emlx["Subject"] = "emlx fixture"
+    emlx.set_content("apple mail body")
+    emlx_bytes = emlx.as_bytes()
+    (root / "message.emlx").write_bytes(str(len(emlx_bytes)).encode("ascii") + b"\n" + emlx_bytes)
+
+    maildir_message = EmailMessage()
+    maildir_message["From"] = "maildir@example.test"
+    maildir_message["To"] = "bob@example.test"
+    maildir_message["Subject"] = "maildir fixture"
+    maildir_message.set_content("maildir body")
+    maildir_cur = root / "Maildir" / "cur"
+    maildir_cur.mkdir(parents=True)
+    (maildir_cur / "1714093200.M1P1Q1.host:2,S").write_bytes(maildir_message.as_bytes())
 
     for name in ("archive.pst", "offline.ost", "message.msg"):
         (root / name).write_bytes(

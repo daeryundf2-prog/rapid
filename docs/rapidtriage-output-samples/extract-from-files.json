@@ -1,47 +1,47 @@
 {
   "command": "extract",
-  "source_command": "files",
-  "input_json": "<ROOT>/rapidtriage-files.json",
-  "root": "<ROOT>",
-  "generated_at": "<GENERATED_AT>",
-  "output_dir": "<ROOT>/extract-out",
+  "entries": [
+    {
+      "categories": [
+        "documents"
+      ],
+      "extracted_path": "<ROOT>/extract-out/evidence/case-notes.txt",
+      "modified_at": "2024-03-04T14:06:07",
+      "original_path": "<ROOT>/evidence/case-notes.txt",
+      "relative_path": "evidence/case-notes.txt",
+      "sha256": "13fd9f7e491a17ad2e440993c72a592d161421eb59b37c1fcfe99c0bcc5b9dc0",
+      "size": 14
+    }
+  ],
   "filters": {
-    "name_contains": [],
-    "path_contains": [],
-    "extensions": [
-      ".txt"
-    ],
     "categories": [
       "documents"
     ],
+    "extensions": [
+      ".txt"
+    ],
     "kinds": [],
-    "limit": 0
+    "limit": 0,
+    "name_contains": [],
+    "path_contains": []
   },
+  "generated_at": "<GENERATED_AT>",
+  "input_json": "<ROOT>/rapidtriage-files.json",
+  "output_dir": "<ROOT>/extract-out",
+  "root": "<ROOT>",
   "safety": {
     "dry_run": false,
-    "read_only": false,
     "max_extract_size_bytes": 0,
     "max_file_count": 0,
-    "overwrite": false
+    "overwrite": false,
+    "read_only": false
   },
+  "skipped": [],
+  "source_command": "files",
   "summary": {
+    "extracted_count": 1,
     "input_count": 2,
     "selected_count": 1,
-    "extracted_count": 1,
     "skipped_count": 0
-  },
-  "entries": [
-    {
-      "original_path": "<ROOT>/evidence/case-notes.txt",
-      "extracted_path": "<ROOT>/extract-out/evidence/case-notes.txt",
-      "relative_path": "evidence/case-notes.txt",
-      "sha256": "13fd9f7e491a17ad2e440993c72a592d161421eb59b37c1fcfe99c0bcc5b9dc0",
-      "modified_at": "2024-03-04T14:06:07",
-      "size": 14,
-      "categories": [
-        "documents"
-      ]
-    }
-  ],
-  "skipped": []
+  }
 }

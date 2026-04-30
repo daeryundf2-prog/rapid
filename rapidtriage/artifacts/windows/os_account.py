@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 from ...core.models import ArtifactRecord
+from .common import build_forensic_review
 from .registry import MAX_HIVE_CELL_SCAN_BYTES, iter_registry_cell_candidates, parse_registry_hive_header
 
 PARSER_VERSION = "windows-os-account-v8"
@@ -36,6 +37,16 @@ SAM_BUILTIN_GROUP_RIDS = {
     "0000022F": "Remote Desktop Users",
     "0000023D": "Event Log Readers",
 }
+SAM_BUILTIN_GROUP_SIDS = {
+    "Administrators": "S-1-5-32-544",
+    "Users": "S-1-5-32-545",
+    "Guests": "S-1-5-32-546",
+    "Power Users": "S-1-5-32-547",
+    "Backup Operators": "S-1-5-32-551",
+    "Remote Desktop Users": "S-1-5-32-555",
+    "Event Log Readers": "S-1-5-32-573",
+}
+BUILTIN_SID_NAMES = {sid: name for name, sid in SAM_BUILTIN_GROUP_SIDS.items()}
 ACCOUNT_HINT_KEYS = (
     "Microsoft\\Windows NT\\CurrentVersion\\ProfileList",
     "Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
@@ -589,6 +600,7 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
         validation_checks = {
             "has_privilege": bool(item.get("privilege")),
             "has_assigned_sid": bool(item.get("assigned_sids")),
+            "has_principal_resolution_hint": bool(privilege_principal_hints(item)),
             "requires_lsa_policy_validation": True,
         }
         report_grade = os_account_report_grade_assessment(
@@ -614,6 +626,7 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "key": item.get("key", ""),
                 "privilege": item.get("privilege", ""),
                 "assigned_sids": list(item.get("assigned_sids") or []),
+                "assigned_principal_hints": privilege_principal_hints(item),
                 "parser_confidence": 0.74,
                 "evidence_strength": "security-privilege-assignment",
                 "validation_required": True,
@@ -666,6 +679,7 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "member_identifier_count": group.get("member_identifier_count", 0),
                 "member_count_semantics": group.get("member_count_semantics", ""),
                 "membership_source_types": list(group.get("membership_source_types") or []),
+                "group_sid_candidates": list(group.get("group_sid_candidates") or []),
                 "privileged_group": bool(group.get("privileged_group")),
                 "parser_confidence": 0.76,
                 "evidence_strength": "exported-group-membership-hint",
@@ -693,6 +707,7 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
         user_name = str(account.get("user_name") or "")
         rid = str(account.get("rid") or "")
         group_rows = group_memberships_for_account(groups, user_name, rid)
+        security_context = account_security_context(account, group_rows, hints)
         risk_flags = account_lifecycle_risk_flags(account, group_rows)
         validation_checks = account_lifecycle_validation_checks(account, group_rows)
         report_grade = os_account_report_grade_assessment(
@@ -732,6 +747,7 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 "uac_flags": list(account.get("uac_flags") or []),
                 "sam_binary_fields": dict(account.get("sam_binary_fields") or {}),
                 "group_membership_hints": group_rows,
+                "account_security_context": security_context,
                 "parser_confidence": account_lifecycle_confidence(account, group_rows),
                 "evidence_strength": "account-lifecycle-registry-export",
                 "validation_required": True,
@@ -739,6 +755,23 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
                 "os_account_report_grade_assessment": report_grade,
                 "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
+                "forensic_review": build_forensic_review(
+                    gap_id="#6",
+                    artifact_goal="SAM/SECURITY/SYSTEM account and privilege context",
+                    primary_evidence=[
+                        f"user={user_name}" if user_name else "",
+                        f"rid={rid}" if rid else "",
+                        f"groups={len(group_rows)}",
+                        f"inherited_privileges={security_context.get('inherited_privilege_count', 0)}",
+                    ],
+                    validation_required=True,
+                    report_grade_assessment=report_grade,
+                    commercial_grade_ready=False,
+                    caveats=[
+                        "Native SAM F/V account structures are only partially decoded.",
+                        "SECURITY secret decryption and transaction-log replay are not complete.",
+                    ],
+                ),
                 "validation_guidance": "Validate account status, group membership, and timestamps against native SAM F/V records, SECURITY policy, and domain context before final testimony.",
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": report_grade["blockers"],
@@ -1071,6 +1104,7 @@ def normalized_group_memberships(groups: object) -> list[dict[str, object]]:
                 "member_identifier_count": len(set(member_sids + [item.lower() for item in member_names])),
                 "member_count_semantics": "estimated from exported SID/name lists; SID-to-name correlation is not proven without native SAM/domain validation",
                 "membership_source_types": group_membership_source_types(member_sids, member_names),
+                "group_sid_candidates": group_sid_candidates(group_name),
                 "privileged_group": is_privileged_group_name(group_name),
             }
         )
@@ -1084,6 +1118,33 @@ def group_membership_source_types(member_sids: list[str], member_names: list[str
     if member_names:
         source_types.append("member-name")
     return source_types
+
+
+def group_sid_candidates(group_name: str) -> list[str]:
+    sid = SAM_BUILTIN_GROUP_SIDS.get(normalize_group_name(group_name), "")
+    return [sid] if sid else []
+
+
+def normalize_group_name(group_name: str) -> str:
+    for candidate in SAM_BUILTIN_GROUP_SIDS:
+        if candidate.lower() == group_name.lower():
+            return candidate
+    return group_name
+
+
+def privilege_principal_hints(item: Mapping[str, object]) -> list[dict[str, str]]:
+    hints: list[dict[str, str]] = []
+    for sid in item.get("assigned_sids", []) if isinstance(item.get("assigned_sids"), list) else []:
+        sid_text = str(sid)
+        principal = BUILTIN_SID_NAMES.get(sid_text, "")
+        hints.append(
+            {
+                "sid": sid_text,
+                "principal": principal,
+                "principal_type": "builtin-alias" if principal else "sid",
+            }
+        )
+    return hints
 
 
 def group_memberships_for_account(groups: object, user_name: str, rid: str) -> list[dict[str, object]]:
@@ -1112,10 +1173,70 @@ def group_memberships_for_account(groups: object, user_name: str, rid: str) -> l
                     "match_types": match_types,
                     "member_sids": member_sids,
                     "member_names": member_names,
+                    "group_sid_candidates": group_sid_candidates(str(group.get("group_name") or "")),
                     "privileged_group": is_privileged_group_name(str(group.get("group_name") or "")),
                 }
             )
     return sorted(matches, key=lambda item: str(item.get("group_name") or ""))
+
+
+def account_security_context(
+    account: Mapping[str, object],
+    group_rows: list[dict[str, object]],
+    hints: Mapping[str, object],
+) -> dict[str, object]:
+    privileges = hints.get("privilege_assignments") if isinstance(hints.get("privilege_assignments"), dict) else {}
+    services = hints.get("services") if isinstance(hints.get("services"), dict) else {}
+    lsa_locations = hints.get("lsa_policy_locations") if isinstance(hints.get("lsa_policy_locations"), dict) else {}
+    group_sid_set = {
+        str(sid)
+        for group in group_rows
+        for sid in group.get("group_sid_candidates", [])
+        if str(sid)
+    }
+    inherited_privileges: list[dict[str, object]] = []
+    for privilege in privileges.values():
+        if not isinstance(privilege, Mapping):
+            continue
+        assigned_sids = [str(item) for item in privilege.get("assigned_sids", []) if str(item)]
+        matched_sids = sorted(group_sid_set.intersection(assigned_sids))
+        if not matched_sids:
+            continue
+        inherited_privileges.append(
+            {
+                "privilege": str(privilege.get("privilege") or ""),
+                "via_group_sids": matched_sids,
+                "via_groups": sorted(BUILTIN_SID_NAMES.get(sid, sid) for sid in matched_sids),
+                "risk_flags": privilege_risk_flags(privilege),
+            }
+        )
+    service_account_matches = [
+        {
+            "service_name": str(service.get("service_name") or ""),
+            "object_name": str(service.get("object_name") or ""),
+            "image_path": str(service.get("image_path") or ""),
+        }
+        for service in services.values()
+        if isinstance(service, Mapping)
+        and str(account.get("user_name") or "").lower()
+        and str(account.get("user_name") or "").lower() in str(service.get("object_name") or "").lower()
+    ]
+    return {
+        "privileged_group_count": sum(1 for group in group_rows if group.get("privileged_group")),
+        "group_sid_candidates": sorted(group_sid_set),
+        "inherited_privilege_count": len(inherited_privileges),
+        "inherited_privileges": sorted(inherited_privileges, key=lambda item: str(item.get("privilege") or "")),
+        "service_account_matches": service_account_matches[:25],
+        "service_account_match_count": len(service_account_matches),
+        "lsa_sensitive_location_count": len(lsa_locations),
+        "requires_native_sam_alias_validation": bool(group_rows),
+        "requires_lsa_policy_validation": bool(privileges or lsa_locations),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "native-sam-alias-member-binary-decoding-required",
+            "lsa-policy-native-validation-required",
+        ],
+    }
 
 
 def account_lifecycle_confidence(account: dict[str, object], group_rows: list[dict[str, object]]) -> float:

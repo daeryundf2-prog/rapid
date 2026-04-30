@@ -8,3 +8,4 @@ rapidtriage-windows-smoke/
 rapidtriage-macos-linux-smoke/
 __pycache__/
 *.pyc
+engines/rust/target/

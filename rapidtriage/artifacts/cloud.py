@@ -7,6 +7,7 @@ from typing import Iterable, Mapping
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
+from .review import build_forensic_review
 
 PARSER_VERSION = "cloud-export-v3"
 CLOUD_JSON_SUFFIXES = {".json"}
@@ -30,6 +31,48 @@ CLOUD_REPORT_GRADE_BLOCKERS = [
     "tenant-permission-sharing-graph-not-complete",
     "known-answer-cloud-export-corpus-required",
 ]
+CLOUD_PROVIDER_PROFILES = {
+    "google": {
+        "services": ("google-takeout", "gmail-takeout", "google-drive", "google-photos", "google-activity"),
+        "collection_modes": ("Takeout archive", "provider API", "admin export"),
+        "known_gaps": (
+            "selected-products-and-export-time-window",
+            "archive-splitting-expiration",
+            "photos-json-sidecar-exif-merge",
+            "location-timeline-on-device-vs-cloud-drift",
+        ),
+    },
+    "apple-icloud": {
+        "services": ("apple-export", "apple-icloud-export", "icloud-drive", "icloud-photos", "icloud-mail"),
+        "collection_modes": ("privacy export", "iCloud.com copy", "device/mac synchronized cache"),
+        "known_gaps": (
+            "advanced-data-protection-limits",
+            "shared-album-resolution-comments-likes-loss",
+            "third-party-icloud-container-visibility",
+            "mail-calendar-contact-client-export-differences",
+        ),
+    },
+    "microsoft-365": {
+        "services": ("microsoft-365", "microsoft-teams", "microsoft-onedrive", "exchange-online", "sharepoint"),
+        "collection_modes": ("Purview eDiscovery export", "Graph API", "audit log export"),
+        "known_gaps": (
+            "teams-cosmosdb-vs-exchange-compliance-records",
+            "pst-packaging-and-items-csv-source-mapping",
+            "retention-hold-policy-and-audit-retention",
+            "sharepoint-onedrive-permission-graph",
+        ),
+    },
+    "collaboration-saas": {
+        "services": ("slack", "dropbox", "box", "zoom", "notion", "atlassian", "github"),
+        "collection_modes": ("workspace export", "admin API", "custodian export"),
+        "known_gaps": (
+            "workspace-plan-dependent-export-scope",
+            "threads-reactions-edits-deletes",
+            "file-version-and-sharing-state",
+            "legal-hold-and-admin-audit-scope",
+        ),
+    },
+}
 
 
 class CloudExportProvider:
@@ -138,6 +181,7 @@ def build_record(
     validation_checks = detail_payload.get("validation_checks")
     if not isinstance(validation_checks, Mapping):
         validation_checks = {}
+    report_grade = cloud_report_grade_assessment(gap_ids, family, service)
     return ArtifactRecord(
         provider=CloudExportProvider.name,
         artifact_type=artifact_type,
@@ -154,8 +198,18 @@ def build_record(
             "commercial_gap_ids": gap_ids,
             "cloud_family": family,
             "cloud_validation_matrix": cloud_validation_matrix(validation_checks),
-            "cloud_report_grade_assessment": cloud_report_grade_assessment(gap_ids, family, service),
+            "cloud_report_grade_assessment": report_grade,
             "cloud_native_capabilities": dict(CLOUD_NATIVE_CAPABILITIES),
+            "cloud_provider_profile": cloud_provider_profile(family, service),
+            "cloud_issue_matrix": cloud_issue_matrix(family, artifact_type),
+            "forensic_review": cloud_forensic_review(
+                gap_ids=gap_ids,
+                family=family,
+                service=service,
+                artifact_type=artifact_type,
+                report_grade=report_grade,
+                details=detail_payload,
+            ),
             **detail_payload,
         },
     )
@@ -395,6 +449,14 @@ def normalize_key(value: object) -> str:
 
 def service_from_path(source_path: str, *, default: str) -> str:
     lowered = source_path.lower()
+    if "slack" in lowered:
+        return "slack"
+    if "dropbox" in lowered:
+        return "dropbox"
+    if "box" in lowered:
+        return "box"
+    if "zoom" in lowered:
+        return "zoom"
     if "gmail" in lowered:
         return "gmail-takeout"
     if "icloud" in lowered or "apple" in lowered:
@@ -412,6 +474,8 @@ def service_from_path(source_path: str, *, default: str) -> str:
 
 def cloud_gap_ids(service: str, artifact_type: str) -> CloudGap:
     lowered = f"{service} {artifact_type}".lower()
+    if any(token in lowered for token in ("slack", "dropbox", "box", "zoom", "notion", "atlassian", "github")):
+        return ["#37", "#38", "#39"], "collaboration-saas"
     if any(token in lowered for token in ("microsoft", "m365", "office", "onedrive", "teams")):
         return ["#39"], "microsoft-365"
     if any(token in lowered for token in ("icloud", "apple")):
@@ -469,6 +533,104 @@ def cloud_report_grade_assessment(gap_ids: list[str], family: str, service: str)
             "Validate key mail/file/message/audit rows against provider-native views or known-answer exports before testimony.",
         ],
     }
+
+
+def cloud_provider_profile(family: str, service: str) -> dict[str, object]:
+    profile = CLOUD_PROVIDER_PROFILES.get(family, {})
+    return {
+        "family": family,
+        "service": service or "unknown",
+        "known_profile": bool(profile),
+        "service_candidates": list(profile.get("services", ())),
+        "collection_modes": list(profile.get("collection_modes", ("export", "api"))),
+        "known_gaps": list(profile.get("known_gaps", ("provider-schema-version-validation",))),
+        "reporting_boundary": "provider-export-scoped-until-source-scope-and-retention-validated",
+    }
+
+
+def cloud_issue_matrix(family: str, artifact_type: str) -> list[dict[str, object]]:
+    is_microsoft = family == "microsoft-365"
+    is_google = family == "google"
+    is_apple = family == "apple-icloud"
+    is_message = artifact_type in {"cloud-message", "cloud-mail"}
+    is_file = artifact_type == "cloud-file"
+    return [
+        {
+            "id": "export-scope-captured",
+            "label": "Provider export/API scope, selected products, tenant/account owner, and request time are captured",
+            "passed": False,
+            "severity": "critical",
+        },
+        {
+            "id": "retention-hold-and-deleted-state",
+            "label": "Retention policy, hold state, deleted object state, and audit retention are validated",
+            "passed": False,
+            "severity": "critical",
+        },
+        {
+            "id": "provider-storage-model",
+            "label": "Provider-specific storage model is understood for this artifact type",
+            "passed": False,
+            "severity": "critical" if is_microsoft and is_message else "high",
+        },
+        {
+            "id": "sidecar-and-metadata-merge",
+            "label": "Sidecar JSON/CSV metadata is merged back to files/messages where needed",
+            "passed": False,
+            "severity": "high" if (is_google or is_file) else "medium",
+        },
+        {
+            "id": "shared-item-permissions",
+            "label": "Sharing, membership, permissions, reactions, edits, and comments are preserved",
+            "passed": False,
+            "severity": "high" if is_file or is_message else "medium",
+        },
+        {
+            "id": "icloud-copy-limitations",
+            "label": "iCloud copy/export limitations such as shared album fidelity and third-party containers are disclosed",
+            "passed": not is_apple,
+            "severity": "high" if is_apple else "low",
+        },
+        {
+            "id": "known-answer-provider-corpus",
+            "label": "Output is diffed against provider-native view and known-answer export corpus",
+            "passed": False,
+            "severity": "critical",
+        },
+    ]
+
+
+def cloud_forensic_review(
+    *,
+    gap_ids: list[str],
+    family: str,
+    service: str,
+    artifact_type: str,
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    primary = [
+        f"artifact_type={artifact_type}",
+        f"family={family}",
+        f"service={service or optional_text(details.get('service'))}",
+        f"event_type={optional_text(details.get('event_type'))}",
+    ]
+    for key in ("timestamp", "subject", "file_name", "chat_id", "operation", "account_email", "url"):
+        value = optional_text(details.get(key))
+        if value:
+            primary.append(f"{key}={value}")
+    return build_forensic_review(
+        gap_id=gap_ids[0] if gap_ids else "#37",
+        artifact_goal="Cloud provider export mail/file/message/audit/account normalization and validation",
+        primary_evidence=primary,
+        validation_required=True,
+        report_grade_assessment=report_grade,
+        blockers=CLOUD_REPORT_GRADE_BLOCKERS,
+        caveats=[
+            "Cloud export rows are provider-export scoped; preserve export/API scope, account ownership, and original hashes.",
+            "Deleted state, retention/eDiscovery semantics, sharing graph, and provider-native completeness remain validation-gated.",
+        ],
+    )
 
 
 def cloud_validation_checks(row: Mapping[str, object], *, required: Iterable[str]) -> dict[str, object]:

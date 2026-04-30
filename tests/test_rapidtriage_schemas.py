@@ -91,6 +91,32 @@ class RapidTriageSchemaValidationTests(unittest.TestCase):
                     summary_path = output_dir / "rapidtriage-run-summary.json"
                     validate(json.loads(summary_path.read_text(encoding="utf-8")), schema)
 
+    def test_artifact_record_v1_schema_accepts_worker_output_contract(self) -> None:
+        payload = {
+            "schema": "ArtifactRecordV1",
+            "artifact_id": "CASE:SRC:file:1",
+            "artifact_family": "file-system",
+            "artifact_type": "file-inventory-record",
+            "parser": "rapid-worker-file-inventory",
+            "parser_version": "0.1.0",
+            "source": {
+                "case_id": "CASE",
+                "source_id": "SRC",
+                "source_path": "/case/source",
+                "offset": None,
+                "length": 10,
+                "hashes": {},
+            },
+            "confidence": 0.9,
+            "validation_required": False,
+            "commercial_grade_ready": False,
+            "commercial_grade_blockers": ["large-case-corpus-validation-required"],
+            "legal_limitations": ["File metadata alone does not prove user intent."],
+            "fields": {"path": "/case/source/a.txt", "size_bytes": 10},
+        }
+
+        validate(payload, load_schema("artifact-record-v1.schema.json"))
+
 
 if __name__ == "__main__":
     unittest.main()

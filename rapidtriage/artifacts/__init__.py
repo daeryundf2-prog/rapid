@@ -6,6 +6,7 @@ from .android import AndroidApkProvider
 from .cloud import CloudExportProvider
 from .email import EmailArtifactsProvider
 from .generic import GenericDocumentArtifactProvider
+from .kakaotalk_windows import KakaoTalkWindowsProvider
 from .linux import LinuxSystemArtifactsProvider
 from .macos import MacOsSystemArtifactsProvider
 from .media import MediaImageProvider
@@ -36,6 +37,7 @@ def all_providers() -> List[object]:
         MediaImageProvider(),
         MemoryVolatilityProvider(),
         MobileExportProvider(),
+        KakaoTalkWindowsProvider(),
         WindowsBrowserArtifactsProvider(),
         WindowsRecentFilesProvider(),
         WindowsOsAccountProvider(),

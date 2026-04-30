@@ -54,6 +54,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
         self.assertIn("--create-case", commands["case-db"].format_help())
         self.assertIn("--import-run", commands["case-db"].format_help())
         self.assertIn("--import-vsc-compare", commands["case-db"].format_help())
+        self.assertIn("--import-worker-jsonl", commands["case-db"].format_help())
         self.assertIn("case-search", commands)
         self.assertIn("--case-id", commands["case-search"].format_help())
         self.assertIn("--source", commands["case-search"].format_help())
@@ -345,6 +346,71 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 metadata_filters=["status=added"],
             )
             self.assertEqual(filtered_out["summary"]["match_count"], 0)
+
+    def test_cli_case_db_imports_worker_jsonl_as_searchable_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            db_path = root / "case.db"
+            worker_jsonl = root / "worker-artifacts.jsonl"
+            worker_record = {
+                "schema": "ArtifactRecordV1",
+                "artifact_id": "CASE-WORKER:SRC:eventlog:1",
+                "artifact_family": "eventlog",
+                "artifact_type": "eventlog-event",
+                "parser": "rapid-worker",
+                "parser_version": "0.1.0",
+                "source": {
+                    "case_id": "CASE-WORKER",
+                    "source_id": "SRC",
+                    "source_path": str(root / "Security.evtx"),
+                    "offset": 4096,
+                    "length": 128,
+                    "hashes": {"sha256": "abc123"},
+                },
+                "confidence": 0.83,
+                "validation_required": True,
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": ["provider-message-rendering-preview-only"],
+                "legal_limitations": ["triage import requires source validation"],
+                "fields": {
+                    "record_id": 42,
+                    "channel": "Security",
+                    "computer": "LAB-PC",
+                    "message_rendering": {
+                        "preview": "PowerShell logon investigation keyword hit",
+                    },
+                },
+            }
+            worker_jsonl.write_text(json.dumps(worker_record, ensure_ascii=False) + "\n", encoding="utf-8")
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                self.assertEqual(
+                    main(
+                        [
+                            "case-db",
+                            str(db_path),
+                            "--import-worker-jsonl",
+                            str(worker_jsonl),
+                            "--case-id",
+                            "CASE-WORKER",
+                            "--json",
+                        ]
+                    ),
+                    0,
+                )
+
+            import_payload = json.loads(stdout.getvalue())
+            self.assertEqual(import_payload["imported_worker_jsonl"]["summary"]["artifact_count"], 1)
+            self.assertEqual(import_payload["imported_worker_jsonl"]["summary"]["indexed_document_count"], 1)
+            database = open_case_database(db_path)
+            payload = database.search_case(case_id="CASE-WORKER", keywords=["PowerShell"], sources=["artifacts"])
+
+            self.assertEqual(payload["summary"]["match_count"], 1)
+            match = payload["matches"][0]
+            self.assertEqual(match["kind"], "eventlog-event")
+            self.assertEqual(match["metadata"]["parser"], "rapid-worker")
+            self.assertEqual(match["path"], str(root / "Security.evtx"))
 
     def test_search_case_finds_documents_files_artifacts_and_timeline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import os
 import textwrap
 from pathlib import Path
 
@@ -40,7 +42,16 @@ from .core.collect_plan import (
     run_collect_export,
     supported_collect_profiles,
 )
-from .core.commercial_readiness import CommercialReadinessError, build_commercial_readiness_report
+from .core.commercial_readiness import (
+    MATURITY_GATE_ORDER,
+    CommercialReadinessError,
+    build_known_answer_template_batches,
+    build_known_answer_manifest_template,
+    build_commercial_readiness_report,
+    parse_item_range,
+    write_known_answer_template_batches,
+    write_known_answer_manifest_template,
+)
 from .core.cloud_api import (
     DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES,
     DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
@@ -48,6 +59,7 @@ from .core.cloud_api import (
     CloudApiCollectionError,
     run_cloud_api_collection,
 )
+from .core.columnar_store import ColumnarStoreUnavailable, convert_jsonl_to_parquet, run_columnar_benchmark
 from .core.compare import CompareError, compare_many_paths, compare_paths
 from .core.confidence import (
     ConfidenceDashboardError,
@@ -65,9 +77,23 @@ from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
 from .core.indicators import IndicatorSummaryError, build_indicator_summary
 from .core.input_root import SUPPORTED_INPUT_ROOT_KINDS, resolve_input_root
 from .core.keyword_packs import KeywordPackError, keyword_pack_library_assessment, list_keyword_packs, resolve_keyword_packs
+from .core.kakaotalk import (
+    DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES,
+    DEFAULT_MEMORY_SQLITE_MAX_HITS,
+    DEFAULT_MEMORY_MESSAGE_RESIDUE_LIMIT,
+    DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT,
+    KakaoTalkDecryptError,
+    run_kakaotalk_windows_collect,
+    run_kakaotalk_decrypt,
+    run_kakaotalk_key_store_inspect,
+    run_kakaotalk_memory_carve,
+    run_kakaotalk_sqlcipher_probe,
+    run_kakaotalk_userdir_bruteforce,
+)
 from .core.normalize import NormalizationError, build_normalized_case
 from .core.ocr_queue import OcrQueueError, build_ocr_queue
 from .core.plugins import PluginError, load_plugin_registry, validate_plugin_manifest, read_plugin_manifest
+from .core.rearchitecture import build_rearchitecture_status
 from .core.rules import RuleConfigError, load_rule_set
 from .core.run import RunModeError, SUPPORTED_RUN_MODES, run_triage_mode
 from .core.sample_case import DEFAULT_SAMPLE_DIR, DEFAULT_SAMPLE_MODE, SampleCaseError, create_sample_case, run_sample_workflow
@@ -76,6 +102,7 @@ from .core.timeline import TimelineError, build_timeline_report, run_timeline
 from .core.timeline_export import TimelineExportError, build_unified_timeline_export
 from .core.validation import ValidationError, build_validation_package
 from .core.vsc import VscCompareError, compare_vsc_snapshots, extract_vsc_changes
+from .core.worker import RustWorkerClient, WorkerError
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 TOP_LEVEL_EPILOG = """Examples:
@@ -229,6 +256,168 @@ def build_parser() -> argparse.ArgumentParser:
     artifacts.add_argument("--kind", required=True, choices=sorted(SUPPORTED_ARTIFACT_KINDS), help="Artifact collector kind")
     artifacts.add_argument("--output", help="JSON output path (default: ./rapidtriage-artifacts-KIND.json)")
     add_rules_argument(artifacts)
+
+    kakao_decrypt = sub.add_parser(
+        "kakaotalk-decrypt",
+        help="Decrypt authorized Windows KakaoTalk chatLogs_*.edb files and summarize message tables",
+        description="Decrypt authorized Windows KakaoTalk chatLogs_*.edb files and summarize message tables",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              RAPIDTRIAGE_KAKAO_KEY_HEX=... RAPIDTRIAGE_KAKAO_IV_HEX=... rapidtriage kakaotalk-decrypt ./KakaoTalk --output kakao-decrypt.json
+              RAPIDTRIAGE_KAKAO_PRAGMA=... RAPIDTRIAGE_KAKAO_USER_ID=12345 rapidtriage kakaotalk-decrypt ./KakaoTalk --include-message-preview
+            """
+        ),
+    )
+    kakao_decrypt.add_argument("root", help="Extracted KakaoTalk user/app-data folder to scan")
+    kakao_decrypt.add_argument("--output", default="rapidtriage-kakaotalk-decrypt.json", help="JSON output path")
+    kakao_decrypt.add_argument("--key-hex", help="Authorized 16-byte AES key as hex; prefer env to avoid shell history")
+    kakao_decrypt.add_argument("--iv-hex", help="Authorized 16-byte AES IV as hex; prefer env to avoid shell history")
+    kakao_decrypt.add_argument("--key-hex-env", default="RAPIDTRIAGE_KAKAO_KEY_HEX", help="Environment variable for AES key hex")
+    kakao_decrypt.add_argument("--iv-hex-env", default="RAPIDTRIAGE_KAKAO_IV_HEX", help="Environment variable for AES IV hex")
+    kakao_decrypt.add_argument("--pragma", help="Authorized KakaoTalk pragma value; prefer env to avoid shell history")
+    kakao_decrypt.add_argument("--user-id", help="Authorized KakaoTalk userId paired with pragma; prefer env")
+    kakao_decrypt.add_argument("--pragma-key-hex", help="Authorized 16-byte DeviceInfo pragma-generation key as hex")
+    kakao_decrypt.add_argument("--sys-uuid", help="Override DeviceInfo sys_uuid; otherwise NTUSER.DAT/env is used")
+    kakao_decrypt.add_argument("--hdd-model", help="Override DeviceInfo hdd_model; otherwise NTUSER.DAT/env is used")
+    kakao_decrypt.add_argument("--hdd-serial", help="Override DeviceInfo hdd_serial; otherwise NTUSER.DAT/env is used")
+    kakao_decrypt.add_argument("--pragma-env", default="RAPIDTRIAGE_KAKAO_PRAGMA", help="Environment variable for pragma")
+    kakao_decrypt.add_argument("--user-id-env", default="RAPIDTRIAGE_KAKAO_USER_ID", help="Environment variable for userId")
+    kakao_decrypt.add_argument("--pragma-key-hex-env", default="RAPIDTRIAGE_KAKAO_PRAGMA_KEY_HEX", help="Environment variable for DeviceInfo pragma-generation key hex")
+    kakao_decrypt.add_argument("--sys-uuid-env", default="RAPIDTRIAGE_KAKAO_SYS_UUID", help="Environment variable for DeviceInfo sys_uuid")
+    kakao_decrypt.add_argument("--hdd-model-env", default="RAPIDTRIAGE_KAKAO_HDD_MODEL", help="Environment variable for DeviceInfo hdd_model")
+    kakao_decrypt.add_argument("--hdd-serial-env", default="RAPIDTRIAGE_KAKAO_HDD_SERIAL", help="Environment variable for DeviceInfo hdd_serial")
+    kakao_decrypt.add_argument("--include-message-preview", action="store_true", help="Include bounded raw message previews in JSON")
+    kakao_decrypt.add_argument("--write-decrypted", action="store_true", help="Write decrypted SQLite files to --decrypted-dir")
+    kakao_decrypt.add_argument("--decrypted-dir", help="Directory for decrypted SQLite files when --write-decrypted is set")
+    kakao_decrypt.add_argument("--max-databases", type=int, default=0, help="Limit chatLogs databases processed (0 means all)")
+    kakao_decrypt.add_argument("--max-messages-per-db", type=int, default=20, help="Bounded preview rows per database")
+    kakao_decrypt.add_argument("--openssl-bin", default="openssl", help="OpenSSL binary used for AES-CBC pages")
+    kakao_decrypt.add_argument(
+        "--no-postpatch-memory-carve",
+        action="store_true",
+        help="Disable fallback SQLite carving from KakaoTalk process memory dumps when legacy decrypt fails",
+    )
+    kakao_decrypt.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
+
+    kakao_collect = sub.add_parser(
+        "kakaotalk-collect-windows",
+        help="Collect authorized Windows PC KakaoTalk data into a ZIP and optionally analyze it",
+        description="Collect authorized Windows PC KakaoTalk data into a ZIP and optionally run the KakaoTalk SQLCipher/report workflow",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage kakaotalk-collect-windows --output-root ./cases --analyze --no-xlsx
+              rapidtriage kakaotalk-collect-windows --kakao-root "C:\\Users\\USER\\AppData\\Local\\Kakao\\KakaoTalk" --output-root D:\\Cases
+              rapidtriage kakaotalk-collect-windows --include-memory-dump --analyze --sqlcipher-bin C:\\Tools\\sqlcipher.exe
+            """
+        ),
+    )
+    kakao_collect.add_argument("--output-root", default="kakaotalk_auto_cases", help="Directory where collection case folders are created")
+    kakao_collect.add_argument("--kakao-root", help="Override KakaoTalk root; default is %%LOCALAPPDATA%%\\Kakao\\KakaoTalk on Windows")
+    kakao_collect.add_argument("--include-memory-dump", action="store_true", help="Also attempt a KakaoTalk.exe memory dump; may require Administrator")
+    kakao_collect.add_argument("--analyze", action="store_true", help="Run post-patch SQLCipher/message/media analysis after collection")
+    kakao_collect.add_argument("--sqlcipher-bin", default="sqlcipher", help="SQLCipher binary used when --analyze is set")
+    kakao_collect.add_argument("--timeout-seconds", type=float, default=5.0, help="Timeout per SQLCipher probe when --analyze is set")
+    kakao_collect.add_argument("--max-message-residues", type=int, default=1000, help="Maximum memory message residues when --analyze is set")
+    kakao_collect.add_argument("--no-xlsx", action="store_true", help="Record that XLSX output should be skipped by wrapper tooling")
+    kakao_collect.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
+
+    kakao_memory_carve = sub.add_parser(
+        "kakaotalk-memory-carve",
+        help="Carve decrypted SQLite residues from authorized KakaoTalk process memory dumps",
+        description="Carve decrypted SQLite residues from authorized KakaoTalk process memory dumps",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage kakaotalk-memory-carve ./KakaoTalk --output kakao-memory-carve.json
+              rapidtriage kakaotalk-memory-carve ./KakaoTalk --write-carves --carve-dir ./memory-carves
+            """
+        ),
+    )
+    kakao_memory_carve.add_argument("root", help="Extracted KakaoTalk folder containing KakaoTalk.DMP or memory dumps")
+    kakao_memory_carve.add_argument("--output", default="rapidtriage-kakaotalk-memory-carve.json", help="JSON output path")
+    kakao_memory_carve.add_argument("--carve-dir", help="Directory for carved SQLite files when --write-carves is set")
+    kakao_memory_carve.add_argument("--write-carves", action="store_true", help="Write carved SQLite fragments to --carve-dir")
+    kakao_memory_carve.add_argument("--max-hits", type=int, default=DEFAULT_MEMORY_SQLITE_MAX_HITS, help="Maximum SQLite headers to carve (0 means all)")
+    kakao_memory_carve.add_argument("--max-carve-bytes", type=int, default=DEFAULT_MEMORY_SQLITE_MAX_CARVE_BYTES, help="Maximum bytes to carve for one SQLite header")
+    kakao_memory_carve.add_argument("--include-row-preview", action="store_true", help="Include bounded row previews when readable")
+    kakao_memory_carve.add_argument("--include-message-preview", action="store_true", help="Include process-memory chat message body previews")
+    kakao_memory_carve.add_argument("--message-csv", help="Optional UTF-8-SIG CSV path for process-memory chat message body residues")
+    kakao_memory_carve.add_argument("--max-rows-per-table", type=int, default=3, help="Bounded row previews per table")
+    kakao_memory_carve.add_argument(
+        "--max-message-residues",
+        type=int,
+        default=DEFAULT_MEMORY_MESSAGE_RESIDUE_LIMIT,
+        help="Maximum process-memory chat JSON message residues to report (0 means all)",
+    )
+    kakao_memory_carve.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
+
+    kakao_sqlcipher_probe = sub.add_parser(
+        "kakaotalk-sqlcipher-probe",
+        help="Probe post-patch KakaoTalk chatLogs_*.edb with redacted SQLCipher key residues from memory",
+        description="Probe post-patch KakaoTalk chatLogs_*.edb with redacted SQLCipher key residues from memory",
+    )
+    kakao_sqlcipher_probe.add_argument("root", help="Extracted KakaoTalk folder containing chatLogs_*.edb and memory dumps")
+    kakao_sqlcipher_probe.add_argument("--output", default="rapidtriage-kakaotalk-sqlcipher-probe.json", help="JSON output path")
+    kakao_sqlcipher_probe.add_argument("--sqlcipher-bin", default="sqlcipher", help="SQLCipher binary to use for temp-copy probes")
+    kakao_sqlcipher_probe.add_argument("--max-keys", type=int, default=DEFAULT_MEMORY_SQLCIPHER_KEY_RESIDUE_LIMIT, help="Maximum unique SQLCipher key residues to test (0 means all)")
+    kakao_sqlcipher_probe.add_argument("--max-databases", type=int, default=0, help="Maximum chatLogs databases to test (0 means all)")
+    kakao_sqlcipher_probe.add_argument("--max-message-residues", type=int, default=DEFAULT_MEMORY_MESSAGE_RESIDUE_LIMIT, help="Maximum post-patch message JSON residues to collect from memory (0 means all)")
+    kakao_sqlcipher_probe.add_argument("--include-message-preview", action="store_true", help="Include recovered message text previews in JSON output")
+    kakao_sqlcipher_probe.add_argument("--timeout-seconds", type=float, default=2.0, help="Timeout per SQLCipher key/database/compatibility probe")
+    kakao_sqlcipher_probe.add_argument("--export-opened-dir", help="Optional directory to export SQLCipher-openable EDBs as plaintext SQLite")
+    kakao_sqlcipher_probe.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
+
+    kakao_key_store = sub.add_parser(
+        "kakaotalk-key-store-inspect",
+        help="Inspect post-patch KakaoTalk appstate.dat wrapped-DEK key stores without exporting secrets",
+        description="Inspect post-patch KakaoTalk appstate.dat wrapped-DEK key stores without exporting secrets",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage kakaotalk-key-store-inspect ./KakaoTalk --output kakao-key-store.json
+              rapidtriage kakaotalk-key-store-inspect ./KakaoTalk --max-memory-sources 1 --json
+            """
+        ),
+    )
+    kakao_key_store.add_argument("root", help="Extracted KakaoTalk folder containing appstate.dat and chatLogs_*.edb")
+    kakao_key_store.add_argument("--output", default="rapidtriage-kakaotalk-key-store.json", help="JSON output path")
+    kakao_key_store.add_argument("--max-memory-sources", type=int, default=2, help="Maximum memory dumps to check for key-store residency (0 disables memory checks)")
+    kakao_key_store.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
+
+    kakao_userdir = sub.add_parser(
+        "kakaotalk-userdir-bruteforce",
+        help="Find an authorized Windows KakaoTalk userId from a users/<userDir> folder name",
+        description="Find an authorized Windows KakaoTalk userId from a users/<userDir> folder name",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage kakaotalk-userdir-bruteforce ./KakaoTalk --userdir-home "C:\\Users\\USER\\AppData\\Local\\Kakao\\KakaoTalk\\users" --pragma-key-hex ...
+              rapidtriage kakaotalk-userdir-bruteforce ./KakaoTalk --pragma ... --start-id 1 --end-id 400000000 --chunk-size 10000000
+            """
+        ),
+    )
+    kakao_userdir.add_argument("root", help="Extracted KakaoTalk user/app-data folder to scan")
+    kakao_userdir.add_argument("--output", default="rapidtriage-kakaotalk-userdir-bruteforce.json", help="JSON output path")
+    kakao_userdir.add_argument("--userdir", help="40-hex users/<userDir> folder name; inferred when omitted")
+    kakao_userdir.add_argument("--userdir-home", help=r'Original Windows users path, e.g. C:\Users\USER\AppData\Local\Kakao\KakaoTalk\users')
+    kakao_userdir.add_argument("--pragma", help="Authorized KakaoTalk pragma value; prefer env/file handling outside shell history")
+    kakao_userdir.add_argument("--pragma-key-hex", help="Authorized 16-byte DeviceInfo pragma-generation key as hex")
+    kakao_userdir.add_argument("--sys-uuid", help="Override DeviceInfo sys_uuid; otherwise NTUSER.DAT is used")
+    kakao_userdir.add_argument("--hdd-model", help="Override DeviceInfo hdd_model; otherwise NTUSER.DAT is used")
+    kakao_userdir.add_argument("--hdd-serial", help="Override DeviceInfo hdd_serial; otherwise NTUSER.DAT is used")
+    kakao_userdir.add_argument("--start-id", type=int, default=1, help="First numeric userId to test")
+    kakao_userdir.add_argument("--end-id", type=int, default=400_000_000, help="Last numeric userId to test")
+    kakao_userdir.add_argument("--chunk-size", type=int, default=10_000_000, help="Range size per checkpointed native-helper run")
+    kakao_userdir.add_argument("--compiler", default="cc", help="C compiler for the native CommonCrypto accelerator")
+    kakao_userdir.add_argument("--openssl-bin", default="openssl", help="OpenSSL binary used for DeviceInfo pragma derivation checks")
+    kakao_userdir.add_argument("--json", action="store_true", help="Print JSON payload to stdout")
 
     cloud_collect = sub.add_parser(
         "cloud-collect",
@@ -610,6 +799,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     enterprise_policy.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
+    rearchitecture_status = sub.add_parser(
+        "rearchitecture-status",
+        help="Evaluate Python/Rust commercial re-architecture progress",
+        description="Evaluate the staged Python/Rust re-architecture plan, worker foundation, storage foundation, and local blockers",
+    )
+    rearchitecture_status.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    worker_parse = sub.add_parser(
+        "worker-parse",
+        help="Run an isolated Rust parser worker and store ArtifactRecordV1 JSONL",
+        description="Run rapid-worker as an isolated parser process and stream normalized ArtifactRecordV1 rows to JSONL",
+    )
+    worker_parse.add_argument("source", help="Evidence source path for the worker")
+    worker_parse.add_argument("--kind", required=True, help="Worker parser kind, e.g. noop or file-inventory")
+    worker_parse.add_argument("--output", required=True, help="ArtifactRecordV1 JSONL output path")
+    worker_parse.add_argument("--worker", help="Path to rapid-worker executable; defaults to RAPIDTRIAGE_RUST_WORKER or PATH")
+    worker_parse.add_argument("--case-id", default="CASE", help="Case ID to pass to the worker")
+    worker_parse.add_argument("--source-id", default="SOURCE", help="Source ID to pass to the worker")
+    worker_parse.add_argument("--timeout-seconds", type=float, default=30.0, help="Worker timeout in seconds")
+    worker_parse.add_argument("--extra-arg", action="append", default=[], help="Extra raw argument for the worker; repeat as needed")
+    worker_parse.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
     case_backup = sub.add_parser("case-backup", help="Back up a RapidTriage Case DB with hashes")
     case_backup.add_argument("database", help="Case DB path")
     case_backup.add_argument("--output-dir", required=True, help="Directory for backup files and manifest")
@@ -675,6 +886,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage case-db ./rapidtriage-case.db --create-case CASE-001 --name "Case 001"
               rapidtriage case-db ./rapidtriage-case.db --import-run ./rapidtriage-sample/run-output --case-id CASE-001
               rapidtriage case-db ./rapidtriage-case.db --import-vsc-compare ./vsc-delta.json --case-id CASE-001
+              rapidtriage case-db ./rapidtriage-case.db --import-worker-jsonl ./worker-artifacts.jsonl --case-id CASE-001
               rapidtriage case-db ./rapidtriage-case.db --list --json
             """
         ),
@@ -683,7 +895,8 @@ def build_parser() -> argparse.ArgumentParser:
     case_db.add_argument("--create-case", metavar="CASE_ID", help="Create a case record after initializing the DB")
     case_db.add_argument("--import-run", help="Import a completed run output directory or rapidtriage-run-summary.json")
     case_db.add_argument("--import-vsc-compare", help="Import a rapidtriage vsc-compare JSON as reviewable case artifacts")
-    case_db.add_argument("--case-id", help="Case ID for --import-run or --import-vsc-compare")
+    case_db.add_argument("--import-worker-jsonl", help="Import ArtifactRecordV1 JSONL emitted by worker-parse")
+    case_db.add_argument("--case-id", help="Case ID for --import-run, --import-vsc-compare, or --import-worker-jsonl")
     case_db.add_argument("--name", help="Case display name for --create-case")
     case_db.add_argument("--description", default="", help="Case description for --create-case")
     case_db.add_argument("--examiner", default="", help="Examiner name for --create-case")
@@ -806,6 +1019,27 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--resume", action="store_true", help="Reuse valid benchmark run outputs when the input fingerprint is unchanged")
     benchmark.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
+    columnar_benchmark = sub.add_parser(
+        "columnar-benchmark",
+        help="Benchmark ArtifactRecordV1 JSONL and optional Parquet columnar storage",
+        description="Write synthetic ArtifactRecordV1 rows to JSONL and, when optional dependencies exist, Parquet",
+    )
+    columnar_benchmark.add_argument("--output-dir", required=True, help="Directory for columnar benchmark outputs")
+    columnar_benchmark.add_argument("--record-count", type=int, default=10_000, help="Synthetic ArtifactRecordV1 row count")
+    columnar_benchmark.add_argument("--keyword", default="PowerShell", help="Keyword embedded in every tenth synthetic row")
+    columnar_benchmark.add_argument("--query-iterations", type=int, default=3, help="Repeated JSONL keyword scan samples")
+    columnar_benchmark.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    columnar_convert = sub.add_parser(
+        "columnar-convert",
+        help="Convert ArtifactRecordV1 JSONL into optional Parquet columnar storage",
+        description="Convert worker-parse ArtifactRecordV1 JSONL into row-grouped Parquet when pyarrow is installed",
+    )
+    columnar_convert.add_argument("--input-jsonl", required=True, help="ArtifactRecordV1 JSONL file from worker-parse")
+    columnar_convert.add_argument("--output-parquet", required=True, help="Destination Parquet file")
+    columnar_convert.add_argument("--row-group-size", type=int, default=100_000, help="Parquet row group size")
+    columnar_convert.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
     stress_plan = sub.add_parser(
         "stress-plan",
         help="Write a repeatable 1TB-10TB stress-test plan without generating large data",
@@ -847,12 +1081,50 @@ def build_parser() -> argparse.ArgumentParser:
             Examples:
               rapidtriage commercial-readiness --json
               rapidtriage commercial-readiness --output-dir ./commercial-readiness --json
+              rapidtriage commercial-readiness --validation-package ./validation/rapidtriage-validation-package.json --json
+              rapidtriage commercial-readiness --next-gate validated --limit 10
+              rapidtriage commercial-readiness --next-gate validated --limit 5 --write-known-answer-template ./known-answer-runs.template.json
+              rapidtriage commercial-readiness --template-items 1-120 --template-batch-size 5 --write-known-answer-template-dir ./known-answer-batches
               rapidtriage commercial-readiness --strict
             """
         ),
     )
     commercial_readiness.add_argument("--backlog", help="Path to rapidtriage-commercial-parity-backlog.md")
     commercial_readiness.add_argument("--output-dir", help="Optional directory for JSON and Markdown gate reports")
+    commercial_readiness.add_argument(
+        "--validation-package",
+        help="Optional validation package or known-answer manifest that maps passing datasets to backlog item numbers",
+    )
+    commercial_readiness.add_argument(
+        "--next-gate",
+        choices=MATURITY_GATE_ORDER,
+        help="Focus console/JSON triage on items whose next required maturity gate matches this value",
+    )
+    commercial_readiness.add_argument(
+        "--limit",
+        type=int,
+        default=25,
+        help="Maximum priority items to show in the focused readiness plan (default: 25)",
+    )
+    commercial_readiness.add_argument(
+        "--write-known-answer-template",
+        help="Write a not-run known-answer manifest template for the selected next-gate priority items",
+    )
+    commercial_readiness.add_argument(
+        "--write-known-answer-template-dir",
+        help="Write not-run known-answer manifest templates in batches for --template-items",
+    )
+    commercial_readiness.add_argument(
+        "--template-items",
+        default="1-120",
+        help="Item range/list for --write-known-answer-template-dir, e.g. 1-5,10,20-25 (default: 1-120)",
+    )
+    commercial_readiness.add_argument(
+        "--template-batch-size",
+        type=int,
+        default=5,
+        help="Number of backlog items per known-answer template batch (default: 5)",
+    )
     commercial_readiness.add_argument("--strict", action="store_true", help="Exit non-zero when commercial gaps remain")
     commercial_readiness.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
@@ -1134,6 +1406,33 @@ def web_main(argv=None) -> int:
     return 2
 
 
+def write_kakaotalk_message_residue_csv(payload: dict[str, object], output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    rows = payload.get("chat_message_residues") or []
+    fieldnames = [
+        "source_path",
+        "source_offset",
+        "chat_id",
+        "log_id",
+        "author_id",
+        "send_at",
+        "send_at_utc",
+        "type",
+        "deleted",
+        "message_text",
+        "message_text_length",
+        "message_text_sha256",
+        "attachment_length",
+        "attachment_sha256",
+    ]
+    with output.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict):
+                writer.writerow(row)
+
+
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -1378,6 +1677,63 @@ def main(argv=None) -> int:
             print(f"Multi-user server: {payload['multi_user_case_server']['status']}")
         return 0
 
+    if args.command == "rearchitecture-status":
+        payload = build_rearchitecture_status()
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("RapidTriage re-architecture status")
+            print(f"Overall: {payload['overall_status']}")
+            print(f"Checks: {payload['passed_count']}/{payload['check_count']} passed")
+            focus = payload.get("focus_balance") if isinstance(payload.get("focus_balance"), dict) else {}
+            if focus:
+                print(f"Focus lanes: {focus.get('lane_count')} ({', '.join(sorted(focus.get('lanes', {}).keys()))})")
+            if payload["blocked_count"]:
+                print(f"Blocked checks: {payload['blocked_count']}")
+            plan_items = payload.get("balanced_next_stage_plan")
+            if isinstance(plan_items, list) and plan_items:
+                print("Balanced 1-18 plan:")
+                for item in plan_items:
+                    if not isinstance(item, dict):
+                        continue
+                    print(
+                        f"- {item.get('number')}. {item.get('title')} "
+                        f"[{item.get('lane')}, {item.get('status')}]"
+                    )
+            print("Next steps:")
+            for item in payload["next_steps"]:
+                print(f"- {item}")
+        return 0
+
+    if args.command == "worker-parse":
+        env_worker = os.environ.get("RAPIDTRIAGE_RUST_WORKER") or ""
+        client = (
+            RustWorkerClient(executable=Path(args.worker).expanduser().resolve(), timeout_seconds=args.timeout_seconds)
+            if args.worker
+            else RustWorkerClient(
+                executable=Path(env_worker).expanduser().resolve() if env_worker else None,
+                timeout_seconds=args.timeout_seconds,
+            )
+        )
+        try:
+            payload = client.parse_to_jsonl(
+                kind=args.kind,
+                source=Path(args.source).expanduser().resolve(),
+                output_path=Path(args.output).expanduser().resolve(),
+                case_id=args.case_id,
+                source_id=args.source_id,
+                extra_args=args.extra_arg or (),
+            )
+        except (WorkerError, OSError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Worker pipeline: {payload['pipeline_status']}")
+            print(f"Records: {payload['artifact_store']['record_count']}")
+            print(f"Output: {payload['artifact_store']['path']}")
+        return 0
+
     if args.command == "case-backup":
         try:
             payload = build_case_backup(
@@ -1486,6 +1842,7 @@ def main(argv=None) -> int:
             created_case = None
             imported_run = None
             imported_vsc_compare = None
+            imported_worker_jsonl = None
             if args.create_case:
                 created_case = database.create_case(
                     case_id=args.create_case,
@@ -1520,6 +1877,15 @@ def main(argv=None) -> int:
                     case_id=import_case_id,
                     case_name=args.name,
                 )
+            if args.import_worker_jsonl:
+                import_case_id = args.case_id or args.create_case
+                if not import_case_id:
+                    parser.error("--case-id or --create-case is required with --import-worker-jsonl")
+                imported_worker_jsonl = database.import_worker_jsonl(
+                    Path(args.import_worker_jsonl).expanduser().resolve(),
+                    case_id=import_case_id,
+                    case_name=args.name,
+                )
             cases = database.list_cases() if args.list or created_case is not None else []
         except CaseDatabaseError as exc:
             parser.error(str(exc))
@@ -1531,6 +1897,7 @@ def main(argv=None) -> int:
             "created_case": created_case.to_dict() if created_case else None,
             "imported_run": imported_run,
             "imported_vsc_compare": imported_vsc_compare,
+            "imported_worker_jsonl": imported_worker_jsonl,
             "cases": [case.to_dict() for case in cases],
         }
         if args.json:
@@ -1546,6 +1913,9 @@ def main(argv=None) -> int:
             if imported_vsc_compare:
                 print(f"Imported VSC compare into case: {imported_vsc_compare['case_id']}")
                 print(f"VSC import counts: {imported_vsc_compare['summary']}")
+            if imported_worker_jsonl:
+                print(f"Imported worker JSONL into case: {imported_worker_jsonl['case_id']}")
+                print(f"Worker import counts: {imported_worker_jsonl['summary']}")
             if cases:
                 print(f"Cases: {len(cases)}")
                 for case in cases:
@@ -1702,6 +2072,53 @@ def main(argv=None) -> int:
             )
         return 0
 
+    if args.command == "columnar-benchmark":
+        try:
+            payload = run_columnar_benchmark(
+                output_dir=Path(args.output_dir).expanduser().resolve(),
+                record_count=args.record_count,
+                keyword=args.keyword,
+                query_iterations=args.query_iterations,
+            )
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            jsonl = payload["jsonl_baseline"]
+            parquet = payload["parquet"]
+            print(f"Saved columnar benchmark JSON: {payload['outputs']['json']}")
+            print(f"Saved columnar benchmark report: {payload['outputs']['markdown']}")
+            print(
+                "JSONL: "
+                f"{jsonl['record_count']} rows in {jsonl['seconds']}s "
+                f"({jsonl['records_per_second']} rows/s), query p95 {jsonl['query_seconds_p95']}s"
+            )
+            print(f"Parquet: {parquet['status']}")
+            print(f"DuckDB Parquet query: {payload['duckdb_parquet_query']['status']}")
+        return 0
+
+    if args.command == "columnar-convert":
+        try:
+            payload = convert_jsonl_to_parquet(
+                input_jsonl=Path(args.input_jsonl).expanduser().resolve(),
+                output_parquet=Path(args.output_parquet).expanduser().resolve(),
+                row_group_size=args.row_group_size,
+            )
+        except (ColumnarStoreUnavailable, OSError, ValueError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Saved Parquet: {payload['output_parquet']}")
+            print(f"Saved conversion manifest: {payload['manifest_path']}")
+            print(
+                "Rows: "
+                f"{payload['record_count']}  Rejected: {payload['rejected_count']}  "
+                f"Rows/s: {payload['records_per_second']}"
+            )
+        return 0
+
     if args.command == "stress-plan":
         try:
             payload = build_stress_test_plan(
@@ -1746,9 +2163,55 @@ def main(argv=None) -> int:
             payload = build_commercial_readiness_report(
                 backlog_path=Path(args.backlog).expanduser().resolve() if args.backlog else None,
                 output_dir=Path(args.output_dir).expanduser().resolve() if args.output_dir else None,
+                validation_package_path=(
+                    Path(args.validation_package).expanduser().resolve() if args.validation_package else None
+                ),
             )
         except CommercialReadinessError as exc:
             parser.error(str(exc))
+        focused_items = []
+        if args.next_gate:
+            focused_items = [
+                item
+                for item in payload.get("all_items", [])
+                if isinstance(item, dict) and item.get("next_required_gate") == args.next_gate
+            ]
+            focused_items = focused_items[: max(args.limit, 0)]
+            payload["focused_next_gate"] = args.next_gate
+            payload["focused_items"] = focused_items
+        elif args.limit != 25:
+            payload["priority_work_plan"] = payload.get("priority_work_plan", [])[: max(args.limit, 0)]
+        if args.write_known_answer_template:
+            template_next_gate = args.next_gate or "validated"
+            template_payload = build_known_answer_manifest_template(
+                payload.get("all_items", []),
+                next_gate=template_next_gate,
+                limit=args.limit,
+            )
+            template_outputs = write_known_answer_manifest_template(
+                template_payload,
+                Path(args.write_known_answer_template).expanduser().resolve(),
+            )
+            template_payload["outputs"] = template_outputs
+            payload["known_answer_manifest_template"] = template_payload
+        if args.write_known_answer_template_dir:
+            template_next_gate = args.next_gate or "validated"
+            try:
+                template_item_numbers = parse_item_range(args.template_items)
+                batch_payload = build_known_answer_template_batches(
+                    payload.get("all_items", []),
+                    item_numbers=template_item_numbers,
+                    batch_size=args.template_batch_size,
+                    next_gate=template_next_gate,
+                )
+                batch_outputs = write_known_answer_template_batches(
+                    batch_payload,
+                    Path(args.write_known_answer_template_dir).expanduser().resolve(),
+                )
+            except CommercialReadinessError as exc:
+                parser.error(str(exc))
+            batch_payload["outputs"] = batch_outputs
+            payload["known_answer_manifest_template_batches"] = batch_payload
         if args.json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
@@ -1757,10 +2220,56 @@ def main(argv=None) -> int:
             print(f"Readiness score: {payload['readiness_score']}/100")
             print(f"Non-commercial items: {payload['non_commercial_count']}/{payload['item_count']}")
             print(f"Commercial claim allowed: {payload['commercial_claim_allowed']}")
+            maturity_summary = payload.get("maturity_gate_summary")
+            if isinstance(maturity_summary, dict):
+                gate_counts = maturity_summary.get("gate_counts")
+                if isinstance(gate_counts, dict):
+                    print("Maturity gates:")
+                    for gate_name in ("implemented", "usable", "validated", "commercial_grade"):
+                        counts = gate_counts.get(gate_name)
+                        if isinstance(counts, dict):
+                            print(f"- {gate_name}: {counts.get('passed', 0)} passed / {counts.get('failed', 0)} remaining")
+            validation_summary = payload.get("validation_evidence_summary")
+            if isinstance(validation_summary, dict) and validation_summary.get("validation_package_attached"):
+                print(
+                    "Validation evidence attached: "
+                    f"{validation_summary.get('items_with_passed_validation_evidence', 0)} items"
+                )
+            if args.next_gate:
+                print(f"Focused next gate: {args.next_gate}")
+                focus_source = focused_items
+            else:
+                focus_source = payload.get("priority_work_plan", [])
+            if isinstance(focus_source, list) and focus_source:
+                print("Priority work plan:")
+                for item in focus_source[: max(args.limit, 0)]:
+                    if not isinstance(item, dict):
+                        continue
+                    action = str(item.get("required_action") or item.get("remaining_gap") or item.get("release_gate") or "")
+                    if len(action) > 140:
+                        action = action[:137].rstrip() + "..."
+                    print(
+                        f"- #{item.get('number')} {item.get('title')} "
+                        f"[{item.get('category')}, {item.get('severity')}, next={item.get('next_gate') or item.get('next_required_gate')}]: "
+                        f"{action}"
+                    )
             if payload.get("outputs"):
                 outputs = payload["outputs"]
                 print(f"Saved JSON: {outputs['json']}")
                 print(f"Saved Markdown: {outputs['markdown']}")
+            if payload.get("known_answer_manifest_template"):
+                template = payload["known_answer_manifest_template"]
+                if isinstance(template, dict) and isinstance(template.get("outputs"), dict):
+                    outputs = template["outputs"]
+                    print(f"Saved known-answer template JSON: {outputs['json']}")
+                    print(f"Saved known-answer template Markdown: {outputs['markdown']}")
+            if payload.get("known_answer_manifest_template_batches"):
+                batches = payload["known_answer_manifest_template_batches"]
+                if isinstance(batches, dict) and isinstance(batches.get("outputs"), dict):
+                    outputs = batches["outputs"]
+                    print(f"Saved known-answer batch index JSON: {outputs['index_json']}")
+                    print(f"Saved known-answer batch index Markdown: {outputs['index_markdown']}")
+                    print(f"Known-answer batches: {outputs['batch_count']}")
         return 1 if args.strict and not payload["commercial_claim_allowed"] else 0
 
     if args.command == "cross-tool-validate":
@@ -2433,6 +2942,378 @@ def main(argv=None) -> int:
             print(
                 f"Selected: {summary['selected_file_count']}  "
                 f"Copied: {summary['copied_file_count']}  Skipped: {summary['skipped_count']}"
+            )
+        return 0
+
+    if args.command == "kakaotalk-decrypt":
+        root = Path(args.root).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        decrypted_dir = Path(args.decrypted_dir).expanduser().resolve() if args.decrypted_dir else None
+        try:
+            payload = run_kakaotalk_decrypt(
+                root,
+                output=output,
+                key_hex=args.key_hex,
+                iv_hex=args.iv_hex,
+                pragma=args.pragma,
+                user_id=args.user_id,
+                pragma_key_hex=args.pragma_key_hex,
+                sys_uuid=args.sys_uuid,
+                hdd_model=args.hdd_model,
+                hdd_serial=args.hdd_serial,
+                key_hex_env=args.key_hex_env,
+                iv_hex_env=args.iv_hex_env,
+                pragma_env=args.pragma_env,
+                user_id_env=args.user_id_env,
+                pragma_key_hex_env=args.pragma_key_hex_env,
+                sys_uuid_env=args.sys_uuid_env,
+                hdd_model_env=args.hdd_model_env,
+                hdd_serial_env=args.hdd_serial_env,
+                include_message_preview=args.include_message_preview,
+                write_decrypted=args.write_decrypted,
+                decrypted_dir=decrypted_dir,
+                max_databases=args.max_databases,
+                max_messages_per_db=args.max_messages_per_db,
+                openssl_bin=args.openssl_bin,
+                postpatch_memory_carve=not args.no_postpatch_memory_carve,
+            )
+        except KakaoTalkDecryptError as exc:
+            parser.error(str(exc))
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="kakaotalk-decrypt",
+            options={
+                "output": str(output),
+                "include_message_preview": args.include_message_preview,
+                "write_decrypted": args.write_decrypted,
+                "decrypted_dir": str(decrypted_dir) if decrypted_dir else None,
+                "max_databases": args.max_databases,
+                "max_messages_per_db": args.max_messages_per_db,
+                "openssl_bin": args.openssl_bin,
+                "postpatch_memory_carve": not args.no_postpatch_memory_carve,
+                "auth_material_source": payload["auth_material"]["source"],
+                "auth_material_ready": payload["auth_material"]["ready"],
+                "secrets_redacted": True,
+            },
+            output_files=[("kakaotalk-decrypt-json", output)]
+            + (
+                [
+                    ("decrypted-dir", Path(str(payload["entries"][0]["decrypted_path"])).parent)
+                    for _ in [0]
+                    if args.write_decrypted
+                    and payload.get("entries")
+                    and payload["entries"][0].get("decrypted_path")
+                ]
+            ),
+            notes=[
+                "KakaoTalk secrets are intentionally redacted from the audit log.",
+                "Message previews are included only when --include-message-preview is set.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved KakaoTalk decrypt JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(
+                f"Chat DBs: {summary['chat_database_count']}  "
+                f"SQLite opened: {summary['sqlite_open_count']}  "
+                f"Messages: {summary['message_row_count']}"
+            )
+            if "postpatch_memory_carve" in payload:
+                print(
+                    "Post-patch memory carve: "
+                    f"SQLite headers {summary.get('postpatch_memory_carve_sqlite_header_count', 0)}  "
+                    f"DB fragments {summary.get('postpatch_memory_carve_database_count', 0)}  "
+                    f"chat-relevant tables {summary.get('postpatch_memory_carve_chat_relevant_table_count', 0)}  "
+                    f"message residues {summary.get('postpatch_memory_chat_message_residue_count', 0)}"
+                )
+        return 0
+
+    if args.command == "kakaotalk-collect-windows":
+        output_root = Path(args.output_root).expanduser().resolve()
+        kakao_root = Path(args.kakao_root).expanduser().resolve() if args.kakao_root else None
+        try:
+            payload = run_kakaotalk_windows_collect(
+                output_root=output_root,
+                kakao_root=kakao_root,
+                include_memory_dump=args.include_memory_dump,
+                analyze=args.analyze,
+                sqlcipher_bin=args.sqlcipher_bin,
+                timeout_seconds=args.timeout_seconds,
+                max_message_residues=args.max_message_residues,
+                no_xlsx=args.no_xlsx,
+            )
+        except KakaoTalkDecryptError as exc:
+            parser.error(str(exc))
+        collection_zip = Path(str(payload["summary"]["collection_zip"]))
+        audit_output = audit_path_for(collection_zip)
+        output_files = [("kakaotalk-collection-zip", collection_zip)]
+        if payload["summary"].get("report_dir"):
+            output_files.append(("kakaotalk-collection-report-dir", Path(str(payload["summary"]["report_dir"]))))
+        write_audit_record(
+            audit_output,
+            command="kakaotalk-collect-windows",
+            options={
+                "output_root": str(output_root),
+                "kakao_root": str(kakao_root) if kakao_root else None,
+                "include_memory_dump": args.include_memory_dump,
+                "analyze": args.analyze,
+                "sqlcipher_bin": args.sqlcipher_bin,
+                "timeout_seconds": args.timeout_seconds,
+                "max_message_residues": args.max_message_residues,
+                "sensitive_keys_exported": False,
+            },
+            output_files=output_files,
+            notes=[
+                "Collect only systems and accounts within authorized legal scope.",
+                "Memory dumps are collected only when explicitly requested.",
+                "Sensitive key material is not exported by the collection workflow.",
+            ],
+        )
+        payload["audit_output"] = str(audit_output)
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved KakaoTalk collection ZIP: {summary['collection_zip']}")
+            print(f"Saved audit JSON: {audit_output}")
+            if summary.get("report_dir"):
+                print(f"Saved KakaoTalk report directory: {summary['report_dir']}")
+            print(
+                f"Files hashed: {summary['hash_manifest_count']}  "
+                f"Registry exports: {summary['registry_export_count']}  "
+                f"Memory dumps: {summary['memory_dump_count']}  "
+                f"status: {summary['status']}"
+            )
+        return 0
+
+    if args.command == "kakaotalk-memory-carve":
+        root = Path(args.root).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        carve_dir = Path(args.carve_dir).expanduser().resolve() if args.carve_dir else None
+        message_csv = Path(args.message_csv).expanduser().resolve() if args.message_csv else None
+        try:
+            payload = run_kakaotalk_memory_carve(
+                root,
+                output=output,
+                carve_dir=carve_dir,
+                max_hits=args.max_hits,
+                max_carve_bytes=args.max_carve_bytes,
+                include_row_preview=args.include_row_preview,
+                max_rows_per_table=args.max_rows_per_table,
+                max_message_residues=args.max_message_residues,
+                include_message_preview=args.include_message_preview or args.include_row_preview or bool(message_csv),
+                write_carves=args.write_carves,
+            )
+        except KakaoTalkDecryptError as exc:
+            parser.error(str(exc))
+        if message_csv is not None:
+            write_kakaotalk_message_residue_csv(payload, message_csv)
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="kakaotalk-memory-carve",
+            options={
+                "output": str(output),
+                "carve_dir": str(carve_dir) if carve_dir else None,
+                "message_csv": str(message_csv) if message_csv else None,
+                "write_carves": args.write_carves,
+                "max_hits": args.max_hits,
+                "max_carve_bytes": args.max_carve_bytes,
+                "include_row_preview": args.include_row_preview,
+                "include_message_preview": args.include_message_preview,
+                "max_rows_per_table": args.max_rows_per_table,
+                "max_message_residues": args.max_message_residues,
+                "secrets_redacted": not (args.include_row_preview or args.include_message_preview or bool(message_csv)),
+            },
+            output_files=[("kakaotalk-memory-carve-json", output)]
+            + ([("kakaotalk-message-residue-csv", message_csv)] if message_csv else [])
+            + ([("kakaotalk-memory-carve-dir", carve_dir)] if args.write_carves and carve_dir else []),
+            notes=[
+                "Memory-carved SQLite fragments are post-patch triage evidence and require manual validation.",
+                "Row previews are included only when --include-row-preview is set.",
+                "Message body previews are included only when --include-message-preview or --message-csv is set.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved KakaoTalk memory carve JSON: {output}")
+            if message_csv is not None:
+                print(f"Saved KakaoTalk message residue CSV: {message_csv}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(
+                f"Memory sources: {summary['memory_source_count']}  "
+                f"SQLite headers: {summary['sqlite_header_count']}  "
+                f"DB fragments: {summary['carved_database_count']}  "
+                f"chat-relevant tables: {summary['chat_relevant_table_count']}  "
+                f"message residues: {summary['chat_message_residue_count']}  "
+                f"reverse indicators: {summary.get('reverse_indicator_count', 0)}  "
+                f"SQLCipher key residues: {summary.get('sqlcipher_key_residue_count', 0)}"
+            )
+        return 0
+
+    if args.command == "kakaotalk-sqlcipher-probe":
+        root = Path(args.root).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        export_opened_dir = Path(args.export_opened_dir).expanduser().resolve() if args.export_opened_dir else None
+        try:
+            payload = run_kakaotalk_sqlcipher_probe(
+                root,
+                output=output,
+                sqlcipher_bin=args.sqlcipher_bin,
+                max_keys=args.max_keys,
+                max_databases=args.max_databases,
+                max_message_residues=args.max_message_residues,
+                include_message_preview=args.include_message_preview,
+                timeout_seconds=args.timeout_seconds,
+                export_opened_dir=export_opened_dir,
+            )
+        except KakaoTalkDecryptError as exc:
+            parser.error(str(exc))
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="kakaotalk-sqlcipher-probe",
+            options={
+                "output": str(output),
+                "sqlcipher_bin": args.sqlcipher_bin,
+                "max_keys": args.max_keys,
+                "max_databases": args.max_databases,
+                "max_message_residues": args.max_message_residues,
+                "include_message_preview": args.include_message_preview,
+                "timeout_seconds": args.timeout_seconds,
+                "export_opened_dir": str(export_opened_dir) if export_opened_dir else None,
+                "raw_keys_redacted": True,
+            },
+            output_files=[("kakaotalk-sqlcipher-probe-json", output)]
+            + ([("kakaotalk-opened-edb-export-dir", export_opened_dir)] if export_opened_dir else []),
+            notes=[
+                "SQLCipher probes run only against temporary EDB copies.",
+                "Memory key literals are redacted in output and require manual validation.",
+                "Plaintext SQLite exports are produced only for EDBs whose memory literal salt matches the file header.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved KakaoTalk SQLCipher probe JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(
+                f"Chat DBs: {summary['chat_database_count']}  "
+                f"key candidates: {summary['key_candidate_count']}  "
+                f"variants: {summary['variant_count']}  "
+                f"attempts: {summary['probe_attempt_count']}  "
+                f"opened: {summary['opened_database_count']}  "
+                f"openable EDBs: {summary.get('openable_edb_count', 0)}  "
+                f"exported EDBs: {summary.get('exported_edb_count', 0)}  "
+                f"rooms: {summary.get('postpatch_room_evidence_count', 0)}  "
+                f"memory messages: {summary.get('postpatch_message_residue_count', 0)}  "
+                f"media attachments: {summary.get('postpatch_media_attachment_count', 0)}  "
+                f"local media files: {summary.get('postpatch_media_local_file_count', 0)}  "
+                f"status: {summary['status']}"
+            )
+        return 0
+
+    if args.command == "kakaotalk-key-store-inspect":
+        root = Path(args.root).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        try:
+            payload = run_kakaotalk_key_store_inspect(
+                root,
+                output=output,
+                max_memory_sources=args.max_memory_sources,
+            )
+        except KakaoTalkDecryptError as exc:
+            parser.error(str(exc))
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="kakaotalk-key-store-inspect",
+            options={
+                "output": str(output),
+                "max_memory_sources": args.max_memory_sources,
+                "raw_wrapped_deks_redacted": True,
+                "unwrapped_deks_not_exported": True,
+            },
+            output_files=[("kakaotalk-key-store-json", output)],
+            notes=[
+                "appstate.dat wrapped DEKs are hashed and length-counted only; raw wrapped key bytes are not exported.",
+                "This maps post-patch EDB key-store state but does not yet unwrap DEKs.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved KakaoTalk key-store JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(
+                f"Key stores: {summary['parsed_key_store_count']}/{summary['key_store_file_count']}  "
+                f"wrapped DEKs: {summary['wrapped_dek_entry_count']}  "
+                f"chatLog keys: {summary['chatlog_wrapped_dek_entry_count']}  "
+                f"chatLog file matches: {summary['chat_database_key_store_match_count']}  "
+                f"status: {summary['method_status']}"
+            )
+        return 0
+
+    if args.command == "kakaotalk-userdir-bruteforce":
+        root = Path(args.root).expanduser().resolve()
+        output = Path(args.output).expanduser().resolve()
+        try:
+            payload = run_kakaotalk_userdir_bruteforce(
+                root,
+                output=output,
+                userdir_home=args.userdir_home,
+                userdir=args.userdir,
+                pragma=args.pragma,
+                pragma_key_hex=args.pragma_key_hex,
+                sys_uuid=args.sys_uuid,
+                hdd_model=args.hdd_model,
+                hdd_serial=args.hdd_serial,
+                start_id=args.start_id,
+                end_id=args.end_id,
+                chunk_size=args.chunk_size,
+                compiler=args.compiler,
+                openssl_bin=args.openssl_bin,
+            )
+        except KakaoTalkDecryptError as exc:
+            parser.error(str(exc))
+        audit_output = audit_path_for(output)
+        write_audit_record(
+            audit_output,
+            command="kakaotalk-userdir-bruteforce",
+            options={
+                "output": str(output),
+                "userdir": args.userdir,
+                "userdir_home": args.userdir_home,
+                "start_id": args.start_id,
+                "end_id": args.end_id,
+                "chunk_size": args.chunk_size,
+                "compiler": args.compiler,
+                "secrets_redacted": True,
+            },
+            output_files=[("kakaotalk-userdir-bruteforce-json", output)],
+            notes=[
+                "KakaoTalk pragma values are redacted from the audit log.",
+                "A matched userId is sensitive and should be used only within authorized scope.",
+            ],
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload["summary"]
+            print(f"Saved KakaoTalk userDir brute force JSON: {output}")
+            print(f"Saved audit JSON: {audit_output}")
+            print(
+                f"Status: {summary['status']}  "
+                f"Searched through: {summary['searched_end_id']}  "
+                f"Matched: {summary['matched']}"
             )
         return 0
 

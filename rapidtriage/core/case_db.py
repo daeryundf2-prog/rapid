@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Optional, Sequence
 
+from .artifact_store import read_jsonl_artifacts, validate_artifact_record
 from .docs import extract_text
 from .search import SearchError, load_run_summary
 from .submission import compute_hashes
@@ -363,6 +364,51 @@ class CaseDatabase:
             "summary": {
                 "evidence_source_count": 1,
                 "artifact_count": artifact_count,
+            },
+        }
+
+    def import_worker_jsonl(
+        self,
+        worker_jsonl: Path,
+        *,
+        case_id: str,
+        case_name: Optional[str] = None,
+    ) -> dict[str, object]:
+        jsonl_path = worker_jsonl.expanduser().resolve()
+        normalized_case_id = normalize_identifier(case_id, fallback="case")
+        with self.connect() as connection:
+            apply_schema(connection)
+            case_row = connection.execute(
+                "SELECT case_id FROM case_record WHERE case_id = ?",
+                (normalized_case_id,),
+            ).fetchone()
+        if case_row is None:
+            self.create_case(case_id=normalized_case_id, name=case_name, case_root=jsonl_path.parent)
+
+        source_payload = {
+            "source": {
+                "source_path": str(jsonl_path),
+                "analysis_root": str(jsonl_path.parent),
+                "type": "worker-jsonl",
+            },
+            "mode": "worker-jsonl",
+            "root": str(jsonl_path.parent),
+        }
+        evidence_source_id = self._insert_evidence_source(normalized_case_id, source_payload)
+        counts = self._import_worker_jsonl_records(normalized_case_id, evidence_source_id, jsonl_path)
+        audit_id = self.add_audit_event(
+            case_id=normalized_case_id,
+            action="worker-jsonl.imported",
+            target_type="worker-jsonl",
+            target_id=str(jsonl_path),
+            params_json=json.dumps({"counts": counts}, ensure_ascii=False, sort_keys=True),
+        )
+        return {
+            "case_id": normalized_case_id,
+            "audit_citation_id": audit_id,
+            "summary": {
+                "evidence_source_count": 1,
+                **counts,
             },
         }
 
@@ -1313,6 +1359,80 @@ class CaseDatabase:
                     count += 1
         return count
 
+    def _import_worker_jsonl_records(self, case_id: str, evidence_source_id: int, jsonl_path: Path) -> dict[str, int]:
+        artifact_count = 0
+        indexed_document_count = 0
+        rejected_count = 0
+        with self.connect() as connection:
+            for index, record in enumerate(read_jsonl_artifacts(jsonl_path), start=1):
+                validation_errors = validate_artifact_record(record)
+                if validation_errors:
+                    rejected_count += 1
+                    continue
+                artifact = worker_artifact_row(record, source_jsonl=str(jsonl_path), index=index)
+                title = artifact_title(artifact)
+                summary = artifact_summary(artifact)
+                cursor = connection.execute(
+                    """
+                    INSERT INTO artifact (
+                        citation_id, case_id, evidence_source_id, artifact_type, parser_name,
+                        parser_version, title, summary, data_json, confidence, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        next_citation_id_for_connection(connection, case_id, "artifact"),
+                        case_id,
+                        evidence_source_id,
+                        str(artifact.get("artifact_type") or "worker-artifact"),
+                        str(record.get("parser") or "rapid-worker"),
+                        str(record.get("parser_version") or ""),
+                        title,
+                        summary,
+                        json.dumps(artifact, ensure_ascii=False, sort_keys=True),
+                        optional_float(record.get("confidence")),
+                        now_iso(),
+                    ),
+                )
+                artifact_id = int(cursor.lastrowid)
+                index_body = worker_record_index_text(artifact)
+                connection.execute(
+                    "INSERT INTO artifact_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
+                    (artifact_id, title, summary, index_body),
+                )
+                doc_cursor = connection.execute(
+                    """
+                    INSERT INTO indexed_document (
+                        citation_id, case_id, evidence_source_id, artifact_id, source_type,
+                        field_name, title, body, language, indexed_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        next_citation_id_for_connection(connection, case_id, "indexed_document"),
+                        case_id,
+                        evidence_source_id,
+                        artifact_id,
+                        "worker-artifact",
+                        str(record.get("artifact_type") or ""),
+                        title,
+                        index_body,
+                        "",
+                        now_iso(),
+                    ),
+                )
+                connection.execute(
+                    "INSERT INTO indexed_document_fts(rowid, title, body) VALUES (?, ?, ?)",
+                    (int(doc_cursor.lastrowid), title, index_body),
+                )
+                artifact_count += 1
+                indexed_document_count += 1
+        return {
+            "artifact_count": artifact_count,
+            "indexed_document_count": indexed_document_count,
+            "rejected_count": rejected_count,
+        }
+
 
 def next_citation_id_for_connection(connection: sqlite3.Connection, case_id: str, kind: str) -> str:
     normalized_kind = kind.strip().lower()
@@ -1578,6 +1698,13 @@ def normalize_path_for_db(path: str) -> str:
 def optional_int(value: Any) -> int | None:
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def optional_float(value: Any) -> float | None:
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return None
 
@@ -1950,6 +2077,70 @@ def indicator_artifact_row(row: Mapping[str, object], *, index: int) -> dict[str
         "supported": True,
         "details": details,
     }
+
+
+def worker_artifact_row(record: Mapping[str, object], *, source_jsonl: str, index: int) -> dict[str, object]:
+    source = record.get("source") if isinstance(record.get("source"), Mapping) else {}
+    fields = record.get("fields") if isinstance(record.get("fields"), Mapping) else {}
+    artifact_type = str(record.get("artifact_type") or "worker-artifact")
+    artifact_family = str(record.get("artifact_family") or "")
+    source_path = str(source.get("source_path") or "") if isinstance(source, Mapping) else ""
+    details = {
+        "parser": str(record.get("parser") or "rapid-worker"),
+        "parser_version": str(record.get("parser_version") or ""),
+        "coverage_status": "worker-jsonl-import",
+        "reportability": "triage",
+        "source_format": "ArtifactRecordV1-jsonl",
+        "source_index": index,
+        "source_jsonl": source_jsonl,
+        "artifact_id": str(record.get("artifact_id") or ""),
+        "artifact_family": artifact_family,
+        "source_case_id": str(source.get("case_id") or "") if isinstance(source, Mapping) else "",
+        "source_id": str(source.get("source_id") or "") if isinstance(source, Mapping) else "",
+        "source_path": source_path,
+        "source_offset": source.get("offset") if isinstance(source, Mapping) else None,
+        "source_length": source.get("length") if isinstance(source, Mapping) else None,
+        "source_hashes": source.get("hashes") if isinstance(source.get("hashes"), Mapping) else {},
+        "confidence": optional_float(record.get("confidence")),
+        "validation_required": bool(record.get("validation_required")),
+        "commercial_grade_ready": bool(record.get("commercial_grade_ready")),
+        "commercial_grade_blockers": list(record.get("commercial_grade_blockers", []))
+        if isinstance(record.get("commercial_grade_blockers"), list)
+        else [],
+        "legal_limitations": list(record.get("legal_limitations", []))
+        if isinstance(record.get("legal_limitations"), list)
+        else [],
+        "fields": dict(fields),
+        "raw": dict(record),
+    }
+    for key, value in fields.items():
+        if key not in details and value not in (None, "", []):
+            details[str(key)] = value
+    return {
+        "provider": "rapid-worker",
+        "artifact_type": artifact_type,
+        "path": source_path,
+        "supported": True,
+        "details": details,
+    }
+
+
+def worker_record_index_text(artifact: Mapping[str, object]) -> str:
+    details = artifact_details(artifact)
+    raw = details.get("raw") if isinstance(details.get("raw"), Mapping) else {}
+    fields = details.get("fields") if isinstance(details.get("fields"), Mapping) else {}
+    searchable = {
+        "provider": artifact.get("provider"),
+        "artifact_type": artifact.get("artifact_type"),
+        "path": artifact.get("path"),
+        "title": artifact_title(artifact),
+        "summary": artifact_summary(artifact),
+        "details": details,
+        "fields": fields,
+        "raw": raw,
+        "metadata": artifact_search_metadata(artifact),
+    }
+    return json.dumps(searchable, ensure_ascii=False, sort_keys=True)
 
 
 def parse_json_object(value: object) -> dict[str, object]:

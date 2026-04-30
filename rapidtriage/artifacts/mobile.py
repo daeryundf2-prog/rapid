@@ -11,6 +11,7 @@ from typing import Iterable, Mapping
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
+from .review import build_forensic_review
 
 PARSER_VERSION = "mobile-export-v4"
 MOBILE_EXPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
@@ -18,6 +19,9 @@ MAX_ROWS_PER_SOURCE = 50_000
 MAX_IOS_BACKUP_FILES = 50_000
 MAX_SQLITE_TABLES = 100
 MAX_CHAT_DB_SAMPLE_ROWS = 25
+KAKAOTALK_BIGBANG_VERSION = "25.7.2"
+KAKAOTALK_BIGBANG_RELEASE_DATE = "2025-08-13"
+KAKAOTALK_BIGBANG_RELEASE_BUILD = "25.7.2.4641"
 MOBILE_NATIVE_CAPABILITIES = {
     "vendor_csv_json_import": True,
     "cellebrite_xry_graykey_axiom_source_hinting": True,
@@ -155,6 +159,81 @@ CHAT_APP_PROFILES: tuple[dict[str, object], ...] = (
         "aliases": ("instagram", "threads", "com.instagram", "direct.db", "direct messages"),
         "message_tables": ("messages", "threads", "users", "direct"),
     },
+    {
+        "service": "iMessage",
+        "aliases": ("imessage", "sms.db", "ichat", "com.apple.messages", "apple messages"),
+        "message_tables": ("message", "chat", "handle", "attachment", "chat_message_join"),
+    },
+    {
+        "service": "Facebook Messenger",
+        "aliases": ("facebook messenger", "messenger", "orca", "com.facebook.orca", "fb_messenger"),
+        "message_tables": ("messages", "threads", "participants", "attachments"),
+    },
+    {
+        "service": "Viber",
+        "aliases": ("viber", "com.viber", "viber_messages"),
+        "message_tables": ("messages", "conversations", "participants"),
+    },
+    {
+        "service": "Skype",
+        "aliases": ("skype", "main.db", "com.skype", "skypemessages"),
+        "message_tables": ("messages", "conversations", "contacts", "chats"),
+    },
+    {
+        "service": "Slack",
+        "aliases": ("slack", "com.tinyspeck", "slack export", "slack_messages"),
+        "message_tables": ("messages", "channels", "users", "attachments"),
+    },
+    {
+        "service": "Microsoft Teams",
+        "aliases": ("microsoft teams", "teams", "msteams", "com.microsoft.teams"),
+        "message_tables": ("messages", "chats", "channels", "users"),
+    },
+    {
+        "service": "Reddit",
+        "aliases": ("reddit", "reddit chat", "com.reddit", "reddit_messages"),
+        "message_tables": ("messages", "chats", "users"),
+    },
+    {
+        "service": "X/Twitter",
+        "aliases": ("twitter", "x.com", "x twitter", "com.twitter", "direct messages"),
+        "message_tables": ("messages", "conversations", "participants"),
+    },
+    {
+        "service": "TikTok",
+        "aliases": ("tiktok", "musically", "com.zhiliaoapp.musically", "aweme"),
+        "message_tables": ("messages", "conversations", "users"),
+    },
+    {
+        "service": "Snapchat",
+        "aliases": ("snapchat", "com.snapchat", "snap", "memories"),
+        "message_tables": ("messages", "conversation", "friends"),
+    },
+    {
+        "service": "Matrix/Element",
+        "aliases": ("matrix", "element", "riot.im", "im.vector.app"),
+        "message_tables": ("events", "rooms", "users", "messages"),
+    },
+    {
+        "service": "Wire",
+        "aliases": ("wire", "com.wire", "wire secure messenger"),
+        "message_tables": ("messages", "conversations", "users"),
+    },
+    {
+        "service": "Threema",
+        "aliases": ("threema", "ch.threema", "threema.db"),
+        "message_tables": ("messages", "contacts", "groups"),
+    },
+    {
+        "service": "Session",
+        "aliases": ("session", "getsession", "network.loki.messenger"),
+        "message_tables": ("messages", "threads", "attachments"),
+    },
+    {
+        "service": "Wickr",
+        "aliases": ("wickr", "wickr me", "wickr pro", "com.mywickr"),
+        "message_tables": ("messages", "conversations", "users"),
+    },
 )
 CHAT_APP_GAP_IDS = {
     "KakaoTalk": "#31",
@@ -165,6 +244,21 @@ CHAT_APP_GAP_IDS = {
     "LINE": "#35",
     "Discord": "#35",
     "Instagram": "#35",
+    "iMessage": "#35",
+    "Facebook Messenger": "#35",
+    "Viber": "#35",
+    "Skype": "#35",
+    "Slack": "#35",
+    "Microsoft Teams": "#35",
+    "Reddit": "#35",
+    "X/Twitter": "#35",
+    "TikTok": "#35",
+    "Snapchat": "#35",
+    "Matrix/Element": "#35",
+    "Wire": "#35",
+    "Threema": "#35",
+    "Session": "#35",
+    "Wickr": "#35",
 }
 CHAT_APP_NATIVE_CAPABILITIES = {
     "authorized_export_row_normalization": True,
@@ -295,6 +389,12 @@ def build_record(
     validation_checks = detail_payload.get("validation_checks")
     if not isinstance(validation_checks, Mapping):
         validation_checks = {}
+    report_grade = mobile_report_grade_assessment(
+        artifact_type=artifact_type,
+        source_tool=source_tool,
+        gap_ids=gap_ids,
+        validation_checks=validation_checks,
+    )
     return ArtifactRecord(
         provider=MobileExportProvider.name,
         artifact_type=artifact_type,
@@ -316,13 +416,16 @@ def build_record(
                 source_tool=source_tool,
                 validation_checks=validation_checks,
             ),
-            "mobile_report_grade_assessment": mobile_report_grade_assessment(
+            "mobile_report_grade_assessment": report_grade,
+            "mobile_native_capabilities": mobile_native_capabilities(artifact_type),
+            "forensic_review": build_mobile_forensic_review(
                 artifact_type=artifact_type,
                 source_tool=source_tool,
                 gap_ids=gap_ids,
-                validation_checks=validation_checks,
+                report_grade=report_grade,
+                details=detail_payload,
             ),
-            "mobile_native_capabilities": mobile_native_capabilities(artifact_type),
+            **chat_app_review_payload(artifact_type, detail_payload),
             "legal_warning": "Use only with authorized mobile exports. Correlate with original acquisition logs and hashes before testimony.",
             **detail_payload,
         },
@@ -491,6 +594,7 @@ def normalize_message(row: Mapping[str, object], path: Path) -> dict[str, object
     )
     service = detect_chat_service(row, path) or optional_text(first_value(row, ("service", "platform", "app", "appname", "application", "source")))
     message_id = optional_text(first_value(row, MESSAGE_ID_KEYS))
+    app_version = optional_text(first_value(row, ("appversion", "version", "clientversion", "kakaotalkversion")))
     media_reference = optional_text(first_value(row, MEDIA_REFERENCE_KEYS))
     reaction = optional_text(first_value(row, REACTION_KEYS))
     return {
@@ -499,6 +603,7 @@ def normalize_message(row: Mapping[str, object], path: Path) -> dict[str, object
         "service": service,
         "service_family": service_family(service),
         "schema_version": optional_text(first_value(row, ("schemaversion", "dbversion", "exportversion", "appversion"))),
+        "app_version": app_version,
         "conversation_id": optional_text(first_value(row, ("conversationid", "chatid", "threadid", "groupid", "roomid"))),
         "conversation_title": optional_text(first_value(row, ("conversationname", "chatname", "chattitle", "roomname", "groupname"))),
         "message_id": message_id,
@@ -531,6 +636,9 @@ def normalize_message(row: Mapping[str, object], path: Path) -> dict[str, object
         "chat_app_gap_ids": chat_app_gap_ids(service),
         "chat_app_report_grade_assessment": chat_app_report_grade_assessment(service),
         "chat_app_native_capabilities": chat_app_native_capabilities(service),
+        "chat_app_scope_profile": chat_app_scope_profile(service),
+        "chat_app_issue_matrix": chat_app_issue_matrix(service, artifact_type="mobile-message", app_version=app_version),
+        **kakaotalk_compatibility_payload(service, app_version),
         "commercial_grade_blockers": chat_app_blockers(service),
         "raw": dict(row),
     }
@@ -597,6 +705,9 @@ def collect_chat_app_database_inventory(path: Path) -> ArtifactRecord:
             "chat_app_gap_ids": chat_app_gap_ids(service),
             "chat_app_report_grade_assessment": chat_app_report_grade_assessment(service),
             "chat_app_native_capabilities": chat_app_native_capabilities(service),
+            "chat_app_scope_profile": chat_app_scope_profile(service),
+            "chat_app_issue_matrix": chat_app_issue_matrix(service, artifact_type="mobile-chat-database", app_version=""),
+            **kakaotalk_compatibility_payload(service, ""),
             "commercial_grade_blockers": chat_app_blockers(service),
             "legal_warning": (
                 "Authorized export/backup inventory only. RapidTriage does not bypass app encryption, decrypt protected stores, "
@@ -795,6 +906,16 @@ def build_mobile_correlation_summary(rows: list[Mapping[str, object]]) -> dict[s
         },
         "commercial_gap_ids": ["#43", "#44", "#45"],
         "mobile_correlation_report_grade_assessment": mobile_correlation_report_grade_assessment(),
+        "forensic_review": mobile_correlation_forensic_review(
+            message_count=len(message_rows),
+            media_count=len(media_rows),
+            contact_count=len(contact_rows),
+            call_count=len(call_rows),
+            services=services,
+            message_media_link_count=len(message_media_links),
+            unified_actor_count=len(unified_actor_view),
+            schema_version_count=len(schema_version_registry),
+        ),
         "commercial_grade_blockers": [
             "Correlation is source-export scoped and does not prove device-wide completeness.",
             "App-specific schema versions, timezone semantics, deleted rows, and media attachment recovery need known-answer validation.",
@@ -1007,6 +1128,41 @@ def mobile_correlation_report_grade_assessment() -> dict[str, object]:
             "Validate contact/call/SMS identity resolution with known-answer mobile images before report-grade conclusions.",
         ],
     }
+
+
+def mobile_correlation_forensic_review(
+    *,
+    message_count: int,
+    media_count: int,
+    contact_count: int,
+    call_count: int,
+    services: list[str],
+    message_media_link_count: int,
+    unified_actor_count: int,
+    schema_version_count: int,
+) -> dict[str, object]:
+    report_grade = mobile_correlation_report_grade_assessment()
+    return build_forensic_review(
+        gap_id="#43",
+        artifact_goal="Mobile message-media-contact-call correlation, unified actor view, and app schema version tracking",
+        primary_evidence=[
+            f"messages={message_count}",
+            f"media={media_count}",
+            f"contacts={contact_count}",
+            f"calls={call_count}",
+            f"services={','.join(services[:8])}",
+            f"message_media_links={message_media_link_count}",
+            f"unified_actors={unified_actor_count}",
+            f"schema_versions={schema_version_count}",
+        ],
+        validation_required=True,
+        report_grade_assessment=report_grade,
+        blockers=report_grade["blockers"],
+        caveats=[
+            "Correlation is export-scoped and candidate-level, not a complete device-wide timeline.",
+            "Known-answer validation is required for attachment resolution, contact identity merging, and schema-version semantics.",
+        ],
+    )
 
 
 def collect_ios_backup_metadata(path: Path) -> Iterable[ArtifactRecord]:
@@ -1500,6 +1656,77 @@ def mobile_report_grade_assessment(
     }
 
 
+def build_mobile_forensic_review(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    gap_ids: list[str],
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    primary = [
+        f"artifact_type={artifact_type}",
+        f"source_tool={source_tool}",
+        f"event_type={optional_text(details.get('event_type'))}",
+    ]
+    for key in ("service", "package", "conversation_id", "file_path", "domain", "relative_path", "plist_name"):
+        value = optional_text(details.get(key))
+        if value:
+            primary.append(f"{key}={value}")
+    return build_forensic_review(
+        gap_id=gap_ids[0] if gap_ids else "#26",
+        artifact_goal=mobile_artifact_goal(artifact_type),
+        primary_evidence=primary,
+        validation_required=True,
+        report_grade_assessment=report_grade,
+        blockers=MOBILE_REPORT_GRADE_BLOCKERS,
+        caveats=[
+            "Mobile rows are normalized from authorized exports/backups and require original acquisition/export metadata.",
+            "Protected/encrypted stores and deleted-record recovery are not report-grade in this parser.",
+        ],
+    )
+
+
+def chat_app_review_payload(artifact_type: str, details: Mapping[str, object]) -> dict[str, object]:
+    service = optional_text(details.get("service"))
+    if artifact_type == "mobile-message" and service not in CHAT_APP_GAP_IDS:
+        return {}
+    if artifact_type != "mobile-chat-database" and service not in CHAT_APP_GAP_IDS:
+        return {}
+    gap_ids = chat_app_gap_ids(service)
+    report_grade = chat_app_report_grade_assessment(service)
+    return {
+        "chat_app_forensic_review": build_forensic_review(
+            gap_id=gap_ids[0] if gap_ids else "#31",
+            artifact_goal=f"{service or 'Chat app'} authorized export/database message evidence",
+            primary_evidence=[
+                f"artifact_type={artifact_type}",
+                f"service={service or 'unknown'}",
+                f"conversation_id={optional_text(details.get('conversation_id'))}",
+                f"message_id={optional_text(details.get('message_id'))}",
+                f"schema_version={optional_text(details.get('schema_version'))}",
+            ],
+            validation_required=True,
+            report_grade_assessment=report_grade,
+            blockers=chat_app_blockers(service),
+            caveats=[
+                "Service-specific encrypted stores, deleted rows, attachment recovery, and sync semantics remain validation-gated.",
+                "Use original acquisition/export logs, app version, timezone, and account ownership before reporting message conclusions.",
+            ],
+        )
+    }
+
+
+def mobile_artifact_goal(artifact_type: str) -> str:
+    if artifact_type.startswith("ios-backup"):
+        return "iOS backup Manifest.db/plist inventory and authorized backup pivot evidence"
+    if artifact_type == "ios-keychain-inventory":
+        return "iOS keychain redacted inventory with strict protected-data boundary"
+    if artifact_type.startswith("mobile-"):
+        return "Vendor mobile export row normalization for messages, apps, contacts, calls, files, media and browser data"
+    return "Mobile export artifact review"
+
+
 def source_validation_checks(
     source_format: str,
     source_tool: str,
@@ -1543,6 +1770,132 @@ def chat_app_native_capabilities(service: str) -> dict[str, object]:
     capabilities["service"] = service or "unknown"
     capabilities["known_service_profile"] = service in CHAT_APP_GAP_IDS
     return capabilities
+
+
+def chat_app_scope_profile(service: str) -> dict[str, object]:
+    profile = chat_app_profile(service)
+    return {
+        "service": service or "unknown",
+        "known_profile": profile is not None,
+        "alias_count": len(profile.get("aliases", ())) if profile else 0,
+        "message_table_candidates": list(profile.get("message_tables", ())) if profile else [],
+        "support_tier": "explicit-profile" if profile else "generic-mobile-message",
+        "collection_mode": "authorized-export-or-inventory",
+        "reporting_boundary": "review-candidate-only",
+    }
+
+
+def chat_app_issue_matrix(service: str, *, artifact_type: str, app_version: str = "") -> list[dict[str, object]]:
+    encrypted = service in {"Signal", "WhatsApp", "Telegram", "Session", "Wickr", "Threema", "Wire"}
+    ephemeral = service in {"Signal", "Telegram", "WhatsApp", "Instagram", "Snapchat", "Session", "Wickr"}
+    attachment_sync = service in {"Signal", "Telegram", "WhatsApp", "Facebook Messenger", "Instagram", "Discord", "Slack", "Microsoft Teams"}
+    issues = [
+        {
+            "id": "service-profile-known",
+            "label": "Service has an explicit RapidTriage profile",
+            "passed": service in CHAT_APP_GAP_IDS,
+            "severity": "high",
+        },
+        {
+            "id": "encrypted-store-authority",
+            "label": "Encrypted store/keychain/backup-key workflow is validated when required",
+            "passed": False,
+            "severity": "critical" if encrypted else "high",
+        },
+        {
+            "id": "ephemeral-message-warning",
+            "label": "Disappearing/secret-chat/deleted-message limitations are surfaced",
+            "passed": True,
+            "severity": "critical" if ephemeral else "medium",
+        },
+        {
+            "id": "attachment-locality",
+            "label": "Attachment/media presence is verified, not just link or thumbnail metadata",
+            "passed": False,
+            "severity": "high" if attachment_sync else "medium",
+        },
+        {
+            "id": "schema-version-known-answer",
+            "label": "App version and schema are validated against known-answer data",
+            "passed": False,
+            "severity": "critical",
+        },
+        {
+            "id": "database-row-decode",
+            "label": "Native database rows are decoded rather than inventoried only",
+            "passed": False,
+            "severity": "critical",
+        },
+    ]
+    if service == "KakaoTalk":
+        compatibility = kakaotalk_compatibility_assessment(app_version)
+        issues.append(
+            {
+                "id": "kakaotalk-post-2025-08-bigbang",
+                "label": "KakaoTalk post-2025-08-13 / 25.7.2 encryption and deletion-behavior changes are handled",
+                "passed": False,
+                "severity": "critical",
+                "status": compatibility["status"],
+                "legacy_method_applicable": compatibility["legacy_method_applicable"],
+            }
+        )
+    return issues
+
+
+def kakaotalk_compatibility_payload(service: str, app_version: str) -> dict[str, object]:
+    if service != "KakaoTalk":
+        return {}
+    return {"kakaotalk_compatibility_assessment": kakaotalk_compatibility_assessment(app_version)}
+
+
+def kakaotalk_compatibility_assessment(app_version: str) -> dict[str, object]:
+    status = "unknown-version-validation-required"
+    if app_version and version_at_least(app_version, KAKAOTALK_BIGBANG_VERSION):
+        status = "post-bigbang-legacy-method-not-applicable"
+    elif app_version:
+        status = "pre-bigbang-version-declared-still-validation-required"
+    return {
+        "status": status,
+        "app_version": app_version or "unknown",
+        "bigbang_release_date": KAKAOTALK_BIGBANG_RELEASE_DATE,
+        "bigbang_minimum_version": KAKAOTALK_BIGBANG_VERSION,
+        "bigbang_reference_build": KAKAOTALK_BIGBANG_RELEASE_BUILD,
+        "legacy_method_applicable": False if status != "pre-bigbang-version-declared-still-validation-required" else "not-assumed",
+        "report_grade_ready": False,
+        "validation_required": True,
+        "required_validation": [
+            "Record KakaoTalk app version/build, OS version, acquisition type, and vendor parser version.",
+            "Treat post-2025-08-13/25.7.2 KakaoTalk stores as incompatible with legacy decoding assumptions until independently validated.",
+            "Use authorized export, original device acquisition metadata, and cross-tool/known-answer diff before reporting message content.",
+        ],
+        "blockers": [
+            "KakaoTalk 25.7.2 release notes include enhanced encryption and deletion-behavior changes.",
+            "RapidTriage does not decrypt KakaoTalk protected stores or recover post-patch deleted records.",
+            "No post-BigBang KakaoTalk known-answer corpus is bundled.",
+        ],
+    }
+
+
+def version_at_least(value: str, minimum: str) -> bool:
+    return version_tuple(value) >= version_tuple(minimum)
+
+
+def version_tuple(value: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for item in value.replace("-", ".").split("."):
+        digits = "".join(character for character in item if character.isdigit())
+        if digits:
+            parts.append(int(digits))
+        if len(parts) >= 4:
+            break
+    return tuple(parts or [0])
+
+
+def chat_app_profile(service: str) -> Mapping[str, object] | None:
+    for profile in CHAT_APP_PROFILES:
+        if str(profile["service"]).lower() == service.lower():
+            return profile
+    return None
 
 
 def chat_app_report_grade_assessment(service: str) -> dict[str, object]:

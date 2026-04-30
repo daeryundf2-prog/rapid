@@ -28,7 +28,7 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             payload = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(payload["kind"], "cloud-export")
             self.assertEqual(payload["provider"]["name"], "cloud-export-artifacts")
-            self.assertEqual(payload["summary"]["artifact_count"], 7)
+            self.assertEqual(payload["summary"]["artifact_count"], 8)
             artifact_types = {artifact["artifact_type"] for artifact in payload["artifacts"]}
             self.assertEqual(
                 artifact_types,
@@ -56,24 +56,39 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("sensitive-cloud-content", mail["details"]["risk_flags"])
             self.assertFalse(mail["details"]["commercial_grade_ready"])
             self.assertIn("#37", mail["details"]["cloud_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(mail["details"]["forensic_review"]["gap_id"], "#37")
             self.assertFalse(mail["details"]["cloud_native_capabilities"]["provider_api_native_acquisition"])
+            self.assertTrue(mail["details"]["cloud_provider_profile"]["known_profile"])
+            self.assertIn("export-scope-captured", {item["id"] for item in mail["details"]["cloud_issue_matrix"]})
 
             cloud_file = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "cloud-file")
             self.assertEqual(cloud_file["details"]["service"], "microsoft-onedrive")
             self.assertEqual(cloud_file["details"]["file_name"], "case.zip")
             self.assertIn("reviewable-document-or-archive", cloud_file["details"]["risk_flags"])
             self.assertIn("#39", cloud_file["details"]["commercial_gap_ids"])
+            self.assertEqual(cloud_file["details"]["forensic_review"]["gap_id"], "#39")
 
             message = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "cloud-message")
             self.assertEqual(message["details"]["service"], "microsoft-teams")
             self.assertEqual(message["details"]["chat_id"], "chat-1")
             self.assertIn("cloud-message", message["details"]["risk_flags"])
             self.assertIn("#39", message["details"]["cloud_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(message["details"]["forensic_review"]["gap_id"], "#39")
+            self.assertIn("teams-cosmosdb-vs-exchange-compliance-records", message["details"]["cloud_provider_profile"]["known_gaps"])
+
+            slack = next(
+                artifact
+                for artifact in payload["artifacts"]
+                if artifact["artifact_type"] == "cloud-message" and artifact["details"]["service"] == "slack"
+            )
+            self.assertEqual(slack["details"]["cloud_family"], "collaboration-saas")
+            self.assertIn("workspace-plan-dependent-export-scope", slack["details"]["cloud_provider_profile"]["known_gaps"])
 
             audit = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "cloud-audit")
             self.assertEqual(audit["details"]["service"], "microsoft-365")
             self.assertIn("identity-security-event", audit["details"]["risk_flags"])
             self.assertIn("#39", audit["details"]["commercial_gap_ids"])
+            self.assertEqual(audit["details"]["forensic_review"]["gap_id"], "#39")
 
 
 def write_cloud_export_fixtures(root: Path) -> None:
@@ -180,6 +195,23 @@ def write_cloud_export_fixtures(root: Path) -> None:
                     "userId": "alice@example.com",
                     "ipAddress": "203.0.113.10",
                     "userAgent": "UnitTest",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    slack = root / "Slack" / "messages.json"
+    slack.parent.mkdir(parents=True)
+    slack.write_text(
+        json.dumps(
+            [
+                {
+                    "timestamp": "2026-04-26T08:00:00Z",
+                    "channelId": "C123",
+                    "id": "slack-msg-1",
+                    "user": "alice@example.com",
+                    "text": "Slack export message",
                 }
             ]
         ),

@@ -49,6 +49,7 @@ class EvidenceAdapterResult:
     commercial_grade_ready: bool = False
     commercial_gap_ids: list[str] | None = None
     report_grade_assessment: dict[str, object] | None = None
+    forensic_review: dict[str, object] | None = None
     native_capabilities: dict[str, object] | None = None
     limitations: list[str] | None = None
     fallback_guidance: list[str] | None = None
@@ -56,6 +57,27 @@ class EvidenceAdapterResult:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+def evidence_forensic_review(
+    *,
+    gap_id: str,
+    artifact_goal: str,
+    primary_evidence: list[str],
+    report_grade_assessment: dict[str, object],
+    caveats: list[str],
+) -> dict[str, object]:
+    blockers = report_grade_assessment.get("blockers")
+    return {
+        "gap_id": gap_id,
+        "artifact_goal": artifact_goal,
+        "review_status": "triage-review",
+        "report_grade_ready": bool(report_grade_assessment.get("ready_for_court_report")),
+        "validation_required": True,
+        "primary_evidence": [item for item in primary_evidence if item],
+        "blockers": list(blockers) if isinstance(blockers, list) else [],
+        "caveats": caveats,
+    }
 
 
 class FolderAdapter:
@@ -97,6 +119,7 @@ class EwfAdapter:
         missing = missing_e01_tools()
         supported = source.suffix.lower() in self.supported_suffixes
         ready = supported and not missing
+        report_grade = image_report_grade_assessment("#22", E01_REPORT_GRADE_BLOCKERS)
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -127,7 +150,21 @@ class EwfAdapter:
             tool_preflight=collect_tool_preflight(E01_REQUIRED_TOOLS) if supported else None,
             commercial_grade_ready=False,
             commercial_gap_ids=["#22"],
-            report_grade_assessment=image_report_grade_assessment("#22", E01_REPORT_GRADE_BLOCKERS),
+            report_grade_assessment=report_grade,
+            forensic_review=evidence_forensic_review(
+                gap_id="#22",
+                artifact_goal="E01/Ex01 read-only workflow, source integrity, external tool preflight, extraction and resume context",
+                primary_evidence=[
+                    f"detected_format={'e01' if source.suffix.lower() == '.e01' else 'ex01'}",
+                    f"ready={ready}",
+                    f"missing_tools={','.join(missing)}",
+                ],
+                report_grade_assessment=report_grade,
+                caveats=[
+                    "Workflow orchestrates libewf/Sleuth Kit rather than a native E01/Ex01 parser.",
+                    "Encrypted, corrupt, and malformed images require independent validation.",
+                ],
+            ),
             native_capabilities={
                 "ewf_libewf_mount_orchestration": True,
                 "auto_extract_then_scan": ready,
@@ -155,6 +192,14 @@ class RawImageAdapter:
         missing = missing_raw_image_tools()
         ready = supported and not missing
         split_parts = discover_raw_parts_for_guidance(source) if supported and source.is_file() else []
+        report_grade = image_report_grade_assessment(
+            "#23",
+            [
+                "native-partition-filesystem-parser-not-implemented",
+                "split-image-gap-and-damaged-set-known-answer-validation-required",
+                "encrypted-volume-unlock-workflow-not-implemented",
+            ],
+        )
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -190,12 +235,19 @@ class RawImageAdapter:
             tool_preflight=collect_tool_preflight(RAW_IMAGE_REQUIRED_TOOLS) if supported else None,
             commercial_grade_ready=False,
             commercial_gap_ids=["#23"],
-            report_grade_assessment=image_report_grade_assessment(
-                "#23",
-                [
-                    "native-partition-filesystem-parser-not-implemented",
-                    "split-image-gap-and-damaged-set-known-answer-validation-required",
-                    "encrypted-volume-unlock-workflow-not-implemented",
+            report_grade_assessment=report_grade,
+            forensic_review=evidence_forensic_review(
+                gap_id="#23",
+                artifact_goal="RAW/split image detection, split sequence guidance, partition selection and filesystem recovery workflow",
+                primary_evidence=[
+                    f"ready={ready}",
+                    f"split_part_count={len(split_parts)}",
+                    f"missing_tools={','.join(missing)}",
+                ],
+                report_grade_assessment=report_grade,
+                caveats=[
+                    "Partition and filesystem recovery are delegated to Sleuth Kit.",
+                    "Split set gaps and encrypted volumes require case-specific validation.",
                 ],
             ),
             native_capabilities={
@@ -267,6 +319,14 @@ class VirtualDiskAdapter:
     def identify(self, source: Path) -> EvidenceAdapterResult:
         supported = source.suffix.lower() in self.supported_suffixes
         if source.suffix.lower() == ".xva":
+            report_grade = image_report_grade_assessment(
+                "#24",
+                [
+                    "xva-direct-extraction-not-implemented",
+                    "hypervisor-metadata-decoding-not-implemented",
+                    "vendor-export-validation-required",
+                ],
+            )
             return EvidenceAdapterResult(
                 adapter=self.name,
                 source_path=str(source),
@@ -292,12 +352,15 @@ class VirtualDiskAdapter:
                 source_integrity=describe_source_integrity(source) if source.is_file() else None,
                 commercial_grade_ready=False,
                 commercial_gap_ids=["#24"],
-                report_grade_assessment=image_report_grade_assessment(
-                    "#24",
-                    [
-                        "xva-direct-extraction-not-implemented",
-                        "hypervisor-metadata-decoding-not-implemented",
-                        "vendor-export-validation-required",
+                report_grade_assessment=report_grade,
+                forensic_review=evidence_forensic_review(
+                    gap_id="#24",
+                    artifact_goal="XVA detection and safe vendor export/convert workflow",
+                    primary_evidence=[f"detected_format=xva", f"ready=False", f"source={source.name}"],
+                    report_grade_assessment=report_grade,
+                    caveats=[
+                        "Direct XVA extraction is not implemented.",
+                        "Preserve Xen/XCP-ng export logs and hashes before scanning derived disks or folders.",
                     ],
                 ),
                 native_capabilities={
@@ -315,6 +378,15 @@ class VirtualDiskAdapter:
             )
         missing = missing_virtual_disk_tools(source.suffix.lower())
         ready = supported and not missing
+        report_grade = image_report_grade_assessment(
+            "#24",
+            [
+                "snapshot-chain-validation-not-implemented",
+                "differencing-disk-resolution-not-implemented",
+                "hypervisor-metadata-decoding-not-implemented",
+                "large-virtual-disk-known-answer-corpus-required",
+            ],
+        )
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -342,13 +414,19 @@ class VirtualDiskAdapter:
             tool_preflight=collect_tool_preflight(VIRTUAL_DISK_REQUIRED_TOOLS) if supported else None,
             commercial_grade_ready=False,
             commercial_gap_ids=["#24"],
-            report_grade_assessment=image_report_grade_assessment(
-                "#24",
-                [
-                    "snapshot-chain-validation-not-implemented",
-                    "differencing-disk-resolution-not-implemented",
-                    "hypervisor-metadata-decoding-not-implemented",
-                    "large-virtual-disk-known-answer-corpus-required",
+            report_grade_assessment=report_grade,
+            forensic_review=evidence_forensic_review(
+                gap_id="#24",
+                artifact_goal="Virtual disk conversion, provenance-preserving raw recovery, snapshot-chain risk disclosure",
+                primary_evidence=[
+                    f"detected_format={source.suffix.lower().lstrip('.') or 'virtual-disk'}",
+                    f"ready={ready}",
+                    f"missing_tools={','.join(missing)}",
+                ],
+                report_grade_assessment=report_grade,
+                caveats=[
+                    "qemu-img conversion and Sleuth Kit recovery must be preserved with tool versions and logs.",
+                    "Snapshot/differencing chains, encryption, and hypervisor metadata are not fully validated.",
                 ],
             ),
             native_capabilities={
@@ -374,6 +452,14 @@ class ForensicContainerAdapter:
     def identify(self, source: Path) -> EvidenceAdapterResult:
         supported = source.suffix.lower() in self.supported_suffixes
         suffix = source.suffix.lower().lstrip(".")
+        report_grade = image_report_grade_assessment(
+            "#25",
+            [
+                "proprietary-container-direct-parser-not-implemented",
+                "embedded-metadata-compression-deleted-entry-validation-required",
+                "vendor-export-log-required",
+            ],
+        )
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -399,12 +485,15 @@ class ForensicContainerAdapter:
             source_integrity=describe_source_integrity(source) if source.is_file() else None,
             commercial_grade_ready=False,
             commercial_gap_ids=["#25"],
-            report_grade_assessment=image_report_grade_assessment(
-                "#25",
-                [
-                    "proprietary-container-direct-parser-not-implemented",
-                    "embedded-metadata-compression-deleted-entry-validation-required",
-                    "vendor-export-log-required",
+            report_grade_assessment=report_grade,
+            forensic_review=evidence_forensic_review(
+                gap_id="#25",
+                artifact_goal="AD1/L01/Lx01/AFF/AFF4 container detection and verified export workflow",
+                primary_evidence=[f"detected_format={suffix}", f"source={source.name}", "direct_parser=False"],
+                report_grade_assessment=report_grade,
+                caveats=[
+                    "Direct proprietary container parsing is not implemented.",
+                    "Treat vendor export output as derived evidence and retain original container hashes/logs.",
                 ],
             ),
             native_capabilities={

@@ -26,6 +26,10 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("benchmark", commands)
         self.assertIn("--file-count", commands["benchmark"].format_help())
         self.assertIn("--resume", commands["benchmark"].format_help())
+        self.assertIn("columnar-benchmark", commands)
+        self.assertIn("--record-count", commands["columnar-benchmark"].format_help())
+        self.assertIn("columnar-convert", commands)
+        self.assertIn("--input-jsonl", commands["columnar-convert"].format_help())
         self.assertIn("stress-plan", commands)
         self.assertIn("case-catalog", commands)
         self.assertIn("--add-run", commands["case-catalog"].format_help())
@@ -33,6 +37,8 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("--output-dir", commands["validation"].format_help())
         self.assertIn("commercial-readiness", commands)
         self.assertIn("--strict", commands["commercial-readiness"].format_help())
+        self.assertIn("--write-known-answer-template", commands["commercial-readiness"].format_help())
+        self.assertIn("--write-known-answer-template-dir", commands["commercial-readiness"].format_help())
         self.assertIn("cross-tool-validate", commands)
         self.assertIn("--reference-output", commands["cross-tool-validate"].format_help())
         self.assertIn("confidence-dashboard", commands)
@@ -220,11 +226,139 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["status"], "commercial-gaps-present")
             self.assertFalse(payload["commercial_claim_allowed"])
             self.assertGreater(payload["non_commercial_count"], 0)
+            self.assertIn("maturity_gate_summary", payload)
+            self.assertEqual(payload["maturity_gate_summary"]["item_count"], 120)
+            self.assertIn("implemented", payload["maturity_gate_summary"]["gate_counts"])
+            self.assertIn("next_gate_samples", payload["maturity_gate_summary"])
+            self.assertIn("next_gate_blocker_counts", payload["maturity_gate_summary"])
+            self.assertIn("priority_work_plan", payload)
+            self.assertGreater(len(payload["priority_work_plan"]), 0)
+            self.assertIn("required_action", payload["priority_work_plan"][0])
+            self.assertIn("all_items", payload)
+            first_item = next(item for item in payload["all_items"] if item["number"] == 1)
+            self.assertIn("maturity_gates", first_item)
+            self.assertIn("commercial_grade", first_item["maturity_gates"])
+            self.assertFalse(first_item["maturity_gates"]["commercial_grade"]["passed"])
             self.assertTrue((Path(tmp_dir) / "rapidtriage-commercial-readiness.json").is_file())
             self.assertTrue((Path(tmp_dir) / "rapidtriage-commercial-readiness.md").is_file())
             critical_numbers = {item["number"] for item in payload["critical_non_commercial_items"]}
             self.assertIn(1, critical_numbers)
             self.assertIn(25, critical_numbers)
+
+    def test_commercial_readiness_can_focus_next_gate_items(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["commercial-readiness", "--next-gate", "validated", "--limit", "3", "--json"])
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["focused_next_gate"], "validated")
+        self.assertEqual(len(payload["focused_items"]), 3)
+        self.assertTrue(all(item["next_required_gate"] == "validated" for item in payload["focused_items"]))
+
+    def test_commercial_readiness_attaches_passed_validation_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evidence = root / "evtx-known-answer.diff.json"
+            evidence.write_text('{"status":"pass"}', encoding="utf-8")
+            validation_package = root / "validation.json"
+            validation_package.write_text(
+                json.dumps(
+                    {
+                        "command": "validation",
+                        "known_answer_validation": {
+                            "datasets": [
+                                {
+                                    "id": "evtx-core-known-answer",
+                                    "name": "EVTX core known-answer",
+                                    "status": "pass",
+                                    "backlog_items": [1],
+                                    "evidence_paths": [str(evidence)],
+                                    "evidence_paths_present": True,
+                                }
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["commercial-readiness", "--validation-package", str(validation_package), "--json"])
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["validation_evidence_summary"]["items_with_passed_validation_evidence"], 1)
+        self.assertIn(1, payload["validation_evidence_summary"]["mapped_item_numbers"])
+        first_item = next(item for item in payload["all_items"] if item["number"] == 1)
+        self.assertTrue(first_item["maturity_gates"]["validated"]["passed"])
+        self.assertFalse(first_item["maturity_gates"]["commercial_grade"]["passed"])
+        self.assertEqual(first_item["next_required_gate"], "commercial_grade")
+
+    def test_commercial_readiness_writes_known_answer_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "known-answer-runs.template.json"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "commercial-readiness",
+                        "--next-gate",
+                        "validated",
+                        "--limit",
+                        "5",
+                        "--write-known-answer-template",
+                        str(output),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertIn("known_answer_manifest_template", payload)
+            template = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(template["command"], "commercial-readiness-known-answer-template")
+            self.assertEqual(template["status"], "template-not-run")
+            self.assertEqual(template["next_gate"], "validated")
+            self.assertEqual(len(template["datasets"]), 5)
+            self.assertEqual(template["datasets"][0]["backlog_items"], [1])
+            self.assertEqual(template["datasets"][0]["status"], "not-run")
+            self.assertIn("reference_tools", template["datasets"][0]["expected"])
+            self.assertTrue(output.with_suffix(".md").is_file())
+
+    def test_commercial_readiness_writes_all_known_answer_template_batches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "known-answer-batches"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "commercial-readiness",
+                        "--template-items",
+                        "1-120",
+                        "--template-batch-size",
+                        "5",
+                        "--write-known-answer-template-dir",
+                        str(output_dir),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            batches = payload["known_answer_manifest_template_batches"]
+            self.assertEqual(batches["batch_count"], 24)
+            self.assertEqual(batches["item_count"], 120)
+            index = json.loads((output_dir / "known-answer-template-batches.index.json").read_text(encoding="utf-8"))
+            self.assertEqual(index["batch_count"], 24)
+            self.assertTrue((output_dir / "known-answer-template-batches.index.md").is_file())
+            self.assertTrue((output_dir / "known-answer-batch-001-005.template.json").is_file())
+            self.assertTrue((output_dir / "known-answer-batch-116-120.template.json").is_file())
+            first_batch = json.loads((output_dir / "known-answer-batch-001-005.template.json").read_text(encoding="utf-8"))
+            last_batch = json.loads((output_dir / "known-answer-batch-116-120.template.json").read_text(encoding="utf-8"))
+            self.assertEqual(first_batch["item_numbers"], [1, 2, 3, 4, 5])
+            self.assertEqual(last_batch["item_numbers"], [116, 117, 118, 119, 120])
+            self.assertTrue(all(dataset["status"] == "not-run" for dataset in first_batch["datasets"]))
 
     def test_cross_tool_validate_compares_rapid_and_reference_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -747,6 +881,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             release_dir = root / "release"
             validation_dir = root / "validation"
             benchmark_dir = root / "benchmark"
+            columnar_benchmark_dir = root / "columnar-benchmark"
             smoke_dir = root / "smoke-windows"
             evidence_dir = root / "release-evidence"
 
@@ -774,8 +909,21 @@ class RapidTriageOpsTests(unittest.TestCase):
                         "--json",
                     ]
                 )
+                columnar_benchmark_exit = main(
+                    [
+                        "columnar-benchmark",
+                        "--output-dir",
+                        str(columnar_benchmark_dir),
+                        "--record-count",
+                        "25",
+                        "--query-iterations",
+                        "1",
+                        "--json",
+                    ]
+                )
             self.assertEqual(validation_exit, 0)
             self.assertEqual(benchmark_exit, 0)
+            self.assertEqual(columnar_benchmark_exit, 0)
 
             smoke_dir.mkdir()
             (smoke_dir / "smoke-summary.json").write_text(json.dumps({"passed": True, "checks": []}), encoding="utf-8")
@@ -791,6 +939,8 @@ class RapidTriageOpsTests(unittest.TestCase):
                     str(validation_dir),
                     "--benchmark-dir",
                     str(benchmark_dir),
+                    "--columnar-benchmark-dir",
+                    str(columnar_benchmark_dir),
                     "--smoke-dir",
                     str(smoke_dir),
                     "--require-smoke-platform",
@@ -812,6 +962,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(report["summary"]["fail"], 0)
             check_ids = {item["id"] for item in report["checks"]}
             self.assertIn("smoke-platform-windows", check_ids)
+            self.assertIn("columnar-benchmark-jsonl-metrics", check_ids)
+            self.assertIn("columnar-benchmark-commercial-disclosure", check_ids)
             self.assertTrue((evidence_dir / "release-evidence-report.md").is_file())
 
     def test_release_evidence_script_reports_missing_required_smoke_platform(self) -> None:

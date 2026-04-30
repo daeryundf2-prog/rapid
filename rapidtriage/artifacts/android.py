@@ -9,6 +9,7 @@ from typing import Iterable
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
+from .review import build_forensic_review
 
 PARSER_VERSION = "android-apk-v4"
 ANDROID_NAMESPACE = "{http://schemas.android.com/apk/res/android}"
@@ -124,8 +125,30 @@ def build_apk_record(path: Path) -> ArtifactRecord:
                 ),
                 "android_report_grade_assessment": android_report_grade_assessment(["#30"]),
                 "commercial_grade_blockers": apk_blockers(),
+                "forensic_review": android_forensic_review(
+                    gap_ids=["#30"],
+                    artifact_goal="Android APK ZIP/manifest/permission/component/string-pivot triage",
+                    primary_evidence=[
+                        f"package={details.get('package', '')}",
+                        f"entry_name={resolved.name}",
+                        "valid_zip=False",
+                    ],
+                ),
             }
         )
+    details.setdefault(
+        "forensic_review",
+        android_forensic_review(
+            gap_ids=["#30"],
+            artifact_goal="Android APK ZIP/manifest/permission/component/string-pivot triage",
+            primary_evidence=[
+                f"package={details.get('package', '')}",
+                f"entry_name={resolved.name}",
+                f"dex_count={details.get('dex_count', 0)}",
+                f"dangerous_permissions={len(details.get('dangerous_permissions', [])) if isinstance(details.get('dangerous_permissions'), list) else 0}",
+            ],
+        ),
+    )
     return ArtifactRecord(
         provider=AndroidApkProvider.name,
         artifact_type="android-apk",
@@ -369,6 +392,16 @@ def build_android_app_data_record(path: Path, package: str) -> ArtifactRecord:
         ),
         "android_report_grade_assessment": android_report_grade_assessment(["#29", "#30"]),
         "android_native_capabilities": dict(ANDROID_NATIVE_CAPABILITIES),
+        "forensic_review": android_forensic_review(
+            gap_ids=["#29", "#30"],
+            artifact_goal="Android backup/export app-data file inventory and package attribution",
+            primary_evidence=[
+                f"package={package}",
+                f"category={category}",
+                f"entry_name={resolved.name}",
+                f"source_size={stat_result.st_size}",
+            ],
+        ),
         "commercial_grade_ready": False,
         "commercial_gap_ids": ["#29", "#30"],
         "commercial_grade_blockers": [
@@ -524,6 +557,26 @@ def android_report_grade_assessment(gap_ids: list[str]) -> dict[str, object]:
             "Preserve acquisition/export logs, package source, signature data, and app version context before reporting.",
         ],
     }
+
+
+def android_forensic_review(
+    *,
+    gap_ids: list[str],
+    artifact_goal: str,
+    primary_evidence: list[str],
+) -> dict[str, object]:
+    return build_forensic_review(
+        gap_id=gap_ids[0] if gap_ids else "#30",
+        artifact_goal=artifact_goal,
+        primary_evidence=primary_evidence,
+        validation_required=True,
+        report_grade_assessment=android_report_grade_assessment(gap_ids),
+        blockers=ANDROID_REPORT_GRADE_BLOCKERS,
+        caveats=[
+            "Android outputs are triage-grade until binary manifest, signature chain, DEX behavior, and app schema parsing are validated.",
+            "Encrypted stores, secrets, and deleted records are not extracted by this parser.",
+        ],
+    )
 
 
 def apk_blockers() -> list[str]:

@@ -1,19 +1,38 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from .docs import write_result
 
 
 COMMERCIAL_READINESS_JSON_NAME = "rapidtriage-commercial-readiness.json"
 COMMERCIAL_READINESS_MARKDOWN_NAME = "rapidtriage-commercial-readiness.md"
+KNOWN_ANSWER_TEMPLATE_MARKDOWN_SUFFIX = ".md"
 
 BACKLOG_ITEM_RE = re.compile(
     r"^(?P<number>\d+)\.\s+(?P<title>.+?)\.\s+Status:\s+(?P<status>[^.]+)\.\s*(?P<body>.*)$"
 )
+MATURITY_GATE_ORDER = ("implemented", "usable", "validated", "commercial_grade")
+MATURITY_GATE_DEFINITIONS = {
+    "implemented": "Code, workflow, import path, or release artifact evidence exists.",
+    "usable": "An analyst can reach the feature through CLI/API/UI/docs without custom patching.",
+    "validated": "Known-answer, fixture, cross-tool, or release-validation evidence is sufficient for the current claim.",
+    "commercial_grade": "No remaining blocker prevents AXIOM/WISDOM-class parity wording for this item.",
+}
+SEVERITY_PRIORITY = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+CATEGORY_PRIORITY = {
+    "core-forensics": 0,
+    "mobile-cloud-apps": 1,
+    "validation-legal": 2,
+    "performance-large-scale": 3,
+    "search-analysis-ux": 4,
+    "deployment-operations": 5,
+    "unknown": 9,
+}
 
 
 class CommercialReadinessError(ValueError):
@@ -24,10 +43,410 @@ def default_backlog_path() -> Path:
     return Path(__file__).resolve().parents[2] / "docs" / "rapidtriage-commercial-parity-backlog.md"
 
 
+def load_validation_evidence(validation_package_path: Path | None = None) -> dict[int, list[dict[str, object]]]:
+    if validation_package_path is None:
+        return {}
+    resolved = validation_package_path.expanduser().resolve()
+    try:
+        raw = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CommercialReadinessError(f"failed to read validation evidence: {exc}") from exc
+    if not isinstance(raw, Mapping):
+        raise CommercialReadinessError("validation evidence must be a JSON object")
+
+    datasets = validation_datasets_from_payload(raw)
+    evidence_by_item: dict[int, list[dict[str, object]]] = {}
+    for dataset in datasets:
+        if not isinstance(dataset, Mapping):
+            continue
+        status = str(dataset.get("status") or "").lower()
+        evidence_paths_present = dataset.get("evidence_paths_present")
+        if status != "pass" or evidence_paths_present is False:
+            continue
+        for number in validation_target_numbers(dataset):
+            evidence_by_item.setdefault(number, []).append(
+                {
+                    "id": str(dataset.get("id") or ""),
+                    "name": str(dataset.get("name") or dataset.get("id") or ""),
+                    "source": str(dataset.get("source") or ""),
+                    "status": status,
+                    "manifest_path": str(resolved),
+                    "evidence_paths": list(dataset.get("evidence_paths") or []),
+                    "notes": str(dataset.get("notes") or ""),
+                }
+            )
+    return evidence_by_item
+
+
+def validation_datasets_from_payload(payload: Mapping[str, object]) -> list[object]:
+    known_answer = payload.get("known_answer_validation")
+    if isinstance(known_answer, Mapping) and isinstance(known_answer.get("datasets"), list):
+        return list(known_answer["datasets"])
+    datasets = payload.get("datasets")
+    if isinstance(datasets, list):
+        return list(datasets)
+    return []
+
+
+def validation_target_numbers(dataset: Mapping[str, object]) -> list[int]:
+    raw_values = (
+        dataset.get("backlog_items")
+        or dataset.get("commercial_items")
+        or dataset.get("item_numbers")
+        or []
+    )
+    if not raw_values and isinstance(dataset.get("expected"), Mapping):
+        expected = dataset["expected"]
+        raw_values = (
+            expected.get("backlog_items")
+            or expected.get("commercial_items")
+            or expected.get("item_numbers")
+            or []
+        )
+    if isinstance(raw_values, (str, int)):
+        raw_values = [raw_values]
+    numbers: list[int] = []
+    if isinstance(raw_values, list):
+        for value in raw_values:
+            try:
+                number = int(str(value).lstrip("#"))
+            except ValueError:
+                continue
+            if 1 <= number <= 120 and number not in numbers:
+                numbers.append(number)
+    return numbers
+
+
+def attach_validation_evidence(
+    items: list[dict[str, object]],
+    evidence_by_item: dict[int, list[dict[str, object]]],
+) -> dict[str, object]:
+    attached_count = 0
+    for item in items:
+        number = int(item.get("number") or 0)
+        evidence_rows = evidence_by_item.get(number, [])
+        if not evidence_rows:
+            item["validation_evidence"] = []
+            continue
+        attached_count += 1
+        item["validation_evidence"] = evidence_rows
+        gates = item.get("maturity_gates")
+        if isinstance(gates, dict) and isinstance(gates.get("validated"), dict):
+            gates["validated"] = maturity_gate(
+                True,
+                "attached known-answer validation evidence passed for this backlog item",
+                "",
+            )
+            item["highest_maturity_stage"] = highest_maturity_stage(gates)
+            item["next_required_gate"] = next_required_gate(gates)
+    return {
+        "validation_package_attached": bool(evidence_by_item),
+        "items_with_passed_validation_evidence": attached_count,
+        "mapped_item_numbers": sorted(evidence_by_item),
+        "rule": "Only datasets with status=pass and present evidence paths can satisfy an item's validated gate; commercial_grade still requires blocker removal.",
+    }
+
+
+def build_known_answer_manifest_template(
+    items: Iterable[dict[str, object]],
+    *,
+    next_gate: str = "validated",
+    limit: int = 5,
+    item_numbers: Iterable[int] | None = None,
+) -> dict[str, object]:
+    if next_gate not in MATURITY_GATE_ORDER:
+        raise CommercialReadinessError(f"unknown maturity gate for known-answer template: {next_gate}")
+    item_list = list(items)
+    selected_numbers = list(dict.fromkeys(int(number) for number in (item_numbers or []) if 1 <= int(number) <= 120))
+    if selected_numbers:
+        items_by_number = {int(item.get("number") or 0): item for item in item_list}
+        selected = [items_by_number[number] for number in selected_numbers if number in items_by_number]
+    else:
+        selected = [
+            item for item in sorted(item_list, key=priority_sort_key)
+            if item.get("next_required_gate") == next_gate
+        ][: max(limit, 0)]
+    datasets = [known_answer_dataset_template(item) for item in selected]
+    return {
+        "command": "commercial-readiness-known-answer-template",
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "status": "template-not-run",
+        "next_gate": next_gate,
+        "item_numbers": [int(item.get("number") or 0) for item in selected],
+        "item_count": len(datasets),
+        "instructions": [
+            "Fill source, evidence_paths, expected assertions, and status after running real known-answer or cross-tool validation.",
+            "Keep status as not-run/open/fail until every required assertion is independently verified.",
+            "Only status=pass rows with present evidence paths can satisfy the commercial-readiness validated gate.",
+        ],
+        "datasets": datasets,
+    }
+
+
+def build_known_answer_template_batches(
+    items: Iterable[dict[str, object]],
+    *,
+    item_numbers: Iterable[int],
+    batch_size: int = 5,
+    next_gate: str = "validated",
+) -> dict[str, object]:
+    if batch_size <= 0:
+        raise CommercialReadinessError("known-answer template batch size must be greater than zero")
+    numbers = [number for number in dict.fromkeys(int(value) for value in item_numbers) if 1 <= number <= 120]
+    batches: list[dict[str, object]] = []
+    for index in range(0, len(numbers), batch_size):
+        batch_numbers = numbers[index : index + batch_size]
+        template = build_known_answer_manifest_template(
+            items,
+            next_gate=next_gate,
+            limit=batch_size,
+            item_numbers=batch_numbers,
+        )
+        batches.append(
+            {
+                "batch_number": len(batches) + 1,
+                "item_numbers": batch_numbers,
+                "item_count": len(batch_numbers),
+                "template": template,
+            }
+        )
+    return {
+        "command": "commercial-readiness-known-answer-template-batches",
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "status": "templates-not-run",
+        "next_gate": next_gate,
+        "batch_size": batch_size,
+        "batch_count": len(batches),
+        "item_count": len(numbers),
+        "item_numbers": numbers,
+        "batches": batches,
+        "rule": "Each batch starts as not-run. Fill evidence and change dataset status to pass only after real validation.",
+    }
+
+
+def known_answer_dataset_template(item: dict[str, object]) -> dict[str, object]:
+    number = int(item.get("number") or 0)
+    title = str(item.get("title") or f"Backlog item {number}")
+    return {
+        "id": f"commercial-item-{number:03d}-{slugify(title)}",
+        "name": title,
+        "source": "",
+        "corpus_family": str(item.get("category") or ""),
+        "status": "not-run",
+        "backlog_items": [number],
+        "evidence_paths": [],
+        "expected": {
+            "backlog_items": [number],
+            "required_assertions": required_assertions_for_item(item),
+            "reference_tools": reference_tools_for_item(number),
+            "minimum_evidence": [
+                "source evidence hash and acquisition notes",
+                "RapidTriage output JSON/Markdown",
+                "trusted reference tool output or known-answer expected-result file",
+                "record-level or assertion-level diff",
+                "reviewer sign-off with limitations",
+            ],
+        },
+        "notes": gate_remaining_text(item, str(item.get("next_required_gate") or "validated")),
+    }
+
+
+def required_assertions_for_item(item: dict[str, object]) -> list[str]:
+    number = int(item.get("number") or 0)
+    title = str(item.get("title") or "")
+    gap = gate_remaining_text(item, str(item.get("next_required_gate") or "validated"))
+    assertions = [
+        f"Backlog item #{number} ({title}) has passing known-answer or cross-tool evidence.",
+        "RapidTriage output preserves source path, source hash, parser version, and relevant offsets where available.",
+        "False-positive and false-negative limitations are documented for this item.",
+    ]
+    if gap:
+        assertions.append(f"Remaining validation gap is specifically addressed: {gap}")
+    if 1 <= number <= 3:
+        assertions.extend(
+            [
+                "EVTX record counts, record IDs, timestamps, provider/channel/EventID fields, and recovered/corrupt candidates match expected results within documented tolerance.",
+                "Message rendering/template fallback differences are explicitly diffed against the reference output.",
+            ]
+        )
+    elif 4 <= number <= 6:
+        assertions.extend(
+            [
+                "Registry/SAM/SECURITY/SYSTEM key, value, timestamp, deleted-cell, account, group, privilege, and transaction-log claims match expected results within documented tolerance.",
+                "Any secret or protected value handling is authorized, redacted where required, and separately audited.",
+            ]
+        )
+    elif 7 <= number <= 18:
+        assertions.append(
+            "Execution, filesystem, ESE, or system-artifact timestamps and semantic caveats are validated against a trusted parser export."
+        )
+    return assertions
+
+
+def reference_tools_for_item(number: int) -> list[str]:
+    if 1 <= number <= 3:
+        return ["EvtxECmd", "Hayabusa", "Windows Event Viewer/wevtutil export where applicable"]
+    if 4 <= number <= 6 or number == 15:
+        return ["Registry Explorer/rla", "RegRipper", "Eric Zimmerman RECmd where applicable"]
+    if number in {7, 8, 9, 16, 17}:
+        return ["AmcacheParser", "AppCompatCacheParser", "PECmd", "LECmd/JLECmd where applicable"]
+    if number in {10, 11}:
+        return ["SrumECmd", "ESEDatabaseView/esedbexport", "Windows Search parser reference export"]
+    if number in {12, 13}:
+        return ["MFTECmd", "usn.py/USN Journal parser reference export", "Sleuth Kit where applicable"]
+    return ["trusted commercial tool export", "known-answer expected-result manifest"]
+
+
+def slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug[:72] or "validation"
+
+
+def write_known_answer_manifest_template(template: dict[str, object], output: Path) -> dict[str, str]:
+    output = output.expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    write_result(template, output)
+    markdown_path = output.with_suffix(KNOWN_ANSWER_TEMPLATE_MARKDOWN_SUFFIX)
+    markdown_path.write_text(render_known_answer_template_markdown(template), encoding="utf-8")
+    return {"json": str(output), "markdown": str(markdown_path)}
+
+
+def write_known_answer_template_batches(batch_payload: dict[str, object], output_dir: Path) -> dict[str, object]:
+    output_dir = output_dir.expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    written_batches: list[dict[str, object]] = []
+    for batch in batch_payload.get("batches", []):
+        if not isinstance(batch, dict) or not isinstance(batch.get("template"), dict):
+            continue
+        item_numbers = [int(number) for number in batch.get("item_numbers", [])]
+        if item_numbers:
+            stem = f"known-answer-batch-{item_numbers[0]:03d}-{item_numbers[-1]:03d}.template.json"
+        else:
+            stem = f"known-answer-batch-{int(batch.get('batch_number') or 0):03d}.template.json"
+        outputs = write_known_answer_manifest_template(batch["template"], output_dir / stem)
+        written_batches.append(
+            {
+                "batch_number": batch.get("batch_number"),
+                "item_numbers": item_numbers,
+                "outputs": outputs,
+            }
+        )
+    index_payload = {
+        "command": batch_payload.get("command"),
+        "generated_at": batch_payload.get("generated_at"),
+        "status": batch_payload.get("status"),
+        "next_gate": batch_payload.get("next_gate"),
+        "batch_size": batch_payload.get("batch_size"),
+        "batch_count": len(written_batches),
+        "item_count": batch_payload.get("item_count"),
+        "item_numbers": batch_payload.get("item_numbers"),
+        "batches": written_batches,
+        "rule": batch_payload.get("rule"),
+    }
+    index_json = output_dir / "known-answer-template-batches.index.json"
+    index_md = output_dir / "known-answer-template-batches.index.md"
+    write_result(index_payload, index_json)
+    index_md.write_text(render_known_answer_batch_index_markdown(index_payload), encoding="utf-8")
+    return {
+        "directory": str(output_dir),
+        "index_json": str(index_json),
+        "index_markdown": str(index_md),
+        "batch_count": len(written_batches),
+        "batches": written_batches,
+    }
+
+
+def parse_item_range(value: str) -> list[int]:
+    numbers: list[int] = []
+    for raw_part in value.split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            start_text, end_text = part.split("-", 1)
+            try:
+                start = int(start_text.strip().lstrip("#"))
+                end = int(end_text.strip().lstrip("#"))
+            except ValueError as exc:
+                raise CommercialReadinessError(f"invalid item range: {part}") from exc
+            if end < start:
+                start, end = end, start
+            candidate_numbers = range(start, end + 1)
+        else:
+            try:
+                candidate_numbers = [int(part.lstrip("#"))]
+            except ValueError as exc:
+                raise CommercialReadinessError(f"invalid item number: {part}") from exc
+        for number in candidate_numbers:
+            if not 1 <= number <= 120:
+                raise CommercialReadinessError(f"item number out of supported range 1-120: {number}")
+            if number not in numbers:
+                numbers.append(number)
+    return numbers
+
+
+def render_known_answer_template_markdown(template: dict[str, object]) -> str:
+    lines = [
+        "# RapidTriage Known-Answer Manifest Template",
+        "",
+        f"- Generated at: `{template.get('generated_at', '')}`",
+        f"- Status: `{template.get('status', '')}`",
+        f"- Next gate: `{template.get('next_gate', '')}`",
+        f"- Dataset templates: `{template.get('item_count', 0)}`",
+        "",
+        "## Instructions",
+        "",
+    ]
+    for item in template.get("instructions", []):
+        lines.append(f"- {item}")
+    lines.extend(["", "## Dataset Templates", ""])
+    for dataset in template.get("datasets", []):
+        if not isinstance(dataset, dict):
+            continue
+        expected = dataset.get("expected") if isinstance(dataset.get("expected"), dict) else {}
+        reference_tools = expected.get("reference_tools") if isinstance(expected.get("reference_tools"), list) else []
+        lines.append(f"- `{dataset.get('id', '')}`: {dataset.get('name', '')}")
+        if reference_tools:
+            lines.append(f"  Reference tools: {', '.join(str(tool) for tool in reference_tools)}")
+        notes = str(dataset.get("notes") or "").strip()
+        if notes:
+            lines.append(f"  Validation focus: {notes}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_known_answer_batch_index_markdown(payload: dict[str, object]) -> str:
+    lines = [
+        "# RapidTriage Known-Answer Template Batch Index",
+        "",
+        f"- Generated at: `{payload.get('generated_at', '')}`",
+        f"- Status: `{payload.get('status', '')}`",
+        f"- Next gate: `{payload.get('next_gate', '')}`",
+        f"- Batch size: `{payload.get('batch_size', '')}`",
+        f"- Batch count: `{payload.get('batch_count', 0)}`",
+        f"- Item count: `{payload.get('item_count', 0)}`",
+        f"- Rule: {payload.get('rule', '')}",
+        "",
+        "## Batches",
+        "",
+    ]
+    for batch in payload.get("batches", []):
+        if not isinstance(batch, dict):
+            continue
+        outputs = batch.get("outputs") if isinstance(batch.get("outputs"), dict) else {}
+        item_numbers = ", ".join(f"#{number}" for number in batch.get("item_numbers", []))
+        lines.append(
+            f"- Batch `{batch.get('batch_number')}` ({item_numbers}): `{outputs.get('json', '')}`"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
 def build_commercial_readiness_report(
     *,
     backlog_path: Path | None = None,
     output_dir: Path | None = None,
+    validation_package_path: Path | None = None,
 ) -> dict[str, object]:
     backlog_path = (backlog_path or default_backlog_path()).expanduser().resolve()
     if not backlog_path.is_file():
@@ -37,6 +456,10 @@ def build_commercial_readiness_report(
     if not items:
         raise CommercialReadinessError(f"no numbered backlog items found in: {backlog_path}")
 
+    validation_evidence_summary = attach_validation_evidence(
+        items,
+        load_validation_evidence(validation_package_path),
+    )
     non_commercial = [item for item in items if not item["commercial_grade_ready"]]
     status_counts: dict[str, int] = {}
     severity_counts: dict[str, int] = {}
@@ -51,6 +474,7 @@ def build_commercial_readiness_report(
 
     commercial_claim_allowed = not non_commercial
     readiness_score = calculate_readiness_score(items)
+    maturity_gate_summary = build_maturity_gate_summary(items)
     payload: dict[str, object] = {
         "command": "commercial-readiness",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -69,6 +493,11 @@ def build_commercial_readiness_report(
         "status_counts": status_counts,
         "severity_counts": severity_counts,
         "category_counts": category_counts,
+        "maturity_gate_definitions": dict(MATURITY_GATE_DEFINITIONS),
+        "maturity_gate_summary": maturity_gate_summary,
+        "validation_evidence_summary": validation_evidence_summary,
+        "priority_work_plan": build_priority_work_plan(items),
+        "all_items": items,
         "critical_non_commercial_items": [
             item for item in non_commercial if item["severity"] in {"critical", "high"}
         ],
@@ -132,6 +561,279 @@ def finalize_backlog_item(item: dict[str, object]) -> None:
     item["commercial_grade_ready"] = status == "Done" and not blockers and not item.get("remaining_gap")
     item["commercial_blockers"] = blockers or fallback_blockers(status, int(item.get("number", 0)))
     item["release_gate"] = release_gate_for_item(item)
+    item["maturity_gates"] = build_maturity_gates(item)
+    item["highest_maturity_stage"] = highest_maturity_stage(item["maturity_gates"])
+    item["next_required_gate"] = next_required_gate(item["maturity_gates"])
+
+
+def build_maturity_gates(item: dict[str, object]) -> dict[str, dict[str, object]]:
+    body = str(item.get("body") or "")
+    status = str(item.get("status") or "")
+    remaining_gap = str(item.get("remaining_gap") or "")
+    blockers = list(item.get("commercial_blockers") or [])
+    commercial_ready = bool(item.get("commercial_grade_ready"))
+
+    implemented_passed = status_indicates_implementation(status) or (
+        status_can_use_current_evidence(status) and has_current_evidence(body)
+    )
+    usable_passed = implemented_passed and status_indicates_usability(status, body)
+    validated_passed = commercial_ready or has_validation_evidence_without_open_validation_gap(body, remaining_gap, blockers)
+    commercial_passed = commercial_ready
+
+    return {
+        "implemented": maturity_gate(
+            implemented_passed,
+            "implementation evidence present in backlog status/body" if implemented_passed else "no implementation evidence",
+            "" if implemented_passed else "Add code or verified workflow evidence for this item.",
+        ),
+        "usable": maturity_gate(
+            usable_passed,
+            "analyst-facing workflow is documented or exposed" if usable_passed else "analyst-facing workflow not proven",
+            "" if usable_passed else "Expose the feature through CLI/API/UI/docs and add smoke coverage.",
+        ),
+        "validated": maturity_gate(
+            validated_passed,
+            "validation evidence is sufficient for the current claim" if validated_passed else "validation evidence is incomplete",
+            "" if validated_passed else validation_remaining_text(remaining_gap, blockers),
+        ),
+        "commercial_grade": maturity_gate(
+            commercial_passed,
+            "no commercial parity blockers remain" if commercial_passed else "commercial parity blockers remain",
+            "" if commercial_passed else commercial_remaining_text(item),
+        ),
+    }
+
+
+def maturity_gate(passed: bool, evidence: str, remaining: str) -> dict[str, object]:
+    return {
+        "passed": passed,
+        "evidence": evidence,
+        "remaining": remaining,
+    }
+
+
+def status_indicates_implementation(status: str) -> bool:
+    return status.startswith("Done") or status.startswith("Partial")
+
+
+def status_can_use_current_evidence(status: str) -> bool:
+    return not (status.startswith("Planned") or status.startswith("External"))
+
+
+def has_current_evidence(body: str) -> bool:
+    lowered = body.lower()
+    return "current:" in lowered or "current rows" in lowered or "current output" in lowered
+
+
+def status_indicates_usability(status: str, body: str) -> bool:
+    lowered = body.lower()
+    if status.startswith("Planned") or status == "External":
+        return False
+    usable_markers = (
+        "cli",
+        "api",
+        "ui",
+        "web",
+        "collector",
+        "rows",
+        "output",
+        "imports",
+        "emits",
+        "records",
+        "report",
+        "package",
+        "workflow",
+        "current:",
+    )
+    return any(marker in lowered for marker in usable_markers)
+
+
+def has_validation_evidence_without_open_validation_gap(
+    body: str,
+    remaining_gap: str,
+    blockers: list[object],
+) -> bool:
+    lowered_body = body.lower()
+    lowered_gap = remaining_gap.lower()
+    blocker_text = " ".join(str(item).lower() for item in blockers)
+    validation_markers = (
+        "known-answer",
+        "fixture-backed",
+        "fixture",
+        "validation package",
+        "cross-tool",
+        "independent validation",
+        "smoke test",
+        "release gate",
+    )
+    open_validation_terms = (
+        "remaining",
+        "validation required",
+        "known-answer",
+        "corpus",
+        "broad",
+        "independent",
+        "external",
+        "commercial gap",
+    )
+    has_marker = any(marker in lowered_body for marker in validation_markers)
+    open_gap = any(term in lowered_gap for term in open_validation_terms) or "validation" in blocker_text
+    return has_marker and not open_gap
+
+
+def validation_remaining_text(remaining_gap: str, blockers: list[object]) -> str:
+    if remaining_gap:
+        return remaining_gap
+    if blockers:
+        return "Resolve validation blockers: " + ", ".join(str(item) for item in blockers)
+    return "Attach fixture, known-answer, cross-tool, or independent validation evidence."
+
+
+def commercial_remaining_text(item: dict[str, object]) -> str:
+    gap = str(item.get("remaining_gap") or "").strip()
+    if gap:
+        return gap
+    blockers = list(item.get("commercial_blockers") or [])
+    if blockers:
+        return "Resolve commercial blockers: " + ", ".join(str(item) for item in blockers)
+    return str(item.get("release_gate") or "Commercial parity evidence is incomplete.")
+
+
+def highest_maturity_stage(gates: object) -> str:
+    if not isinstance(gates, dict):
+        return "none"
+    highest = "none"
+    for gate_name in MATURITY_GATE_ORDER:
+        gate = gates.get(gate_name)
+        if isinstance(gate, dict) and gate.get("passed"):
+            highest = gate_name
+        else:
+            break
+    return highest
+
+
+def next_required_gate(gates: object) -> str:
+    if not isinstance(gates, dict):
+        return MATURITY_GATE_ORDER[0]
+    for gate_name in MATURITY_GATE_ORDER:
+        gate = gates.get(gate_name)
+        if not (isinstance(gate, dict) and gate.get("passed")):
+            return gate_name
+    return ""
+
+
+def build_maturity_gate_summary(items: Iterable[dict[str, object]]) -> dict[str, object]:
+    item_list = list(items)
+    gate_counts = {
+        gate_name: {
+            "passed": sum(
+                1
+                for item in item_list
+                if isinstance(item.get("maturity_gates"), dict)
+                and isinstance(item["maturity_gates"].get(gate_name), dict)
+                and item["maturity_gates"][gate_name].get("passed")
+            ),
+            "failed": 0,
+        }
+        for gate_name in MATURITY_GATE_ORDER
+    }
+    for gate_name, counts in gate_counts.items():
+        counts["failed"] = len(item_list) - int(counts["passed"])
+
+    next_gate_counts: dict[str, int] = {}
+    for item in item_list:
+        gate_name = str(item.get("next_required_gate") or "complete")
+        next_gate_counts[gate_name] = next_gate_counts.get(gate_name, 0) + 1
+
+    maturity_stage_counts: dict[str, int] = {}
+    for item in item_list:
+        stage_name = str(item.get("highest_maturity_stage") or "none")
+        maturity_stage_counts[stage_name] = maturity_stage_counts.get(stage_name, 0) + 1
+
+    next_gate_samples: dict[str, list[dict[str, object]]] = {}
+    for gate_name in MATURITY_GATE_ORDER:
+        gate_items = [item for item in item_list if item.get("next_required_gate") == gate_name]
+        next_gate_samples[gate_name] = [
+            {
+                "number": item.get("number"),
+                "title": item.get("title"),
+                "category": item.get("category"),
+                "severity": item.get("severity"),
+                "remaining": gate_remaining_text(item, gate_name),
+            }
+            for item in sorted(gate_items, key=priority_sort_key)[:10]
+        ]
+
+    return {
+        "item_count": len(item_list),
+        "gate_counts": gate_counts,
+        "next_gate_counts": next_gate_counts,
+        "next_gate_samples": next_gate_samples,
+        "next_gate_blocker_counts": build_next_gate_blocker_counts(item_list),
+        "highest_maturity_stage_counts": maturity_stage_counts,
+        "commercial_grade_count": gate_counts["commercial_grade"]["passed"],
+        "commercial_grade_missing_count": gate_counts["commercial_grade"]["failed"],
+        "rule": "implemented -> usable -> validated -> commercial_grade; do not claim a higher gate until every earlier gate passes.",
+    }
+
+
+def build_priority_work_plan(items: Iterable[dict[str, object]], *, limit: int = 25) -> list[dict[str, object]]:
+    actionable = [item for item in items if item.get("next_required_gate")]
+    plan: list[dict[str, object]] = []
+    for item in sorted(actionable, key=priority_sort_key)[:limit]:
+        next_gate = str(item.get("next_required_gate") or "")
+        plan.append(
+            {
+                "number": item.get("number"),
+                "title": item.get("title"),
+                "category": item.get("category"),
+                "severity": item.get("severity"),
+                "current_stage": item.get("highest_maturity_stage") or "none",
+                "next_gate": next_gate,
+                "required_action": gate_remaining_text(item, next_gate),
+                "release_gate": item.get("release_gate"),
+            }
+        )
+    return plan
+
+
+def priority_sort_key(item: dict[str, object]) -> tuple[int, int, int, int]:
+    next_gate = str(item.get("next_required_gate") or "complete")
+    gate_priority = MATURITY_GATE_ORDER.index(next_gate) if next_gate in MATURITY_GATE_ORDER else len(MATURITY_GATE_ORDER)
+    severity_priority = SEVERITY_PRIORITY.get(str(item.get("severity") or "low"), 9)
+    category_priority = CATEGORY_PRIORITY.get(str(item.get("category") or "unknown"), 9)
+    return (gate_priority, severity_priority, category_priority, int(item.get("number") or 0))
+
+
+def gate_remaining_text(item: dict[str, object], gate_name: str) -> str:
+    gates = item.get("maturity_gates")
+    if isinstance(gates, dict):
+        gate = gates.get(gate_name)
+        if isinstance(gate, dict):
+            remaining = str(gate.get("remaining") or "").strip()
+            if remaining:
+                return remaining
+    return str(item.get("remaining_gap") or item.get("release_gate") or "No remaining action recorded.")
+
+
+def build_next_gate_blocker_counts(items: Iterable[dict[str, object]]) -> dict[str, dict[str, int]]:
+    counts: dict[str, dict[str, int]] = {gate_name: {} for gate_name in MATURITY_GATE_ORDER}
+    for item in items:
+        gate_name = str(item.get("next_required_gate") or "")
+        if gate_name not in counts:
+            continue
+        blocker_ids = list(item.get("commercial_blockers") or [])
+        if not blocker_ids:
+            blocker_ids = [gate_remaining_text(item, gate_name)]
+        for blocker in blocker_ids:
+            blocker_key = normalize_blocker_key(str(blocker))
+            counts[gate_name][blocker_key] = counts[gate_name].get(blocker_key, 0) + 1
+    return counts
+
+
+def normalize_blocker_key(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9가-힣]+", "-", value.strip().lower()).strip("-")
+    return normalized[:96] or "unspecified"
 
 
 def normalize_status(value: str) -> str:
@@ -321,9 +1023,49 @@ def render_commercial_readiness_markdown(payload: dict[str, object]) -> str:
         f"- Non-commercial items: `{payload.get('non_commercial_count', 0)}`/`{payload.get('item_count', 0)}`",
         f"- Release claim: {payload.get('release_claim', '')}",
         "",
-        "## Required Release Evidence",
+        "## Maturity Gate Summary",
         "",
     ]
+    maturity_summary = payload.get("maturity_gate_summary") if isinstance(payload.get("maturity_gate_summary"), dict) else {}
+    gate_counts = maturity_summary.get("gate_counts") if isinstance(maturity_summary.get("gate_counts"), dict) else {}
+    for gate_name in MATURITY_GATE_ORDER:
+        counts = gate_counts.get(gate_name) if isinstance(gate_counts.get(gate_name), dict) else {}
+        lines.append(
+            f"- `{gate_name}`: `{counts.get('passed', 0)}` passed, `{counts.get('failed', 0)}` remaining"
+        )
+    validation_summary = (
+        payload.get("validation_evidence_summary")
+        if isinstance(payload.get("validation_evidence_summary"), dict)
+        else {}
+    )
+    if validation_summary.get("validation_package_attached"):
+        mapped = ", ".join(f"#{number}" for number in validation_summary.get("mapped_item_numbers", []))
+        lines.extend(
+            [
+                "",
+                "## Attached Validation Evidence",
+                "",
+                f"- Items with passed evidence: `{validation_summary.get('items_with_passed_validation_evidence', 0)}`",
+                f"- Mapped items: {mapped or '`none`'}",
+                f"- Rule: {validation_summary.get('rule', '')}",
+            ]
+        )
+    lines.extend(["", "## Priority Work Plan", ""])
+    for item in payload.get("priority_work_plan", []):
+        if not isinstance(item, dict):
+            continue
+        action = str(item.get("required_action") or "").strip()
+        if len(action) > 220:
+            action = action[:217].rstrip() + "..."
+        lines.append(
+            f"- `#{item.get('number')}` {item.get('title', '')} "
+            f"({item.get('category', '')}, {item.get('severity', '')}, next `{item.get('next_gate', '')}`): {action}"
+        )
+    lines.extend([
+        "",
+        "## Required Release Evidence",
+        "",
+    ])
     for item in payload.get("required_release_evidence", []):
         if isinstance(item, dict):
             lines.append(f"- `{item.get('id', '')}`: {item.get('evidence', '')}")
@@ -342,9 +1084,12 @@ def render_commercial_readiness_markdown(payload: dict[str, object]) -> str:
         gap = str(item.get("remaining_gap") or "").strip()
         if len(gap) > 220:
             gap = gap[:217].rstrip() + "..."
+        highest_stage = str(item.get("highest_maturity_stage") or "none")
+        next_gate = str(item.get("next_required_gate") or "")
         lines.append(
             f"- `#{item.get('number')}` {item.get('title', '')} "
-            f"({item.get('status', '')}, {item.get('category', '')}): {gap or item.get('release_gate', '')}"
+            f"({item.get('status', '')}, {item.get('category', '')}, highest `{highest_stage}`, next `{next_gate}`): "
+            f"{gap or item.get('release_gate', '')}"
         )
     lines.extend(["", "## Operator Guidance", ""])
     for item in payload.get("operator_guidance", []):

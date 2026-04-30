@@ -124,6 +124,23 @@ def run_cloud_api_collection(
         "legal_warning": "Use only with authorized cloud accounts/API scopes; do not paste tokens into manifests or reports.",
     }
     credential_handling["credential_security_assessment"] = cloud_credential_security_assessment(credential_handling)
+    credential_handling["forensic_review"] = cloud_api_forensic_review(
+        gap_id="#41",
+        artifact_goal="Cloud token/credential handling, redaction, storage boundary, and audit readiness",
+        primary_evidence=[
+            f"credential_storage={credential_handling['credential_storage']}",
+            f"headers_redacted={credential_handling['headers_redacted']}",
+            f"tokens_written_to_output={credential_handling['tokens_written_to_output']}",
+            f"secure_token_vault_integrated={credential_handling['secure_token_vault_integrated']}",
+        ],
+        report_grade_assessment=credential_handling["credential_security_assessment"],
+        blockers=CLOUD_CREDENTIAL_SECURITY_BLOCKERS,
+        caveats=[
+            "Environment-variable token handling is safer than manifest tokens but is not an enterprise token vault.",
+            "Provider OAuth consent, scopes, rotation, revocation, and legal authority must be recorded for report-grade use.",
+        ],
+    )
+    api_report_grade = cloud_api_report_grade_assessment()
     payload = {
         "command": "cloud-collect",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -138,8 +155,24 @@ def run_cloud_api_collection(
         "commercial_grade_ready": False,
         "commercial_gap_ids": ["#40"],
         "cloud_api_validation_matrix": cloud_api_validation_matrix(summary, credential_handling),
-        "cloud_api_report_grade_assessment": cloud_api_report_grade_assessment(),
+        "cloud_api_report_grade_assessment": api_report_grade,
         "cloud_api_native_capabilities": dict(CLOUD_API_NATIVE_CAPABILITIES),
+        "forensic_review": cloud_api_forensic_review(
+            gap_id="#40",
+            artifact_goal="Cloud API acquisition manifest, bounded collection, response hashing, and import workflow",
+            primary_evidence=[
+                f"request_count={summary['request_count']}",
+                f"collected_count={summary['collected_count']}",
+                f"dry_run={summary['dry_run']}",
+                f"responses_dir={responses_dir.resolve()}",
+            ],
+            report_grade_assessment=api_report_grade,
+            blockers=CLOUD_API_REPORT_GRADE_BLOCKERS,
+            caveats=[
+                "Provider-specific OAuth/device-flow, scope discovery, pagination, and legal hold workflows remain validation-gated.",
+                "Validate collected JSON against provider-native export views before report conclusions.",
+            ],
+        ),
         "import_guidance": "Run `rapidtriage artifacts OUTPUT_DIR/responses --kind cloud-export` to normalize supported JSON responses.",
     }
     output_path = output_dir / "rapidtriage-cloud-collect.json"
@@ -366,6 +399,27 @@ def cloud_api_report_grade_assessment() -> dict[str, object]:
             "Capture account authorization, provider scopes, consent/legal-hold context, and API version metadata.",
             "Validate collected JSON against provider-native export views before report-grade use.",
         ],
+    }
+
+
+def cloud_api_forensic_review(
+    *,
+    gap_id: str,
+    artifact_goal: str,
+    primary_evidence: list[str],
+    report_grade_assessment: Mapping[str, object],
+    blockers: list[str],
+    caveats: list[str],
+) -> dict[str, object]:
+    return {
+        "gap_id": gap_id,
+        "artifact_goal": artifact_goal,
+        "review_status": "triage-review",
+        "report_grade_ready": bool(report_grade_assessment.get("ready_for_court_report")),
+        "validation_required": True,
+        "primary_evidence": [item for item in primary_evidence if item],
+        "blockers": sorted({str(item) for item in [*blockers, *report_grade_assessment.get("blockers", [])]}),
+        "caveats": caveats,
     }
 
 

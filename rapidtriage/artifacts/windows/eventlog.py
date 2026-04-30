@@ -794,6 +794,7 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
         chunk_context = native_evtx_chunk_context(blob, offset, len(record_blob))
         binxml_status = str(binxml.get("status") or NATIVE_EVTX_BINXML_STATUS)
         recovery_context = native_evtx_recovery_context(candidate, integrity, chunk_context, binxml_status)
+        recovery_evidence = native_evtx_recovery_evidence(candidate, integrity, chunk_context, recovery_context, binxml_status)
         sequence = native_evtx_sequence(record_id, previous_record_id)
         previous_record_id = record_id or previous_record_id
         parameter_candidates = native_evtx_parameter_candidates(native_indicators, binxml)
@@ -827,6 +828,8 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             "evtx_binxml": binxml,
             "binxml_system_fields": dict(binxml_promoted.get("system_fields") or {}),
             "binxml_event_data_fields": dict(binxml_promoted.get("event_data_fields") or {}),
+            "binxml_event_data_sequence": list(binxml_promoted.get("event_data_sequence") or []),
+            "binxml_event_data_values_by_name": dict(binxml_promoted.get("event_data_values_by_name") or {}),
             "binxml_user_data_fields": dict(binxml_promoted.get("user_data_fields") or {}),
             "evtx_file_header": native_evtx_file_header(blob),
             "evtx_chunk_context": chunk_context,
@@ -835,6 +838,7 @@ def collect_native_evtx_events(path: Path) -> Iterable[ArtifactRecord]:
             "evtx_record_sha256": hashlib.sha256(record_blob).hexdigest(),
             "evtx_record_integrity": integrity,
             "evtx_recovery_context": recovery_context,
+            "evtx_recovery_evidence": recovery_evidence,
             "evtx_recovery_status": recovery_context["status"],
             "evtx_allocation_status": recovery_context["allocation_status"],
             "evtx_native_capabilities": NATIVE_EVTX_CAPABILITIES,
@@ -1034,6 +1038,50 @@ def native_evtx_recovery_context(
     }
 
 
+def native_evtx_recovery_evidence(
+    candidate: NativeEvtxRecordCandidate,
+    integrity: Mapping[str, object],
+    chunk_context: Mapping[str, object],
+    recovery_context: Mapping[str, object],
+    binxml_status: str,
+) -> dict[str, object]:
+    record_size = len(candidate.record_blob)
+    reasons: list[str] = []
+    allocation_status = str(recovery_context.get("allocation_status") or native_evtx_allocation_status(chunk_context))
+    if allocation_status != "allocated-or-live-record":
+        reasons.append(f"allocation:{allocation_status}")
+    if candidate.reason != "record-size-plausible":
+        reasons.append(f"candidate:{candidate.reason}")
+    if not integrity.get("trailing_size_valid"):
+        reasons.append("integrity:trailing-size-invalid")
+    if binxml_status == NATIVE_EVTX_BINXML_STATUS:
+        reasons.append("binxml:not-decoded")
+    return {
+        "record_offset": candidate.offset,
+        "record_end_offset": candidate.offset + record_size,
+        "record_size_observed": record_size,
+        "declared_size": candidate.declared_size,
+        "available_size": candidate.available_size,
+        "parseable_record": candidate.parseable,
+        "candidate_reason": candidate.reason,
+        "binxml_status": binxml_status,
+        "allocation_status": allocation_status,
+        "recovery_status": str(recovery_context.get("status") or ""),
+        "confidence": float(recovery_context.get("confidence") or 0),
+        "record_relative_offset": int(chunk_context.get("record_relative_offset") or 0),
+        "free_space_offset": int(chunk_context.get("free_space_offset") or 0),
+        "last_record_offset": int(chunk_context.get("last_record_offset") or 0),
+        "chunk_boundary_status": str(chunk_context.get("chunk_boundary_status") or ""),
+        "chunk_signature_valid": bool(chunk_context.get("chunk_signature_valid")),
+        "integrity": {
+            "magic_valid": bool(integrity.get("magic_valid")),
+            "declared_size_valid": bool(integrity.get("declared_size_valid")),
+            "trailing_size_valid": bool(integrity.get("trailing_size_valid")),
+        },
+        "evidence_reasons": sorted(set(reasons)),
+    }
+
+
 def native_evtx_allocation_status(chunk_context: Mapping[str, object]) -> str:
     if not chunk_context.get("chunk_signature_valid"):
         return "unknown-no-valid-chunk-header"
@@ -1109,8 +1157,14 @@ def native_evtx_validation_checks(
         "chunk_allocation_status": recovery_context.get("allocation_status", ""),
         "recovery_status": recovery_context.get("status", ""),
         "binxml_status": binxml.get("status", NATIVE_EVTX_BINXML_STATUS),
-        "decoded_value_type_counts": counter_items(decoded_types),
+        "decoded_value_type_counts": (
+            binxml.get("decoded_value_type_counts")
+            if isinstance(binxml.get("decoded_value_type_counts"), list)
+            else counter_items(decoded_types)
+        ),
+        "value_field_map_present": bool(binxml.get("value_field_map")),
         "template_value_count": int(binxml.get("template_value_count") or 0),
+        "template_substitution_count": int(binxml.get("template_substitution_count") or 0),
         "template_ids": list(binxml.get("template_ids") or []) if isinstance(binxml.get("template_ids"), list) else [],
     }
     checks["passes_basic_record_integrity"] = (
@@ -1247,6 +1301,13 @@ def native_evtx_record_candidate_record(
     integrity = native_evtx_candidate_integrity(candidate)
     chunk_context = native_evtx_chunk_context(blob, candidate.offset, len(candidate.record_blob))
     recovery_context = native_evtx_recovery_context(candidate, integrity, chunk_context, NATIVE_EVTX_BINXML_STATUS)
+    recovery_evidence = native_evtx_recovery_evidence(
+        candidate,
+        integrity,
+        chunk_context,
+        recovery_context,
+        NATIVE_EVTX_BINXML_STATUS,
+    )
     validation_checks = native_evtx_validation_checks(integrity, chunk_context, recovery_context, {})
     details = {
         "parser": "windows-eventlog-evtx-native-candidate",
@@ -1267,6 +1328,7 @@ def native_evtx_record_candidate_record(
         "evtx_record_integrity": integrity,
         "evtx_chunk_context": chunk_context,
         "evtx_recovery_context": recovery_context,
+        "evtx_recovery_evidence": recovery_evidence,
         "evtx_recovery_status": recovery_context["status"],
         "evtx_allocation_status": recovery_context["allocation_status"],
         "evtx_validation_checks": validation_checks,
@@ -1577,6 +1639,8 @@ def native_evtx_promoted_fields(binxml: Mapping[str, object]) -> dict[str, objec
     event_data_fields: dict[str, str] = {}
     user_data_fields: dict[str, str] = {}
     flat_fields: dict[str, str] = {}
+    event_data_sequence: list[dict[str, object]] = []
+    event_data_values_by_name: dict[str, list[str]] = {}
     pending_event_data_name = ""
     event_data_index = 0
 
@@ -1606,12 +1670,39 @@ def native_evtx_promoted_fields(binxml: Mapping[str, object]) -> dict[str, objec
             event_data_index += 1
             pending_event_data_name = ""
             event_data_fields.setdefault(key, text)
+            event_data_sequence.append(
+                {
+                    "index": event_data_index - 1,
+                    "name": key,
+                    "value": text,
+                    "path": path,
+                    "value_type": str(item.get("value_type") or ""),
+                    "confidence": str(item.get("confidence") or ""),
+                }
+            )
+            values = event_data_values_by_name.setdefault(key, [])
+            if text not in values:
+                values.append(text)
             continue
 
         if path.startswith("Event/EventData/"):
             key = native_evtx_leaf_field_name(path.removeprefix("Event/EventData/"))
             if key:
                 event_data_fields.setdefault(key, text)
+                event_data_sequence.append(
+                    {
+                        "index": event_data_index,
+                        "name": key,
+                        "value": text,
+                        "path": path,
+                        "value_type": str(item.get("value_type") or ""),
+                        "confidence": str(item.get("confidence") or ""),
+                    }
+                )
+                event_data_index += 1
+                values = event_data_values_by_name.setdefault(key, [])
+                if text not in values:
+                    values.append(text)
             continue
 
         if path.startswith("Event/UserData/"):
@@ -1629,6 +1720,8 @@ def native_evtx_promoted_fields(binxml: Mapping[str, object]) -> dict[str, objec
     return {
         "system_fields": system_fields,
         "event_data_fields": event_data_fields,
+        "event_data_sequence": event_data_sequence[:200],
+        "event_data_values_by_name": event_data_values_by_name,
         "user_data_fields": user_data_fields,
         "flat_fields": flat_fields,
     }
@@ -1865,11 +1958,19 @@ def parse_native_evtx_binxml(payload: bytes) -> dict[str, object]:
         "token_counts": counter_items(tokens),
         "elements": elements[:100],
         "value_fields": value_fields[:100],
+        "value_field_map": binxml_value_field_map(value_fields),
+        "decoded_value_type_counts": binxml_value_type_counts(value_fields),
         "template_values": template_values[:100],
         "template_ids": sorted(set(template_ids)),
         "template_value_count": len(template_values),
+        "template_substitution_count": sum(
+            1
+            for item in value_fields
+            if isinstance(item, Mapping) and item.get("confidence") == "binxml-template-substitution"
+        ),
         "rendered_preview": "".join(rendered)[:4000],
         "token_count": sum(tokens.values()),
+        "unsupported_token_count": sum(1 for item in warnings if str(item).startswith("unsupported")),
         "warnings": warnings[:25],
     }
 
@@ -2101,10 +2202,38 @@ def parse_binxml_fragment_tokens(
         "token_counts": counter_items(tokens),
         "elements": elements,
         "value_fields": value_fields,
+        "value_field_map": binxml_value_field_map(value_fields),
+        "decoded_value_type_counts": binxml_value_type_counts(value_fields),
         "rendered_preview": "".join(rendered)[:4000],
         "token_count": sum(tokens.values()),
+        "unsupported_token_count": sum(1 for item in warnings if str(item).startswith("unsupported")),
         "warnings": warnings[:25],
     }
+
+
+def binxml_value_field_map(value_fields: Sequence[Mapping[str, object]]) -> dict[str, list[str]]:
+    field_map: dict[str, list[str]] = {}
+    for item in value_fields:
+        if not isinstance(item, Mapping):
+            continue
+        path = str(item.get("element_path") or "").strip()
+        text = str(item.get("text") or "").strip()
+        if not path or not text:
+            continue
+        values = field_map.setdefault(path, [])
+        if text not in values:
+            values.append(text)
+    return field_map
+
+
+def binxml_value_type_counts(value_fields: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    counts: Counter[str] = Counter()
+    for item in value_fields:
+        if not isinstance(item, Mapping):
+            continue
+        value_type = str(item.get("value_type") or "unknown")
+        counts[value_type] += 1
+    return counter_items(counts)
 
 
 def read_binxml_name(blob: bytes, offset: int) -> tuple[str, int]:
@@ -2650,7 +2779,7 @@ def render_event_message(
 
     template = event_message_template(provider_name, event_id)
     if template:
-        message, missing_fields = render_message_template(template, data)
+        message, missing_fields, used_fields = render_message_template(template, data)
         message_source = "rapidtriage-builtin-event-template"
         return {
             "status": "rendered-builtin-template",
@@ -2662,7 +2791,9 @@ def render_event_message(
             "event_id": event_id,
             "event_category": category,
             "template_ids": template_ids,
+            "used_fields": used_fields,
             "missing_fields": missing_fields,
+            "available_field_summary": event_message_field_summary(data),
             "validation_required": is_native_evtx,
             "rendering_limitations": ["provider-resource-not-used"] if is_native_evtx else [],
             "warnings": ["validate-against-provider-message-resource"] if is_native_evtx else [],
@@ -2690,6 +2821,7 @@ def render_event_message(
         "event_id": event_id,
         "event_category": category,
         "template_ids": template_ids,
+        "available_field_summary": event_message_field_summary(data),
         "validation_required": is_native_evtx,
         "rendering_limitations": ["provider-message-resource-not-resolved"] if is_native_evtx else [],
         "warnings": warnings,
@@ -2735,20 +2867,40 @@ def event_message_provenance(
     return provenance
 
 
-def render_message_template(template: str, data: Mapping[str, object]) -> tuple[str, list[str]]:
+def event_message_field_summary(data: Mapping[str, object]) -> dict[str, object]:
+    binxml = data.get("evtx_binxml") if isinstance(data.get("evtx_binxml"), Mapping) else {}
+    system_fields = data.get("binxml_system_fields") if isinstance(data.get("binxml_system_fields"), Mapping) else {}
+    event_data_fields = data.get("binxml_event_data_fields") if isinstance(data.get("binxml_event_data_fields"), Mapping) else {}
+    user_data_fields = data.get("binxml_user_data_fields") if isinstance(data.get("binxml_user_data_fields"), Mapping) else {}
+    event_data_sequence = data.get("binxml_event_data_sequence") if isinstance(data.get("binxml_event_data_sequence"), list) else []
+    value_field_map = binxml.get("value_field_map") if isinstance(binxml.get("value_field_map"), Mapping) else {}
+    return {
+        "system_field_names": sorted(str(key) for key in system_fields),
+        "event_data_field_names": sorted(str(key) for key in event_data_fields),
+        "user_data_field_names": sorted(str(key) for key in user_data_fields),
+        "event_data_sequence_count": len(event_data_sequence),
+        "binxml_value_field_paths": sorted(str(key) for key in value_field_map)[:100],
+        "template_substitution_count": int(binxml.get("template_substitution_count") or 0) if isinstance(binxml, Mapping) else 0,
+    }
+
+
+def render_message_template(template: str, data: Mapping[str, object]) -> tuple[str, list[str], list[dict[str, str]]]:
     missing_fields: list[str] = []
+    used_fields: list[dict[str, str]] = []
 
     def replace(match: re.Match[str]) -> str:
         expression = match.group(1)
         keys = [key.strip() for key in expression.split("|") if key.strip()]
-        value = first_data_text(data, *keys)
-        if value:
-            return value
+        for key in keys:
+            value = first_data_text(data, key)
+            if value:
+                used_fields.append({"expression": expression, "field": key})
+                return value
         missing_fields.append(expression)
         return ""
 
     rendered = re.sub(r"\{([^{}]+)\}", replace, template)
-    return re.sub(r"\s+", " ", rendered).strip(), missing_fields
+    return re.sub(r"\s+", " ", rendered).strip(), missing_fields, used_fields
 
 
 def event_message_template(provider_name: str, event_id: str) -> str:

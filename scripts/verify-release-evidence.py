@@ -14,6 +14,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--release-dir", default="release", help="Directory containing release artifacts")
     parser.add_argument("--validation-dir", default="release-validation", help="Directory containing validation package")
     parser.add_argument("--benchmark-dir", default="release-benchmark", help="Directory containing benchmark output")
+    parser.add_argument(
+        "--columnar-benchmark-dir",
+        help="Directory containing optional columnar-benchmark output for high-volume ArtifactRecord evidence",
+    )
     parser.add_argument("--smoke-dir", action="append", default=[], help="Smoke output directory; repeat per platform")
     parser.add_argument("--minimum-smoke-count", type=int, default=1, help="Minimum required passing smoke summaries")
     parser.add_argument(
@@ -28,6 +32,9 @@ def main(argv: list[str] | None = None) -> int:
     release_dir = Path(args.release_dir).expanduser().resolve()
     validation_dir = Path(args.validation_dir).expanduser().resolve()
     benchmark_dir = Path(args.benchmark_dir).expanduser().resolve()
+    columnar_benchmark_dir = (
+        Path(args.columnar_benchmark_dir).expanduser().resolve() if args.columnar_benchmark_dir else None
+    )
     smoke_dirs = [Path(value).expanduser().resolve() for value in args.smoke_dir]
     required_smoke_platforms = [normalize_platform_label(value) for value in args.require_smoke_platform if value.strip()]
     output_dir = Path(args.output_dir).expanduser().resolve()
@@ -37,6 +44,15 @@ def main(argv: list[str] | None = None) -> int:
     checks.extend(check_release_artifacts(release_dir))
     checks.extend(check_validation_package(validation_dir))
     checks.extend(check_benchmark_output(benchmark_dir))
+    if columnar_benchmark_dir is not None:
+        checks.extend(check_columnar_benchmark_output(columnar_benchmark_dir))
+    else:
+        checks.append(
+            make_skip_check(
+                "columnar-benchmark-not-provided",
+                "optional columnar benchmark evidence not requested; pass --columnar-benchmark-dir to verify it",
+            )
+        )
     checks.extend(
         check_smoke_outputs(
             smoke_dirs,
@@ -55,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
             "release_dir": str(release_dir),
             "validation_dir": str(validation_dir),
             "benchmark_dir": str(benchmark_dir),
+            "columnar_benchmark_dir": str(columnar_benchmark_dir) if columnar_benchmark_dir is not None else "",
             "smoke_dirs": [str(path) for path in smoke_dirs],
             "minimum_smoke_count": args.minimum_smoke_count,
             "required_smoke_platforms": required_smoke_platforms,
@@ -134,6 +151,178 @@ def check_benchmark_output(benchmark_dir: Path) -> list[dict[str, Any]]:
             path=json_path,
         )
     )
+    return checks
+
+
+def check_columnar_benchmark_output(columnar_dir: Path) -> list[dict[str, Any]]:
+    json_path = columnar_dir / "columnar-benchmark.json"
+    markdown_path = columnar_dir / "columnar-benchmark.md"
+    jsonl_path = columnar_dir / "artifact-records.jsonl"
+    checks = [
+        check_path("columnar-benchmark-dir", columnar_dir, is_dir=True),
+        check_path("columnar-benchmark-json", json_path),
+        check_path("columnar-benchmark-markdown", markdown_path),
+        check_path("columnar-benchmark-jsonl", jsonl_path),
+    ]
+    payload = read_json(json_path)
+    if not isinstance(payload, dict):
+        checks.append(make_check("columnar-benchmark-payload", False, "payload missing or invalid", path=json_path))
+        return checks
+
+    record_count = payload.get("record_count")
+    jsonl = payload.get("jsonl_baseline") if isinstance(payload.get("jsonl_baseline"), dict) else {}
+    parquet = payload.get("parquet") if isinstance(payload.get("parquet"), dict) else {}
+    duckdb_query = payload.get("duckdb_parquet_query") if isinstance(payload.get("duckdb_parquet_query"), dict) else {}
+    environment = payload.get("environment") if isinstance(payload.get("environment"), dict) else {}
+    readiness = payload.get("commercial_readiness") if isinstance(payload.get("commercial_readiness"), dict) else {}
+
+    checks.append(
+        make_check(
+            "columnar-benchmark-payload",
+            payload.get("command") == "columnar-benchmark" and isinstance(record_count, int) and record_count > 0,
+            f"command={payload.get('command')}, record_count={record_count}",
+            path=json_path,
+        )
+    )
+    checks.append(
+        make_check(
+            "columnar-benchmark-jsonl-metrics",
+            jsonl.get("status") == "written"
+            and jsonl.get("record_count") == record_count
+            and jsonl.get("rejected_count") == 0
+            and isinstance(jsonl.get("query_seconds_p50"), (int, float))
+            and isinstance(jsonl.get("query_seconds_p95"), (int, float))
+            and isinstance(jsonl.get("query_match_count"), int),
+            (
+                f"status={jsonl.get('status')}, record_count={jsonl.get('record_count')}, "
+                f"rejected={jsonl.get('rejected_count')}, p50={jsonl.get('query_seconds_p50')}, "
+                f"p95={jsonl.get('query_seconds_p95')}"
+            ),
+            path=json_path,
+        )
+    )
+    checks.append(
+        make_check(
+            "columnar-benchmark-environment",
+            isinstance(environment.get("python_version"), str)
+            and isinstance(environment.get("platform"), str)
+            and isinstance(environment.get("dependency_versions"), dict),
+            (
+                f"platform={environment.get('platform')}, python={environment.get('python_version')}, "
+                f"dependencies={sorted(environment.get('dependency_versions', {}).keys()) if isinstance(environment.get('dependency_versions'), dict) else []}"
+            ),
+            path=json_path,
+        )
+    )
+    checks.extend(check_columnar_parquet_and_query(columnar_dir, parquet, duckdb_query, record_count, json_path))
+    checks.append(
+        make_check(
+            "columnar-benchmark-commercial-disclosure",
+            readiness.get("ready_for_1m_10m_claim") is False
+            and isinstance(readiness.get("blockers"), list)
+            and "#66" in readiness.get("commercial_gap_ids", []),
+            (
+                f"ready_for_1m_10m_claim={readiness.get('ready_for_1m_10m_claim')}, "
+                f"blockers={len(readiness.get('blockers', [])) if isinstance(readiness.get('blockers'), list) else 'missing'}"
+            ),
+            path=json_path,
+        )
+    )
+    return checks
+
+
+def check_columnar_parquet_and_query(
+    columnar_dir: Path,
+    parquet: dict[str, Any],
+    duckdb_query: dict[str, Any],
+    record_count: Any,
+    json_path: Path,
+) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    parquet_status = parquet.get("status")
+    if parquet_status == "written":
+        manifest = parquet.get("manifest") if isinstance(parquet.get("manifest"), dict) else {}
+        parquet_path = Path(str(parquet.get("path") or columnar_dir / "artifact-records.parquet"))
+        checks.append(check_path("columnar-benchmark-parquet-file", parquet_path))
+        checks.append(
+            make_check(
+                "columnar-benchmark-parquet-manifest",
+                parquet.get("record_count") == record_count
+                and parquet.get("rejected_count") == 0
+                and manifest.get("streaming_safe") is True
+                and isinstance(manifest.get("row_group_count"), int),
+                (
+                    f"record_count={parquet.get('record_count')}, rejected={parquet.get('rejected_count')}, "
+                    f"streaming_safe={manifest.get('streaming_safe')}, row_groups={manifest.get('row_group_count')}"
+                ),
+                path=json_path,
+            )
+        )
+    elif parquet_status == "skipped":
+        checks.append(
+            make_skip_check(
+                "columnar-benchmark-parquet-file",
+                f"Parquet output skipped: {parquet.get('reason')}; {parquet.get('install_hint', '')}",
+                path=json_path,
+            )
+        )
+        checks.append(
+            make_skip_check(
+                "columnar-benchmark-parquet-manifest",
+                "Parquet manifest unavailable because Parquet output was skipped",
+                path=json_path,
+            )
+        )
+    else:
+        checks.append(
+            make_check(
+                "columnar-benchmark-parquet-file",
+                False,
+                f"unexpected parquet status={parquet_status}",
+                path=json_path,
+            )
+        )
+        checks.append(
+            make_check(
+                "columnar-benchmark-parquet-manifest",
+                False,
+                f"unexpected parquet status={parquet_status}",
+                path=json_path,
+            )
+        )
+
+    duckdb_status = duckdb_query.get("status")
+    if duckdb_status == "queried":
+        checks.append(
+            make_check(
+                "columnar-benchmark-duckdb-query",
+                duckdb_query.get("query_match_count") is not None
+                and isinstance(duckdb_query.get("query_seconds_p50"), (int, float))
+                and isinstance(duckdb_query.get("query_seconds_p95"), (int, float)),
+                (
+                    f"match_count={duckdb_query.get('query_match_count')}, "
+                    f"p50={duckdb_query.get('query_seconds_p50')}, p95={duckdb_query.get('query_seconds_p95')}"
+                ),
+                path=json_path,
+            )
+        )
+    elif duckdb_status == "skipped":
+        checks.append(
+            make_skip_check(
+                "columnar-benchmark-duckdb-query",
+                f"DuckDB query skipped: {duckdb_query.get('reason')}; {duckdb_query.get('install_hint', '')}",
+                path=json_path,
+            )
+        )
+    else:
+        checks.append(
+            make_check(
+                "columnar-benchmark-duckdb-query",
+                False,
+                f"unexpected DuckDB query status={duckdb_status}",
+                path=json_path,
+            )
+        )
     return checks
 
 
@@ -275,6 +464,17 @@ def make_check(check_id: str, passed: bool, detail: str, *, path: Path | None = 
     }
 
 
+def make_skip_check(check_id: str, detail: str, *, path: Path | None = None) -> dict[str, Any]:
+    return {
+        "id": check_id,
+        "status": "skip",
+        "detail": detail,
+        "path": str(path) if path is not None else "",
+        "required": False,
+        "remediation": "",
+    }
+
+
 def build_summary(checks: list[dict[str, Any]]) -> dict[str, int]:
     counts = {"pass": 0, "fail": 0, "skip": 0}
     for item in checks:
@@ -303,6 +503,8 @@ def remediation_for(check_id: str) -> str:
         return "Run rapidtriage validation --output-dir release-validation --overwrite and attach JSON/Markdown output."
     if check_id.startswith("benchmark-"):
         return "Run rapidtriage benchmark --output-dir release-benchmark --overwrite and attach JSON/Markdown output."
+    if check_id.startswith("columnar-benchmark-"):
+        return "Run rapidtriage columnar-benchmark --output-dir release-columnar-benchmark --record-count 100000 --json and attach JSON/Markdown/JSONL output; install .[columnar] for Parquet/DuckDB evidence."
     if check_id.startswith("smoke-platform-"):
         platform_label = check_id.removeprefix("smoke-platform-")
         return f"Run and summarize a passing smoke test for platform '{platform_label}', then pass it with --smoke-dir."
@@ -349,6 +551,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Release dir: `{payload.get('inputs', {}).get('release_dir', '')}`",
         f"- Validation dir: `{payload.get('inputs', {}).get('validation_dir', '')}`",
         f"- Benchmark dir: `{payload.get('inputs', {}).get('benchmark_dir', '')}`",
+        f"- Columnar benchmark dir: `{payload.get('inputs', {}).get('columnar_benchmark_dir', '')}`",
         f"- Smoke dirs: `{', '.join(payload.get('inputs', {}).get('smoke_dirs', []))}`",
         f"- Required smoke platforms: `{', '.join(payload.get('inputs', {}).get('required_smoke_platforms', []))}`",
         f"- Release gate: `{payload.get('release_gate', '')}`",

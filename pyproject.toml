@@ -33,7 +33,18 @@ web = [
   "uvicorn[standard]>=0.27",
 ]
 test = [
+  "fastapi>=0.110",
   "httpx>=0.27",
+  "Pillow>=10",
+  "pycryptodome>=3.20",
+]
+columnar = [
+  "pyarrow>=15",
+  "duckdb>=0.10",
+]
+kakaotalk = [
+  "openpyxl>=3.1",
+  "pycryptodome>=3.20",
 ]
 
 [project.scripts]

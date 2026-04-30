@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, unquote_plus, urlparse
 
 from ...core.models import ArtifactRecord
 from .common import (
+    build_forensic_review,
     isoformat_from_unix_micros,
     isoformat_from_timestamp,
     isoformat_from_webkit_micros,
@@ -281,6 +282,7 @@ def build_browser_artifacts(
         conversation_rows=conversation_rows,
         unified_timeline=unified_timeline,
     )
+    report_grade = browser_report_grade_assessment(validation_checks)
     base_details = {
         "parser": parser or "browser-history",
         "parser_version": parser_version,
@@ -316,8 +318,27 @@ def build_browser_artifacts(
         "unified_timeline": unified_timeline,
         "browser_validation_checks": validation_checks,
         "browser_validation_matrix": browser_validation_matrix(validation_checks),
-        "browser_report_grade_assessment": browser_report_grade_assessment(validation_checks),
+        "browser_report_grade_assessment": report_grade,
         "browser_native_capabilities": dict(BROWSER_NATIVE_CAPABILITIES),
+        "forensic_review": build_forensic_review(
+            gap_id="#20",
+            artifact_goal="Unified browser history/download timeline with cache/session/extension/sync inventory context",
+            primary_evidence=[
+                f"browser={browser}",
+                f"profile={profile}",
+                f"history_rows={len(history_rows)}",
+                f"download_rows={len(download_rows)}",
+                f"timeline_rows={len(unified_timeline)}",
+                f"storage_inventory={len(storage_inventory)}",
+            ],
+            validation_required=True,
+            report_grade_assessment=report_grade,
+            blockers=BROWSER_REPORT_GRADE_BLOCKERS,
+            caveats=[
+                "Timeline rows are normalized candidates; browser-specific transition and deletion semantics require validation.",
+                "Cache/session/extension/sync stores are inventoried, not fully schema-decoded.",
+            ],
+        ),
         "privacy_legal_warning": BROWSER_PRIVACY_WARNING,
         "commercial_grade_ready": False,
         "commercial_grade_blockers": BROWSER_REPORT_GRADE_BLOCKERS,
@@ -370,10 +391,27 @@ def build_browser_artifacts(
                     "commercial_grade_ready": False,
                     "commercial_grade_blockers": AI_TRANSCRIPT_BLOCKERS,
                     "browser_report_grade_assessment": {
-                        **browser_report_grade_assessment(validation_checks),
+                        **report_grade,
                         "commercial_gap_ids": ["#20", "#21"],
                     },
                     "browser_native_capabilities": dict(BROWSER_NATIVE_CAPABILITIES),
+                    "forensic_review": build_forensic_review(
+                        gap_id="#21",
+                        artifact_goal="AI service browser usage and candidate transcript pivots",
+                        primary_evidence=[
+                            f"ai_usage_count={len(ai_rows)}",
+                            f"conversation_candidates={len(conversation_rows)}",
+                            f"first_seen_at={seen[0] if seen else ''}",
+                            f"last_seen_at={seen[-1] if seen else ''}",
+                        ],
+                        validation_required=True,
+                        report_grade_assessment={**report_grade, "commercial_gap_ids": ["#20", "#21"]},
+                        blockers=AI_TRANSCRIPT_BLOCKERS,
+                        caveats=[
+                            "History proves AI-service visits, not full prompt/answer content by itself.",
+                            "Transcript content must be verified against raw browser storage or service-side exports.",
+                        ],
+                    ),
                     "risk_flags": ["ai-service-usage"],
                     "triage_recommendation": (
                         "Browser history proves visits to AI services only. Review page titles, URL query hints, "
@@ -481,6 +519,28 @@ def build_ai_conversation_record(
                 "deleted_ai_transcript_fragment_recovery": False,
                 "service_schema_version_tracking": False,
             },
+            "forensic_review": build_forensic_review(
+                gap_id="#21",
+                artifact_goal="AI service question/answer transcript candidate pairing",
+                primary_evidence=[
+                    f"question_count={sum(1 for row in conversation_rows if row.get('direction') == 'question')}",
+                    f"answer_count={sum(1 for row in conversation_rows if row.get('direction') == 'answer')}",
+                    f"complete_pairs={transcript['complete_pair_count']}",
+                    f"source_files={source_summary['source_file_count']}",
+                ],
+                validation_required=True,
+                report_grade_assessment={
+                    "status": "validation-required",
+                    "commercial_gap_ids": ["#21"],
+                    "blockers": list(AI_TRANSCRIPT_BLOCKERS),
+                    "ready_for_court_report": False,
+                },
+                blockers=AI_TRANSCRIPT_BLOCKERS,
+                caveats=[
+                    "Question/answer pairing is order-based candidate logic.",
+                    "Service-side export/schema validation is required before report-grade transcript conclusions.",
+                ],
+            ),
             "risk_flags": ["ai-conversation-storage-candidate"],
             "triage_recommendation": (
                 "Review these recovered browser-storage snippets against the raw source files. "
@@ -503,6 +563,17 @@ def build_browser_storage_inventory_record(
 ) -> ArtifactRecord:
     sensitive_count = sum(1 for row in storage_inventory if row.get("sensitive"))
     secret_validation_checks = browser_secret_handling_validation_checks(sensitive_count)
+    validation_context = {
+        "storage_inventory_present": bool(storage_inventory),
+        "sensitive_storage_inventory_present": sensitive_count > 0,
+        "commercial_validation_required": True,
+        "full_cache_entry_decode": False,
+        "cookie_values_decrypted": False,
+        "extension_schema_validated": False,
+        "sync_state_validated": False,
+        "unified_timeline_present": False,
+    }
+    report_grade = browser_report_grade_assessment(validation_context)
     return ArtifactRecord(
         provider=provider,
         artifact_type=artifact_type,
@@ -531,31 +602,43 @@ def build_browser_storage_inventory_record(
             },
             "secret_handling_validation_checks": secret_validation_checks,
             "browser_secret_handling_assessment": browser_secret_handling_assessment(secret_validation_checks),
-            "browser_validation_matrix": browser_validation_matrix(
-                {
-                    "storage_inventory_present": bool(storage_inventory),
-                    "sensitive_storage_inventory_present": sensitive_count > 0,
-                    "commercial_validation_required": True,
-                    "full_cache_entry_decode": False,
-                    "cookie_values_decrypted": False,
-                    "extension_schema_validated": False,
-                    "sync_state_validated": False,
-                    "unified_timeline_present": False,
-                }
+            "secret_handling_forensic_review": build_forensic_review(
+                gap_id="#42",
+                artifact_goal="Browser password/cookie/session artifact handling with strict legal warning and no secret reveal",
+                primary_evidence=[
+                    f"sensitive_inventory_count={sensitive_count}",
+                    f"raw_secret_values_extracted={False}",
+                    f"browser={browser}",
+                    f"profile={profile}",
+                ],
+                validation_required=True,
+                report_grade_assessment=browser_secret_handling_assessment(secret_validation_checks),
+                blockers=browser_secret_handling_assessment(secret_validation_checks)["blockers"],
+                caveats=[
+                    "This parser inventories sensitive stores only; it does not decrypt cookies, passwords, or session tokens.",
+                    "Any secret review must be explicit, authorized, audited, and independently validated.",
+                ],
             ),
-            "browser_report_grade_assessment": browser_report_grade_assessment(
-                {
-                    "storage_inventory_present": bool(storage_inventory),
-                    "sensitive_storage_inventory_present": sensitive_count > 0,
-                    "commercial_validation_required": True,
-                    "full_cache_entry_decode": False,
-                    "cookie_values_decrypted": False,
-                    "extension_schema_validated": False,
-                    "sync_state_validated": False,
-                    "unified_timeline_present": False,
-                }
-            ),
+            "browser_validation_matrix": browser_validation_matrix(validation_context),
+            "browser_report_grade_assessment": report_grade,
             "browser_native_capabilities": dict(BROWSER_NATIVE_CAPABILITIES),
+            "forensic_review": build_forensic_review(
+                gap_id="#19",
+                artifact_goal="Browser cache/session/extension/sync/cookie/credential inventory and legal-scope review",
+                primary_evidence=[
+                    f"inventory_count={len(storage_inventory)}",
+                    f"sensitive_inventory_count={sensitive_count}",
+                    f"profile={profile}",
+                    f"browser={browser}",
+                ],
+                validation_required=True,
+                report_grade_assessment=report_grade,
+                blockers=BROWSER_REPORT_GRADE_BLOCKERS,
+                caveats=[
+                    "Sensitive stores are inventory-only; RapidTriage does not decrypt cookies, passwords, or session tokens here.",
+                    "Open raw browser stores only after scope and legal authority are documented.",
+                ],
+            ),
             "commercial_grade_ready": False,
             "commercial_grade_blockers": BROWSER_REPORT_GRADE_BLOCKERS,
             "triage_recommendation": (

@@ -9,9 +9,10 @@ from pathlib import Path, PureWindowsPath
 from typing import Iterable, Mapping, Sequence
 
 from ...core.models import ArtifactRecord
-from .ese import build_ese_string_pivots, probe_ese_database
+from .common import build_forensic_review
+from .ese import build_ese_page_map, build_ese_string_pivots, probe_ese_database
 
-PARSER_VERSION = "windows-search-index-import-v5"
+PARSER_VERSION = "windows-search-index-import-v6"
 SEARCH_EDB_PATH = ("ProgramData", "Microsoft", "Search", "Data", "Applications", "Windows", "Windows.edb")
 SUPPORTED_EXPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 EXPORT_HINTS = ("windows.edb", "windows-search", "searchindex", "search-index", "edbexport", "winsearch")
@@ -25,6 +26,8 @@ WINDOWS_SEARCH_CAPABILITIES = {
     "csv_json_export_import": True,
     "ese_header_probe": True,
     "native_string_pivots": True,
+    "native_page_map_triage": True,
+    "page_level_marker_correlation": True,
     "table_family_marker_detection": True,
     "content_candidate_string_scan": True,
     "native_ese_catalog_decode": False,
@@ -32,6 +35,8 @@ WINDOWS_SEARCH_CAPABILITIES = {
     "native_row_level_decode": False,
     "native_deleted_state_decode": False,
     "native_timestamp_decode": False,
+    "native_space_tree_decode": False,
+    "native_long_value_tree_decode": False,
 }
 WINDOWS_SEARCH_TABLE_MARKERS = {
     "gather-path": ("systemindex_gthrpth", "gthrpth", "scope", "crawl", "file:"),
@@ -65,7 +70,9 @@ class WindowsSearchIndexProvider:
             inventory = build_edb_inventory_record(edb_path)
             records.append(inventory)
             records.extend(build_edb_pivot_records(edb_path, inventory.details))
+            records.extend(build_edb_page_candidate_records(edb_path, inventory.details))
             records.extend(build_edb_table_candidate_records(edb_path, inventory.details))
+            records.extend(build_edb_row_candidate_records(edb_path, inventory.details))
             seen.add(edb_path.resolve())
 
         for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
@@ -79,7 +86,9 @@ class WindowsSearchIndexProvider:
                 inventory = build_edb_inventory_record(path)
                 records.append(inventory)
                 records.extend(build_edb_pivot_records(path, inventory.details))
+                records.extend(build_edb_page_candidate_records(path, inventory.details))
                 records.extend(build_edb_table_candidate_records(path, inventory.details))
+                records.extend(build_edb_row_candidate_records(path, inventory.details))
                 seen.add(resolved)
                 continue
             if path.suffix.lower() not in SUPPORTED_EXPORT_SUFFIXES or not any(hint in lowered for hint in EXPORT_HINTS):
@@ -99,8 +108,10 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
     stat_result = path.stat()
     ese_header = probe_ese_database(path)
     pivots = build_ese_string_pivots(path)
+    page_map = build_ese_page_map(path, table_markers=WINDOWS_SEARCH_TABLE_MARKERS)
     content_candidates = build_search_content_candidates(pivots)
     table_families = detect_search_table_families(pivots)
+    row_candidates = build_search_row_candidates({**pivots, "content_candidates": content_candidates})
     coverage_status = "ese-header-string-scan" if ese_header.get("header_readable") else "detected"
     validation_checks = {
         "ese_header_readable": bool(ese_header.get("header_readable")),
@@ -109,6 +120,9 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
         "has_url_pivots": bool(pivots.get("url_candidates")),
         "has_content_candidates": bool(content_candidates),
         "has_table_family_candidates": bool(table_families),
+        "has_native_row_candidates": bool(row_candidates),
+        "ese_page_map_built": bool(page_map.get("page_map_available")),
+        "page_level_marker_correlation_available": bool(page_map.get("candidate_page_count")),
         "ese_catalog_decoded": False,
         "row_level_decoding_available": False,
         "timestamps_decoded_from_native_rows": False,
@@ -139,6 +153,20 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
             "parser_confidence": 0.65 if ese_header.get("signature_valid") else 0.35,
             "evidence_strength": "search-index-database-presence",
             **pivots,
+            "ese_page_map": page_map,
+            "edb_analysis_method": {
+                "method_id": page_map.get("method_id", "ese-page-map-string-correlation-v1"),
+                "status": page_map.get("analysis_status", "not-built"),
+                "stages": [
+                    "ESE header probe",
+                    "bounded page map scan",
+                    "page-local Windows Search table marker correlation",
+                    "page-local path/URL/content/risk string grouping",
+                    "external parser diff validation before report-grade use",
+                ],
+                "commercial_position": "triage-grade-page-correlation-not-full-native-row-decode",
+                "why_new": "Analyst review can now jump from a candidate hit to the ESE page offset/hash that contained the supporting strings, instead of relying only on a global bounded string list.",
+            },
             "content_candidates": content_candidates,
             "native_candidate_metadata": {
                 "path_candidate_count": len(pivots.get("path_candidates") or []),
@@ -146,14 +174,23 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
                 "content_candidate_count": len(content_candidates),
                 "table_candidate_families": table_families,
                 "table_candidate_count": len(table_families),
+                "row_candidate_count": len(row_candidates),
+                "page_count_total": int(page_map.get("page_count_total") or 0),
+                "page_count_scanned": int(page_map.get("page_count_scanned") or 0),
+                "page_candidate_count": int(page_map.get("candidate_page_count") or 0),
+                "page_marker_family_counts": list(page_map.get("page_marker_family_counts") or []),
                 "string_scan_bytes": int(pivots.get("string_scan_bytes") or 0),
             },
             "native_validation": {
                 "header_signature_valid": bool(ese_header.get("signature_valid")),
                 "page_size_detected": int(ese_header.get("page_size") or 0),
+                "page_map_built": bool(page_map.get("page_map_available")),
+                "page_map_method": page_map.get("method_id", "ese-page-map-string-correlation-v1"),
+                "page_level_marker_correlation_available": bool(page_map.get("candidate_page_count")),
                 "bounded_string_scan_only": True,
                 "ese_catalog_decoded": False,
                 "row_level_decoding_available": False,
+                "row_candidate_decode_status": "correlated-native-string-candidates-only",
                 "path_url_content_candidates_only": True,
                 "timestamps_decoded_from_native_rows": False,
                 "deleted_state_decoded_from_native_rows": False,
@@ -163,10 +200,25 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
             "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
             "search_index_report_grade_assessment": report_grade,
             "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+            "forensic_review": build_forensic_review(
+                gap_id="#11",
+                artifact_goal="Windows.edb native ESE search-index evidence",
+                primary_evidence=[
+                    f"paths={len(pivots.get('path_candidates') or [])}",
+                    f"urls={len(pivots.get('url_candidates') or [])}",
+                    f"rows={len(row_candidates)}",
+                    f"tables={len(table_families)}",
+                    f"pages={int(page_map.get('candidate_page_count') or 0)}",
+                ],
+                validation_required=True,
+                report_grade_assessment=report_grade,
+                commercial_grade_ready=False,
+                caveats=["Page-level ESE correlation is available, but native ESE rows and deleted state are not fully decoded."],
+            ),
             "commercial_grade_ready": False,
             "commercial_grade_blockers": report_grade["blockers"],
             "recommended_parsers": ["WinSearchDBAnalyzer", "ESEDatabaseView", "libesedb/esedbexport"],
-            "note": "Windows.edb is inventoried directly with bounded ESE header/string/table candidate pivots; export CSV/JSON rows with a trusted ESE/Search parser for full table, timestamp, and deleted-state decoding.",
+            "note": "Windows.edb is inventoried directly with bounded ESE header/string/page-map/table candidate pivots; page candidates preserve offset/hash context for review, but export CSV/JSON rows with a trusted ESE/Search parser for full table, timestamp, and deleted-state decoding.",
         },
     )
 
@@ -243,11 +295,130 @@ def build_edb_pivot_records(path: Path, inventory_details: Mapping[str, object])
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+                    "forensic_review": build_forensic_review(
+                        gap_id="#11",
+                        artifact_goal="Windows.edb native string pivot",
+                        primary_evidence=[
+                            f"path={item_path}" if item_path else "",
+                            f"url={url}" if url else "",
+                            f"file={file_name}" if file_name else "",
+                        ],
+                        validation_required=True,
+                        report_grade_assessment=report_grade,
+                        commercial_grade_ready=False,
+                        caveats=["Row candidate is correlated from strings, not a decoded ESE table row."],
+                    ),
                     "commercial_grade_ready": False,
                     "commercial_grade_blockers": report_grade["blockers"],
                     "risk_flags": sorted(set(risk_flags)),
                     "risk_score": min(100, len(set(risk_flags)) * 20),
                     "raw_preview": candidate_value[:2000],
+                },
+            )
+        )
+    return records
+
+
+def build_edb_page_candidate_records(path: Path, inventory_details: Mapping[str, object]) -> list[ArtifactRecord]:
+    page_map = dict(inventory_details.get("ese_page_map") or {})
+    page_samples = [sample for sample in page_map.get("page_samples") or [] if isinstance(sample, Mapping)]
+    if not page_samples:
+        return []
+
+    source_hashes = file_hashes(path)
+    records: list[ArtifactRecord] = []
+    for index, sample in enumerate(page_samples):
+        path_candidates = [str(value) for value in sample.get("path_candidates") or [] if str(value)]
+        url_candidates = [str(value) for value in sample.get("url_candidates") or [] if str(value)]
+        content_candidates = [str(value) for value in sample.get("content_candidates") or [] if str(value)]
+        table_marker_hits = {
+            str(family): [str(marker) for marker in markers]
+            for family, markers in dict(sample.get("table_marker_hits") or {}).items()
+        }
+        validation_checks = {
+            "ese_signature_valid": bool(dict(inventory_details.get("ese_header") or {}).get("signature_valid")),
+            "ese_page_map_built": True,
+            "page_level_marker_correlation_available": bool(table_marker_hits),
+            "has_path_or_url": bool(path_candidates or url_candidates),
+            "has_content_snippet": bool(content_candidates),
+            "ese_catalog_decoded": False,
+            "row_level_decoding_available": False,
+            "timestamps_decoded_from_native_rows": False,
+            "deleted_state_decoded_from_native_rows": False,
+            "requires_windows_search_parser": True,
+        }
+        report_grade = search_index_report_grade_assessment(
+            search_index_validation_matrix(validation_checks),
+            validation_required=True,
+            extra_blockers=WINDOWS_SEARCH_EDB_BLOCKERS,
+        )
+        risk_flags = list(sample.get("risk_flags") or [])
+        if table_marker_hits:
+            risk_flags.extend(f"windows-search-page-table:{family}" for family in table_marker_hits)
+        if url_candidates:
+            risk_flags.append("search-index-page-url-candidate")
+        if path_candidates:
+            risk_flags.append("search-index-page-path-candidate")
+        records.append(
+            ArtifactRecord(
+                provider=WindowsSearchIndexProvider.name,
+                artifact_type="windows-search-edb-page-candidate",
+                path=str(path.resolve()),
+                supported=True,
+                details={
+                    "parser": "windows-search-edb-page-map",
+                    "parser_version": PARSER_VERSION,
+                    "coverage_status": "native-ese-page-map-candidate",
+                    "reportability": "triage",
+                    "source_path": str(path.resolve()),
+                    "source_format": "ese-edb",
+                    "source_hashes": source_hashes,
+                    "source_index": index,
+                    "page_index": int(sample.get("page_index") or 0),
+                    "page_offset": int(sample.get("page_offset") or 0),
+                    "page_size": int(sample.get("page_size") or 0),
+                    "page_sha256": str(sample.get("page_sha256") or ""),
+                    "page_evidence_density": int(sample.get("evidence_density") or 0),
+                    "printable_string_count": int(sample.get("printable_string_count") or 0),
+                    "path_candidates": path_candidates,
+                    "url_candidates": url_candidates,
+                    "content_candidates": content_candidates,
+                    "suspicious_strings": [str(value) for value in sample.get("suspicious_strings") or []],
+                    "table_marker_hits": table_marker_hits,
+                    "candidate_basis": {
+                        "method_id": page_map.get("method_id", "ese-page-map-string-correlation-v1"),
+                        "correlation_scope": "single-ese-page",
+                        "page_hash_preserved": bool(sample.get("page_sha256")),
+                        "page_offset_preserved": True,
+                    },
+                    "parser_confidence": page_candidate_confidence(path_candidates, url_candidates, content_candidates, table_marker_hits),
+                    "evidence_strength": "windows-search-page-local-string-correlation",
+                    "validation_required": True,
+                    "validation_guidance": "This candidate groups strings found on the same ESE page and preserves page offset/hash for review. It is not a decoded Windows Search row; validate with a full ESE catalog/table decoder before report use.",
+                    "validation_checks": validation_checks,
+                    "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
+                    "search_index_report_grade_assessment": report_grade,
+                    "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+                    "forensic_review": build_forensic_review(
+                        gap_id="#11",
+                        artifact_goal="Windows.edb ESE page-level candidate",
+                        primary_evidence=[
+                            f"page={int(sample.get('page_index') or 0)}",
+                            f"offset={int(sample.get('page_offset') or 0)}",
+                            f"paths={len(path_candidates)}",
+                            f"urls={len(url_candidates)}",
+                            f"tables={len(table_marker_hits)}",
+                        ],
+                        validation_required=True,
+                        report_grade_assessment=report_grade,
+                        commercial_grade_ready=False,
+                        caveats=["Page-local correlation is stronger than global string scan but still not native ESE row decoding."],
+                    ),
+                    "commercial_grade_ready": False,
+                    "commercial_grade_blockers": report_grade["blockers"],
+                    "risk_flags": sorted(set(risk_flags)),
+                    "risk_score": min(100, len(set(risk_flags)) * 15),
+                    "raw_preview": json.dumps(sample, ensure_ascii=False, sort_keys=True)[:2000],
                 },
             )
         )
@@ -307,11 +478,118 @@ def build_edb_table_candidate_records(path: Path, inventory_details: Mapping[str
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+                    "forensic_review": build_forensic_review(
+                        gap_id="#11",
+                        artifact_goal="Windows.edb native table-family candidate",
+                        primary_evidence=[
+                            f"table={table_family}",
+                            f"markers={len(matched)}",
+                        ],
+                        validation_required=True,
+                        report_grade_assessment=report_grade,
+                        commercial_grade_ready=False,
+                        caveats=["Table family is detected from native strings, not decoded from the ESE catalog."],
+                    ),
                     "commercial_grade_ready": False,
                     "commercial_grade_blockers": report_grade["blockers"],
                     "risk_flags": [f"windows-search-table:{table_family}"],
                     "risk_score": 20,
                     "raw_preview": " ".join(strings[:20])[:2000],
+                },
+            )
+        )
+    return records
+
+
+def build_edb_row_candidate_records(path: Path, inventory_details: Mapping[str, object]) -> list[ArtifactRecord]:
+    source_hashes = file_hashes(path)
+    row_candidates = build_search_row_candidates(inventory_details)
+    table_families = list(dict.fromkeys(str(value) for value in detect_search_table_families(inventory_details)))
+    has_deleted_markers = "deleted-state" in table_families
+    records: list[ArtifactRecord] = []
+    for index, candidate in enumerate(row_candidates):
+        item_path = str(candidate.get("item_path") or "")
+        url = str(candidate.get("url") or "")
+        content_snippet = str(candidate.get("content_snippet") or "")
+        file_name = str(candidate.get("file_name") or "") or filename_from_path(item_path)
+        validation_checks = {
+            "has_source_path_or_url": bool(item_path or url),
+            "has_file_name": bool(file_name),
+            "has_content_snippet": bool(content_snippet),
+            "has_table_family_candidates": bool(table_families),
+            "row_level_decoding_available": False,
+            "timestamps_decoded_from_native_rows": False,
+            "deleted_state_decoded_from_native_rows": False,
+            "requires_windows_search_parser": True,
+        }
+        report_grade = search_index_report_grade_assessment(
+            search_index_validation_matrix(validation_checks),
+            validation_required=True,
+            extra_blockers=WINDOWS_SEARCH_EDB_BLOCKERS,
+        )
+        risk_flags = ["windows-search-row-candidate"]
+        lowered = " ".join([item_path, url, content_snippet]).lower()
+        if any(term in lowered for term in ("powershell", "cmd.exe", "rundll32", "regsvr32", "wmic", "certutil")):
+            risk_flags.append("search-index-suspicious-row-text")
+        if url:
+            risk_flags.append("search-index-url-row")
+        records.append(
+            ArtifactRecord(
+                provider=WindowsSearchIndexProvider.name,
+                artifact_type="windows-search-edb-row-candidate",
+                path=str(path.resolve()),
+                supported=True,
+                details={
+                    "parser": "windows-search-edb-row-candidate",
+                    "parser_version": PARSER_VERSION,
+                    "coverage_status": "native-ese-correlated-string-row-candidate",
+                    "reportability": "triage",
+                    "source_path": str(path.resolve()),
+                    "source_format": "ese-edb",
+                    "source_hashes": source_hashes,
+                    "source_index": index,
+                    "item_path": item_path,
+                    "file_name": file_name,
+                    "extension": extension_from_name(file_name or item_path),
+                    "url": url,
+                    "title": "",
+                    "content_snippet": content_snippet[:1000],
+                    "table_family_candidates": table_families,
+                    "deleted_state": "candidate-marker-present" if has_deleted_markers else "not-decoded",
+                    "timestamp": "",
+                    "timestamp_source": "not-decoded-native-edb",
+                    "candidate_basis": {
+                        "path_source": candidate.get("path_source", ""),
+                        "url_source": candidate.get("url_source", ""),
+                        "content_source": candidate.get("content_source", ""),
+                        "correlation_method": candidate.get("correlation_method", ""),
+                    },
+                    "parser_confidence": candidate.get("parser_confidence", 0.45),
+                    "evidence_strength": "windows-search-correlated-native-string-candidate",
+                    "validation_required": True,
+                    "validation_guidance": "This row correlates native Windows.edb path, URL, and content strings for triage search/review. It is not a decoded ESE row; validate timestamps, deleted state, and table columns with a dedicated Windows Search EDB parser.",
+                    "validation_checks": validation_checks,
+                    "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
+                    "search_index_report_grade_assessment": report_grade,
+                    "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+                    "forensic_review": build_forensic_review(
+                        gap_id="#11",
+                        artifact_goal="Windows.edb correlated row candidate",
+                        primary_evidence=[
+                            f"path={item_path}" if item_path else "",
+                            f"url={url}" if url else "",
+                            f"file={file_name}" if file_name else "",
+                        ],
+                        validation_required=True,
+                        report_grade_assessment=report_grade,
+                        commercial_grade_ready=False,
+                        caveats=["Row candidate is correlated from strings, not a decoded ESE table row."],
+                    ),
+                    "commercial_grade_ready": False,
+                    "commercial_grade_blockers": report_grade["blockers"],
+                    "risk_flags": sorted(set(risk_flags)),
+                    "risk_score": min(100, len(set(risk_flags)) * 20),
+                    "raw_preview": json.dumps(candidate, ensure_ascii=False, sort_keys=True)[:2000],
                 },
             )
         )
@@ -401,8 +679,17 @@ def build_search_index_summary(root: Path, records: Sequence[ArtifactRecord]) ->
     entries = [record for record in records if record.artifact_type == "windows-search-index-entry"]
     edb_files = [record for record in records if record.artifact_type == "windows-search-edb-file"]
     edb_pivots = [record for record in records if record.artifact_type == "windows-search-edb-pivot"]
+    edb_page_candidates = [record for record in records if record.artifact_type == "windows-search-edb-page-candidate"]
     edb_table_candidates = [record for record in records if record.artifact_type == "windows-search-edb-table-candidate"]
-    if not entries and not edb_files and not edb_pivots and not edb_table_candidates:
+    edb_row_candidates = [record for record in records if record.artifact_type == "windows-search-edb-row-candidate"]
+    if (
+        not entries
+        and not edb_files
+        and not edb_pivots
+        and not edb_page_candidates
+        and not edb_table_candidates
+        and not edb_row_candidates
+    ):
         return None
     extension_counts: Counter[str] = Counter()
     source_files: set[str] = set()
@@ -414,6 +701,14 @@ def build_search_index_summary(root: Path, records: Sequence[ArtifactRecord]) ->
         source_path = str(details.get("source_path") or record.path)
         source_files.add(source_path)
     for record in edb_pivots:
+        details = record.details
+        source_path = str(details.get("source_path") or record.path)
+        source_files.add(source_path)
+    for record in edb_row_candidates:
+        details = record.details
+        source_path = str(details.get("source_path") or record.path)
+        source_files.add(source_path)
+    for record in edb_page_candidates:
         details = record.details
         source_path = str(details.get("source_path") or record.path)
         source_files.add(source_path)
@@ -457,7 +752,9 @@ def build_search_index_summary(root: Path, records: Sequence[ArtifactRecord]) ->
             "entry_count": len(entries),
             "inventory_count": len(edb_files),
             "edb_pivot_count": len(edb_pivots),
+            "edb_page_candidate_count": len(edb_page_candidates),
             "edb_table_candidate_count": len(edb_table_candidates),
+            "edb_row_candidate_count": len(edb_row_candidates),
             "source_files": sorted(source_files),
             "extension_counts": [{"value": value, "count": count} for value, count in extension_counts.most_common(25)],
             "table_family_counts": [
@@ -496,19 +793,109 @@ def build_search_content_candidates(pivots: Mapping[str, object], *, limit: int 
     return candidates
 
 
+def build_search_row_candidates(pivots: Mapping[str, object], *, limit: int = 50) -> list[dict[str, object]]:
+    paths = [str(value) for value in pivots.get("path_candidates") or [] if str(value)]
+    urls = [str(value) for value in pivots.get("url_candidates") or [] if str(value)]
+    contents = [str(value) for value in pivots.get("content_candidates") or [] if str(value)]
+    if not contents:
+        contents = build_search_content_candidates(pivots)
+    rows: list[dict[str, object]] = []
+    seen: set[tuple[str, str, str]] = set()
+    if paths:
+        for index, item_path in enumerate(paths[:limit]):
+            content = contents[index] if index < len(contents) else (contents[0] if contents else "")
+            url = urls[index] if index < len(urls) else ""
+            add_search_row_candidate(rows, seen, item_path, url, content, "path-content-url-position-correlation")
+            if len(rows) >= limit:
+                return rows
+    for index, url in enumerate(urls[:limit]):
+        content = contents[index] if index < len(contents) else (contents[0] if contents else "")
+        add_search_row_candidate(rows, seen, "", url, content, "url-content-position-correlation")
+        if len(rows) >= limit:
+            return rows
+    for index, content in enumerate(contents[:limit]):
+        add_search_row_candidate(rows, seen, "", "", content, "content-string-candidate")
+        if len(rows) >= limit:
+            return rows
+    return rows
+
+
+def add_search_row_candidate(
+    rows: list[dict[str, object]],
+    seen: set[tuple[str, str, str]],
+    item_path: str,
+    url: str,
+    content: str,
+    method: str,
+) -> None:
+    key = (item_path, url, content)
+    if key in seen or not any(key):
+        return
+    seen.add(key)
+    rows.append(
+        {
+            "item_path": item_path,
+            "file_name": filename_from_path(item_path),
+            "url": url,
+            "content_snippet": content[:1000],
+            "path_source": "native-path-string" if item_path else "",
+            "url_source": "native-url-string" if url else "",
+            "content_source": "native-content-string" if content else "",
+            "correlation_method": method,
+            "parser_confidence": search_row_candidate_confidence(item_path, url, content, method),
+        }
+    )
+
+
+def search_row_candidate_confidence(item_path: str, url: str, content: str, method: str) -> float:
+    score = 0.32
+    if item_path:
+        score += 0.18
+    if url:
+        score += 0.12
+    if content:
+        score += 0.12
+    if method.startswith("path-content"):
+        score += 0.08
+    return round(min(score, 0.74), 2)
+
+
+def page_candidate_confidence(
+    paths: Sequence[str],
+    urls: Sequence[str],
+    contents: Sequence[str],
+    table_marker_hits: Mapping[str, Sequence[str]],
+) -> float:
+    score = 0.34
+    if paths:
+        score += 0.14
+    if urls:
+        score += 0.08
+    if contents:
+        score += 0.12
+    if table_marker_hits:
+        score += min(0.18, len(table_marker_hits) * 0.05)
+    return round(min(score, 0.76), 2)
+
+
 def search_index_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, object]]:
     labels = {
         "ese_header_readable": ("ESE header readable", "critical"),
         "ese_signature_valid": ("ESE signature valid", "critical"),
+        "ese_page_map_built": ("ESE page map built", "high"),
+        "page_level_marker_correlation_available": ("Page marker correlation", "medium"),
         "has_path_pivots": ("Path pivots", "medium"),
         "has_url_pivots": ("URL pivots", "medium"),
         "has_content_candidates": ("Content candidates", "medium"),
         "has_table_family_candidates": ("Table family candidates", "medium"),
+        "has_native_row_candidates": ("Native row candidates", "medium"),
         "has_candidate_value": ("Candidate value", "medium"),
         "has_path_or_url": ("Path or URL", "medium"),
+        "has_source_path_or_url": ("Source path or URL", "high"),
         "has_item_path": ("Item path", "high"),
         "has_file_name": ("File name", "medium"),
         "has_content": ("Content", "medium"),
+        "has_content_snippet": ("Content snippet", "medium"),
         "has_timestamp": ("Timestamp", "high"),
         "ese_catalog_decoded": ("ESE catalog decoded", "critical"),
         "row_level_decoding_available": ("Row-level decoding", "critical"),

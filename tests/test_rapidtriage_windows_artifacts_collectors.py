@@ -7,6 +7,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
+from rapidtriage.artifacts.windows.eventlog import binxml_value_field_map, native_evtx_promoted_fields
 from rapidtriage.artifacts.windows.registry import collect_registry_hive
 from rapidtriage.artifacts.windows.shellbags import WindowsShellbagsProvider
 from rapidtriage.cli import main
@@ -16,6 +17,64 @@ FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rapidtriage" / "w
 
 
 class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
+    def test_native_evtx_binxml_promotes_duplicate_event_data_without_losing_order(self) -> None:
+        value_fields = [
+            {
+                "element_path": "Event/EventData/Data/@Name",
+                "text": "TargetUserName",
+                "value_type": "StringType",
+                "confidence": "binxml-attribute",
+            },
+            {
+                "element_path": "Event/EventData/Data",
+                "text": "alice",
+                "value_type": "StringType",
+                "confidence": "binxml-template-substitution",
+            },
+            {
+                "element_path": "Event/EventData/Data/@Name",
+                "text": "IpAddress",
+                "value_type": "StringType",
+                "confidence": "binxml-attribute",
+            },
+            {
+                "element_path": "Event/EventData/Data",
+                "text": "10.0.0.5",
+                "value_type": "StringType",
+                "confidence": "binxml-template-substitution",
+            },
+            {
+                "element_path": "Event/EventData/Data/@Name",
+                "text": "IpAddress",
+                "value_type": "StringType",
+                "confidence": "binxml-attribute",
+            },
+            {
+                "element_path": "Event/EventData/Data",
+                "text": "10.0.0.6",
+                "value_type": "StringType",
+                "confidence": "binxml-template-substitution",
+            },
+        ]
+
+        promoted = native_evtx_promoted_fields({"value_fields": value_fields})
+
+        self.assertEqual(promoted["event_data_fields"]["TargetUserName"], "alice")
+        self.assertEqual(promoted["event_data_fields"]["IpAddress"], "10.0.0.5")
+        self.assertEqual(promoted["event_data_values_by_name"]["IpAddress"], ["10.0.0.5", "10.0.0.6"])
+        self.assertEqual(
+            [item["name"] for item in promoted["event_data_sequence"]],
+            ["TargetUserName", "IpAddress", "IpAddress"],
+        )
+        self.assertEqual(
+            [item["value"] for item in promoted["event_data_sequence"]],
+            ["alice", "10.0.0.5", "10.0.0.6"],
+        )
+        self.assertEqual(
+            binxml_value_field_map(value_fields)["Event/EventData/Data"],
+            ["alice", "10.0.0.5", "10.0.0.6"],
+        )
+
     def test_shellbags_provider_emits_native_hive_candidate_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             hive_path = Path(tmp_dir) / "Users" / "alice" / "UsrClass.dat"
@@ -36,6 +95,19 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("0", key_tree.details["node_id_candidates"])
             self.assertIn("42", key_tree.details["bag_id_candidates"])
             self.assertTrue(key_tree.details["timestamp_candidates"])
+            self.assertEqual(key_tree.details["shellbag_evidence"]["key_evidence"]["shellbag_section"], "bagmru")
+            self.assertEqual(
+                key_tree.details["shellbag_evidence"]["relationship_evidence"]["bag_node_relationship_status"],
+                "candidate-from-key-path-and-values",
+            )
+            self.assertIn("42", key_tree.details["shellbag_evidence"]["relationship_evidence"]["bag_id_candidates"])
+            self.assertIn("0", key_tree.details["shellbag_evidence"]["relationship_evidence"]["node_id_candidates"])
+            self.assertEqual(
+                key_tree.details["shellbag_evidence"]["activity_evidence"]["primary_timestamp"],
+                "2024-04-02T03:04:05+00:00",
+            )
+            self.assertEqual(key_tree.details["forensic_review"]["gap_id"], "#15")
+            self.assertIn("ShellBags", key_tree.details["forensic_review"]["artifact_goal"])
             self.assertTrue(key_tree.details["validation_checks"]["regf_header_valid"])
             self.assertFalse(key_tree.details["validation_checks"]["binary_shell_item_decoding_available"])
             self.assertFalse(key_tree.details["commercial_grade_ready"])
@@ -63,6 +135,12 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             run_key = next(record for record in key_tree_nodes if record.details["name"] == "Run")
             self.assertEqual(run_key.details["key_path"], "HKEY_CURRENT_USER\\Software\\Run")
             self.assertEqual(run_key.details["key_path_confidence"], "parent-chain")
+            self.assertEqual(run_key.details["key_path_components"], ["Software", "Run"])
+            self.assertEqual(run_key.details["key_depth"], 2)
+            self.assertEqual(run_key.details["key_tree_path_evidence"]["full_path"], "HKEY_CURRENT_USER\\Software\\Run")
+            self.assertEqual(run_key.details["key_tree_path_evidence"]["path_confidence"], "parent-chain")
+            self.assertFalse(run_key.details["key_tree_path_evidence"]["cycle_detected"])
+            self.assertEqual(len(run_key.details["key_ancestry_cell_offsets"]), 2)
             self.assertEqual(run_key.details["value_names"], ["SecurityUpdater"])
             self.assertEqual(run_key.details["linked_value_count"], 1)
             self.assertEqual(run_key.details["missing_value_cell_offsets"], [])
@@ -93,6 +171,16 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(
                 value_recovery.details["registry_report_grade_assessment"]["status"],
                 "recovery-candidate-validation-required",
+            )
+            self.assertEqual(
+                value_recovery.details["registry_recovery_evidence"]["candidate_kind"],
+                "deleted-or-free-value-cell",
+            )
+            self.assertTrue(value_recovery.details["registry_recovery_evidence"]["positive_size_free_cell"])
+            self.assertEqual(value_recovery.details["registry_recovery_evidence"]["parent_confidence"], "key-value-list")
+            self.assertIn(
+                "parent:key-value-list",
+                value_recovery.details["registry_recovery_evidence"]["evidence_reasons"],
             )
             self.assertIn("#5", value_recovery.details["registry_report_grade_assessment"]["commercial_gap_ids"])
             self.assertIn(
@@ -225,12 +313,19 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             ]
             self.assertGreaterEqual(len(deleted_cells), 2)
             self.assertTrue(all(artifact["details"]["validation_required"] for artifact in deleted_cells))
+            self.assertTrue(all(artifact["details"]["registry_recovery_evidence"]["validation_required"] for artifact in deleted_cells))
             self.assertTrue(any(artifact["details"]["name"] == "SecurityUpdater" for artifact in deleted_cells))
             key_recovery = [
                 artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-key-recovery-candidate"
             ]
             self.assertTrue(any(artifact["details"]["name"] == "DeletedRun" for artifact in key_recovery))
             self.assertTrue(all(artifact["details"]["validation_required"] for artifact in key_recovery))
+            self.assertTrue(
+                any(
+                    "allocator:positive-size-free-cell" in artifact["details"]["registry_recovery_evidence"]["evidence_reasons"]
+                    for artifact in key_recovery
+                )
+            )
             value_recovery = [
                 artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-value-recovery-candidate"
             ]
@@ -317,10 +412,12 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             defender = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "defender-support-log")
             self.assertEqual(defender["details"]["interesting_entry_count"], 3)
             self.assertIn("#18", defender["details"]["system_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(defender["details"]["forensic_review"]["gap_id"], "#18")
             self.assertFalse(defender["details"]["system_native_capabilities"]["defender_event_mpcmdrun_correlation"])
             firewall = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "firewall-log")
             self.assertEqual(firewall["details"]["blocked_count"], 1)
             self.assertIn("#18", firewall["details"]["system_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(firewall["details"]["forensic_review"]["gap_id"], "#18")
             self.assertFalse(firewall["details"]["system_native_capabilities"]["firewall_rule_store_correlation"])
             wer = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "wer-report")
             self.assertEqual(wer["details"]["application"], "powershell.exe")
@@ -333,6 +430,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertTrue(wer["details"]["validation_checks"]["has_exception_code"])
             self.assertFalse(wer["details"]["commercial_grade_ready"])
             self.assertIn("#18", wer["details"]["system_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(wer["details"]["forensic_review"]["gap_id"], "#18")
             self.assertIn("wer-dump-file-correlation-not-implemented", wer["details"]["commercial_grade_blockers"])
             self.assertEqual(len(wer["details"]["source_hashes"]["sha256"]), 64)
             zone = next(artifact for artifact in system_provider["artifacts"] if artifact["artifact_type"] == "zone-identifier")

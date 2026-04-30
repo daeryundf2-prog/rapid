@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 from ...core.models import ArtifactRecord
+from .common import build_forensic_review
 from .registry import (
     MAX_HIVE_CELL_SCAN_BYTES,
     MAX_HIVE_STRING_SCAN_BYTES,
@@ -208,6 +209,19 @@ def build_native_shellbag_record(
         "value_names": sorted(value_names),
         "value_previews": dict(sorted(value_previews.items())),
         "timestamp_candidates": timestamp_candidates,
+        "shellbag_evidence": shellbag_evidence(
+            source_key_path=source_key_path,
+            section=section,
+            bag_ids=bag_ids,
+            node_ids=node_ids,
+            path_candidates=path_candidates,
+            timestamp_candidates=timestamp_candidates,
+            value_names=value_names,
+            candidate_source=candidate_source,
+            allocation_status=allocation_status,
+            cell_offset=cell_offset,
+            hbin_offset=hbin_offset,
+        ),
         "key_last_written_at": key_last_written_at,
         "key_path_confidence": key_path_confidence,
         "cell_offset": cell_offset,
@@ -227,6 +241,23 @@ def build_native_shellbag_record(
         "shellbag_validation_matrix": shellbag_validation_matrix(checks),
         "shellbag_report_grade_assessment": report_grade,
         "shellbag_native_capabilities": SHELLBAG_CAPABILITIES,
+        "forensic_review": build_forensic_review(
+            gap_id="#15",
+            artifact_goal="ShellBags folder view history evidence",
+            primary_evidence=[
+                f"section={section}",
+                f"bags={len(bag_ids)}",
+                f"nodes={len(node_ids)}",
+                f"timestamps={len(timestamp_candidates)}",
+            ],
+            validation_required=True,
+            report_grade_assessment=report_grade,
+            commercial_grade_ready=False,
+            caveats=[
+                "Binary shell item payload decoding is not complete.",
+                "Bag/node relationships and transaction logs require external validation.",
+            ],
+        ),
         "commercial_grade_ready": False,
         "commercial_grade_blockers": report_grade["blockers"],
         "risk_flags": ["folder-view-history", "native-shellbag-candidate", "user-activity:shellbag"],
@@ -242,6 +273,49 @@ def build_native_shellbag_record(
         supported=bool(metadata.get("regf_valid")),
         details=details,
     )
+
+
+def shellbag_evidence(
+    *,
+    source_key_path: str,
+    section: str,
+    bag_ids: Sequence[str],
+    node_ids: Sequence[str],
+    path_candidates: Sequence[str],
+    timestamp_candidates: Sequence[Mapping[str, object]],
+    value_names: Sequence[str],
+    candidate_source: str,
+    allocation_status: str,
+    cell_offset: int,
+    hbin_offset: int,
+) -> dict[str, object]:
+    return {
+        "key_evidence": {
+            "source_key_path": source_key_path,
+            "shellbag_section": section,
+            "candidate_source": candidate_source,
+            "allocation_status": allocation_status,
+            "cell_offset": cell_offset,
+            "hbin_offset": hbin_offset,
+        },
+        "relationship_evidence": {
+            "bag_id_candidates": list(bag_ids),
+            "node_id_candidates": list(node_ids),
+            "bag_node_relationship_status": "candidate-from-key-path-and-values",
+            "value_names": sorted(value_names),
+        },
+        "activity_evidence": {
+            "path_candidates": list(path_candidates),
+            "timestamp_candidates": [dict(item) for item in timestamp_candidates],
+            "primary_timestamp": str(timestamp_candidates[0].get("timestamp") or "") if timestamp_candidates else "",
+            "primary_timestamp_source": str(timestamp_candidates[0].get("source") or "") if timestamp_candidates else "",
+        },
+        "report_limitations": [
+            "binary shell item payloads are not decoded",
+            "BagMRU/Bags relationship is candidate-level only",
+            "transaction logs and deleted shellbag slack are not replayed",
+        ],
+    }
 
 
 def is_shellbag_source(value: str) -> bool:

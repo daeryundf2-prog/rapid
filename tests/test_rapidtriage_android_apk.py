@@ -54,6 +54,7 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertTrue(details["entry_hashes"])
             self.assertFalse(details["commercial_grade_ready"])
             self.assertIn("#30", details["android_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(details["forensic_review"]["gap_id"], "#30")
             self.assertFalse(details["android_native_capabilities"]["binary_manifest_decode"])
             self.assertFalse(details["validation_checks"]["commercial_validation_corpus"])
             self.assertTrue(any(item["value"] == "DexClassLoader" for item in details["string_pivots"]))
@@ -69,6 +70,7 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertFalse(app_data["details"]["validation_checks"]["secret_values_extracted"])
             self.assertIn("#29", app_data["details"]["android_report_grade_assessment"]["commercial_gap_ids"])
             self.assertIn("#30", app_data["details"]["android_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(app_data["details"]["forensic_review"]["gap_id"], "#29")
             self.assertFalse(app_data["details"]["android_native_capabilities"]["app_specific_database_decode"])
 
 

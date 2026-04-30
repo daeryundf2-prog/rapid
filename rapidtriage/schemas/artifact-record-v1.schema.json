@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rapidtriage.local/schemas/artifact-record-v1.schema.json",
+  "title": "ArtifactRecordV1",
+  "type": "object",
+  "required": [
+    "schema",
+    "artifact_id",
+    "artifact_family",
+    "artifact_type",
+    "parser",
+    "parser_version",
+    "source",
+    "confidence",
+    "validation_required",
+    "commercial_grade_ready",
+    "commercial_grade_blockers",
+    "legal_limitations",
+    "fields"
+  ],
+  "properties": {
+    "schema": { "const": "ArtifactRecordV1" },
+    "artifact_id": { "type": "string", "minLength": 1 },
+    "artifact_family": { "type": "string", "minLength": 1 },
+    "artifact_type": { "type": "string", "minLength": 1 },
+    "parser": { "type": "string", "minLength": 1 },
+    "parser_version": { "type": "string", "minLength": 1 },
+    "source": {
+      "type": "object",
+      "required": ["case_id", "source_id", "source_path", "offset", "length", "hashes"],
+      "properties": {
+        "case_id": { "type": "string" },
+        "source_id": { "type": "string" },
+        "source_path": { "type": "string" },
+        "offset": { "type": ["integer", "null"], "minimum": 0 },
+        "length": { "type": ["integer", "null"], "minimum": 0 },
+        "hashes": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "validation_required": { "type": "boolean" },
+    "commercial_grade_ready": { "type": "boolean" },
+    "commercial_grade_blockers": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "legal_limitations": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "fields": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

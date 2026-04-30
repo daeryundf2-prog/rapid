@@ -10,9 +10,10 @@ from typing import Iterable
 
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
+from .review import build_forensic_review
 
 PARSER_VERSION = "email-artifacts-v2"
-EMAIL_SUFFIXES = {".eml", ".mbox", ".msg", ".pst", ".ost"}
+EMAIL_SUFFIXES = {".eml", ".emlx", ".mbox", ".msg", ".pst", ".ost"}
 MAX_MBOX_MESSAGES = 200
 CONTAINER_SCAN_LIMIT = 16 * 1024 * 1024
 MAX_CONTAINER_CANDIDATES = 200
@@ -36,6 +37,50 @@ EMAIL_REPORT_GRADE_BLOCKERS = [
     "conversation-threading-and-dedup-validation-required",
     "broad-mailbox-known-answer-corpus-required",
 ]
+EMAIL_FORMAT_PROFILES = {
+    "eml": {
+        "family": "internet-message",
+        "support_tier": "parsed-triage",
+        "native_decode": True,
+        "known_gaps": ["mime-edge-cases", "dkim-arc-smime-openpgp-validation", "thread-graph-validation"],
+    },
+    "emlx": {
+        "family": "apple-mail-message",
+        "support_tier": "parsed-triage",
+        "native_decode": True,
+        "known_gaps": ["apple-envelope-index-correlation", "attachment-folder-correlation", "thread-graph-validation"],
+    },
+    "mbox": {
+        "family": "unix-mailbox",
+        "support_tier": "bounded-parse",
+        "native_decode": True,
+        "known_gaps": ["message-boundary-edge-cases", "large-mailbox-pagination", "thread-graph-validation"],
+    },
+    "maildir": {
+        "family": "maildir-message",
+        "support_tier": "parsed-triage",
+        "native_decode": True,
+        "known_gaps": ["maildir-flag-semantics", "folder-state-correlation", "thread-graph-validation"],
+    },
+    "pst": {
+        "family": "mapi-container",
+        "support_tier": "bounded-string-inventory",
+        "native_decode": False,
+        "known_gaps": ["folder-tree", "message-flags", "deleted-items", "corrupt-store-recovery", "attachments"],
+    },
+    "ost": {
+        "family": "exchange-cache",
+        "support_tier": "bounded-string-inventory",
+        "native_decode": False,
+        "known_gaps": ["server-sync-state", "folder-tree", "deleted-items", "conversion-differences", "attachments"],
+    },
+    "msg": {
+        "family": "mapi-message",
+        "support_tier": "bounded-string-inventory",
+        "native_decode": False,
+        "known_gaps": ["mapi-properties", "embedded-attachments", "rtf-body", "recipient-tables"],
+    },
+}
 
 
 class EmailArtifactsProvider:
@@ -51,12 +96,16 @@ class EmailArtifactsProvider:
         for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
             if path.is_file() and path.suffix.lower() in EMAIL_SUFFIXES:
                 yield from collect_email_path(path)
+            elif path.is_file() and is_maildir_message(path):
+                yield from collect_maildir_message(path)
 
 
 def collect_email_path(path: Path) -> Iterable[ArtifactRecord]:
     suffix = path.suffix.lower()
     if suffix == ".eml":
         yield from collect_eml(path)
+    elif suffix == ".emlx":
+        yield from collect_emlx(path)
     elif suffix == ".mbox":
         yield from collect_mbox(path)
     else:
@@ -70,6 +119,25 @@ def collect_eml(path: Path) -> Iterable[ArtifactRecord]:
     except OSError:
         return
     yield build_message_record(path, source_hashes, 0, message, source_format="eml")
+
+
+def collect_emlx(path: Path) -> Iterable[ArtifactRecord]:
+    source_hashes = compute_hashes(path)
+    try:
+        data = strip_emlx_length_prefix(path.read_bytes())
+        message = email.message_from_bytes(data, policy=policy.default)
+    except OSError:
+        return
+    yield build_message_record(path, source_hashes, 0, message, source_format="emlx")
+
+
+def collect_maildir_message(path: Path) -> Iterable[ArtifactRecord]:
+    source_hashes = compute_hashes(path)
+    try:
+        message = email.message_from_bytes(path.read_bytes(), policy=policy.default)
+    except OSError:
+        return
+    yield build_message_record(path, source_hashes, 0, message, source_format="maildir")
 
 
 def collect_mbox(path: Path) -> Iterable[ArtifactRecord]:
@@ -167,6 +235,17 @@ def build_message_record(
         "email_validation_matrix": email_validation_matrix(source_format, {"headers_parsed": True, "body_present": bool(body_preview)}),
         "email_report_grade_assessment": email_report_grade_assessment(source_format),
         "email_native_capabilities": dict(EMAIL_NATIVE_CAPABILITIES),
+        "email_format_profile": email_format_profile(source_format),
+        "email_issue_matrix": email_issue_matrix(source_format),
+        "forensic_review": email_forensic_review(
+            source_format=source_format,
+            primary_evidence=[
+                f"message_id={header_value(message, 'Message-ID')}",
+                f"subject={header_value(message, 'Subject')}",
+                f"from={header_value(message, 'From')}",
+                f"attachments={len(attachments)}",
+            ],
+        ),
         "commercial_gap_ids": ["#36"],
         "commercial_grade_ready": False,
         "commercial_grade_blockers": email_blockers(source_format),
@@ -202,6 +281,16 @@ def build_mailbox_record(
         "email_validation_matrix": email_validation_matrix(source_format, validation_checks),
         "email_report_grade_assessment": email_report_grade_assessment(source_format),
         "email_native_capabilities": dict(EMAIL_NATIVE_CAPABILITIES),
+        "email_format_profile": email_format_profile(source_format),
+        "email_issue_matrix": email_issue_matrix(source_format),
+        "forensic_review": email_forensic_review(
+            source_format=source_format,
+            primary_evidence=[
+                f"mailbox={path.name}",
+                f"message_count={message_count}",
+                f"source_format={source_format}",
+            ],
+        ),
         "commercial_gap_ids": ["#36"],
         "commercial_grade_ready": False,
         "commercial_grade_blockers": email_blockers(source_format),
@@ -253,6 +342,19 @@ def attachment_summaries(message: EmailMessage) -> list[dict[str, object]]:
             }
         )
     return attachments[:100]
+
+
+def strip_emlx_length_prefix(data: bytes) -> bytes:
+    first_line, separator, rest = data.partition(b"\n")
+    if separator and first_line.strip().isdigit():
+        return rest
+    return data
+
+
+def is_maildir_message(path: Path) -> bool:
+    if path.parent.name not in {"cur", "new"}:
+        return False
+    return bool(path.parent.parent.name)
 
 
 def read_prefix(path: Path, limit: int) -> bytes:
@@ -358,6 +460,77 @@ def email_report_grade_assessment(source_format: str) -> dict[str, object]:
             "Review privilege/scope, threading, duplicate handling, and attachment extraction against known-answer mailboxes.",
         ],
     }
+
+
+def email_format_profile(source_format: str) -> dict[str, object]:
+    profile = EMAIL_FORMAT_PROFILES.get(source_format, {})
+    return {
+        "source_format": source_format,
+        "family": profile.get("family", "unknown-mail-format"),
+        "support_tier": profile.get("support_tier", "candidate-inventory"),
+        "native_decode": bool(profile.get("native_decode")),
+        "known_gaps": list(profile.get("known_gaps", ["format-specific-validation-required"])),
+        "reporting_boundary": "triage-candidate-until-known-answer-validated",
+    }
+
+
+def email_issue_matrix(source_format: str) -> list[dict[str, object]]:
+    profile = EMAIL_FORMAT_PROFILES.get(source_format, {})
+    native_decode = bool(profile.get("native_decode"))
+    is_mapi = source_format in {"pst", "ost", "msg"}
+    return [
+        {
+            "id": "mime-structure-and-trace",
+            "label": "MIME structure, headers, trace fields, and hidden timestamps are reviewed",
+            "passed": source_format in {"eml", "emlx", "mbox", "maildir"},
+            "severity": "critical",
+        },
+        {
+            "id": "mapi-native-object-decode",
+            "label": "PST/OST/MSG MAPI objects are natively decoded",
+            "passed": False if is_mapi else native_decode,
+            "severity": "critical" if is_mapi else "medium",
+        },
+        {
+            "id": "corrupt-store-recovery",
+            "label": "Corrupt/orphaned mailbox data is recovered and compared against alternate tools",
+            "passed": False,
+            "severity": "critical" if source_format in {"pst", "ost"} else "high",
+        },
+        {
+            "id": "thread-and-dedup",
+            "label": "Message-ID/In-Reply-To conversation graph and duplicate handling are validated",
+            "passed": False,
+            "severity": "high",
+        },
+        {
+            "id": "auth-signature-crypto",
+            "label": "DKIM/ARC/SPF plus S/MIME/OpenPGP state are validated where present",
+            "passed": False,
+            "severity": "high",
+        },
+        {
+            "id": "attachment-extraction",
+            "label": "Attachment bytes, hashes, nested messages, and privilege scope are validated",
+            "passed": False,
+            "severity": "critical",
+        },
+    ]
+
+
+def email_forensic_review(*, source_format: str, primary_evidence: list[str]) -> dict[str, object]:
+    return build_forensic_review(
+        gap_id="#36",
+        artifact_goal="Email mailbox/message parsing, attachment metadata, threading, and report-grade mailbox validation",
+        primary_evidence=primary_evidence,
+        validation_required=True,
+        report_grade_assessment=email_report_grade_assessment(source_format),
+        blockers=EMAIL_REPORT_GRADE_BLOCKERS,
+        caveats=[
+            "EML/MBOX rows are parsed for triage and require broad corpus validation for testimony.",
+            "PST/OST/MSG rows are bounded candidate inventory until native mailbox object decoding is implemented.",
+        ],
+    )
 
 
 def email_blockers(source_format: str) -> list[str]:
