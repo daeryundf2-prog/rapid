@@ -470,6 +470,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 native_evtx["details"]["evtx_report_grade_assessment"]["blockers"],
             )
             self.assertIn("#1", native_evtx["details"]["evtx_report_grade_assessment"]["commercial_gap_ids"])
+            uplift = native_evtx["details"]["commercial_uplift_evidence"]
+            self.assertEqual(uplift["batch_id"], "commercial-uplift-001-005")
+            self.assertEqual(uplift["item_numbers"], [1, 2, 3])
+            self.assertEqual(uplift["implementation_track"], "native-parser-depth")
+            self.assertIn("record-magic", uplift["passed_validation_matrix_ids"])
+            self.assertIn("chunk-context", uplift["failed_validation_matrix_ids"])
+            self.assertEqual(uplift["large_data_controls"]["current_reader"], "whole-file-read")
+            self.assertTrue(uplift["large_data_controls"]["streaming_reader_required_for_tb_claims"])
             self.assertTrue(native_evtx["details"]["evtx_native_capabilities"]["template_substitution_values"])
             self.assertFalse(native_evtx["details"]["evtx_native_capabilities"]["provider_resource_message_rendering"])
             validation_matrix = {item["id"]: item for item in native_evtx["details"]["evtx_validation_matrix"]}
@@ -754,6 +762,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 candidate["evtx_recovery_validation_profile"]["required_independent_checks"],
             )
             self.assertEqual(candidate["evtx_report_grade_assessment"]["status"], "validation-required")
+            self.assertEqual(candidate["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-001-005")
+            self.assertEqual(candidate["commercial_uplift_evidence"]["item_numbers"], [1, 2, 3])
+            self.assertIn("record-magic", candidate["commercial_uplift_evidence"]["passed_validation_matrix_ids"])
+            self.assertTrue(
+                candidate["commercial_uplift_evidence"]["large_data_controls"][
+                    "streaming_reader_required_for_tb_claims"
+                ]
+            )
             self.assertIn("record-integrity-not-proven", candidate["evtx_report_grade_assessment"]["blockers"])
             self.assertTrue(candidate["validation_required"])
             self.assertIn("do-not-report-without-validation", candidate["caution_labels"])
@@ -864,6 +880,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("privilege assignment attribution", lifecycle_gate["satisfied_checks"])
             self.assertIn("secret-value redaction and authority gate", lifecycle_gate["satisfied_checks"])
             self.assertFalse(lifecycle_gate["commercial_grade_ready"])
+            lifecycle_uplift = lifecycle["details"]["commercial_uplift_evidence"]
+            self.assertEqual(lifecycle_uplift["batch_id"], "commercial-uplift-006-010")
+            self.assertEqual(lifecycle_uplift["item_numbers"], [6])
+            self.assertIn("has-sam-f-value", lifecycle_uplift["passed_validation_matrix_ids"])
+            self.assertIn("native-sam-fv-report-grade", lifecycle_uplift["failed_validation_matrix_ids"])
+            self.assertTrue(lifecycle_uplift["large_data_controls"]["secret_values_redacted"])
             group = next(item for item in group_rows if item["details"]["group_name"] == "Administrators")
             self.assertFalse(group["details"]["commercial_grade_ready"])
             self.assertEqual(group["details"]["member_count"], 1)
@@ -989,6 +1011,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("path/hash/publisher extraction", amcache_gate["satisfied_checks"])
             self.assertIn("execution caveat wording", amcache_gate["satisfied_checks"])
             self.assertFalse(amcache_gate["commercial_grade_ready"])
+            amcache_uplift = exported_amcache["details"]["commercial_uplift_evidence"]
+            self.assertEqual(amcache_uplift["batch_id"], "commercial-uplift-006-010")
+            self.assertEqual(amcache_uplift["item_numbers"], [7])
+            self.assertIn("has-hash", amcache_uplift["passed_validation_matrix_ids"])
+            self.assertTrue(amcache_uplift["large_data_controls"]["schema_version_matrix_required"])
             native_amcache_hive = next(item for item in artifacts if item["artifact_type"] == "amcache-hive")
             self.assertGreaterEqual(native_amcache_hive["details"]["amcache_hive_evidence"]["candidate_path_count"], 1)
             self.assertEqual(
@@ -1023,6 +1050,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("device path normalization", bam_gate["satisfied_checks"])
             self.assertIn("FILETIME validity", bam_gate["satisfied_checks"])
             self.assertIn("ControlSet attribution", bam_gate["satisfied_checks"])
+            bam_uplift = bam["details"]["commercial_uplift_evidence"]
+            self.assertEqual(bam_uplift["item_numbers"], [9])
+            self.assertTrue(bam_uplift["large_data_controls"]["native_binary_layout_required_for_commercial_claims"])
             self.assertTrue(shimcache["details"]["validation_required"])
             self.assertEqual(shimcache["details"]["execution_caveat"], "Presence in ShimCache is not proof the executable ran.")
             self.assertEqual(
@@ -1044,6 +1074,9 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(shimcache_gate["gap_id"], "#8")
             self.assertIn("not-proof-of-execution warning", shimcache_gate["satisfied_checks"])
             self.assertIn("malformed binary bounds checks", shimcache_gate["satisfied_checks"])
+            shimcache_uplift = shimcache["details"]["commercial_uplift_evidence"]
+            self.assertEqual(shimcache_uplift["item_numbers"], [8])
+            self.assertTrue(shimcache_uplift["large_data_controls"]["native_binary_layout_required_for_commercial_claims"])
             self.assertEqual(srum_rows[0]["details"]["app_id"], "powershell.exe")
             self.assertEqual(srum_rows[0]["details"]["bytes_received"], 2048)
             self.assertEqual(srum_rows[0]["details"]["bytes_total"], 2560)
@@ -1084,6 +1117,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("ESE page checksum validation", srum_db_gate["satisfied_checks"])
             self.assertIn("catalog/table mapping", srum_db_gate["satisfied_checks"])
             self.assertIn("native-row confidence scoring", srum_db_gate["satisfied_checks"])
+            srum_uplift = srum_database_rows[0]["details"]["commercial_uplift_evidence"]
+            self.assertEqual(srum_uplift["batch_id"], "commercial-uplift-006-010")
+            self.assertEqual(srum_uplift["item_numbers"], [10])
+            self.assertTrue(srum_uplift["large_data_controls"]["row_level_native_decode_required_for_commercial_claims"])
             self.assertTrue(any("powershell.exe" in value.lower() for value in srum_database_rows[0]["details"]["path_candidates"]))
             self.assertTrue(any(item["details"]["app_id"] == "powershell.exe" for item in srum_pivots))
             self.assertTrue(any(item["details"]["url"] == "https://download.example/tools/installer.exe" for item in srum_pivots))

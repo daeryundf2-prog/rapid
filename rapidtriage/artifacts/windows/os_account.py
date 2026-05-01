@@ -644,6 +644,16 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
                 "os_account_report_grade_assessment": report_grade,
                 "core_accuracy_gates": core_accuracy_gates,
+                "commercial_uplift_evidence": os_account_commercial_uplift_evidence(
+                    {
+                        "source_path": str(path.resolve()),
+                        "source_hashes": dict(source_hashes),
+                        "source_index": index,
+                        "rid": "",
+                        "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
+                        "os_account_report_grade_assessment": report_grade,
+                    }
+                ),
                 "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
                 "validation_guidance": "This row identifies sensitive LSA/SECURITY policy locations only; secrets are not decrypted and must be handled under legal authorization.",
                 "commercial_grade_ready": False,
@@ -848,6 +858,16 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
                 "os_account_report_grade_assessment": report_grade,
                 "core_accuracy_gates": core_accuracy_gates,
+                "commercial_uplift_evidence": os_account_commercial_uplift_evidence(
+                    {
+                        "source_path": str(path.resolve()),
+                        "source_hashes": dict(source_hashes),
+                        "source_index": index,
+                        "rid": rid,
+                        "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
+                        "os_account_report_grade_assessment": report_grade,
+                    }
+                ),
                 "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
                 "account_privilege_deep_parse_profile": account_privilege_deep_parse_profile(
                     artifact_scope="account-lifecycle-security-context",
@@ -1153,6 +1173,44 @@ def os_account_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[s
         satisfied.append("secret-value redaction and authority gate")
 
     return [build_accuracy_gate(6, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
+
+
+def os_account_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, object]:
+    matrix = details.get("os_account_validation_matrix") if isinstance(details.get("os_account_validation_matrix"), list) else []
+    report_grade = (
+        details.get("os_account_report_grade_assessment")
+        if isinstance(details.get("os_account_report_grade_assessment"), Mapping)
+        else {}
+    )
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    return {
+        "batch_id": "commercial-uplift-006-010",
+        "item_numbers": [6],
+        "implementation_track": "native-parser-depth",
+        "objective": "Expose SAM/SECURITY/SYSTEM account validation evidence and commercial blockers on account rows.",
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"source_index:{details.get('source_index', '')}",
+            f"source_sha256:{hashes.get('sha256', '')}",
+            f"rid:{details.get('rid', '')}",
+        ],
+        "passed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+        ],
+        "failed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+        ],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "row_scope": "account-lifecycle-row",
+            "secret_values_redacted": True,
+            "native_sam_binary_decode_partial": True,
+            "transaction_log_replay_required_for_commercial_claims": True,
+        },
+        "next_internal_step": "Finish native SAM alias/member binary reconstruction and SECURITY secret authority-gated decrypt validation.",
+        "external_evidence_required": True,
+    }
 
 
 def os_account_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, object]]:

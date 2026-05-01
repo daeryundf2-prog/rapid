@@ -12,7 +12,7 @@ from typing import Iterable, Mapping
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review, iter_windows_user_homes
-from .ese import build_ese_string_pivots, probe_ese_database
+from .ese import ESE_SCAN_READ_SIZE, build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
 from .srum_ese import analyze_srudb_native
 
@@ -20,6 +20,7 @@ PARSER_VERSION = "windows-execution-v8"
 REGISTRY_EXPORT_EXT = ".reg"
 SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 AMCACHE_HIVE_NAME = "AMCACHE.HVE"
+MAX_NATIVE_AMCACHE_SCAN_BYTES = 8 * 1024 * 1024
 POWERSHELL_HISTORY = ("AppData", "Roaming", "Microsoft", "Windows", "PowerShell", "PSReadLine", "ConsoleHost_history.txt")
 
 EXECUTION_KEYWORDS = {
@@ -259,6 +260,18 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
             "execution_validation_matrix": execution_validation_matrix(validation_checks),
             "execution_report_grade_assessment": report_grade,
             "core_accuracy_gates": core_accuracy_gates,
+            "commercial_uplift_evidence": execution_commercial_uplift_evidence(
+                artifact_type,
+                {
+                    "source_path": str(path.resolve()),
+                    "source_hashes": file_hashes(path),
+                    "source_key": key,
+                    "source_index": 0,
+                    "source_format": "reg",
+                    "execution_validation_matrix": execution_validation_matrix(validation_checks),
+                    "execution_report_grade_assessment": report_grade,
+                },
+            ),
             "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
             "forensic_review": build_forensic_review(
                 gap_id=execution_gap_ids(artifact_type)[0] if execution_gap_ids(artifact_type) else "#7",
@@ -302,7 +315,7 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
     try:
         stat_result = path.stat()
         with path.open("rb") as handle:
-            blob = handle.read(min(stat_result.st_size, 8 * 1024 * 1024))
+            blob = handle.read(min(stat_result.st_size, MAX_NATIVE_AMCACHE_SCAN_BYTES))
     except OSError:
         return
     source_hashes = file_hashes(path)
@@ -449,6 +462,17 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "execution_validation_matrix": execution_validation_matrix(entry_validation_checks),
                 "execution_report_grade_assessment": entry_report_grade,
                 "core_accuracy_gates": entry_core_accuracy_gates,
+                "commercial_uplift_evidence": execution_commercial_uplift_evidence(
+                    "amcache-entry",
+                    {
+                        "source_path": str(path.resolve()),
+                        "source_hashes": source_hashes,
+                        "source_index": index,
+                        "source_format": "amcache-hive",
+                        "execution_validation_matrix": execution_validation_matrix(entry_validation_checks),
+                        "execution_report_grade_assessment": entry_report_grade,
+                    },
+                ),
                 "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
                 "validation_guidance": "Validate native Amcache string-pivot rows with AmcacheParser/RECmd before report-grade install/execution claims.",
                 "commercial_grade_ready": False,
@@ -622,6 +646,18 @@ def build_srum_database_inventory_record(path: Path) -> ArtifactRecord:
             "execution_validation_matrix": execution_validation_matrix(validation_checks),
             "execution_report_grade_assessment": report_grade,
             "core_accuracy_gates": core_accuracy_gates,
+            "commercial_uplift_evidence": execution_commercial_uplift_evidence(
+                "srum-database-file",
+                {
+                    "source_path": str(path.resolve()),
+                    "source_hashes": file_hashes(path),
+                    "source_format": "ese-srum",
+                    "source_index": 0,
+                    "execution_validation_matrix": execution_validation_matrix(validation_checks),
+                    "execution_report_grade_assessment": report_grade,
+                    "native_srudb_validation": native_validation,
+                },
+            ),
             "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
             "forensic_review": build_forensic_review(
                 gap_id="#10",
@@ -1695,6 +1731,51 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
         return [build_accuracy_gate(10, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
     return []
+
+
+def execution_commercial_uplift_evidence(artifact_type: str, details: Mapping[str, object]) -> dict[str, object]:
+    matrix = details.get("execution_validation_matrix") if isinstance(details.get("execution_validation_matrix"), list) else []
+    report_grade = (
+        details.get("execution_report_grade_assessment")
+        if isinstance(details.get("execution_report_grade_assessment"), Mapping)
+        else {}
+    )
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    gap_ids = execution_gap_ids(artifact_type)
+    item_numbers = [int(gap_id.lstrip("#")) for gap_id in gap_ids if gap_id.lstrip("#").isdigit()]
+    return {
+        "batch_id": "commercial-uplift-006-010",
+        "item_numbers": item_numbers,
+        "implementation_track": "native-parser-depth",
+        "objective": "Expose execution-artifact validation evidence, commercial blockers, and large-data limits on each #7-#10 row.",
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"source_index:{details.get('source_index', '')}",
+            f"source_sha256:{hashes.get('sha256', '')}",
+            f"source_format:{details.get('source_format', '')}",
+        ],
+        "passed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+        ],
+        "failed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+        ],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "bounded_native_string_scan_bytes": MAX_NATIVE_AMCACHE_SCAN_BYTES
+            if artifact_type in {"amcache-entry", "amcache-hive"}
+            else ESE_SCAN_READ_SIZE if artifact_type.startswith("srum-") else 0,
+            "row_level_native_decode_required_for_commercial_claims": artifact_type.startswith("srum-"),
+            "native_binary_layout_required_for_commercial_claims": artifact_type in {"shimcache-entry", "bam-entry"},
+            "schema_version_matrix_required": artifact_type in {"amcache-entry", "shimcache-entry"},
+        },
+        "next_internal_step": (
+            "Add native binary/schema row decoding plus cross-tool known-answer diffs before removing "
+            "#7-#10 commercial blockers."
+        ),
+        "external_evidence_required": True,
+    }
 
 
 def first_hash_value(values: Mapping[str, str], length: int) -> str:

@@ -236,6 +236,15 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(key_gate["missing_required_checks"], [])
             self.assertIn("source file or export hash", key_gate["minimum_evidence"])
             self.assertFalse(key_gate["commercial_grade_ready"])
+            key_uplift = run_key.details["commercial_uplift_evidence"]
+            self.assertEqual(key_uplift["batch_id"], "commercial-uplift-001-005")
+            self.assertEqual(key_uplift["item_numbers"], [4])
+            self.assertEqual(key_uplift["implementation_track"], "native-parser-depth")
+            self.assertIn("root-reachability", key_uplift["passed_validation_matrix_ids"])
+            self.assertEqual(key_uplift["large_data_controls"]["reader"], "bounded-hbin-cell-scan")
+            self.assertTrue(
+                key_uplift["large_data_controls"]["transaction_log_replay_required_for_commercial_claims"]
+            )
 
             value_recovery = next(
                 record
@@ -290,6 +299,15 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(value_gate["missing_required_checks"], [])
             self.assertIn("expected-answer manifest", value_gate["minimum_evidence"])
             self.assertFalse(value_gate["commercial_grade_ready"])
+            value_uplift = value_recovery.details["commercial_uplift_evidence"]
+            self.assertEqual(value_uplift["batch_id"], "commercial-uplift-001-005")
+            self.assertEqual(value_uplift["item_numbers"], [5])
+            self.assertIn("deleted-value-cell", value_uplift["passed_validation_matrix_ids"])
+            self.assertEqual(
+                value_uplift["recovery_profile_version"],
+                "registry-deleted-cell-validation-v1",
+            )
+            self.assertTrue(value_uplift["external_evidence_required"])
             key_recovery = next(
                 record
                 for record in records
@@ -304,6 +322,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "parent-chain-and-root-reachability-review",
                 key_recovery.details["registry_recovery_validation_profile"]["required_independent_checks"],
             )
+            self.assertEqual(key_recovery.details["commercial_uplift_evidence"]["item_numbers"], [5])
 
     def test_manifest_collects_browser_and_recent_file_artifacts_from_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

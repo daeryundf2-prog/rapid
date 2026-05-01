@@ -983,6 +983,7 @@ def collect_native_evtx_events(
         details["parser_confidence"] = native_evtx_confidence(details)
         details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
         details["core_accuracy_gates"] = native_evtx_core_accuracy_gates(details)
+        details["commercial_uplift_evidence"] = native_evtx_commercial_uplift_evidence(details)
         details["commercial_grade_ready"] = details["evtx_report_grade_assessment"]["report_grade_ready"]
         details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
         yield event_record(path, "eventlog-event", details)
@@ -1520,6 +1521,60 @@ def native_evtx_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[
     ]
 
 
+def native_evtx_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, object]:
+    checks = details.get("evtx_validation_checks") if isinstance(details.get("evtx_validation_checks"), Mapping) else {}
+    matrix = details.get("evtx_validation_matrix") if isinstance(details.get("evtx_validation_matrix"), list) else []
+    report_grade = (
+        details.get("evtx_report_grade_assessment")
+        if isinstance(details.get("evtx_report_grade_assessment"), Mapping)
+        else {}
+    )
+    passed_matrix = [
+        str(item.get("id"))
+        for item in matrix
+        if isinstance(item, Mapping) and item.get("passed")
+    ]
+    failed_matrix = [
+        str(item.get("id"))
+        for item in matrix
+        if isinstance(item, Mapping) and not item.get("passed")
+    ]
+    return {
+        "batch_id": "commercial-uplift-001-005",
+        "item_numbers": [1, 2, 3],
+        "implementation_track": "native-parser-depth",
+        "objective": (
+            "Expose EVTX record/message/recovery validation evidence directly on each native row so "
+            "analysts can separate reviewable triage output from report-grade testimony."
+        ),
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"record_id:{details.get('record_id', '')}",
+            f"record_offset:{details.get('evtx_record_offset', '')}",
+            f"record_sha256:{details.get('evtx_record_sha256', '')}",
+        ],
+        "passed_validation_matrix_ids": passed_matrix,
+        "failed_validation_matrix_ids": failed_matrix,
+        "binxml_status": str(details.get("evtx_binxml_status") or checks.get("binxml_status") or ""),
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "record_limit": MAX_NATIVE_EVTX_RECORDS,
+            "chunk_limit": MAX_NATIVE_EVTX_CHUNKS,
+            "max_record_size_bytes": MAX_NATIVE_EVTX_RECORD_SIZE,
+            "bounded_string_limit": MAX_NATIVE_EVTX_STRINGS,
+            "bounded_binxml_token_limit": MAX_NATIVE_EVTX_BINXML_TOKENS,
+            "current_reader": "whole-file-read",
+            "streaming_reader_required_for_tb_claims": True,
+        },
+        "next_internal_step": (
+            "Add streaming/mmap chunk iteration plus record-level diff fixtures against EvtxECmd or "
+            "Windows Event Viewer XML before removing commercial blockers."
+        ),
+        "external_evidence_required": True,
+    }
+
+
 def native_evtx_record_candidate_record(
     path: Path,
     source_index: int,
@@ -1582,6 +1637,7 @@ def native_evtx_record_candidate_record(
     }
     details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
     details["core_accuracy_gates"] = native_evtx_core_accuracy_gates(details)
+    details["commercial_uplift_evidence"] = native_evtx_commercial_uplift_evidence(details)
     details["commercial_grade_ready"] = False
     details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
     return event_record(path, "eventlog-record-candidate", details)

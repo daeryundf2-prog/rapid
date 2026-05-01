@@ -564,6 +564,17 @@ def build_registry_key_tree_records(
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
                 "core_accuracy_gates": core_accuracy_gates,
+                "commercial_uplift_evidence": registry_commercial_uplift_evidence(
+                    gap_ids=["#4"],
+                    details={
+                        "source_path": str(path.resolve()),
+                        "source_hashes": dict(source_hashes),
+                        "cell_offset": key_node.get("cell_offset", 0),
+                        "registry_validation_matrix": validation_matrix,
+                        "registry_report_grade_assessment": report_grade_assessment,
+                        "recovery_profile": {},
+                    },
+                ),
                 "registry_native_capabilities": REGISTRY_NATIVE_CAPABILITIES,
                 "commercial_grade_ready": report_grade_assessment["report_grade_ready"],
                 "commercial_grade_blockers": report_grade_assessment["blockers"],
@@ -653,6 +664,17 @@ def build_registry_key_recovery_records(
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
                 "core_accuracy_gates": core_accuracy_gates,
+                "commercial_uplift_evidence": registry_commercial_uplift_evidence(
+                    gap_ids=["#5"],
+                    details={
+                        "source_path": str(path.resolve()),
+                        "source_hashes": dict(source_hashes),
+                        "cell_offset": candidate.get("cell_offset", 0),
+                        "registry_validation_matrix": validation_matrix,
+                        "registry_report_grade_assessment": report_grade_assessment,
+                        "recovery_profile": recovery_profile,
+                    },
+                ),
                 "registry_native_capabilities": REGISTRY_NATIVE_CAPABILITIES,
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": report_grade_assessment["blockers"],
@@ -770,6 +792,17 @@ def build_registry_value_recovery_records(
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
                 "core_accuracy_gates": core_accuracy_gates,
+                "commercial_uplift_evidence": registry_commercial_uplift_evidence(
+                    gap_ids=["#5"],
+                    details={
+                        "source_path": str(path.resolve()),
+                        "source_hashes": dict(source_hashes),
+                        "cell_offset": candidate.get("cell_offset", 0),
+                        "registry_validation_matrix": validation_matrix,
+                        "registry_report_grade_assessment": report_grade_assessment,
+                        "recovery_profile": recovery_profile,
+                    },
+                ),
                 "registry_native_capabilities": REGISTRY_NATIVE_CAPABILITIES,
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": report_grade_assessment["blockers"],
@@ -950,6 +983,72 @@ def registry_core_accuracy_gates(
             item5_checks.append("reportability blocked until independent confirmation")
         gates.append(build_accuracy_gate(5, satisfied_checks=item5_checks, evidence_refs=evidence_refs))
     return gates
+
+
+def registry_commercial_uplift_evidence(
+    *,
+    gap_ids: Sequence[str],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    validation_matrix = (
+        details.get("registry_validation_matrix")
+        if isinstance(details.get("registry_validation_matrix"), list)
+        else []
+    )
+    report_grade = (
+        details.get("registry_report_grade_assessment")
+        if isinstance(details.get("registry_report_grade_assessment"), Mapping)
+        else {}
+    )
+    recovery_profile = (
+        details.get("recovery_profile")
+        if isinstance(details.get("recovery_profile"), Mapping)
+        else {}
+    )
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    passed_matrix = [
+        str(item.get("id"))
+        for item in validation_matrix
+        if isinstance(item, Mapping) and item.get("passed")
+    ]
+    failed_matrix = [
+        str(item.get("id"))
+        for item in validation_matrix
+        if isinstance(item, Mapping) and not item.get("passed")
+    ]
+    item_numbers = [int(gap_id.lstrip("#")) for gap_id in gap_ids if gap_id.lstrip("#").isdigit()]
+    return {
+        "batch_id": "commercial-uplift-001-005",
+        "item_numbers": item_numbers,
+        "implementation_track": "native-parser-depth",
+        "objective": (
+            "Expose registry key-tree and deleted-cell validation evidence directly on native rows so "
+            "analysts can distinguish allocated key reconstruction from recovery candidates."
+        ),
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"cell_offset:{details.get('cell_offset', '')}",
+            f"source_sha256:{hashes.get('sha256', '')}",
+        ],
+        "passed_validation_matrix_ids": passed_matrix,
+        "failed_validation_matrix_ids": failed_matrix,
+        "recovery_profile_version": str(recovery_profile.get("profile_version") or ""),
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "bounded_cell_scan_bytes": MAX_HIVE_CELL_SCAN_BYTES,
+            "bounded_string_scan_bytes": MAX_HIVE_STRING_SCAN_BYTES,
+            "cell_record_limit": MAX_HIVE_CELL_RECORDS,
+            "max_cell_size_bytes": MAX_HIVE_CELL_SIZE,
+            "reader": "bounded-hbin-cell-scan",
+            "transaction_log_replay_required_for_commercial_claims": True,
+        },
+        "next_internal_step": (
+            "Add transaction-log replay detection, full binary value decoding, and second-parser offset "
+            "diff fixtures before removing registry commercial blockers."
+        ),
+        "external_evidence_required": True,
+    }
 
 
 def build_registry_record(
