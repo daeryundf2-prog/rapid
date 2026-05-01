@@ -230,6 +230,18 @@ def build_mft_inventory_record(path: Path) -> ArtifactRecord:
             "ntfs_validation_matrix": ntfs_validation_matrix(validation_checks),
             "ntfs_report_grade_assessment": report_grade,
             "ntfs_native_capabilities": NTFS_FILESYSTEM_CAPABILITIES,
+            "commercial_uplift_evidence": ntfs_commercial_uplift_evidence(
+                "mft",
+                {
+                    "source_path": str(path.resolve()),
+                    "source_hashes": file_hashes(path),
+                    "artifact_type": "mft-file",
+                    "ntfs_validation_matrix": ntfs_validation_matrix(validation_checks),
+                    "ntfs_report_grade_assessment": report_grade,
+                    "native_record_count": len(mft_records),
+                    "scan_bytes": len(blob),
+                },
+            ),
             "commercial_grade_ready": False,
             "commercial_grade_blockers": report_grade["blockers"],
             "note": "Native $MFT is inventoried with bounded FILE record, attribute, timestamp, sequence-fixup, and string pivots; validate report findings with a dedicated parser.",
@@ -308,6 +320,19 @@ def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
             "ntfs_validation_matrix": ntfs_validation_matrix(validation_checks),
             "ntfs_report_grade_assessment": report_grade,
             "ntfs_native_capabilities": NTFS_FILESYSTEM_CAPABILITIES,
+            "commercial_uplift_evidence": ntfs_commercial_uplift_evidence(
+                "usn",
+                {
+                    "source_path": str(path.resolve()),
+                    "source_hashes": file_hashes(path),
+                    "artifact_type": "usn-journal-file",
+                    "ntfs_validation_matrix": ntfs_validation_matrix(validation_checks),
+                    "ntfs_report_grade_assessment": report_grade,
+                    "native_record_count": len(records),
+                    "scan_bytes": len(blob),
+                    "next_cursor_available": bool(scan_metadata["next_cursor_available"]),
+                },
+            ),
             "commercial_grade_ready": False,
             "commercial_grade_blockers": report_grade["blockers"],
             "note": "Native USN records are decoded when bounded v2/v3 record structures are recoverable; validation counts summarize structural, cursor, size, and timestamp confidence. Validate critical timelines with a dedicated parser.",
@@ -408,6 +433,7 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
     )
     details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
     details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
+    details["commercial_uplift_evidence"] = ntfs_commercial_uplift_evidence("mft", details)
     details["forensic_review"] = build_forensic_review(
         gap_id="#12",
         artifact_goal="$MFT native FILE record evidence",
@@ -524,6 +550,7 @@ def build_native_usn_record(path: Path, record: Mapping[str, object], index: int
     )
     details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
     details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
+    details["commercial_uplift_evidence"] = ntfs_commercial_uplift_evidence("usn", details)
     details["forensic_review"] = build_forensic_review(
         gap_id="#13",
         artifact_goal="$UsnJrnl native change record evidence",
@@ -746,6 +773,51 @@ def ntfs_report_grade_assessment(
     }
 
 
+def ntfs_commercial_uplift_evidence(family: str, details: Mapping[str, object]) -> dict[str, object]:
+    matrix = details.get("ntfs_validation_matrix") if isinstance(details.get("ntfs_validation_matrix"), list) else []
+    report_grade = (
+        details.get("ntfs_report_grade_assessment")
+        if isinstance(details.get("ntfs_report_grade_assessment"), Mapping)
+        else {}
+    )
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    item_number = 12 if family == "mft" else 13
+    return {
+        "batch_id": "commercial-uplift-011-015",
+        "item_numbers": [item_number],
+        "implementation_track": "native-parser-depth",
+        "objective": "Expose native NTFS record validation, cursor/offset provenance, and commercial blockers on MFT/USN rows.",
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"source_index:{details.get('source_index', '')}",
+            f"source_sha256:{hashes.get('sha256', '')}",
+            f"artifact_type:{details.get('artifact_type', '')}",
+        ],
+        "passed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+        ],
+        "failed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+        ],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "bounded_native_scan": True,
+            "scan_limit_bytes": NATIVE_SCAN_LIMIT,
+            "native_record_count": int(details.get("native_record_count") or 0),
+            "record_cursor": int(details.get("record_cursor") or details.get("record_offset") or 0),
+            "next_cursor_available": bool(details.get("next_cursor_available")),
+            "full_volume_or_journal_validation_required_for_commercial_claims": True,
+        },
+        "next_internal_step": (
+            "Complete MFT attribute-list/nonresident runlist/path reconstruction validation."
+            if family == "mft"
+            else "Complete USN full-journal replay, FRN path-cache correlation, and large corpus cursor validation."
+        ),
+        "external_evidence_required": True,
+    }
+
+
 def iter_csv_rows(path: Path) -> Iterable[Mapping[str, object]]:
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -839,6 +911,7 @@ def build_filesystem_record(path: Path, family: str, row: Mapping[str, object], 
     details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
     details["commercial_grade_ready"] = False
     details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
+    details["commercial_uplift_evidence"] = ntfs_commercial_uplift_evidence(family, details)
     return ArtifactRecord(
         provider=WindowsFilesystemProvider.name,
         artifact_type=artifact_type,

@@ -261,6 +261,20 @@ def build_native_shellbag_record(
         "shellbag_validation_matrix": shellbag_validation_matrix(checks),
         "shellbag_report_grade_assessment": report_grade,
         "shellbag_native_capabilities": SHELLBAG_CAPABILITIES,
+        "commercial_uplift_evidence": shellbag_commercial_uplift_evidence(
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": dict(source_hashes),
+                "candidate_source": candidate_source,
+                "source_key_path": source_key_path,
+                "shellbag_section": section,
+                "cell_offset": cell_offset,
+                "hbin_offset": hbin_offset,
+                "allocation_status": allocation_status,
+                "shellbag_validation_matrix": shellbag_validation_matrix(checks),
+                "shellbag_report_grade_assessment": report_grade,
+            }
+        ),
         "forensic_review": build_forensic_review(
             gap_id="#15",
             artifact_goal="ShellBags folder view history evidence",
@@ -509,6 +523,46 @@ def shellbag_report_grade_assessment(
         "validated_strengths": [str(item.get("id")) for item in validation_matrix if item.get("passed")],
         "commercial_gap_ids": ["#15"],
         "next_validation_step": "Validate ShellBag binary shell-item payloads, bag/node relationships, transaction logs, and deleted/slack candidates with a dedicated parser before report-grade use.",
+    }
+
+
+def shellbag_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, object]:
+    matrix = details.get("shellbag_validation_matrix") if isinstance(details.get("shellbag_validation_matrix"), list) else []
+    report_grade = (
+        details.get("shellbag_report_grade_assessment")
+        if isinstance(details.get("shellbag_report_grade_assessment"), Mapping)
+        else {}
+    )
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    return {
+        "batch_id": "commercial-uplift-011-015",
+        "item_numbers": [15],
+        "implementation_track": "native-parser-depth",
+        "objective": "Expose ShellBags key-tree evidence, offset provenance, shell-item decoding blockers, and transaction-log gaps.",
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"source_sha256:{hashes.get('sha256', '')}",
+            f"cell_offset:{details.get('cell_offset', '')}",
+            f"hbin_offset:{details.get('hbin_offset', '')}",
+            f"section:{details.get('shellbag_section', '')}",
+        ],
+        "passed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+        ],
+        "failed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+        ],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "bounded_hive_scan": True,
+            "max_hive_scan_bytes": MAX_HIVE_CELL_SCAN_BYTES,
+            "allocation_status": str(details.get("allocation_status") or ""),
+            "shell_item_binary_decode_required_for_commercial_claims": True,
+            "transaction_log_replay_required_for_commercial_claims": True,
+        },
+        "next_internal_step": "Finish Shell Item binary decoding, BagMRU/Bags relationship validation, and transaction-log replay.",
+        "external_evidence_required": True,
     }
 
 

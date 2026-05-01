@@ -266,6 +266,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("embedded LNK linkage", jumplist_gate["satisfied_checks"])
             self.assertIn("AppID mapping provenance", jumplist_gate["satisfied_checks"])
             self.assertIn("deleted-entry warning", jumplist_gate["satisfied_checks"])
+            jumplist_uplift = automatic["details"]["commercial_uplift_evidence"]
+            self.assertEqual(jumplist_uplift["batch_id"], "commercial-uplift-011-015")
+            self.assertEqual(jumplist_uplift["item_numbers"], [14])
+            self.assertIn("has-destlist-stream", jumplist_uplift["passed_validation_matrix_ids"])
+            self.assertTrue(
+                jumplist_uplift["large_data_controls"]["deleted_entry_recovery_required_for_commercial_claims"]
+            )
             self.assertIn(r"C:\Users\alice\Documents\Incident Notes.docx", automatic["details"]["embedded_paths"])
             self.assertEqual(custom["details"]["destinations"][0]["target_path"], r"C:\Users\alice\Downloads\installer.exe")
 
@@ -1366,6 +1373,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("timestamp/source field provenance", mft_gate["satisfied_checks"])
             self.assertFalse(native_mft[0]["details"]["ntfs_native_capabilities"]["mft_attribute_list_resolution"])
             self.assertTrue(native_mft[0]["details"]["validation_required"])
+            mft_uplift = native_mft[0]["details"]["commercial_uplift_evidence"]
+            self.assertEqual(mft_uplift["batch_id"], "commercial-uplift-011-015")
+            self.assertEqual(mft_uplift["item_numbers"], [12])
+            self.assertIn("sequence-fixup-valid", mft_uplift["passed_validation_matrix_ids"])
+            self.assertTrue(
+                mft_uplift["large_data_controls"]["full_volume_or_journal_validation_required_for_commercial_claims"]
+            )
             self.assertIn({"value": "valid", "count": 1}, mft_files[0]["details"]["sequence_validation_counts"])
             self.assertIn({"value": "$FILE_NAME", "count": 1}, mft_files[0]["details"]["native_attribute_type_counts"])
             self.assertEqual(usn_files[0]["details"]["source_path"], str(fixture.usn_journal.resolve()))
@@ -1420,6 +1434,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("rename/delete ordering", usn_gate["satisfied_checks"])
             self.assertIn("cursor determinism at scale", usn_gate["satisfied_checks"])
             self.assertFalse(native_usn[0]["details"]["ntfs_native_capabilities"]["usn_full_journal_replay"])
+            usn_uplift = native_usn[0]["details"]["commercial_uplift_evidence"]
+            self.assertEqual(usn_uplift["item_numbers"], [13])
+            self.assertIn("record-cursor-progresses", usn_uplift["passed_validation_matrix_ids"])
+            self.assertEqual(usn_uplift["large_data_controls"]["record_cursor"], 16)
             self.assertEqual(native_usn[1]["details"]["major_version"], 3)
             self.assertEqual(native_usn[1]["details"]["file_path"], "renamed.txt")
             self.assertEqual(native_usn[1]["details"]["rename_hint"], "rename-new-name")
@@ -1489,6 +1507,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertGreaterEqual(edb_files[0]["details"]["native_candidate_metadata"]["page_candidate_count"], 1)
             self.assertGreaterEqual(edb_files[0]["details"]["native_candidate_metadata"]["table_candidate_count"], 3)
             self.assertGreaterEqual(edb_files[0]["details"]["native_candidate_metadata"]["row_candidate_count"], 1)
+            edb_uplift = edb_files[0]["details"]["commercial_uplift_evidence"]
+            self.assertEqual(edb_uplift["batch_id"], "commercial-uplift-011-015")
+            self.assertEqual(edb_uplift["item_numbers"], [11])
+            self.assertIn("ese-signature-valid", edb_uplift["passed_validation_matrix_ids"])
+            self.assertTrue(edb_uplift["large_data_controls"]["row_level_native_decode_required_for_commercial_claims"])
             self.assertEqual(
                 edb_files[0]["details"]["native_validation"]["row_candidate_decode_status"],
                 "correlated-native-string-candidates-only",
@@ -1533,6 +1556,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             row_gate = row_candidate["details"]["core_accuracy_gates"][0]
             self.assertEqual(row_gate["gap_id"], "#11")
             self.assertIn("deleted/index-state validation", row_gate["satisfied_checks"])
+            row_uplift = row_candidate["details"]["commercial_uplift_evidence"]
+            self.assertIn("row-level-decoding-available", row_uplift["failed_validation_matrix_ids"])
             self.assertEqual(summary["details"]["entry_count"], 1)
             self.assertEqual(summary["details"]["inventory_count"], 1)
             self.assertGreaterEqual(summary["details"]["edb_pivot_count"], 2)

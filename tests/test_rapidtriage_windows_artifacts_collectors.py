@@ -175,6 +175,14 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("UsrClass/NTUSER correlation", shellbag_gate["satisfied_checks"])
             self.assertIn("deleted/slack validation warning", shellbag_gate["satisfied_checks"])
             self.assertIn("shell item binary decoding", shellbag_gate["missing_required_checks"])
+            shellbag_uplift = key_tree.details["commercial_uplift_evidence"]
+            self.assertEqual(shellbag_uplift["batch_id"], "commercial-uplift-011-015")
+            self.assertEqual(shellbag_uplift["item_numbers"], [15])
+            self.assertIn("regf-header-valid", shellbag_uplift["passed_validation_matrix_ids"])
+            self.assertIn("binary-shell-item-decoding-available", shellbag_uplift["failed_validation_matrix_ids"])
+            self.assertTrue(
+                shellbag_uplift["large_data_controls"]["transaction_log_replay_required_for_commercial_claims"]
+            )
 
     def test_registry_hive_reconstructs_native_key_and_value_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

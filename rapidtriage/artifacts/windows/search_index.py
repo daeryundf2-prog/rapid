@@ -213,6 +213,21 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
             "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
             "search_index_report_grade_assessment": report_grade,
             "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+            "commercial_uplift_evidence": windows_search_commercial_uplift_evidence(
+                {
+                    "source_path": str(path.resolve()),
+                    "source_hashes": file_hashes(path),
+                    "artifact_type": "windows-search-edb-file",
+                    "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
+                    "search_index_report_grade_assessment": report_grade,
+                    "native_candidate_metadata": {
+                        "page_count_scanned": int(page_map.get("page_count_scanned") or 0),
+                        "row_candidate_count": len(row_candidates),
+                        "table_candidate_count": len(table_families),
+                        "string_scan_bytes": int(pivots.get("string_scan_bytes") or 0),
+                    },
+                }
+            ),
             "forensic_review": build_forensic_review(
                 gap_id="#11",
                 artifact_goal="Windows.edb native ESE search-index evidence",
@@ -322,6 +337,16 @@ def build_edb_pivot_records(path: Path, inventory_details: Mapping[str, object])
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+                    "commercial_uplift_evidence": windows_search_commercial_uplift_evidence(
+                        {
+                            "source_path": str(path.resolve()),
+                            "source_hashes": source_hashes,
+                            "source_index": index,
+                            "artifact_type": "windows-search-edb-pivot",
+                            "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
+                            "search_index_report_grade_assessment": report_grade,
+                        }
+                    ),
                     "forensic_review": build_forensic_review(
                         gap_id="#11",
                         artifact_goal="Windows.edb native string pivot",
@@ -442,6 +467,21 @@ def build_edb_page_candidate_records(path: Path, inventory_details: Mapping[str,
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+                    "commercial_uplift_evidence": windows_search_commercial_uplift_evidence(
+                        {
+                            "source_path": str(path.resolve()),
+                            "source_hashes": source_hashes,
+                            "source_index": index,
+                            "artifact_type": "windows-search-edb-page-candidate",
+                            "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
+                            "search_index_report_grade_assessment": report_grade,
+                            "native_candidate_metadata": {
+                                "page_index": int(sample.get("page_index") or 0),
+                                "page_offset": int(sample.get("page_offset") or 0),
+                                "page_size": int(sample.get("page_size") or 0),
+                            },
+                        }
+                    ),
                     "forensic_review": build_forensic_review(
                         gap_id="#11",
                         artifact_goal="Windows.edb ESE page-level candidate",
@@ -532,6 +572,17 @@ def build_edb_table_candidate_records(path: Path, inventory_details: Mapping[str
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+                    "commercial_uplift_evidence": windows_search_commercial_uplift_evidence(
+                        {
+                            "source_path": str(path.resolve()),
+                            "source_hashes": source_hashes,
+                            "source_index": index,
+                            "artifact_type": "windows-search-edb-table-candidate",
+                            "table_family": table_family,
+                            "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
+                            "search_index_report_grade_assessment": report_grade,
+                        }
+                    ),
                     "forensic_review": build_forensic_review(
                         gap_id="#11",
                         artifact_goal="Windows.edb native table-family candidate",
@@ -641,6 +692,18 @@ def build_edb_row_candidate_records(path: Path, inventory_details: Mapping[str, 
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+                    "commercial_uplift_evidence": windows_search_commercial_uplift_evidence(
+                        {
+                            "source_path": str(path.resolve()),
+                            "source_hashes": source_hashes,
+                            "source_index": index,
+                            "artifact_type": "windows-search-edb-row-candidate",
+                            "item_path": item_path,
+                            "url": url,
+                            "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
+                            "search_index_report_grade_assessment": report_grade,
+                        }
+                    ),
                     "forensic_review": build_forensic_review(
                         gap_id="#11",
                         artifact_goal="Windows.edb correlated row candidate",
@@ -1018,6 +1081,50 @@ def search_index_report_grade_assessment(
         "validated_strengths": [str(item.get("id")) for item in validation_matrix if isinstance(item, Mapping) and item.get("passed")],
         "commercial_gap_ids": ["#11"],
         "next_validation_step": "Validate Windows.edb paths, content, timestamps, and deleted/index state with a full ESE/Search parser before report-grade use.",
+    }
+
+
+def windows_search_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, object]:
+    matrix = (
+        details.get("search_index_validation_matrix")
+        if isinstance(details.get("search_index_validation_matrix"), Sequence)
+        else []
+    )
+    report_grade = (
+        details.get("search_index_report_grade_assessment")
+        if isinstance(details.get("search_index_report_grade_assessment"), Mapping)
+        else {}
+    )
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    metadata = details.get("native_candidate_metadata") if isinstance(details.get("native_candidate_metadata"), Mapping) else {}
+    return {
+        "batch_id": "commercial-uplift-011-015",
+        "item_numbers": [11],
+        "implementation_track": "native-parser-depth",
+        "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"source_index:{details.get('source_index', '')}",
+            f"source_sha256:{hashes.get('sha256', '')}",
+            f"artifact_type:{details.get('artifact_type', '')}",
+        ],
+        "passed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+        ],
+        "failed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+        ],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "bounded_page_map": True,
+            "page_count_scanned": int(metadata.get("page_count_scanned") or 0),
+            "string_scan_bytes": int(metadata.get("string_scan_bytes") or 0),
+            "row_level_native_decode_required_for_commercial_claims": True,
+            "deleted_state_decode_required_for_commercial_claims": True,
+        },
+        "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+        "external_evidence_required": True,
     }
 
 

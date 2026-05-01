@@ -6,7 +6,7 @@ import struct
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Sequence, Tuple
+from typing import Iterable, Mapping, Sequence, Tuple
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
@@ -526,6 +526,19 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         "recent_validation_matrix": recent_validation_matrix(validation_checks),
         "recent_report_grade_assessment": report_grade,
         "recent_native_capabilities": JUMPLIST_CAPABILITIES,
+        "commercial_uplift_evidence": jumplist_commercial_uplift_evidence(
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": file_hashes(path),
+                "artifact_type": artifact_type,
+                "application_id_hash": path.stem.split(".", 1)[0],
+                "recent_validation_matrix": recent_validation_matrix(validation_checks),
+                "recent_report_grade_assessment": report_grade,
+                "destination_count": len(destinations),
+                "ole_stream_count": len(ole_streams),
+                "destlist_parse_status": destlist_metadata.get("destlist_parse_status", ""),
+            }
+        ),
         "forensic_review": build_forensic_review(
             gap_id="#14",
             artifact_goal="JumpList DestList and embedded LNK destination evidence",
@@ -1006,6 +1019,45 @@ def recent_report_grade_assessment(
         "validated_strengths": [str(item.get("id")) for item in validation_matrix if item.get("passed")],
         "commercial_gap_ids": gap_ids,
         "next_validation_step": "Validate JumpList DestList semantics, deleted entries, account context, and Shell Link property stores with known-answer corpus before report-grade use.",
+    }
+
+
+def jumplist_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, object]:
+    matrix = details.get("recent_validation_matrix") if isinstance(details.get("recent_validation_matrix"), list) else []
+    report_grade = (
+        details.get("recent_report_grade_assessment")
+        if isinstance(details.get("recent_report_grade_assessment"), Mapping)
+        else {}
+    )
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    return {
+        "batch_id": "commercial-uplift-011-015",
+        "item_numbers": [14],
+        "implementation_track": "native-parser-depth",
+        "objective": "Expose JumpList DestList validation, OLE/LNK provenance, deleted-entry blockers, and AppID gaps.",
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"source_sha256:{hashes.get('sha256', '')}",
+            f"artifact_type:{details.get('artifact_type', '')}",
+            f"app_id_hash:{details.get('application_id_hash', '')}",
+        ],
+        "passed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+        ],
+        "failed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+        ],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "bounded_ole_stream_inventory": True,
+            "ole_stream_count": int(details.get("ole_stream_count") or 0),
+            "destination_count": int(details.get("destination_count") or 0),
+            "destlist_parse_status": str(details.get("destlist_parse_status") or ""),
+            "deleted_entry_recovery_required_for_commercial_claims": True,
+        },
+        "next_internal_step": "Finish OS-version DestList field validation, deleted-entry recovery, and AppID mapping corpus checks.",
+        "external_evidence_required": True,
     }
 
 
