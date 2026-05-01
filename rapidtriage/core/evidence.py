@@ -15,6 +15,7 @@ from .e01 import (
     collect_tool_preflight,
     describe_source_integrity,
     image_core_accuracy_gates,
+    image_commercial_uplift_evidence,
     image_report_grade_assessment,
     missing_e01_tools,
 )
@@ -56,6 +57,7 @@ class EvidenceAdapterResult:
     fallback_guidance: list[str] | None = None
     safety_notes: list[str] | None = None
     core_accuracy_gates: list[dict[str, object]] | None = None
+    commercial_uplift_evidence: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -197,6 +199,20 @@ class EwfAdapter:
                     "limitations": E01_REPORT_GRADE_BLOCKERS,
                 },
             ),
+            commercial_uplift_evidence=image_commercial_uplift_evidence(
+                22,
+                {
+                    "source_path": str(source),
+                    "source_integrity": source_integrity,
+                    "tool_preflight": tool_preflight or [],
+                    "partition_table": [],
+                    "command_history": [],
+                    "warnings": [] if ready else ["Direct E01/Ex01 extraction is disabled until required tools are present."],
+                    "limitations": E01_REPORT_GRADE_BLOCKERS,
+                    "image_report_grade_assessment": report_grade,
+                    "detected_format": "e01" if source.suffix.lower() == ".e01" else "ex01",
+                },
+            ),
         )
 
 
@@ -297,6 +313,27 @@ class RawImageAdapter:
                         "native-partition-filesystem-parser-not-implemented",
                         "encrypted-volume-unlock-workflow-not-implemented",
                     ],
+                },
+            ),
+            commercial_uplift_evidence=image_commercial_uplift_evidence(
+                23,
+                {
+                    "source_path": str(source),
+                    "source_integrity": (source_integrity or {}).get("parts", [])
+                    if isinstance(source_integrity, dict) and "parts" in source_integrity
+                    else source_integrity,
+                    "tool_preflight": tool_preflight or [],
+                    "partition_table": [],
+                    "command_history": [],
+                    "split_part_count": len(split_parts) if split_parts else 0,
+                    "warnings": [] if ready else ["Direct raw/split extraction is disabled until Sleuth Kit tools are present."],
+                    "limitations": [
+                        "native-partition-filesystem-parser-not-implemented",
+                        "split-image-gap-and-damaged-set-known-answer-validation-required",
+                        "encrypted-volume-unlock-workflow-not-implemented",
+                    ],
+                    "image_report_grade_assessment": report_grade,
+                    "detected_format": "raw",
                 },
             ),
         )
@@ -424,6 +461,26 @@ class VirtualDiskAdapter:
                         "limitations": ["xva-direct-extraction-not-implemented"],
                     },
                 ),
+                commercial_uplift_evidence=image_commercial_uplift_evidence(
+                    24,
+                    {
+                        "source_path": str(source),
+                        "source_integrity": describe_source_integrity(source) if source.is_file() else None,
+                        "tool_preflight": [],
+                        "partition_table": [],
+                        "command_history": [],
+                        "warnings": [
+                            "Direct XVA extraction is not implemented; preserve the export/conversion log for reporting."
+                        ],
+                        "limitations": [
+                            "xva-direct-extraction-not-implemented",
+                            "hypervisor-metadata-decoding-not-implemented",
+                            "vendor-export-validation-required",
+                        ],
+                        "image_report_grade_assessment": report_grade,
+                        "detected_format": "xva",
+                    },
+                ),
             )
         missing = missing_virtual_disk_tools(source.suffix.lower())
         ready = supported and not missing
@@ -510,6 +567,25 @@ class VirtualDiskAdapter:
                         "snapshot-chain-validation-not-implemented",
                         "differencing-disk-resolution-not-implemented",
                     ],
+                },
+            ),
+            commercial_uplift_evidence=image_commercial_uplift_evidence(
+                24,
+                {
+                    "source_path": str(source),
+                    "source_integrity": source_integrity,
+                    "tool_preflight": tool_preflight or [],
+                    "partition_table": [],
+                    "command_history": [],
+                    "warnings": [] if ready else ["Direct virtual disk extraction is disabled until required tooling is present."],
+                    "limitations": [
+                        "snapshot-chain-validation-not-implemented",
+                        "differencing-disk-resolution-not-implemented",
+                        "hypervisor-metadata-decoding-not-implemented",
+                        "large-virtual-disk-known-answer-corpus-required",
+                    ],
+                    "image_report_grade_assessment": report_grade,
+                    "detected_format": source.suffix.lower().lstrip(".") or "virtual-disk",
                 },
             ),
         )
@@ -602,6 +678,24 @@ class ForensicContainerAdapter:
                         "proprietary-container-direct-parser-not-implemented",
                         "embedded-metadata-compression-deleted-entry-validation-required",
                     ],
+                },
+            ),
+            commercial_uplift_evidence=image_commercial_uplift_evidence(
+                25,
+                {
+                    "source_path": str(source),
+                    "source_integrity": source_integrity,
+                    "tool_preflight": [],
+                    "partition_table": [],
+                    "command_history": [],
+                    "warnings": [f"Direct {suffix.upper()} container parsing is not implemented yet."],
+                    "limitations": [
+                        "proprietary-container-direct-parser-not-implemented",
+                        "embedded-metadata-compression-deleted-entry-validation-required",
+                        "vendor-export-log-required",
+                    ],
+                    "image_report_grade_assessment": report_grade,
+                    "detected_format": suffix or "forensic-container",
                 },
             ),
         )

@@ -421,6 +421,22 @@ def build_browser_artifacts(
                         build_ai_transcript_summary(conversation_rows)["validation_status"] if conversation_rows else "none"
                     ),
                     "privacy_legal_warning": BROWSER_PRIVACY_WARNING,
+                    "commercial_uplift_evidence": ai_transcript_commercial_uplift_evidence(
+                        {
+                            "source_path": str(source_path.resolve()),
+                            "browser": browser,
+                            "profile": profile,
+                            "ai_usage_count": len(ai_rows),
+                            "conversation_rows": conversation_rows,
+                            "transcript": build_ai_transcript_summary(conversation_rows),
+                            "source_summary": summarize_ai_conversation_sources(conversation_rows),
+                            "transcript_validation_checks": {
+                                "has_ai_usage": bool(ai_rows),
+                                "has_candidate_transcript_rows": bool(conversation_rows),
+                                "service_side_export_validated": False,
+                            },
+                        }
+                    ),
                     "commercial_grade_ready": False,
                     "commercial_grade_blockers": AI_TRANSCRIPT_BLOCKERS,
                     "browser_report_grade_assessment": {
@@ -529,6 +545,24 @@ def build_ai_conversation_record(
                 "has_orphans": bool(transcript["orphan_question_count"] or transcript["orphan_answer_count"]),
                 "service_side_export_validated": False,
             },
+            "commercial_uplift_evidence": ai_transcript_commercial_uplift_evidence(
+                {
+                    "source_path": str(profile_dir.resolve()),
+                    "browser": browser,
+                    "profile": profile,
+                    "conversation_rows": conversation_rows,
+                    "transcript": transcript,
+                    "source_summary": source_summary,
+                    "transcript_validation_checks": {
+                        "has_service_label": bool(count_field(conversation_rows, "ai_service")),
+                        "has_question_answer_pair": bool(transcript["complete_pair_count"]),
+                        "has_source_hashes": all(bool(row.get("source_sha256")) for row in conversation_rows),
+                        "has_source_storage_area": all(bool(row.get("storage_area")) for row in conversation_rows),
+                        "has_orphans": bool(transcript["orphan_question_count"] or transcript["orphan_answer_count"]),
+                        "service_side_export_validated": False,
+                    },
+                }
+            ),
             "core_accuracy_gates": ai_transcript_core_accuracy_gates(
                 {
                     "source_path": str(profile_dir.resolve()),
@@ -848,6 +882,51 @@ def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[st
             "browser_version_corpus_required_for_commercial_claims": True,
         },
         "next_internal_step": "Finish cache/session schema decoding, deleted-history recovery, Safari parity, and browser-version known-answer validation.",
+        "external_evidence_required": True,
+    }
+
+
+def ai_transcript_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[str, object]:
+    checks = (
+        details.get("transcript_validation_checks")
+        if isinstance(details.get("transcript_validation_checks"), Mapping)
+        else {}
+    )
+    transcript = details.get("transcript") if isinstance(details.get("transcript"), Mapping) else {}
+    source_summary = details.get("source_summary") if isinstance(details.get("source_summary"), Mapping) else {}
+    conversation_rows = [row for row in details.get("conversation_rows") or [] if isinstance(row, Mapping)]
+    return {
+        "batch_id": "commercial-uplift-021-025",
+        "item_numbers": [21],
+        "implementation_track": "ai-transcript-parser-validation",
+        "objective": "Expose AI service question/answer candidate pairing evidence, source storage provenance, and validation blockers without claiming complete transcript recovery.",
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"browser:{details.get('browser', '')}",
+            f"profile:{details.get('profile', '')}",
+            f"source_file_count:{source_summary.get('source_file_count', 0)}",
+        ],
+        "passed_validation_check_ids": [str(key) for key, value in checks.items() if bool(value) and key != "has_orphans"],
+        "failed_validation_check_ids": [str(key) for key, value in checks.items() if not bool(value)],
+        "candidate_quality": {
+            "conversation_candidate_count": len(conversation_rows),
+            "question_count": int(transcript.get("question_count") or sum(1 for row in conversation_rows if row.get("direction") == "question")),
+            "answer_count": int(transcript.get("answer_count") or sum(1 for row in conversation_rows if row.get("direction") == "answer")),
+            "complete_pair_count": int(transcript.get("complete_pair_count") or 0),
+            "orphan_question_count": int(transcript.get("orphan_question_count") or 0),
+            "orphan_answer_count": int(transcript.get("orphan_answer_count") or 0),
+            "completeness_score": transcript.get("completeness_score"),
+        },
+        "commercial_blockers": list(AI_TRANSCRIPT_BLOCKERS),
+        "large_data_controls": {
+            "max_ai_storage_files": MAX_AI_STORAGE_FILES,
+            "max_ai_storage_file_bytes": MAX_AI_STORAGE_FILE_BYTES,
+            "max_ai_conversation_rows": MAX_AI_CONVERSATION_ROWS,
+            "source_storage_area_count": len(source_summary.get("storage_area_counts") or {}),
+            "service_schema_version_corpus_required": True,
+            "service_side_export_validation_required": True,
+        },
+        "next_internal_step": "Add service-specific export/schema validators, deleted-fragment recovery fixtures, and FP/FN measurement for ChatGPT/Claude/Gemini/Perplexity.",
         "external_evidence_required": True,
     }
 

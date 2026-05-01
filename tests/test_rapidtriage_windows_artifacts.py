@@ -143,6 +143,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("#21", ai_conversation["details"]["browser_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(ai_conversation["details"]["forensic_review"]["gap_id"], "#21")
             self.assertFalse(ai_conversation["details"]["browser_native_capabilities"]["service_side_transcript_export_validation"])
+            ai_uplift = ai_conversation["details"]["commercial_uplift_evidence"]
+            self.assertEqual(ai_uplift["batch_id"], "commercial-uplift-021-025")
+            self.assertEqual(ai_uplift["item_numbers"], [21])
+            self.assertIn("has_question_answer_pair", ai_uplift["passed_validation_check_ids"])
+            self.assertIn("service_side_export_validated", ai_uplift["failed_validation_check_ids"])
+            self.assertGreaterEqual(ai_uplift["candidate_quality"]["complete_pair_count"], 2)
+            self.assertEqual(ai_uplift["large_data_controls"]["max_ai_storage_files"], 80)
             ai_gate = ai_conversation["details"]["core_accuracy_gates"][0]
             self.assertEqual(ai_gate["gap_id"], "#21")
             self.assertIn("service/schema version detection", ai_gate["satisfied_checks"])

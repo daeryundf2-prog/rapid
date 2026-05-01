@@ -100,6 +100,10 @@ DOS Partition Table
             self.assertEqual(e01_gate["gap_id"], "#22")
             self.assertIn("partition offset correctness", e01_gate["satisfied_checks"])
             self.assertIn("read-only extraction provenance", e01_gate["satisfied_checks"])
+            e01_uplift = metadata["commercial_uplift_evidence"]
+            self.assertEqual(e01_uplift["item_numbers"], [22])
+            self.assertIn("#22-command-history", e01_uplift["passed_validation_matrix_ids"])
+            self.assertIn("#22-native-commercial-parser", e01_uplift["failed_validation_matrix_ids"])
 
     def test_raw_split_image_discovery_sorts_numeric_segments(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -187,6 +191,11 @@ DOS Partition Table
             self.assertIn("partition table parsing", raw_gate["satisfied_checks"])
             self.assertIn("filesystem extraction audit", raw_gate["satisfied_checks"])
             self.assertIn("deleted-file recovery expectations", raw_gate["satisfied_checks"])
+            raw_uplift = metadata["commercial_uplift_evidence"]
+            self.assertEqual(raw_uplift["batch_id"], "commercial-uplift-021-025")
+            self.assertEqual(raw_uplift["item_numbers"], [23])
+            self.assertIn("#23-command-history", raw_uplift["passed_validation_matrix_ids"])
+            self.assertEqual(raw_uplift["large_data_controls"]["split_part_count"], 2)
 
     def test_extract_raw_image_falls_back_to_whole_image_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -294,6 +303,10 @@ DOS Partition Table
             self.assertEqual(vm_gate["gap_id"], "#24")
             self.assertIn("converted raw hash/provenance", vm_gate["satisfied_checks"])
             self.assertIn("nested partition extraction", vm_gate["satisfied_checks"])
+            vm_uplift = metadata["commercial_uplift_evidence"]
+            self.assertEqual(vm_uplift["item_numbers"], [24])
+            self.assertIn("#24-command-history", vm_uplift["passed_validation_matrix_ids"])
+            self.assertIn("#24-native-commercial-parser", vm_uplift["failed_validation_matrix_ids"])
 
     def test_run_triage_accepts_e01_image_and_analyzes_extracted_filesystem(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

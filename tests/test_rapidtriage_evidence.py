@@ -54,6 +54,11 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertIn("corrupt/encrypted limitation reporting", e01_gate["satisfied_checks"])
             self.assertTrue(result["limitations"])
             self.assertTrue(result["fallback_guidance"])
+            e01_uplift = result["commercial_uplift_evidence"]
+            self.assertEqual(e01_uplift["batch_id"], "commercial-uplift-021-025")
+            self.assertEqual(e01_uplift["item_numbers"], [22])
+            self.assertIn("#22-source-integrity", e01_uplift["passed_validation_matrix_ids"])
+            self.assertIn("#22-native-commercial-parser", e01_uplift["failed_validation_matrix_ids"])
 
     def test_identifies_raw_image_as_direct_extract_when_sleuthkit_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -78,6 +83,11 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(raw_gate["gap_id"], "#23")
             self.assertIn("split-set order and gap validation", raw_gate["satisfied_checks"])
             self.assertIn("encrypted volume limitation warning", raw_gate["satisfied_checks"])
+            raw_uplift = result["commercial_uplift_evidence"]
+            self.assertEqual(raw_uplift["item_numbers"], [23])
+            self.assertIn("#23-source-integrity", raw_uplift["passed_validation_matrix_ids"])
+            self.assertIn("#23-native-commercial-parser", raw_uplift["failed_validation_matrix_ids"])
+            self.assertEqual(raw_uplift["large_data_controls"]["split_part_count"], 1)
 
     def test_identifies_archive_image_as_direct_extract_when_tool_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -118,6 +128,10 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertIn("qemu-img version/command capture", vm_gate["satisfied_checks"])
             self.assertIn("snapshot/differencing-chain detection", vm_gate["satisfied_checks"])
             self.assertIn("unsupported/encrypted VM warning", vm_gate["satisfied_checks"])
+            vm_uplift = result["commercial_uplift_evidence"]
+            self.assertEqual(vm_uplift["item_numbers"], [24])
+            self.assertIn("#24-source-integrity", vm_uplift["passed_validation_matrix_ids"])
+            self.assertIn("#24-native-commercial-parser", vm_uplift["failed_validation_matrix_ids"])
 
     def test_identifies_xva_as_export_first_virtual_disk(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -143,6 +157,10 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertIn("snapshot/differencing-chain detection", xva_gate["satisfied_checks"])
             self.assertIn("unsupported/encrypted VM warning", xva_gate["satisfied_checks"])
             self.assertTrue(result["fallback_guidance"])
+            xva_uplift = result["commercial_uplift_evidence"]
+            self.assertEqual(xva_uplift["item_numbers"], [24])
+            self.assertIn("#24-partition-or-container-metadata", xva_uplift["passed_validation_matrix_ids"])
+            self.assertIn("xva-direct-extraction-not-implemented", xva_uplift["commercial_blockers"])
 
     def test_identifies_common_image_formats_as_planned_adapters(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -180,6 +198,10 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 self.assertIn("metadata/deleted-entry validation", container_gate["satisfied_checks"])
                 self.assertIn("encrypted/compressed limitation warning", container_gate["satisfied_checks"])
                 self.assertTrue(result["limitations"])
+                container_uplift = result["commercial_uplift_evidence"]
+                self.assertEqual(container_uplift["item_numbers"], [25])
+                self.assertIn("#25-source-integrity", container_uplift["passed_validation_matrix_ids"])
+                self.assertIn("#25-native-commercial-parser", container_uplift["failed_validation_matrix_ids"])
 
     def test_unknown_format_is_not_supported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

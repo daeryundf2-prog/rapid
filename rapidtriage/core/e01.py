@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Callable, Mapping, Optional, Sequence
 
 from .audit import compute_sha256
 from .forensic_accuracy import build_accuracy_gate
@@ -93,6 +93,19 @@ class E01ExtractionResult:
                 },
             ),
             "image_report_grade_assessment": image_report_grade_assessment("#22", E01_REPORT_GRADE_BLOCKERS),
+            "commercial_uplift_evidence": image_commercial_uplift_evidence(
+                22,
+                {
+                    "source_path": str(self.source_path),
+                    "source_integrity": self.source_integrity,
+                    "tool_preflight": list(self.tool_preflight),
+                    "partition_table": list(self.partition_table),
+                    "partition_start_sector": self.partition_start_sector,
+                    "command_history": list(self.command_history),
+                    "warnings": list(self.warnings),
+                    "limitations": E01_REPORT_GRADE_BLOCKERS,
+                },
+            ),
             "native_capabilities": dict(E01_NATIVE_CAPABILITIES),
             "commercial_grade_blockers": [
                 "Requires independent known-answer validation across libewf/Sleuth Kit versions and malformed E01/Ex01 corpora.",
@@ -327,6 +340,83 @@ def image_report_grade_assessment(gap_id: str, blockers: Sequence[str]) -> dict[
             "Preserve original acquisition hash, tool versions, command logs, and export/mount logs with the case.",
             "Validate extracted filesystem contents against a trusted forensic tool before report-grade conclusions.",
         ],
+    }
+
+
+def image_commercial_uplift_evidence(number: int, details: Mapping[str, object]) -> dict[str, object]:
+    gap_id = f"#{number}"
+    matrix = image_validation_matrix(
+        gap_id=gap_id,
+        source_integrity=bool(details.get("source_integrity")),
+        tool_preflight=bool(details.get("tool_preflight")),
+        partition_table=bool(details.get("partition_table"))
+        or bool(details.get("detected_format"))
+        or bool(details.get("container_type")),
+        command_history=bool(details.get("command_history")),
+        native_complete=False,
+    )
+    source_integrity = details.get("source_integrity")
+    if isinstance(source_integrity, Mapping):
+        source_hashes = [str(source_integrity.get("sha256") or "")]
+        hash_statuses = [str(source_integrity.get("hash_status") or "")]
+        split_part_count = 1 if source_integrity else 0
+    elif isinstance(source_integrity, list):
+        parts = [item for item in source_integrity if isinstance(item, Mapping)]
+        source_hashes = [str(item.get("sha256") or "") for item in parts]
+        hash_statuses = [str(item.get("hash_status") or "") for item in parts]
+        split_part_count = len(parts)
+    else:
+        source_hashes = []
+        hash_statuses = []
+        split_part_count = 0
+    report_grade = details.get("image_report_grade_assessment")
+    blockers = (
+        report_grade.get("blockers")
+        if isinstance(report_grade, Mapping) and isinstance(report_grade.get("blockers"), list)
+        else details.get("limitations")
+    )
+    objectives = {
+        22: "Make E01/Ex01 workflow evidence explicit: source integrity, tool preflight, partition selection, read-only extraction provenance, and blockers.",
+        23: "Make RAW/split image handling evidence explicit: segment order, gap checks, partition selection, filesystem recovery audit, and encrypted-volume blockers.",
+        24: "Make virtual-disk workflow evidence explicit: qemu-img conversion provenance, converted raw integrity, nested recovery, and snapshot/differencing blockers.",
+        25: "Make forensic container support evidence explicit: format detection, source integrity, export-first workflow, and native parser blockers.",
+    }
+    next_steps = {
+        22: "Add native E01/Ex01 segment metadata parsing and run encrypted/corrupt image known-answer corpora.",
+        23: "Add native partition/filesystem parsing, large damaged split-set tests, and encrypted-volume workflow evidence.",
+        24: "Add snapshot/differencing-chain resolution, hypervisor metadata capture, and qemu-img version-matrix validation.",
+        25: "Implement/import native or verified vendor parsers for AD1/L01/Lx01/AFF/AFF4/XVA and validate metadata/deleted-entry handling.",
+    }
+    return {
+        "batch_id": "commercial-uplift-021-025",
+        "item_numbers": [number],
+        "implementation_track": "evidence-image-workflow",
+        "objective": objectives.get(number, "Expose evidence-image validation evidence without overclaiming commercial-grade readiness."),
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            *[f"source_sha256:{value}" for value in source_hashes[:5] if value and value != "None"],
+            f"detected_format:{details.get('detected_format', '')}",
+            f"converted_raw_path:{details.get('converted_raw_path', '')}",
+        ],
+        "passed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+        ],
+        "failed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+        ],
+        "commercial_blockers": list(blockers or []),
+        "large_data_controls": {
+            "direct_image_hash_limit_bytes": DIRECT_IMAGE_HASH_LIMIT_BYTES,
+            "source_hash_statuses": [status for status in hash_statuses if status],
+            "split_part_count": int(details.get("split_part_count") or split_part_count),
+            "partition_table_row_count": len(details.get("partition_table") or []),
+            "tool_preflight_count": len(details.get("tool_preflight") or []),
+            "command_history_count": len(details.get("command_history") or []),
+            "external_tool_or_vendor_workflow_required": True,
+            "native_parser_complete": False,
+        },
+        "next_internal_step": next_steps.get(number, "Attach known-answer corpora and close native parser blockers."),
+        "external_evidence_required": True,
     }
 
 
