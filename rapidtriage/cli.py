@@ -1204,6 +1204,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Original evidence file used to produce the compared outputs; repeat to hash multiple sources.",
     )
+    cross_tool.add_argument(
+        "--independent-report",
+        action="append",
+        help="Independent reviewer report/sign-off file to hash into the validation report.",
+    )
+    cross_tool.add_argument(
+        "--corpus-scope",
+        default="",
+        help="Short corpus scope statement, e.g. NIST CFReDS Security.evtx plus local deleted-record fixture.",
+    )
     cross_tool.add_argument("--output", help="Optional JSON report path")
     cross_tool.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
@@ -2350,6 +2360,8 @@ def main(argv=None) -> int:
                 tool_versions=tool_versions,
                 tool_commands=tool_commands,
                 source_evidence=[Path(path).expanduser().resolve() for path in args.source_evidence or []],
+                independent_reports=[Path(path).expanduser().resolve() for path in args.independent_report or []],
+                corpus_scope=args.corpus_scope or "",
             )
         except (CrossToolValidationError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             parser.error(str(exc))

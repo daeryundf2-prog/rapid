@@ -35,6 +35,8 @@ rapidtriage cross-tool-validate \
   --source-evidence ./evidence/Security.evtx \
   --tool-version evtxecmd="EvtxECmd 1.5.0" \
   --tool-command evtxecmd="EvtxECmd.exe -f ./evidence/Security.evtx --csv ./reference" \
+  --independent-report ./validation-001-005/independent-evtx-review.md \
+  --corpus-scope "NIST/CFReDS Security.evtx plus local deleted-record fixture set" \
   --backlog-item 1 \
   --backlog-item 2 \
   --backlog-item 3 \
@@ -47,4 +49,4 @@ rapidtriage commercial-readiness \
   --json
 ```
 
-The cross-tool report now emits a `datasets` section compatible with `commercial-readiness`. It also records SHA256/size/mtime for the RapidTriage output, each external reference output, and any `--source-evidence` path, plus operator-supplied external tool versions and commands. A passing report can satisfy the `validated` gate for mapped items only when the JSON report exists and the overlap threshold is met. It still does not satisfy `commercial_grade`; independent reviewer sign-off, corpus scope, and Registry transaction-log/deleted-cell validation must remain attached.
+The cross-tool report now emits a `datasets` section compatible with `commercial-readiness`. It also records SHA256/size/mtime for the RapidTriage output, each external reference output, any `--source-evidence` path, and any `--independent-report` path, plus operator-supplied external tool versions, commands, and corpus scope. A passing report can satisfy the `validated` gate for mapped items only when the JSON report exists and the overlap threshold is met. The report-level `ready_for_commercial_grade` flag turns true only when source hashes, external tool versions/commands, corpus scope, and independent review hashes are all attached; item-level commercial-grade still depends on the backlog item's native parser-depth blockers such as Registry transaction-log/deleted-cell validation.

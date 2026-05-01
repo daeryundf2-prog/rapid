@@ -59,6 +59,8 @@ def build_cross_tool_validation_report(
     tool_versions: Mapping[str, str] | None = None,
     tool_commands: Mapping[str, str] | None = None,
     source_evidence: Iterable[Path] | None = None,
+    independent_reports: Iterable[Path] | None = None,
+    corpus_scope: str = "",
 ) -> dict[str, object]:
     if not reference_outputs:
         raise CrossToolValidationError("at least one --reference-output NAME=PATH is required")
@@ -76,6 +78,7 @@ def build_cross_tool_validation_report(
     ]
     mapped_items = list(dict.fromkeys(int(item) for item in (backlog_items or [])))
     source_evidence_integrity = [file_integrity(path) for path in (source_evidence or [])]
+    independent_review_integrity = [file_integrity(path) for path in (independent_reports or [])]
     tool_metadata = build_tool_metadata(
         rapid_dataset=rapid_dataset,
         reference_datasets=list(reference_datasets.values()),
@@ -96,6 +99,8 @@ def build_cross_tool_validation_report(
         "reference_outputs": list(reference_datasets.values()),
         "backlog_items": mapped_items,
         "source_evidence_integrity": source_evidence_integrity,
+        "independent_review_integrity": independent_review_integrity,
+        "corpus_scope": corpus_scope.strip(),
         "tool_metadata": tool_metadata,
         "comparisons": comparisons,
         "cross_tool_validation_assessment": cross_tool_validation_assessment(
@@ -104,6 +109,8 @@ def build_cross_tool_validation_report(
             backlog_items=mapped_items,
             output=output,
             source_evidence_integrity=source_evidence_integrity,
+            independent_review_integrity=independent_review_integrity,
+            corpus_scope=corpus_scope,
             tool_metadata=tool_metadata,
         ),
         "operator_guidance": build_operator_guidance(comparisons),
@@ -117,6 +124,8 @@ def build_cross_tool_validation_report(
             rapid_output=rapid_output,
             reference_outputs=reference_outputs,
             source_evidence=source_evidence or [],
+            independent_reports=independent_reports or [],
+            corpus_scope=corpus_scope,
         )
     if output is not None:
         write_result(payload, output.expanduser().resolve())
@@ -301,11 +310,14 @@ def build_validation_datasets(
     rapid_output: Path,
     reference_outputs: Mapping[str, Path],
     source_evidence: Iterable[Path],
+    independent_reports: Iterable[Path],
+    corpus_scope: str,
 ) -> list[dict[str, object]]:
     evidence_paths = [str(output.expanduser().resolve())] if output is not None else [
         str(rapid_output.expanduser().resolve()),
         *[str(path.expanduser().resolve()) for path in reference_outputs.values()],
         *[str(path.expanduser().resolve()) for path in source_evidence],
+        *[str(path.expanduser().resolve()) for path in independent_reports],
     ]
     reference_names = [str(item.get("reference_name") or "") for item in comparisons]
     return [
@@ -325,8 +337,10 @@ def build_validation_datasets(
                     "Missing reference keys are bounded in missing_in_rapid_sample for reviewer triage.",
                     "Reference tool names, row counts, key counts, and overlap ratio are preserved.",
                     "Cross-tool report preserves source/reference output hashes plus operator-provided tool version/command metadata when supplied.",
+                    "Independent review report hash and corpus scope are preserved when supplied.",
                 ],
                 "reference_tools": reference_names,
+                "corpus_scope": corpus_scope.strip(),
                 "minimum_overlap": min(
                     [float(item.get("overlap_ratio") or 0.0) for item in comparisons] or [0.0]
                 ),
@@ -343,6 +357,8 @@ def cross_tool_validation_assessment(
     backlog_items: list[int],
     output: Path | None,
     source_evidence_integrity: list[dict[str, object]],
+    independent_review_integrity: list[dict[str, object]],
+    corpus_scope: str,
     tool_metadata: Mapping[str, object],
 ) -> dict[str, object]:
     tool_rows = tool_metadata.get("tools") if isinstance(tool_metadata.get("tools"), list) else []
@@ -353,28 +369,44 @@ def cross_tool_validation_assessment(
     tools_with_version = sum(1 for item in external_tool_rows if item.get("version"))
     tools_with_command = sum(1 for item in external_tool_rows if item.get("command"))
     source_hashes_attached = bool(source_evidence_integrity)
+    independent_review_attached = bool(independent_review_integrity)
+    corpus_scope_attached = bool(corpus_scope.strip())
     versions_attached = bool(external_tool_rows) and tools_with_version == len(external_tool_rows)
     commands_attached = bool(external_tool_rows) and tools_with_command == len(external_tool_rows)
-    blockers = ["independent-reviewer-signoff-required"]
-    if not source_hashes_attached:
+    blockers: list[str] = []
+    if not source_hashes_attached or not corpus_scope_attached:
         blockers.append("corpus-scope-and-source-hash-review-required")
     if not versions_attached or not commands_attached:
         blockers.append("external-tool-version-and-command-capture-required")
+    if not independent_review_attached:
+        blockers.append("independent-reviewer-signoff-required")
+    ready_for_commercial_grade = (
+        bool(backlog_items)
+        and status == "pass"
+        and output is not None
+        and source_hashes_attached
+        and corpus_scope_attached
+        and versions_attached
+        and commands_attached
+        and independent_review_attached
+    )
     return {
         "status": status,
         "backlog_items": backlog_items,
         "comparison_count": len(comparisons),
         "output": str(output.expanduser().resolve()) if output is not None else "",
         "ready_for_validated_gate": bool(backlog_items) and status == "pass" and output is not None,
-        "ready_for_commercial_grade": False,
+        "ready_for_commercial_grade": ready_for_commercial_grade,
         "source_evidence_count": len(source_evidence_integrity),
+        "independent_review_count": len(independent_review_integrity),
         "tools_with_version_count": tools_with_version,
         "tools_with_command_count": tools_with_command,
         "commercial_grade_readiness_checks": {
             "source_evidence_hashes_attached": source_hashes_attached,
+            "corpus_scope_attached": corpus_scope_attached,
             "external_tool_versions_attached": versions_attached,
             "external_tool_commands_attached": commands_attached,
-            "independent_reviewer_signoff_attached": False,
+            "independent_reviewer_signoff_attached": independent_review_attached,
         },
         "commercial_grade_blockers": blockers,
     }

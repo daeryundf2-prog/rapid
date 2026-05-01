@@ -557,6 +557,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             rapid = root / "rapid.json"
             reference = root / "evtxecmd.csv"
             source = root / "Security.evtx"
+            independent_report = root / "independent-review.md"
             output = root / "cross-tool.json"
             rapid.write_text(
                 json.dumps(
@@ -574,6 +575,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                 encoding="utf-8",
             )
             source.write_bytes(b"fixture evtx source bytes")
+            independent_report.write_text(
+                "# Independent review\n\nReviewer confirmed row-level overlap for fixture Security.evtx.\n",
+                encoding="utf-8",
+            )
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
@@ -596,6 +601,10 @@ class RapidTriageOpsTests(unittest.TestCase):
                         "evtxecmd=EvtxECmd 1.5.0",
                         "--tool-command",
                         "evtxecmd=EvtxECmd.exe -f Security.evtx --csv reference",
+                        "--independent-report",
+                        str(independent_report),
+                        "--corpus-scope",
+                        "Fixture Security.evtx with two known EventRecordID rows and external EvtxECmd CSV export.",
                         "--output",
                         str(output),
                         "--json",
@@ -607,21 +616,24 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["status"], "pass")
             self.assertEqual(payload["backlog_items"], [1, 2])
             self.assertTrue(payload["cross_tool_validation_assessment"]["ready_for_validated_gate"])
-            self.assertFalse(payload["cross_tool_validation_assessment"]["ready_for_commercial_grade"])
+            self.assertTrue(payload["cross_tool_validation_assessment"]["ready_for_commercial_grade"])
             self.assertEqual(len(payload["rapid_output"]["file_integrity"]["sha256"]), 64)
             self.assertEqual(len(payload["reference_outputs"][0]["file_integrity"]["sha256"]), 64)
             self.assertEqual(len(payload["source_evidence_integrity"][0]["sha256"]), 64)
+            self.assertEqual(len(payload["independent_review_integrity"][0]["sha256"]), 64)
+            self.assertIn("Fixture Security.evtx", payload["corpus_scope"])
             tool_rows = {item["name"]: item for item in payload["tool_metadata"]["tools"]}
             self.assertEqual(tool_rows["evtxecmd"]["version"], "EvtxECmd 1.5.0")
             self.assertEqual(tool_rows["evtxecmd"]["command"], "EvtxECmd.exe -f Security.evtx --csv reference")
             readiness_checks = payload["cross_tool_validation_assessment"]["commercial_grade_readiness_checks"]
             self.assertTrue(readiness_checks["source_evidence_hashes_attached"])
+            self.assertTrue(readiness_checks["corpus_scope_attached"])
             self.assertTrue(readiness_checks["external_tool_versions_attached"])
             self.assertTrue(readiness_checks["external_tool_commands_attached"])
-            self.assertFalse(readiness_checks["independent_reviewer_signoff_attached"])
+            self.assertTrue(readiness_checks["independent_reviewer_signoff_attached"])
             self.assertEqual(
                 payload["cross_tool_validation_assessment"]["commercial_grade_blockers"],
-                ["independent-reviewer-signoff-required"],
+                [],
             )
             self.assertEqual(payload["datasets"][0]["status"], "pass")
             self.assertEqual(payload["datasets"][0]["backlog_items"], [1, 2])
