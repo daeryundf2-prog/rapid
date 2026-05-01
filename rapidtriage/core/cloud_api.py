@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .audit import compute_sha256
+from .forensic_accuracy import build_accuracy_gate
 
 DEFAULT_CLOUD_BEARER_TOKEN_ENV = "RAPIDTRIAGE_CLOUD_BEARER_TOKEN"
 DEFAULT_CLOUD_API_TIMEOUT_SECONDS = 30
@@ -157,6 +158,13 @@ def run_cloud_api_collection(
         "cloud_api_validation_matrix": cloud_api_validation_matrix(summary, credential_handling),
         "cloud_api_report_grade_assessment": api_report_grade,
         "cloud_api_native_capabilities": dict(CLOUD_API_NATIVE_CAPABILITIES),
+        "core_accuracy_gates": cloud_api_core_accuracy_gates(
+            manifest_path=manifest_path,
+            output_dir=output_dir,
+            summary=summary,
+            credential_handling=credential_handling,
+            requests=collected,
+        ),
         "forensic_review": cloud_api_forensic_review(
             gap_id="#40",
             artifact_goal="Cloud API acquisition manifest, bounded collection, response hashing, and import workflow",
@@ -400,6 +408,38 @@ def cloud_api_report_grade_assessment() -> dict[str, object]:
             "Validate collected JSON against provider-native export views before report-grade use.",
         ],
     }
+
+
+def cloud_api_core_accuracy_gates(
+    *,
+    manifest_path: Path,
+    output_dir: Path,
+    summary: Mapping[str, object],
+    credential_handling: Mapping[str, object],
+    requests: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    evidence_refs = [
+        f"manifest_path:{manifest_path.resolve()}",
+        f"manifest_sha256:{compute_sha256(manifest_path)}",
+        f"output_dir:{output_dir.resolve()}",
+    ]
+    for request in requests[:5]:
+        if request.get("response_sha256"):
+            evidence_refs.append(f"response_sha256:{request['response_sha256']}")
+        if request.get("response_path"):
+            evidence_refs.append(f"response_path:{request['response_path']}")
+    satisfied: list[str] = []
+    if int(summary.get("request_count") or 0) > 0:
+        satisfied.append("manifest request validation")
+    if bool(credential_handling.get("headers_redacted")) and not bool(credential_handling.get("tokens_written_to_output")):
+        satisfied.append("credential redaction")
+    if bool(summary.get("dry_run")) or any(request.get("response_sha256") for request in requests):
+        satisfied.append("response hash/provenance")
+    if not CLOUD_API_NATIVE_CAPABILITIES["incremental_delta_collection"]:
+        satisfied.append("pagination/backoff limitation warning")
+    if credential_handling.get("legal_warning") and not CLOUD_API_NATIVE_CAPABILITIES["provider_specific_oauth_flow"]:
+        satisfied.append("provider OAuth/scope/legal warning")
+    return [build_accuracy_gate(40, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
 def cloud_api_forensic_review(

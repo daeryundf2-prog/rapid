@@ -1,0 +1,140 @@
+{
+  "schema": "rapidtriage-core-forensics-fixture-evidence-v1",
+  "scope": "#31-#40 internal fixture validation",
+  "status": "pass",
+  "claim_boundary": "Internal fixture-backed validation for implemented+usable+validated maturity only; commercial-grade still requires external messenger, mailbox, cloud export/API corpora, provider-tool diffs, independent review, and lawful acquisition metadata.",
+  "fixture_sources": [
+    "tests/test_rapidtriage_mobile_export.py",
+    "tests/test_rapidtriage_email_artifacts.py",
+    "tests/test_rapidtriage_cloud_export.py",
+    "tests/test_rapidtriage_cloud_collect.py"
+  ],
+  "collector_commands": [
+    "rapidtriage artifacts <fixture-root> --kind mobile-export --output mobile-artifacts.json",
+    "rapidtriage artifacts <fixture-root> --kind email --output email-artifacts.json",
+    "rapidtriage artifacts <fixture-root> --kind cloud-export --output cloud-artifacts.json",
+    "rapidtriage cloud-collect cloud-api-manifest.json --output-dir cloud-api-raw"
+  ],
+  "validated_items": [
+    {
+      "number": 31,
+      "title": "KakaoTalk parser",
+      "assertions": [
+        "KakaoTalk export rows preserve service/profile detection, chat/message participant/media normalization, app/schema and BigBang compatibility metadata, encrypted/deleted warnings, source hashes, legal provenance, and #31 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "post-2025-08 KakaoTalk known-answer corpus",
+        "schema-version-specific parser mapping",
+        "deleted/encrypted store validation"
+      ]
+    },
+    {
+      "number": 32,
+      "title": "WhatsApp parser",
+      "assertions": [
+        "WhatsApp export/database rows preserve service/profile detection, chat/contact/media normalization, crypt authority warnings, deleted-row warnings, source hash/app-version provenance, and #32 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "crypt backup key workflow",
+        "contact/call/media native database validation",
+        "deleted-row corpus"
+      ]
+    },
+    {
+      "number": 33,
+      "title": "Telegram parser",
+      "assertions": [
+        "Telegram export rows preserve service/profile detection, chat/user/media attribution, account/cache provenance, encrypted local-store warnings, deleted/cache limitation warnings, and #33 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "Telegram Desktop encrypted/local map decoding",
+        "cache/media recovery validation",
+        "account attribution corpus"
+      ]
+    },
+    {
+      "number": 34,
+      "title": "Signal parser",
+      "assertions": [
+        "Signal export rows preserve service/profile detection, thread/recipient/message inventory, SQLCipher/key authority gates, attachment/deleted warnings, secret-safe provenance, and #34 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "SQLCipher/key handling module",
+        "encrypted backup validation",
+        "attachment/deleted corpus"
+      ]
+    },
+    {
+      "number": 35,
+      "title": "Extended messenger parser",
+      "assertions": [
+        "LINE/Discord/Instagram/Facebook Messenger style export rows preserve extended service detection, message/media/reaction normalization, schema registry evidence, encrypted/ephemeral warnings, source hashes, legal provenance, and #35 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "service-specific encrypted stores",
+        "read-state/reaction completeness",
+        "ephemeral/deleted validation"
+      ]
+    },
+    {
+      "number": 36,
+      "title": "Email PST/OST full mailbox parser",
+      "assertions": [
+        "EML/MBOX/Maildir/PST/OST/MSG rows preserve source profiles, source hashes, message/body/attachment inventory, PST/OST limitations, threading/dedup warnings, legal privilege boundary, and #36 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "native PST/OST/MSG object decoding",
+        "folder tree/deleted item recovery",
+        "broad mailbox known-answer corpus"
+      ]
+    },
+    {
+      "number": 37,
+      "title": "Gmail/Google Takeout deep parser",
+      "assertions": [
+        "Google/Gmail/Takeout rows preserve provider profile detection, Gmail/Drive/Activity/Location normalization, source hashes, export-scope warnings, sidecar/linkage limitations, provider schema/timezone warnings, and #37 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "full Takeout product matrix",
+        "Gmail MBOX threading",
+        "Photos sidecar/EXIF merge"
+      ]
+    },
+    {
+      "number": 38,
+      "title": "Apple iCloud export parser",
+      "assertions": [
+        "Apple/iCloud rows preserve provider profile detection, account/file/photo metadata normalization, source hashes, export-scope warnings, ADP/shared-album warnings, retention/schema warnings, and #38 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "Advanced Data Protection limitations",
+        "shared album fidelity",
+        "third-party iCloud container validation"
+      ]
+    },
+    {
+      "number": 39,
+      "title": "Microsoft 365/OneDrive/Teams export parser",
+      "assertions": [
+        "Microsoft 365/OneDrive/Teams rows preserve provider profile detection, mail/file/message/audit normalization, source hashes, eDiscovery/export warnings, permissions/retention/deleted warnings, provider schema/timestamp warnings, and #39 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "Graph/eDiscovery version matrix",
+        "Teams reactions/attachments completeness",
+        "SharePoint/OneDrive permission graph"
+      ]
+    },
+    {
+      "number": 40,
+      "title": "Cloud API acquisition workflow",
+      "assertions": [
+        "Cloud API collection payloads preserve manifest validation, credential redaction, response hash/provenance, pagination/backoff limitations, OAuth/scope/legal warnings, and #40 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "provider-specific OAuth/device flow",
+        "pagination/backoff/delta known-answer corpus",
+        "legal hold/export workflow"
+      ]
+    }
+  ]
+}

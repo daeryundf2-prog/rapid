@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Iterable, Mapping
 
+from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 from .review import build_forensic_review
@@ -202,6 +203,16 @@ def build_record(
             "cloud_native_capabilities": dict(CLOUD_NATIVE_CAPABILITIES),
             "cloud_provider_profile": cloud_provider_profile(family, service),
             "cloud_issue_matrix": cloud_issue_matrix(family, artifact_type),
+            "core_accuracy_gates": cloud_core_accuracy_gates(
+                gap_ids=gap_ids,
+                family=family,
+                service=service,
+                artifact_type=artifact_type,
+                source_hashes=source_hashes,
+                details=detail_payload,
+                source_index=source_index,
+                source_path=str(path.resolve()),
+            ),
             "forensic_review": cloud_forensic_review(
                 gap_ids=gap_ids,
                 family=family,
@@ -533,6 +544,64 @@ def cloud_report_grade_assessment(gap_ids: list[str], family: str, service: str)
             "Validate key mail/file/message/audit rows against provider-native views or known-answer exports before testimony.",
         ],
     }
+
+
+def cloud_core_accuracy_gates(
+    *,
+    gap_ids: list[str],
+    family: str,
+    service: str,
+    artifact_type: str,
+    source_hashes: Mapping[str, str],
+    details: Mapping[str, object],
+    source_index: int,
+    source_path: str,
+) -> list[dict[str, object]]:
+    validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    evidence_refs = [
+        f"source_path:{source_path}",
+        f"source_index:{source_index}",
+        f"service:{service}",
+        f"artifact_type:{artifact_type}",
+    ]
+    if source_hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{source_hashes['sha256']}")
+    gates: list[dict[str, object]] = []
+    for gap_id in gap_ids:
+        number = int(gap_id.strip("#"))
+        satisfied: list[str] = []
+        if number == 37:
+            if family == "google" or "google" in service or "gmail" in service:
+                satisfied.append("Google service/profile detection")
+            if artifact_type in {"cloud-mail", "cloud-file", "cloud-activity", "cloud-location"}:
+                satisfied.append("Gmail/Drive/Activity/Location normalization")
+            if source_hashes.get("sha256") and not validation.get("provider_scope_verified"):
+                satisfied.append("source hash and export-scope warning")
+            if details.get("commercial_grade_blockers"):
+                satisfied.append("sidecar/media/linkage limitation")
+                satisfied.append("provider schema/timezone warning")
+        elif number == 38:
+            if family == "apple-icloud" or "icloud" in service or "apple" in service:
+                satisfied.append("Apple/iCloud service profile detection")
+            if artifact_type in {"cloud-account", "cloud-file", "cloud-mail"}:
+                satisfied.append("account/file/photo metadata normalization")
+            if source_hashes.get("sha256") and not validation.get("provider_scope_verified"):
+                satisfied.append("source hash and export-scope warning")
+            if details.get("commercial_grade_blockers"):
+                satisfied.append("ADP/shared-album limitation warning")
+                satisfied.append("provider retention/schema warning")
+        elif number == 39:
+            if family == "microsoft-365" or "microsoft" in service or "teams" in service or "onedrive" in service:
+                satisfied.append("Microsoft 365 service profile detection")
+            if artifact_type in {"cloud-mail", "cloud-file", "cloud-message", "cloud-audit"}:
+                satisfied.append("mail/file/message/audit normalization")
+            if source_hashes.get("sha256") and not validation.get("provider_scope_verified"):
+                satisfied.append("source hash and eDiscovery/export warning")
+            if details.get("commercial_grade_blockers"):
+                satisfied.append("permissions/retention/deleted limitation")
+                satisfied.append("provider schema/timestamp warning")
+        gates.append(build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs))
+    return gates
 
 
 def cloud_provider_profile(family: str, service: str) -> dict[str, object]:

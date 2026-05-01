@@ -396,6 +396,24 @@ def build_record(
         gap_ids=gap_ids,
         validation_checks=validation_checks,
     )
+    core_accuracy_gates = [
+        *mobile_core_accuracy_gates(
+            artifact_type=artifact_type,
+            source_tool=source_tool,
+            source_format=source_format,
+            source_index=source_index,
+            source_hashes=source_hashes,
+            details=detail_payload,
+        ),
+        *chat_app_core_accuracy_gates(
+            artifact_type=artifact_type,
+            source_tool=source_tool,
+            source_format=source_format,
+            source_index=source_index,
+            source_hashes=source_hashes,
+            details=detail_payload,
+        ),
+    ]
     return ArtifactRecord(
         provider=MobileExportProvider.name,
         artifact_type=artifact_type,
@@ -419,14 +437,7 @@ def build_record(
             ),
             "mobile_report_grade_assessment": report_grade,
             "mobile_native_capabilities": mobile_native_capabilities(artifact_type),
-            "core_accuracy_gates": mobile_core_accuracy_gates(
-                artifact_type=artifact_type,
-                source_tool=source_tool,
-                source_format=source_format,
-                source_index=source_index,
-                source_hashes=source_hashes,
-                details=detail_payload,
-            ),
+            "core_accuracy_gates": core_accuracy_gates,
             "forensic_review": build_mobile_forensic_review(
                 artifact_type=artifact_type,
                 source_tool=source_tool,
@@ -1715,6 +1726,97 @@ def mobile_core_accuracy_gates(
             satisfied.append("audit log for any controlled reveal")
         gates.append(build_accuracy_gate(28, satisfied_checks=satisfied, evidence_refs=evidence_refs))
 
+    return gates
+
+
+def chat_app_core_accuracy_gates(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    details: Mapping[str, object],
+) -> list[dict[str, object]]:
+    service = optional_text(details.get("service"))
+    gap_ids = chat_app_gap_ids(service)
+    if artifact_type not in {"mobile-message", "mobile-chat-database"} or not gap_ids:
+        return []
+    evidence_refs = [
+        f"source_path:{optional_text(details.get('source_path'))}",
+        f"source_tool:{source_tool}",
+        f"source_format:{source_format}",
+        f"source_index:{source_index}",
+        f"service:{service}",
+    ]
+    if source_hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{source_hashes['sha256']}")
+    validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    issue_ids = {
+        str(item.get("id"))
+        for item in details.get("chat_app_issue_matrix", [])
+        if isinstance(item, Mapping)
+    }
+    table_summaries = details.get("table_summaries") if isinstance(details.get("table_summaries"), list) else []
+    gates: list[dict[str, object]] = []
+    for gap_id in gap_ids:
+        number = int(gap_id.strip("#"))
+        satisfied: list[str] = []
+        if service and details.get("chat_app_scope_profile", {}).get("known_profile"):
+            label = {
+                31: "KakaoTalk service/profile detection",
+                32: "WhatsApp service/profile detection",
+                33: "Telegram service/profile detection",
+                34: "Signal service/profile detection",
+                35: "extended service/profile detection",
+            }.get(number)
+            if label:
+                satisfied.append(label)
+        if number == 31:
+            if details.get("message_text_sha256") or table_summaries:
+                satisfied.append("chat/message participant/media normalization")
+            if details.get("kakaotalk_compatibility_assessment") or details.get("schema_version") or details.get("app_version"):
+                satisfied.append("schema/app version and BigBang compatibility tracking")
+            if "kakaotalk-post-2025-08-bigbang" in issue_ids or details.get("commercial_grade_blockers"):
+                satisfied.append("encrypted/deleted limitation warning")
+            if source_hashes.get("sha256") and source_tool:
+                satisfied.append("source hash and legal provenance")
+        elif number == 32:
+            if details.get("message_text_sha256") or table_summaries:
+                satisfied.append("chat/contact/media normalization")
+            if details.get("commercial_grade_blockers") or not validation.get("decryption_attempted", True):
+                satisfied.append("crypt backup authority workflow warning")
+            if details.get("commercial_grade_blockers"):
+                satisfied.append("deleted-row limitation warning")
+            if source_hashes.get("sha256") and (details.get("app_version") is not None or details.get("chat_app_issue_matrix")):
+                satisfied.append("source hash and app-version provenance")
+        elif number == 33:
+            if details.get("message_text_sha256") or table_summaries:
+                satisfied.append("chat/user/media attribution")
+            if source_hashes.get("sha256") and (details.get("message_id") or details.get("database_name") or table_summaries):
+                satisfied.append("account/cache provenance")
+            if details.get("commercial_grade_blockers"):
+                satisfied.append("encrypted local store warning")
+                satisfied.append("deleted/cache recovery limitation")
+        elif number == 34:
+            if details.get("message_text_sha256") or table_summaries:
+                satisfied.append("thread/recipient/message inventory")
+            if details.get("commercial_grade_blockers") or not validation.get("decryption_attempted", True):
+                satisfied.append("SQLCipher/key authority gate")
+            if details.get("commercial_grade_blockers"):
+                satisfied.append("attachment/deleted limitation warning")
+            if source_hashes.get("sha256") and source_tool:
+                satisfied.append("secret-safe legal provenance")
+        elif number == 35:
+            if details.get("message_text_sha256") or table_summaries:
+                satisfied.append("message/media/reaction normalization")
+            if details.get("schema_version") is not None or details.get("chat_app_issue_matrix"):
+                satisfied.append("schema/app version registry")
+            if details.get("commercial_grade_blockers"):
+                satisfied.append("encrypted/ephemeral limitation warning")
+            if source_hashes.get("sha256") and source_tool:
+                satisfied.append("source hash and legal provenance")
+        gates.append(build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs))
     return gates
 
 

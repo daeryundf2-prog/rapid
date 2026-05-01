@@ -1,0 +1,187 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #31-#40 internal fixture validation",
+  "status": "pass",
+  "datasets": [
+    {
+      "id": "core-forensics-031-kakaotalk-fixture",
+      "name": "#31 KakaoTalk parser fixture assertions",
+      "source": "tests.test_rapidtriage_mobile_export.write_mobile_export_fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [31],
+      "evidence_paths": [
+        "docs/validation/core-forensics-031-040-fixture-evidence.json",
+        "tests/test_rapidtriage_mobile_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "KakaoTalk rows preserve service/profile, message/media pivots, BigBang compatibility, limitation warnings, source hashes, and #31 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; post-BigBang KakaoTalk known-answer validation remains required."
+    },
+    {
+      "id": "core-forensics-032-whatsapp-fixture",
+      "name": "#32 WhatsApp parser fixture assertions",
+      "source": "tests.test_rapidtriage_mobile_export.write_mobile_export_fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [32],
+      "evidence_paths": [
+        "docs/validation/core-forensics-031-040-fixture-evidence.json",
+        "tests/test_rapidtriage_mobile_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "WhatsApp rows preserve service/profile, chat/contact/media pivots, crypt/deleted warnings, source provenance, and #32 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; crypt backups and deleted rows require external corpus."
+    },
+    {
+      "id": "core-forensics-033-telegram-fixture",
+      "name": "#33 Telegram parser fixture assertions",
+      "source": "tests.test_rapidtriage_mobile_export.write_mobile_export_fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [33],
+      "evidence_paths": [
+        "docs/validation/core-forensics-031-040-fixture-evidence.json",
+        "tests/test_rapidtriage_mobile_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Telegram rows preserve service/profile, chat/user/media attribution, cache/account provenance, limitations, and #33 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; encrypted/local Telegram stores remain validation-gated."
+    },
+    {
+      "id": "core-forensics-034-signal-fixture",
+      "name": "#34 Signal parser fixture assertions",
+      "source": "tests.test_rapidtriage_mobile_export.write_mobile_export_fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [34],
+      "evidence_paths": [
+        "docs/validation/core-forensics-031-040-fixture-evidence.json",
+        "tests/test_rapidtriage_mobile_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Signal rows preserve service/profile, thread/message inventory, SQLCipher authority gates, attachment/deleted warnings, and #34 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; SQLCipher/key handling remains a separate validated module."
+    },
+    {
+      "id": "core-forensics-035-extended-messenger-fixture",
+      "name": "#35 extended messenger fixture assertions",
+      "source": "tests.test_rapidtriage_mobile_export.write_mobile_export_fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [35],
+      "evidence_paths": [
+        "docs/validation/core-forensics-031-040-fixture-evidence.json",
+        "tests/test_rapidtriage_mobile_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Extended messenger rows preserve service/profile, message/media/reaction normalization, schema registry, limitations, and #35 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; service-specific encrypted stores and ephemeral/deleted evidence need known-answer corpora."
+    },
+    {
+      "id": "core-forensics-036-email-fixture",
+      "name": "#36 email mailbox fixture assertions",
+      "source": "tests.test_rapidtriage_email_artifacts.write_email_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [36],
+      "evidence_paths": [
+        "docs/validation/core-forensics-031-040-fixture-evidence.json",
+        "tests/test_rapidtriage_email_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Email rows preserve mailbox/message profile, header/body/attachment inventory, PST/OST limitations, threading warnings, legal boundary, and #36 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; native PST/OST/MSG decoding and deleted item recovery remain commercial blockers."
+    },
+    {
+      "id": "core-forensics-037-google-cloud-fixture",
+      "name": "#37 Google Takeout/Gmail fixture assertions",
+      "source": "tests.test_rapidtriage_cloud_export.write_cloud_export_fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [37],
+      "evidence_paths": [
+        "docs/validation/core-forensics-031-040-fixture-evidence.json",
+        "tests/test_rapidtriage_cloud_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Google cloud rows preserve profile detection, Gmail/Drive/Activity/Location normalization, export warnings, schema/timezone warnings, and #37 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; full Takeout product matrix and provider-native diffs remain required."
+    },
+    {
+      "id": "core-forensics-038-icloud-fixture",
+      "name": "#38 Apple iCloud fixture assertions",
+      "source": "tests.test_rapidtriage_cloud_export.write_cloud_export_fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [38],
+      "evidence_paths": [
+        "docs/validation/core-forensics-031-040-fixture-evidence.json",
+        "tests/test_rapidtriage_cloud_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Apple/iCloud rows preserve profile detection, account/file/photo normalization, ADP/shared-album limitations, retention/schema warnings, and #38 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; ADP, shared album, and third-party container semantics need provider corpus."
+    },
+    {
+      "id": "core-forensics-039-m365-fixture",
+      "name": "#39 Microsoft 365/OneDrive/Teams fixture assertions",
+      "source": "tests.test_rapidtriage_cloud_export.write_cloud_export_fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [39],
+      "evidence_paths": [
+        "docs/validation/core-forensics-031-040-fixture-evidence.json",
+        "tests/test_rapidtriage_cloud_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Microsoft cloud rows preserve profile detection, file/message/audit normalization, eDiscovery warnings, permission/retention limitations, and #39 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; Graph/eDiscovery diffs and permission graph validation remain required."
+    },
+    {
+      "id": "core-forensics-040-cloud-api-fixture",
+      "name": "#40 cloud API acquisition fixture assertions",
+      "source": "tests.test_rapidtriage_cloud_collect.cloud_test_server",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [40],
+      "evidence_paths": [
+        "docs/validation/core-forensics-031-040-fixture-evidence.json",
+        "tests/test_rapidtriage_cloud_collect.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Cloud API collection preserves manifest validation, credential redaction, response hash/provenance, API limitation warnings, and #40 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; provider OAuth/device flow, pagination/delta, and legal-hold workflows remain validation-gated."
+    }
+  ]
+}

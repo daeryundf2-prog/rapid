@@ -8,6 +8,7 @@ from email import policy
 from pathlib import Path
 from typing import Iterable
 
+from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 from .review import build_forensic_review
@@ -237,6 +238,24 @@ def build_message_record(
         "email_native_capabilities": dict(EMAIL_NATIVE_CAPABILITIES),
         "email_format_profile": email_format_profile(source_format),
         "email_issue_matrix": email_issue_matrix(source_format),
+        "core_accuracy_gates": email_core_accuracy_gates(
+            source_format=source_format,
+            source_hashes=source_hashes,
+            details={
+                "source_path": str(path.resolve()),
+                "source_index": source_index,
+                "message_id": header_value(message, "Message-ID"),
+                "subject": header_value(message, "Subject"),
+                "body_sha256": body_hash,
+                "attachments": attachments,
+                "validation_checks": {
+                    "headers_parsed": True,
+                    "body_present": bool(body_preview),
+                    "attachment_metadata_only": True,
+                    "commercial_parser_validated": False,
+                },
+            },
+        ),
         "forensic_review": email_forensic_review(
             source_format=source_format,
             primary_evidence=[
@@ -283,6 +302,17 @@ def build_mailbox_record(
         "email_native_capabilities": dict(EMAIL_NATIVE_CAPABILITIES),
         "email_format_profile": email_format_profile(source_format),
         "email_issue_matrix": email_issue_matrix(source_format),
+        "core_accuracy_gates": email_core_accuracy_gates(
+            source_format=source_format,
+            source_hashes=source_hashes,
+            details={
+                "source_path": str(path.resolve()),
+                "mailbox_name": path.name,
+                "message_count": message_count,
+                "validation_checks": validation_checks,
+                **(extra_details or {}),
+            },
+        ),
         "forensic_review": email_forensic_review(
             source_format=source_format,
             primary_evidence=[
@@ -460,6 +490,33 @@ def email_report_grade_assessment(source_format: str) -> dict[str, object]:
             "Review privilege/scope, threading, duplicate handling, and attachment extraction against known-answer mailboxes.",
         ],
     }
+
+
+def email_core_accuracy_gates(
+    *,
+    source_format: str,
+    source_hashes: dict[str, str],
+    details: dict[str, object],
+) -> list[dict[str, object]]:
+    validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
+    evidence_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"source_format:{source_format}",
+    ]
+    if source_hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{source_hashes['sha256']}")
+    satisfied: list[str] = []
+    if source_format and (details.get("message_id") is not None or details.get("mailbox_name")):
+        satisfied.append("mailbox/message source profile detection")
+    if validation.get("headers_parsed") or validation.get("parsed_message_count") is not None or details.get("email_candidates"):
+        satisfied.append("message header/body/attachment inventory")
+    if source_format in {"pst", "ost", "msg"} or not EMAIL_NATIVE_CAPABILITIES["native_pst_ost_msg_object_decode"]:
+        satisfied.append("PST/OST native limitation warning")
+    if not validation.get("commercial_parser_validated"):
+        satisfied.append("threading/dedup validation warning")
+    if source_hashes.get("sha256"):
+        satisfied.append("legal privilege boundary")
+    return [build_accuracy_gate(36, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
 def email_format_profile(source_format: str) -> dict[str, object]:

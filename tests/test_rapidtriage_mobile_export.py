@@ -106,6 +106,12 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 "kakaotalk-post-2025-08-bigbang",
                 {item["id"] for item in kakao["details"]["chat_app_issue_matrix"]},
             )
+            kakao_gate = {gate["gap_id"]: gate for gate in kakao["details"]["core_accuracy_gates"]}["#31"]
+            self.assertIn("KakaoTalk service/profile detection", kakao_gate["satisfied_checks"])
+            self.assertIn("chat/message participant/media normalization", kakao_gate["satisfied_checks"])
+            self.assertIn("schema/app version and BigBang compatibility tracking", kakao_gate["satisfied_checks"])
+            self.assertIn("encrypted/deleted limitation warning", kakao_gate["satisfied_checks"])
+            self.assertIn("source hash and legal provenance", kakao_gate["satisfied_checks"])
             facebook = next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Facebook Messenger")
             self.assertEqual(facebook["details"]["chat_app_forensic_review"]["gap_id"], "#35")
             self.assertIn(
@@ -114,18 +120,33 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                     "chat_app_gap_ids"
                 ],
             )
+            whatsapp = next(artifact for artifact in chat_messages if artifact["details"]["service"] == "WhatsApp")
+            whatsapp_gate = {gate["gap_id"]: gate for gate in whatsapp["details"]["core_accuracy_gates"]}["#32"]
+            self.assertIn("WhatsApp service/profile detection", whatsapp_gate["satisfied_checks"])
+            self.assertIn("chat/contact/media normalization", whatsapp_gate["satisfied_checks"])
+            self.assertIn("crypt backup authority workflow warning", whatsapp_gate["satisfied_checks"])
             self.assertIn(
                 "#33",
                 next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Telegram")["details"][
                     "chat_app_gap_ids"
                 ],
             )
+            telegram = next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Telegram")
+            telegram_gate = {gate["gap_id"]: gate for gate in telegram["details"]["core_accuracy_gates"]}["#33"]
+            self.assertIn("Telegram service/profile detection", telegram_gate["satisfied_checks"])
+            self.assertIn("chat/user/media attribution", telegram_gate["satisfied_checks"])
+            self.assertIn("encrypted local store warning", telegram_gate["satisfied_checks"])
             self.assertIn(
                 "#34",
                 next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Signal")["details"][
                     "chat_app_gap_ids"
                 ],
             )
+            signal = next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Signal")
+            signal_gate = {gate["gap_id"]: gate for gate in signal["details"]["core_accuracy_gates"]}["#34"]
+            self.assertIn("Signal service/profile detection", signal_gate["satisfied_checks"])
+            self.assertIn("thread/recipient/message inventory", signal_gate["satisfied_checks"])
+            self.assertIn("SQLCipher/key authority gate", signal_gate["satisfied_checks"])
             self.assertTrue(
                 all(
                     "#35" in next(
@@ -134,6 +155,11 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                     for service in ("LINE", "Discord", "Instagram")
                 )
             )
+            line = next(artifact for artifact in chat_messages if artifact["details"]["service"] == "LINE")
+            line_gate = {gate["gap_id"]: gate for gate in line["details"]["core_accuracy_gates"]}["#35"]
+            self.assertIn("extended service/profile detection", line_gate["satisfied_checks"])
+            self.assertIn("message/media/reaction normalization", line_gate["satisfied_checks"])
+            self.assertIn("schema/app version registry", line_gate["satisfied_checks"])
 
             app = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-app")
             self.assertEqual(app["details"]["source_tool"], "graykey")

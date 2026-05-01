@@ -53,6 +53,13 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertEqual(payload["summary"]["collected_count"], 1)
                 self.assertIn("#40", payload["cloud_api_report_grade_assessment"]["commercial_gap_ids"])
                 self.assertEqual(payload["forensic_review"]["gap_id"], "#40")
+                api_gate = payload["core_accuracy_gates"][0]
+                self.assertEqual(api_gate["gap_id"], "#40")
+                self.assertIn("manifest request validation", api_gate["satisfied_checks"])
+                self.assertIn("credential redaction", api_gate["satisfied_checks"])
+                self.assertIn("response hash/provenance", api_gate["satisfied_checks"])
+                self.assertIn("pagination/backoff limitation warning", api_gate["satisfied_checks"])
+                self.assertIn("provider OAuth/scope/legal warning", api_gate["satisfied_checks"])
                 self.assertIn("#41", payload["credential_handling"]["commercial_gap_ids"])
                 self.assertIn("#41", payload["credential_handling"]["credential_security_assessment"]["commercial_gap_ids"])
                 self.assertEqual(payload["credential_handling"]["forensic_review"]["gap_id"], "#41")

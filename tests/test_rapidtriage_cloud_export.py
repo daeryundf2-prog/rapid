@@ -60,6 +60,18 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertFalse(mail["details"]["cloud_native_capabilities"]["provider_api_native_acquisition"])
             self.assertTrue(mail["details"]["cloud_provider_profile"]["known_profile"])
             self.assertIn("export-scope-captured", {item["id"] for item in mail["details"]["cloud_issue_matrix"]})
+            google_gate = mail["details"]["core_accuracy_gates"][0]
+            self.assertEqual(google_gate["gap_id"], "#37")
+            self.assertIn("Google service/profile detection", google_gate["satisfied_checks"])
+            self.assertIn("Gmail/Drive/Activity/Location normalization", google_gate["satisfied_checks"])
+            self.assertIn("source hash and export-scope warning", google_gate["satisfied_checks"])
+            self.assertIn("provider schema/timezone warning", google_gate["satisfied_checks"])
+
+            apple_gate = account["details"]["core_accuracy_gates"][0]
+            self.assertEqual(apple_gate["gap_id"], "#38")
+            self.assertIn("Apple/iCloud service profile detection", apple_gate["satisfied_checks"])
+            self.assertIn("account/file/photo metadata normalization", apple_gate["satisfied_checks"])
+            self.assertIn("ADP/shared-album limitation warning", apple_gate["satisfied_checks"])
 
             cloud_file = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "cloud-file")
             self.assertEqual(cloud_file["details"]["service"], "microsoft-onedrive")
@@ -67,6 +79,11 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("reviewable-document-or-archive", cloud_file["details"]["risk_flags"])
             self.assertIn("#39", cloud_file["details"]["commercial_gap_ids"])
             self.assertEqual(cloud_file["details"]["forensic_review"]["gap_id"], "#39")
+            microsoft_file_gate = cloud_file["details"]["core_accuracy_gates"][0]
+            self.assertEqual(microsoft_file_gate["gap_id"], "#39")
+            self.assertIn("Microsoft 365 service profile detection", microsoft_file_gate["satisfied_checks"])
+            self.assertIn("mail/file/message/audit normalization", microsoft_file_gate["satisfied_checks"])
+            self.assertIn("source hash and eDiscovery/export warning", microsoft_file_gate["satisfied_checks"])
 
             message = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "cloud-message")
             self.assertEqual(message["details"]["service"], "microsoft-teams")

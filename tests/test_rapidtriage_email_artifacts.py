@@ -43,6 +43,13 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             self.assertFalse(eml["details"]["email_native_capabilities"]["native_pst_ost_msg_object_decode"])
             self.assertEqual(eml["details"]["email_format_profile"]["family"], "internet-message")
             self.assertIn("auth-signature-crypto", {item["id"] for item in eml["details"]["email_issue_matrix"]})
+            eml_gate = eml["details"]["core_accuracy_gates"][0]
+            self.assertEqual(eml_gate["gap_id"], "#36")
+            self.assertIn("mailbox/message source profile detection", eml_gate["satisfied_checks"])
+            self.assertIn("message header/body/attachment inventory", eml_gate["satisfied_checks"])
+            self.assertIn("PST/OST native limitation warning", eml_gate["satisfied_checks"])
+            self.assertIn("threading/dedup validation warning", eml_gate["satisfied_checks"])
+            self.assertIn("legal privilege boundary", eml_gate["satisfied_checks"])
 
             emlx = next(artifact for artifact in messages if artifact["details"]["source_format"] == "emlx")
             self.assertEqual(emlx["details"]["email_format_profile"]["family"], "apple-mail-message")
@@ -58,6 +65,9 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             self.assertEqual(pst["details"]["forensic_review"]["gap_id"], "#36")
             self.assertEqual(pst["details"]["email_format_profile"]["support_tier"], "bounded-string-inventory")
             self.assertIn("mapi-native-object-decode", {item["id"] for item in pst["details"]["email_issue_matrix"]})
+            pst_gate = pst["details"]["core_accuracy_gates"][0]
+            self.assertEqual(pst_gate["gap_id"], "#36")
+            self.assertIn("PST/OST native limitation warning", pst_gate["satisfied_checks"])
 
 
 def write_email_fixture(root: Path) -> None:
