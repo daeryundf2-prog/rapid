@@ -62,6 +62,11 @@ class RapidTriageCompareTests(unittest.TestCase):
             self.assertIn("#52", payload["summary"]["commercial_gap_ids"])
             self.assertFalse(payload["compare_native_capabilities"]["binary_structure_aware_diff"])
             self.assertIn("#52", payload["compare_report_grade_assessment"]["commercial_gap_ids"])
+            compare_gate = payload["core_accuracy_gates"][0]
+            self.assertEqual(compare_gate["gap_id"], "#52")
+            self.assertIn("hash comparison", compare_gate["satisfied_checks"])
+            self.assertIn("bounded text diff", compare_gate["satisfied_checks"])
+            self.assertIn("specialized diff limitation warning", compare_gate["satisfied_checks"])
             result = payload["results"][0]
             self.assertEqual(result["status"], "different")
             self.assertEqual(result["left"]["hashes"].keys(), {"md5", "sha1", "sha256"})
@@ -145,6 +150,7 @@ class RapidTriageCompareTests(unittest.TestCase):
             self.assertIn("#52", payload["summary"]["commercial_gap_ids"])
             self.assertTrue(payload["compare_native_capabilities"]["a_b_c_baseline_compare"])
             self.assertEqual(payload["compare_report_grade_assessment"]["mode"], "multi")
+            self.assertEqual(payload["core_accuracy_gates"][0]["gap_id"], "#52")
             self.assertEqual(payload["results"][0]["right"]["label"], "host-a")
             self.assertEqual(payload["results"][1]["right"]["label"], "host-b")
             self.assertEqual(payload["summary"]["status_counts"]["same"], 1)

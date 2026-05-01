@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Mapping
 
 from ..artifacts.media import IMAGE_EXTENSIONS, contains_hangul, language_hint_for_text, ocr_quality_metrics
+from .forensic_accuracy import build_accuracy_gate
 from .submission import compute_hashes
 
 
@@ -109,6 +110,7 @@ def build_ocr_queue(
         },
         "ocr_queue_native_capabilities": dict(OCR_QUEUE_NATIVE_CAPABILITIES),
         "ocr_queue_report_grade_assessment": ocr_queue_report_grade_assessment(),
+        "core_accuracy_gates": ocr_queue_core_accuracy_gates(items=items, root=resolved_root),
         "items": items,
         "review_guidance": [
             "Sidecar OCR text is treated as post-acquisition review material; preserve the original sidecar hashes.",
@@ -158,6 +160,16 @@ def build_ocr_queue_item(
         "retryable": status in {"queued", "failed-retry-queued"},
         "validation_status": "review-sidecar-text" if sidecar else "requires-ocr-run",
         "commercial_gap_ids": ["#58", "#59"],
+        "core_accuracy_gates": ocr_queue_item_core_accuracy_gates(item_context={
+            "source_path": str(resolved),
+            "status": status,
+            "sidecar": sidecar,
+            "translation_sidecar": translation_sidecar,
+            "language_hint": language_hint,
+            "confidence": confidence,
+            "metadata": metadata,
+            "quality_metrics": ocr_quality_metrics(text) if text else {},
+        }),
         "korean_ocr_translation_workflow": {
             "commercial_gap_ids": ["#59"],
             "language_hint": language_hint,
@@ -168,6 +180,69 @@ def build_ocr_queue_item(
         },
         "report_grade_assessment": ocr_queue_item_assessment(status=status, language_hint=language_hint),
     }
+
+
+def ocr_queue_core_accuracy_gates(*, items: list[dict[str, object]], root: Path) -> list[dict[str, object]]:
+    evidence_refs = [f"root:{root}", f"candidate_count:{len(items)}"]
+    for item in items[:5]:
+        evidence_refs.append(f"source_path:{item.get('source_path', '')}")
+        if isinstance(item.get("sidecar"), Mapping) and item["sidecar"].get("sha256"):
+            evidence_refs.append(f"sidecar_sha256:{item['sidecar']['sha256']}")
+
+    item58 = []
+    if items:
+        item58.append("queue item generation")
+    if any(isinstance(item.get("sidecar"), Mapping) and item["sidecar"].get("sha256") for item in items):
+        item58.append("sidecar import and hashes")
+    if any(str(item.get("status")) == "failed-retry-queued" or item.get("previous_status") for item in items):
+        item58.append("retry state handling")
+    if any(isinstance(item.get("sidecar"), Mapping) and item["sidecar"].get("metadata") for item in items):
+        item58.append("engine/metadata preservation")
+    if not OCR_QUEUE_NATIVE_CAPABILITIES["native_ocr_engine_execution"]:
+        item58.append("native OCR limitation warning")
+
+    item59 = []
+    if any("ko" in str(item.get("language_hint", "")).lower() or "kor" in str(item.get("language_hint", "")).lower() for item in items):
+        item59.append("Korean language hinting")
+    if any(item.get("quality_metrics") for item in items):
+        item59.append("OCR quality metrics")
+    if any(item.get("translation_sidecar") for item in items):
+        item59.append("translation sidecar import")
+    if any(item.get("confidence") is not None or (isinstance(item.get("sidecar"), Mapping) and item["sidecar"].get("metadata")) for item in items):
+        item59.append("confidence/engine metadata")
+    if not OCR_QUEUE_NATIVE_CAPABILITIES["human_translation_certification"]:
+        item59.append("human translation validation warning")
+
+    return [
+        build_accuracy_gate(58, satisfied_checks=item58, evidence_refs=evidence_refs),
+        build_accuracy_gate(59, satisfied_checks=item59, evidence_refs=evidence_refs),
+    ]
+
+
+def ocr_queue_item_core_accuracy_gates(*, item_context: Mapping[str, object]) -> list[dict[str, object]]:
+    sidecar = item_context.get("sidecar") if isinstance(item_context.get("sidecar"), Mapping) else {}
+    translation_sidecar = (
+        item_context.get("translation_sidecar")
+        if isinstance(item_context.get("translation_sidecar"), Mapping)
+        else {}
+    )
+    metadata = item_context.get("metadata") if isinstance(item_context.get("metadata"), Mapping) else {}
+    quality_metrics = item_context.get("quality_metrics") if isinstance(item_context.get("quality_metrics"), Mapping) else {}
+    return ocr_queue_core_accuracy_gates(
+        items=[
+            {
+                "source_path": item_context.get("source_path", ""),
+                "status": item_context.get("status", ""),
+                "sidecar": sidecar,
+                "translation_sidecar": translation_sidecar,
+                "language_hint": item_context.get("language_hint", ""),
+                "confidence": item_context.get("confidence"),
+                "quality_metrics": quality_metrics,
+                "previous_status": "",
+            }
+        ],
+        root=Path(str(item_context.get("source_path") or ".")).parent,
+    )
 
 
 def ocr_queue_report_grade_assessment() -> dict[str, object]:

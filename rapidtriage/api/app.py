@@ -33,6 +33,7 @@ from ..core.docs import SUPPORTED_DOC_EXTS, extract_text
 from ..core.doctor import run_doctor
 from ..core.enterprise import build_enterprise_policy
 from ..core.evidence import identify_evidence, supported_evidence_formats
+from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.hash_cache import hash_cache_assessment
 from ..core.jobs import RunJobStore, RunRequest, default_job_store, is_relative_to, run_output_dir
 from ..core.keyword_packs import KeywordPackError, keyword_pack_library_assessment, list_keyword_packs, resolve_keyword_packs
@@ -1342,6 +1343,13 @@ def source_viewer_actions(run_id: str, source_path: Path) -> list[dict[str, obje
 
 
 def source_review_workflow_metadata() -> dict[str, object]:
+    satisfied = [
+        "review status fields persisted",
+        "assignment and priority captured",
+        "verification status captured",
+        "report inclusion state captured",
+        "history/audit limitation warning",
+    ]
     return {
         "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["review"]],
         "status": "implemented-baseline-validation-required",
@@ -1356,6 +1364,13 @@ def source_review_workflow_metadata() -> dict[str, object]:
             "immutable-history",
         ],
         "ready_for_court_report": False,
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                51,
+                satisfied_checks=satisfied,
+                evidence_refs=["source-preview:review_workflow", "case-db:review_mark", "case-db:review_mark_history"],
+            )
+        ],
         "blockers": [
             "single-user-local-workflow-until-role-based-case-server-is-enabled",
             "review-decisions-still-require-source-hash-and-parser-limitation-verification",
@@ -1369,6 +1384,19 @@ def source_compare_workflow_metadata() -> dict[str, object]:
         "status": "implemented-baseline-validation-required",
         "supports": ["a-b-compare", "a-b-c-baseline-compare", "hash-compare", "bounded-text-diff", "report-pivot"],
         "ready_for_court_report": False,
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                52,
+                satisfied_checks=[
+                    "A/B/C baseline compare",
+                    "hash comparison",
+                    "bounded text diff",
+                    "status counts",
+                    "specialized diff limitation warning",
+                ],
+                evidence_refs=["source-preview:compare_workflow", "command:compare"],
+            )
+        ],
         "blockers": [
             "binary-structure-aware-diff-not-implemented",
             "visual-diff-and-table-aware-diff-require-dedicated-viewers",
@@ -1491,6 +1519,11 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
                     "foreign-key-relationship-graph-not-yet-rendered",
                     "wal/journal-replay-and-deleted-row-recovery-not-implemented-in-viewer",
                 ],
+            ),
+            "core_accuracy_gates": sqlite_viewer_core_accuracy_gates(
+                source_path=source_path,
+                database_metadata=database_metadata,
+                tables=previews,
             ),
             "sqlite_fts_optimization_assessment": source_viewer_component_assessment(
                 VIEWER_WORKFLOW_GAP_IDS["sqlite_performance"],
@@ -1698,6 +1731,11 @@ def build_email_preview(source_path: Path, suffix: str) -> Dict[str, object]:
                     "attachment-body-rendering-is-bounded-and-inventory-oriented",
                 ],
             ),
+            "core_accuracy_gates": email_viewer_core_accuracy_gates(
+                source_path=source_path,
+                messages=summaries,
+                conversation=conversation,
+            ),
         },
     }
 
@@ -1768,6 +1806,12 @@ def build_hex_preview(source_path: Path) -> Dict[str, object]:
                     "file-format-structure-decoding-requires-specialized-parser",
                 ],
             ),
+            "core_accuracy_gates": hex_viewer_core_accuracy_gates(
+                source_path=source_path,
+                rows=rows,
+                preview_hashes=preview_hashes,
+                truncated=len(data) > HEX_PREVIEW_MAX_BYTES,
+            ),
         },
     }
 
@@ -1801,6 +1845,7 @@ def build_image_preview(source_path: Path, *, image_url: str) -> Dict[str, objec
                 "compare_ready": bool(details.get("perceptual_hash")),
             },
             "gallery_review_assessment": image_gallery_review_assessment(details),
+            "core_accuracy_gates": image_viewer_core_accuracy_gates(source_path=source_path, details=details),
             "ocr_queue_assessment": details.get("ocr_queue_assessment") if isinstance(details.get("ocr_queue_assessment"), dict) else {},
             "korean_ocr_translation_workflow": details.get("korean_ocr_translation_workflow") if isinstance(details.get("korean_ocr_translation_workflow"), dict) else {},
         }
@@ -1817,6 +1862,7 @@ def build_image_preview(source_path: Path, *, image_url: str) -> Dict[str, objec
                 "compare_ready": False,
             },
             "gallery_review_assessment": image_gallery_review_assessment({}),
+            "core_accuracy_gates": image_viewer_core_accuracy_gates(source_path=source_path, details={}),
         }
     return {
         "preview_type": "image",
@@ -1854,6 +1900,136 @@ def image_gallery_review_assessment(details: Mapping[str, object]) -> dict[str, 
         ],
         "source_perceptual_hash_present": bool(details.get("perceptual_hash")),
     }
+
+
+def hex_viewer_core_accuracy_gates(
+    *,
+    source_path: Path,
+    rows: Sequence[Mapping[str, object]],
+    preview_hashes: Mapping[str, str],
+    truncated: bool,
+) -> list[dict[str, object]]:
+    satisfied = []
+    if rows:
+        satisfied.append("bounded hex rows")
+    if all(row.get("offset") is not None and row.get("offset_hex") for row in rows):
+        satisfied.append("byte offsets and hex offsets")
+    if preview_hashes.get("sha256"):
+        satisfied.append("preview hash")
+    if rows:
+        satisfied.append("byte-search citation support")
+    if truncated is not None:
+        satisfied.append("full-source validation warning")
+    return [
+        build_accuracy_gate(
+            53,
+            satisfied_checks=satisfied,
+            evidence_refs=[f"source_path:{source_path}", f"row_count:{len(rows)}", f"preview_sha256:{preview_hashes.get('sha256', '')}"],
+        )
+    ]
+
+
+def sqlite_viewer_core_accuracy_gates(
+    *,
+    source_path: Path,
+    database_metadata: Mapping[str, object],
+    tables: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    satisfied = ["read-only SQLite open"]
+    if tables:
+        satisfied.append("table and schema inventory")
+    if any(table.get("column_details") or table.get("indexes") for table in tables):
+        satisfied.append("column/index metadata")
+    if any(table.get("rows") is not None for table in tables):
+        satisfied.append("bounded row preview")
+    satisfied.append("deleted/WAL limitation warning")
+    return [
+        build_accuracy_gate(
+            54,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"source_path:{source_path}",
+                f"table_count:{len(tables)}",
+                f"page_size:{database_metadata.get('page_size', '')}",
+                f"page_count:{database_metadata.get('page_count', '')}",
+            ],
+        )
+    ]
+
+
+def email_viewer_core_accuracy_gates(
+    *,
+    source_path: Path,
+    messages: Sequence[Mapping[str, object]],
+    conversation: Mapping[str, object],
+) -> list[dict[str, object]]:
+    threads = conversation.get("threads") if isinstance(conversation.get("threads"), list) else []
+    satisfied = []
+    if threads:
+        satisfied.append("thread grouping")
+    if any(isinstance(thread, Mapping) and thread.get("message_order") is not None for thread in threads):
+        satisfied.append("message order")
+    if messages and all(message.get("from") is not None and message.get("subject") is not None for message in messages):
+        satisfied.append("participant/header preservation")
+    if any(int(message.get("attachment_count") or 0) >= 0 for message in messages):
+        satisfied.append("attachment inventory")
+    satisfied.append("mailbox threading limitation warning")
+    return [
+        build_accuracy_gate(
+            55,
+            satisfied_checks=satisfied,
+            evidence_refs=[f"source_path:{source_path}", f"message_count:{len(messages)}", f"thread_count:{len(threads)}"],
+        )
+    ]
+
+
+def image_viewer_core_accuracy_gates(*, source_path: Path, details: Mapping[str, object]) -> list[dict[str, object]]:
+    satisfied = []
+    if details.get("width") is not None or details.get("hashes"):
+        satisfied.append("image metadata and source hashes")
+    if details.get("thumbnail_preview") or details.get("decoded") is not None:
+        satisfied.append("thumbnail or preview metadata")
+    if details.get("similarity_bucket"):
+        satisfied.append("perceptual similarity bucket")
+    satisfied.append("tag/report selection hints")
+    if not details.get("media_native_capabilities", {}).get("deepfake_detection", False):
+        satisfied.append("visual-classifier limitation warning")
+    return [
+        build_accuracy_gate(
+            56,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"source_path:{source_path}",
+                f"perceptual_hash:{details.get('perceptual_hash', '')}",
+                f"similarity_bucket:{details.get('similarity_bucket', '')}",
+            ],
+        )
+    ]
+
+
+def media_viewer_core_accuracy_gates(
+    *,
+    source_path: Path,
+    metadata: Mapping[str, object],
+    sidecars: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    satisfied = []
+    if metadata:
+        satisfied.append("media metadata extracted")
+    if source_path.stat().st_size <= 128 * 1024 * 1024:
+        satisfied.append("source hashes captured")
+    if sidecars:
+        satisfied.append("transcript sidecars imported")
+    if any(item.get("cues") for item in sidecars):
+        satisfied.append("cue timestamps preserved")
+    satisfied.append("playback/transcript verification warning")
+    return [
+        build_accuracy_gate(
+            57,
+            satisfied_checks=satisfied,
+            evidence_refs=[f"source_path:{source_path}", f"transcript_sidecar_count:{len(sidecars)}"],
+        )
+    ]
 
 
 def image_tag_suggestions(details: Mapping[str, object]) -> list[str]:
@@ -1910,6 +2086,11 @@ def build_media_preview(source_path: Path, *, mime_type: str) -> Dict[str, objec
             "transcript_sidecar_count": len(sidecars),
             "transcript_sidecars": sidecars,
             "media_transcript_assessment": media_transcript_assessment(sidecars=sidecars),
+            "core_accuracy_gates": media_viewer_core_accuracy_gates(
+                source_path=source_path,
+                metadata=metadata,
+                sidecars=sidecars,
+            ),
             "limitations": [
                 "Media playback/transcoding is not performed by the local viewer.",
                 "Transcript sidecars are imported as review aids and must be verified against the original media.",

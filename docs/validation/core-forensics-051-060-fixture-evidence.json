@@ -1,0 +1,98 @@
+{
+  "schema": "rapidtriage-fixture-evidence-v1",
+  "scope": "#51-#60 internal fixture validation",
+  "status": "pass",
+  "generated_for": "RapidTriage commercial-readiness internal validated maturity gate",
+  "evidence": [
+    {
+      "item": 51,
+      "title": "Reviewer assignment/status workflow",
+      "test_files": ["tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_api.py"],
+      "assertions": [
+        "Case DB review marks preserve status, verification status, reviewer, assignee, priority, due date, report inclusion, history, and #51 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Role-based multi-user server, conflict handling, notifications, and signed reviewer SOP."]
+    },
+    {
+      "item": 52,
+      "title": "A/B/C multi-evidence compare",
+      "test_files": ["tests/test_rapidtriage_compare.py", "tests/test_rapidtriage_api.py"],
+      "assertions": [
+        "Compare output preserves A/B and A/B/C baseline comparison, file hashes, bounded text diff, status counts, report pivots, and #52 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Binary/image/SQLite semantic diff viewers and reviewer-selected comparison known-answer corpus."]
+    },
+    {
+      "item": 53,
+      "title": "Raw/source hex viewer",
+      "test_files": ["tests/test_rapidtriage_api.py"],
+      "assertions": [
+        "Source preview emits bounded hex rows with offsets, ASCII, preview hash, byte-search citation support, and #53 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Full-file jump/export-range UI and byte-level citation package validation."]
+    },
+    {
+      "item": 54,
+      "title": "SQLite/table specialized viewer",
+      "test_files": ["tests/test_rapidtriage_api.py"],
+      "assertions": [
+        "SQLite source preview opens read-only, records table/schema/column/index metadata, bounded row previews, search hooks, and #54 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["WHERE-builder UI, deleted-row/WAL validation, and large database fixture corpus."]
+    },
+    {
+      "item": 55,
+      "title": "Email conversation viewer",
+      "test_files": ["tests/test_rapidtriage_api.py"],
+      "assertions": [
+        "Email source preview emits conversation threads, message order, participants, headers, attachment inventory, and #55 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Native PST/OST/MSG threading, deleted items, attachment extraction, and mailbox known-answer validation."]
+    },
+    {
+      "item": 56,
+      "title": "Image gallery review mode",
+      "test_files": ["tests/test_rapidtriage_media_image.py", "tests/test_rapidtriage_api.py"],
+      "assertions": [
+        "Image rows/previews preserve metadata, hashes, thumbnails, perceptual hash buckets, tag/report hints, visual limitations, and #56 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Dedicated virtualized gallery, persistent tags, ML visual similarity corpus, and sensitive/deepfake classifier validation."]
+    },
+    {
+      "item": 57,
+      "title": "Video/audio preview and transcript",
+      "test_files": ["tests/test_rapidtriage_api.py"],
+      "assertions": [
+        "Media source preview preserves metadata, source hashes, transcript sidecars, cue timestamps, verification warnings, and #57 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Safe playback sandbox, ASR engine execution, waveform/thumbnails, and transcript alignment validation."]
+    },
+    {
+      "item": 58,
+      "title": "OCR queue manager",
+      "test_files": ["tests/test_rapidtriage_ocr_queue.py", "tests/test_rapidtriage_media_image.py"],
+      "assertions": [
+        "OCR queue/manifests preserve queue items, sidecar hashes, retry state, metadata, native OCR warnings, and #58 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Native OCR worker execution, engine/version logs, and per-case web queue persistence."]
+    },
+    {
+      "item": 59,
+      "title": "Korean OCR/translation workflow hardening",
+      "test_files": ["tests/test_rapidtriage_ocr_queue.py", "tests/test_rapidtriage_media_image.py"],
+      "assertions": [
+        "OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, human-review warnings, and #59 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Korean OCR calibration corpus, certified translation workflow, and side-by-side review UI."]
+    },
+    {
+      "item": 60,
+      "title": "Search hit deduplication",
+      "test_files": ["tests/test_rapidtriage_search_analysis.py"],
+      "assertions": [
+        "Search analysis preserves duplicate fingerprints, duplicate group counts, representative hits, source/path refs, near-duplicate warnings, and #60 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["UI collapse/suppression workflow, fuzzy near-duplicate text grouping, and media duplicate validation."]
+    }
+  ]
+}

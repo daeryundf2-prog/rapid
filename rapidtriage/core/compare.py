@@ -6,6 +6,8 @@ import hashlib
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from .forensic_accuracy import build_accuracy_gate
+
 
 class CompareError(ValueError):
     """Raised when a compare request cannot be completed."""
@@ -109,6 +111,7 @@ def compare_paths(
         },
         "compare_native_capabilities": dict(COMPARE_NATIVE_CAPABILITIES),
         "compare_report_grade_assessment": compare_report_grade_assessment(mode="pair"),
+        "core_accuracy_gates": compare_core_accuracy_gates(results=[result], mode="pair"),
         "results": [result],
     }
 
@@ -186,8 +189,32 @@ def compare_many_paths(
         },
         "compare_native_capabilities": dict(COMPARE_NATIVE_CAPABILITIES),
         "compare_report_grade_assessment": compare_report_grade_assessment(mode="multi"),
+        "core_accuracy_gates": compare_core_accuracy_gates(results=comparisons, mode="multi"),
         "results": comparisons,
     }
+
+
+def compare_core_accuracy_gates(*, results: Sequence[Mapping[str, object]], mode: str) -> list[dict[str, object]]:
+    satisfied = []
+    if mode == "multi" or len(results) >= 1:
+        satisfied.append("A/B/C baseline compare")
+    if all(result.get("left", {}).get("hashes") and result.get("right", {}).get("hashes") for result in results):
+        satisfied.append("hash comparison")
+    if any(isinstance(result.get("diff"), Mapping) and result["diff"].get("included") for result in results):
+        satisfied.append("bounded text diff")
+    if results:
+        satisfied.append("status counts")
+    if not COMPARE_NATIVE_CAPABILITIES["binary_structure_aware_diff"]:
+        satisfied.append("specialized diff limitation warning")
+    evidence_refs = [
+        f"mode:{mode}",
+        f"result_count:{len(results)}",
+    ]
+    for result in results[:3]:
+        evidence_refs.append(f"comparison_id:{result.get('comparison_id', '')}")
+        evidence_refs.append(f"left:{result.get('left_path', '')}")
+        evidence_refs.append(f"right:{result.get('right_path', '')}")
+    return [build_accuracy_gate(52, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
 def compare_report_grade_assessment(*, mode: str) -> dict[str, object]:

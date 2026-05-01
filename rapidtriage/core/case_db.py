@@ -11,6 +11,7 @@ from typing import Any, Iterable, Iterator, Mapping, Optional, Sequence
 
 from .artifact_store import read_jsonl_artifacts, validate_artifact_record
 from .docs import extract_text
+from .forensic_accuracy import build_accuracy_gate
 from .search import SearchError, load_run_summary
 from .submission import compute_hashes
 
@@ -3462,12 +3463,33 @@ def review_mark_to_dict(row: sqlite3.Row) -> dict[str, object]:
 
 
 def review_workflow_assessment(*, assignee: str, priority: str, due_at: str) -> dict[str, object]:
+    satisfied = [
+        "review status fields persisted",
+        "verification status captured",
+        "report inclusion state captured",
+        "history/audit limitation warning",
+    ]
+    if assignee or priority:
+        satisfied.append("assignment and priority captured")
     return {
         "commercial_gap_ids": ["#51"],
         "status": "implemented-baseline-validation-required",
         "assignment_present": bool(assignee),
         "priority": priority,
         "due_at": due_at,
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                51,
+                satisfied_checks=satisfied,
+                evidence_refs=[
+                    f"assignee:{assignee}",
+                    f"priority:{priority}",
+                    f"due_at:{due_at}",
+                    "case_db:review_mark",
+                    "case_db:review_mark_history",
+                ],
+            )
+        ],
         "ready_for_court_report": False,
         "blockers": [
             "local-single-database-review-workflow-until-role-based-server-is-enabled",

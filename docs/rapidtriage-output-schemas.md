@@ -241,7 +241,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `analysis.timeline` extracts timestamp anchors from matched metadata and sorts them for quick chronological correlation with #49 validation warnings.
 - `analysis.deduplication` emits #60 duplicate groups with fingerprints, representative previews, match indices, paths, source lists, duplicate/unique counts, candidate duplicate-resolution status, and report-grade validation blockers.
 - `analysis.workbook` creates draft hypotheses, review questions, and next actions with #50 status; it is a triage aid and must be verified against source rows and hashes.
-- `analysis.core_accuracy_gates` emits #46~#50 gate objects showing which required clustering, entity, graph, timeline, and workbook checks are satisfied and which remain validation-required.
+- `analysis.core_accuracy_gates` emits #46~#50 and #60 gate objects showing which required clustering, entity, graph, timeline, workbook, and duplicate-hit checks are satisfied and which remain validation-required.
 
 ### `source-preview` API
 
@@ -250,11 +250,12 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - Structured preview types include `text`, `image`, `sqlite`, `json`, `xml`, `email`, `media`, and `hex`.
 - `viewer_sandbox` states #73 read-only bounded rendering, no content execution, active-content blocking status, external-network prohibition, byte/character caps, and sandbox limitations.
 - SQLite previews include #74 `large_sqlite_fts_optimization` metadata and an explicit optimization assessment so large tables stay bounded in the viewer while indexed case search handles broader review.
-- Review and compare viewer actions expose #51/#52 status fields for reviewer, assignee, priority, due date, report inclusion, and A/B/C pinning, but final report use still requires source verification.
-- `hex` previews are bounded read-only rows with `offset`, `offset_hex`, `hex`, `ascii`, `bytes_read`, `max_bytes`, `offset_navigation`, #53 assessment, and `truncated`; they are for triage and byte-offset orientation, not a replacement for source-file validation.
-- `sqlite` previews include table profiles, schema SQL, column details, index hints, bounded rows, text-column search support, and #54 assessment.
-- `email` previews include bounded messages plus `threads` and `conversation_view` with `thread_id`, subject, participants, message order, date range, attachment counts, and #55 assessment.
-- `media` previews include MIME type, bounded metadata, WAV duration/channel/sample-rate when available, #57 transcript sidecar rows, cue counts, sidecar hashes when bounded, review-aid validation status, and explicit playback/transcript verification limitations.
+- Review and compare viewer actions expose #51/#52 status fields plus `core_accuracy_gates` for reviewer, assignee, priority, due date, report inclusion, and A/B/C pinning, but final report use still requires source verification.
+- `hex` previews are bounded read-only rows with `offset`, `offset_hex`, `hex`, `ascii`, `bytes_read`, `max_bytes`, `offset_navigation`, #53 `core_accuracy_gates`, #53 assessment, and `truncated`; they are for triage and byte-offset orientation, not a replacement for source-file validation.
+- `sqlite` previews include table profiles, schema SQL, column details, index hints, bounded rows, text-column search support, #54 `core_accuracy_gates`, and #54 assessment.
+- `email` previews include bounded messages plus `threads` and `conversation_view` with `thread_id`, subject, participants, message order, date range, attachment counts, #55 `core_accuracy_gates`, and #55 assessment.
+- `image` previews include dimensions, thumbnails, perceptual-hash/similarity metadata, tag suggestions, OCR sidecar status, #56/#58/#59 `core_accuracy_gates`, and report-selection guidance.
+- `media` previews include MIME type, bounded metadata, WAV duration/channel/sample-rate when available, #57 transcript sidecar rows, cue counts, sidecar hashes when bounded, #57 `core_accuracy_gates`, review-aid validation status, and explicit playback/transcript verification limitations.
 
 ### `ArtifactRecordV1`
 

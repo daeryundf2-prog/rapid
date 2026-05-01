@@ -848,7 +848,7 @@ def build_required_documents() -> list[dict[str, str]]:
         {"path": "docs/rapidtriage-parser-coverage.md", "purpose": "Implemented artifact and extension coverage."},
         {
             "path": "docs/rapidtriage-core-forensics-accuracy-profiles.md",
-            "purpose": "#1-#50 parser accuracy profile gates and pass/fail evidence requirements.",
+            "purpose": "#1-#60 parser accuracy profile gates and pass/fail evidence requirements.",
         },
         {
             "path": "docs/rapidtriage-core-forensics-001-005-validation.md",
@@ -881,6 +881,10 @@ def build_required_documents() -> list[dict[str, str]]:
         {
             "path": "docs/rapidtriage-core-forensics-041-050-validation.md",
             "purpose": "#41-#50 internal fixture validation manifest and commercial-readiness attachment workflow.",
+        },
+        {
+            "path": "docs/rapidtriage-core-forensics-051-060-validation.md",
+            "purpose": "#51-#60 internal fixture validation manifest and commercial-readiness attachment workflow.",
         },
         {"path": "docs/rapidtriage-release-checklist.md", "purpose": "Repeatable release verification checklist."},
         {"path": "docs/rapidtriage-release-notes-template.md", "purpose": "Release communication template."},
@@ -981,7 +985,7 @@ def render_validation_markdown(payload: Mapping[str, object]) -> str:
                 if isinstance(item, Mapping):
                     lines.append(f"- `{item.get('id', '')}` ({item.get('source', '')}): status `{item.get('status', '')}`")
 
-    lines.extend(["", "## #1-#50 Core Forensics Accuracy Profiles", ""])
+    lines.extend(["", "## #1-#60 Core Forensics Accuracy Profiles", ""])
     if accuracy_profiles:
         lines.append(f"- Version: `{accuracy_profiles.get('version', '')}`")
         lines.append(f"- Profile count: `{accuracy_profiles.get('profile_count', 0)}`")

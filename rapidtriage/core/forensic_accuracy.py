@@ -708,6 +708,146 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "persistence/versioning limitation warning",
         ),
     },
+    {
+        "number": 51,
+        "title": "Reviewer assignment/status workflow",
+        "surface": "review marks, reviewer/assignee, priority, due dates, verification status, report inclusion, and history",
+        "corpus": "case database fixtures with assigned/reassigned review decisions, batch updates, saved searches, and report exports",
+        "oracle": "analyst review log, case database audit history, and reviewer sign-off workflow checklist",
+        "required_checks": (
+            "review status fields persisted",
+            "assignment and priority captured",
+            "verification status captured",
+            "report inclusion state captured",
+            "history/audit limitation warning",
+        ),
+    },
+    {
+        "number": 52,
+        "title": "A/B/C multi-evidence compare",
+        "surface": "two-way and baseline multi-file compare, hashes, text diff, labels, status counts, and report pivots",
+        "corpus": "file comparison fixtures with same/different text, binary files, labels, and report review selections",
+        "oracle": "known file hashes, expected unified diff output, and analyst-selected comparison notes",
+        "required_checks": (
+            "A/B/C baseline compare",
+            "hash comparison",
+            "bounded text diff",
+            "status counts",
+            "specialized diff limitation warning",
+        ),
+    },
+    {
+        "number": 53,
+        "title": "Raw/source hex viewer",
+        "surface": "bounded hex rows, offsets, ASCII, preview hash, byte search citations, and safe copy/export warnings",
+        "corpus": "binary source fixtures with known byte offsets, repeated terms, truncation boundaries, and hash assertions",
+        "oracle": "known byte-offset manifest, source hash output, and manual hex editor comparison",
+        "required_checks": (
+            "bounded hex rows",
+            "byte offsets and hex offsets",
+            "preview hash",
+            "byte-search citation support",
+            "full-source validation warning",
+        ),
+    },
+    {
+        "number": 54,
+        "title": "SQLite/table specialized viewer",
+        "surface": "read-only SQLite table preview, schema SQL, column details, indexes, row samples, and text search hooks",
+        "corpus": "SQLite fixtures with tables, views, indexes, primary keys, text/blob columns, and large row counts",
+        "oracle": "sqlite3 CLI queries, expected schema/table row assertions, and source database hashes",
+        "required_checks": (
+            "read-only SQLite open",
+            "table and schema inventory",
+            "column/index metadata",
+            "bounded row preview",
+            "deleted/WAL limitation warning",
+        ),
+    },
+    {
+        "number": 55,
+        "title": "Email conversation viewer",
+        "surface": "threaded email previews, headers, participants, message order, attachments, and conversation limitations",
+        "corpus": "EML/MBOX fixtures with Message-ID, References/In-Reply-To, attachments, and duplicate subjects",
+        "oracle": "mail client/thread export, message header assertions, and attachment inventory manifest",
+        "required_checks": (
+            "thread grouping",
+            "message order",
+            "participant/header preservation",
+            "attachment inventory",
+            "mailbox threading limitation warning",
+        ),
+    },
+    {
+        "number": 56,
+        "title": "Image gallery review mode",
+        "surface": "image dimensions, source hashes, thumbnails, perceptual hash, similarity bucket, tags, and report selection hints",
+        "corpus": "image fixtures with dimensions, thumbnails, visually similar groups, OCR sidecars, and broken images",
+        "oracle": "image metadata/hash manifest, visual review labels, and perceptual-hash expected buckets",
+        "required_checks": (
+            "image metadata and source hashes",
+            "thumbnail or preview metadata",
+            "perceptual similarity bucket",
+            "tag/report selection hints",
+            "visual-classifier limitation warning",
+        ),
+    },
+    {
+        "number": 57,
+        "title": "Video/audio preview and transcript",
+        "surface": "media metadata, source hashes, transcript sidecars, cue timestamps, and playback/transcript limitations",
+        "corpus": "audio/video fixtures with WAV metadata, SRT/VTT/TXT transcript sidecars, cue ranges, and hash assertions",
+        "oracle": "media metadata tools, transcript cue manifest, and manual playback verification notes",
+        "required_checks": (
+            "media metadata extracted",
+            "source hashes captured",
+            "transcript sidecars imported",
+            "cue timestamps preserved",
+            "playback/transcript verification warning",
+        ),
+    },
+    {
+        "number": 58,
+        "title": "OCR queue manager",
+        "surface": "OCR candidate queue, sidecar import, retry state, source/sidecar hashes, metadata, and status counts",
+        "corpus": "image fixtures with OCR sidecars, metadata sidecars, failed previous queues, and retry scenarios",
+        "oracle": "expected queue manifest, OCR sidecar hash manifest, and external OCR engine run logs",
+        "required_checks": (
+            "queue item generation",
+            "sidecar import and hashes",
+            "retry state handling",
+            "engine/metadata preservation",
+            "native OCR limitation warning",
+        ),
+    },
+    {
+        "number": 59,
+        "title": "Korean OCR/translation workflow hardening",
+        "surface": "Korean language hints, OCR quality metrics, translation sidecars, confidence metadata, and review warnings",
+        "corpus": "Korean/English image OCR fixtures with Hangul sidecars, translations, confidence, and engine metadata",
+        "oracle": "human-reviewed OCR/translation expected text, sidecar hashes, and language-pack validation logs",
+        "required_checks": (
+            "Korean language hinting",
+            "OCR quality metrics",
+            "translation sidecar import",
+            "confidence/engine metadata",
+            "human translation validation warning",
+        ),
+    },
+    {
+        "number": 60,
+        "title": "Search hit deduplication",
+        "surface": "duplicate groups by hash or normalized preview, representative hits, source/path links, and suppression warnings",
+        "corpus": "search-result fixtures with exact hash duplicates, repeated previews, OCR duplicates, and near-duplicate noise",
+        "oracle": "hand-labeled duplicate groups, hash manifests, and reviewer suppression decisions",
+        "required_checks": (
+            "duplicate fingerprint generation",
+            "duplicate group counts",
+            "representative hit links",
+            "source/path references",
+            "near-duplicate limitation warning",
+        ),
+    },
 )
 
 
@@ -716,11 +856,11 @@ def build_core_forensics_accuracy_profiles() -> dict[str, object]:
     return {
         "version": CORE_FORENSIC_ACCURACY_VERSION,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "scope": "#1-#50 validation and accuracy reinforcement",
+        "scope": "#1-#60 validation and accuracy reinforcement",
         "profile_count": len(profiles),
         "commercial_gap_ids": [f"#{item['number']}" for item in profiles],
         "status": "accuracy-profiles-ready",
-        "release_gate": "Each #1-#50 parser claim must attach pass/fail evidence against its profile before report-grade wording.",
+        "release_gate": "Each #1-#60 parser claim must attach pass/fail evidence against its profile before report-grade wording.",
         "profiles": profiles,
     }
 
@@ -765,7 +905,7 @@ def build_accuracy_profile(item: Mapping[str, object]) -> dict[str, object]:
             "hash_required": True,
             "timezone_or_timestamp_semantics_required": number in {
                 1, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 20, 22, 23, 24, 26, 27, 29, 31, 32,
-                33, 34, 35, 36, 37, 38, 39, 40, 43, 44, 45, 49,
+                33, 34, 35, 36, 37, 38, 39, 40, 43, 44, 45, 49, 51, 55, 57, 58, 59,
             },
             "secret_redaction_required": number in {19, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 40, 41, 42},
             "legal_or_authority_gate_required": number in {19, 22, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38, 39, 40, 41, 42},
@@ -837,4 +977,4 @@ def accuracy_profile_for_item(number: int) -> dict[str, object]:
     for item in CORE_FORENSIC_ACCURACY_ITEMS:
         if int(item["number"]) == number:
             return build_accuracy_profile(item)
-    raise KeyError(f"unknown #1-#50 forensic accuracy item: {number}")
+    raise KeyError(f"unknown #1-#60 forensic accuracy item: {number}")

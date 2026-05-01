@@ -84,6 +84,13 @@
       "type": "object",
       "additionalProperties": true
     },
+    "core_accuracy_gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
     "results": {
       "type": "array",
       "items": {

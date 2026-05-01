@@ -49,6 +49,11 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertIn("#58", details["commercial_gap_ids"])
             self.assertIn("#59", details["commercial_gap_ids"])
             self.assertIn("#56", details["media_report_grade_assessment"]["commercial_gap_ids"])
+            media_gates = {gate["gap_id"]: gate for gate in details["core_accuracy_gates"]}
+            self.assertIn("image metadata and source hashes", media_gates["#56"]["satisfied_checks"])
+            self.assertIn("sidecar import and hashes", media_gates["#58"]["satisfied_checks"])
+            self.assertIn("Korean language hinting", media_gates["#59"]["satisfied_checks"])
+            self.assertIn("translation sidecar import", media_gates["#59"]["satisfied_checks"])
             self.assertTrue(details["media_native_capabilities"]["image_gallery_review_metadata"])
             self.assertGreaterEqual(details["parser_confidence"], 0.8)
             self.assertTrue(details["ocr_candidate"])

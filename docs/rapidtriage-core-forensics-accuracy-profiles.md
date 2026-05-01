@@ -1,6 +1,6 @@
-# RapidTriage #1-#50 Accuracy Profiles
+# RapidTriage #1-#60 Accuracy Profiles
 
-This document explains the validation and accuracy layer for commercial-parity backlog items #1 through #50.
+This document explains the validation and accuracy layer for commercial-parity backlog items #1 through #60.
 
 The goal is not to overclaim that every parser is commercial-grade. The goal is to make every parser claim measurable: each item now has a machine-readable profile that states the artifact surface, required known-answer corpus, independent oracle, required checks, minimum evidence, and reportability gate.
 
@@ -14,9 +14,9 @@ rapidtriage validation --output-dir ./validation --overwrite
 
 The generated `rapidtriage-validation-package.json` includes `core_forensics_accuracy_profiles`.
 
-It also includes `core_forensics_known_answer_template`, a 50-dataset skeleton that can be copied into a real known-answer manifest after evidence paths, expected assertions, observed outputs, and pass/fail status are filled in.
+It also includes `core_forensics_known_answer_template`, a 60-dataset skeleton that can be copied into a real known-answer manifest after evidence paths, expected assertions, observed outputs, and pass/fail status are filled in.
 
-For each #1-#50 item, attach evidence before report-grade wording:
+For each #1-#60 item, attach evidence before report-grade wording:
 
 - Source file or export hash.
 - Tool/parser version and command.
@@ -45,7 +45,9 @@ The profiles cover:
 - #36-#40: Email mailbox parsing, Google/iCloud/Microsoft 365 cloud exports, and cloud API acquisition workflow.
 - #41-#45: Cloud credential handling, browser secret inventory, mobile correlation, unified mobile actor view, and app schema version management.
 - #46-#50: Search-result clustering, entity pivots, relationship graphing, timeline correlation, and hypothesis/workbook review aids.
+- #51-#55: Reviewer workflow, multi-evidence compare, raw hex, SQLite, and email conversation viewers.
+- #56-#60: Image gallery review, media transcript preview, OCR queue, Korean OCR/translation workflow, and search hit deduplication.
 
 ## Court/Report Posture
 
-Every #1-#50 profile defaults to `validation-required`. This is deliberate. A parser may be useful for triage while still needing known-answer, cross-tool, or independent validation before a report can claim commercial-grade certainty.
+Every #1-#60 profile defaults to `validation-required`. This is deliberate. A parser may be useful for triage while still needing known-answer, cross-tool, or independent validation before a report can claim commercial-grade certainty.

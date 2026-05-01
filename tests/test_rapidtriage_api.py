@@ -224,6 +224,8 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertFalse(preview_payload["viewer_sandbox"]["executes_content"])
             self.assertIn("#51", preview_payload["review_workflow"]["commercial_gap_ids"])
             self.assertIn("#52", preview_payload["compare_workflow"]["commercial_gap_ids"])
+            self.assertEqual(preview_payload["review_workflow"]["core_accuracy_gates"][0]["gap_id"], "#51")
+            self.assertEqual(preview_payload["compare_workflow"]["core_accuracy_gates"][0]["gap_id"], "#52")
             self.assertEqual(
                 {action["id"] for action in preview_payload["viewer_actions"]},
                 {"download", "hash", "search-current-file", "pin-compare", "save-review"},
@@ -270,6 +272,8 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("CREATE TABLE notes", sqlite_preview["sqlite"]["tables"][0]["schema_sql"])
             self.assertIn("schema-sql", sqlite_preview["sqlite"]["review_features"])
             self.assertIn("#54", sqlite_preview["sqlite"]["sqlite_viewer_assessment"]["commercial_gap_ids"])
+            self.assertEqual(sqlite_preview["sqlite"]["core_accuracy_gates"][0]["gap_id"], "#54")
+            self.assertIn("read-only SQLite open", sqlite_preview["sqlite"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("#74", sqlite_preview["sqlite"]["sqlite_fts_optimization_assessment"]["commercial_gap_ids"])
             self.assertIn("#74", sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["commercial_gap_ids"])
             self.assertGreaterEqual(sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["searchable_text_column_count"], 1)
@@ -307,6 +311,7 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(eml_preview["email"]["thread_count"], 1)
             self.assertEqual(eml_preview["email"]["threads"][0]["message_count"], 1)
             self.assertIn("#55", eml_preview["email"]["email_conversation_viewer_assessment"]["commercial_gap_ids"])
+            self.assertEqual(eml_preview["email"]["core_accuracy_gates"][0]["gap_id"], "#55")
             self.assertEqual(eml_preview["email"]["conversation_view"]["thread_count"], 1)
             self.assertEqual(
                 eml_preview["email"]["conversation_view"]["threads"][0]["message_order"][0]["subject"],
@@ -321,6 +326,7 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertTrue(binary_preview["hex"]["truncated"])
             self.assertEqual(len(binary_preview["hex"]["preview_sha256"]), 64)
             self.assertIn("#53", binary_preview["hex"]["hex_viewer_assessment"]["commercial_gap_ids"])
+            self.assertEqual(binary_preview["hex"]["core_accuracy_gates"][0]["gap_id"], "#53")
             self.assertTrue(binary_preview["hex"]["offset_navigation"]["supports_keyword_byte_hits"])
             binary_search_response = client.get(
                 f"/api/runs/{run_id}/source-search",
@@ -339,6 +345,7 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(len(image_preview["image"]["perceptual_hash"]), 16)
             self.assertIn("#56", image_preview["image"]["gallery_review"]["commercial_gap_ids"])
             self.assertIn("#56", image_preview["image"]["gallery_review_assessment"]["commercial_gap_ids"])
+            self.assertEqual(image_preview["image"]["core_accuracy_gates"][0]["gap_id"], "#56")
             self.assertIn("#58", image_preview["image"]["ocr_queue_assessment"]["commercial_gap_ids"])
             self.assertIn("#59", image_preview["image"]["korean_ocr_translation_workflow"]["commercial_gap_ids"])
             self.assertIn("similarity-bucketed", image_preview["image"]["gallery_review"]["tag_suggestions"])
@@ -354,6 +361,7 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("#57", media_preview["media"]["review"]["commercial_gap_ids"])
             self.assertTrue(media_preview["media"]["review"]["cue_navigation_available"])
             self.assertIn("#57", media_preview["media"]["media_transcript_assessment"]["commercial_gap_ids"])
+            self.assertEqual(media_preview["media"]["core_accuracy_gates"][0]["gap_id"], "#57")
             self.assertEqual(media_preview["media"]["media_transcript_assessment"]["cue_count"], 1)
             self.assertEqual(media_preview["media"]["transcript_sidecars"][0]["cues"][0]["start"], "00:00:00,000")
             self.assertIn("#57", media_preview["media"]["transcript_sidecars"][0]["commercial_gap_ids"])

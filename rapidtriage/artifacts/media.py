@@ -18,6 +18,7 @@ except ModuleNotFoundError:
     Image = None  # type: ignore[assignment]
 
 from ..core.models import ArtifactRecord
+from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.submission import compute_hashes
 
 PARSER_VERSION = "media-image-v4"
@@ -198,6 +199,7 @@ def build_image_record(path: Path) -> ArtifactRecord:
             }
         )
         artifact_type = "media-image"
+    details["core_accuracy_gates"] = media_core_accuracy_gates(details=details, source_path=resolved)
     return ArtifactRecord(
         provider=MediaImageProvider.name,
         artifact_type=artifact_type,
@@ -319,6 +321,62 @@ def media_report_grade_assessment() -> dict[str, object]:
             "Use validated media/OCR tools for sensitive image classification, full gallery workflows, and certified translation.",
         ],
     }
+
+
+def media_core_accuracy_gates(*, details: dict[str, object], source_path: Path) -> list[dict[str, object]]:
+    evidence_refs = [
+        f"source_path:{source_path}",
+        f"source_format:{details.get('source_format', '')}",
+        f"source_size:{details.get('source_size', '')}",
+    ]
+    hashes = details.get("hashes") if isinstance(details.get("hashes"), dict) else {}
+    if hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+
+    item56: list[str] = []
+    if details.get("hashes") and (details.get("width") is not None or details.get("decoded") is not None):
+        item56.append("image metadata and source hashes")
+    if details.get("thumbnail_preview") or details.get("decoded") is not None:
+        item56.append("thumbnail or preview metadata")
+    if details.get("similarity_bucket"):
+        item56.append("perceptual similarity bucket")
+    if details.get("gallery_review_mode"):
+        item56.append("tag/report selection hints")
+    if not MEDIA_NATIVE_CAPABILITIES["deepfake_detection"]:
+        item56.append("visual-classifier limitation warning")
+
+    ocr_sidecar = details.get("ocr_sidecar") if isinstance(details.get("ocr_sidecar"), dict) else {}
+    item58: list[str] = []
+    if details.get("ocr_plan"):
+        item58.append("queue item generation")
+    if (ocr_sidecar.get("sha256") or ocr_sidecar.get("source_sha256")) and ocr_sidecar.get("text_sha256"):
+        item58.append("sidecar import and hashes")
+    if details.get("ocr_queue_assessment"):
+        item58.append("retry state handling")
+    if ocr_sidecar.get("metadata") is not None:
+        item58.append("engine/metadata preservation")
+    if not MEDIA_NATIVE_CAPABILITIES["native_ocr_execution"]:
+        item58.append("native OCR limitation warning")
+
+    translation_sidecar = details.get("translation_sidecar") if isinstance(details.get("translation_sidecar"), dict) else {}
+    workflow = details.get("korean_ocr_translation_workflow") if isinstance(details.get("korean_ocr_translation_workflow"), dict) else {}
+    item59: list[str] = []
+    if workflow.get("language_hints") or details.get("ocr_plan"):
+        item59.append("Korean language hinting")
+    if ocr_sidecar.get("quality_metrics"):
+        item59.append("OCR quality metrics")
+    if translation_sidecar:
+        item59.append("translation sidecar import")
+    if ocr_sidecar.get("metadata") is not None:
+        item59.append("confidence/engine metadata")
+    if not MEDIA_NATIVE_CAPABILITIES["machine_translation_execution"]:
+        item59.append("human translation validation warning")
+
+    return [
+        build_accuracy_gate(56, satisfied_checks=item56, evidence_refs=evidence_refs),
+        build_accuracy_gate(58, satisfied_checks=item58, evidence_refs=evidence_refs),
+        build_accuracy_gate(59, satisfied_checks=item59, evidence_refs=evidence_refs),
+    ]
 
 
 def load_ocr_sidecar(path: Path) -> dict[str, object]:

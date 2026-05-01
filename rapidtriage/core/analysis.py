@@ -100,6 +100,7 @@ def build_search_analysis(
         graph=graph,
         timeline=timeline,
         workbook=workbook,
+        deduplication=deduplication,
     )
     return {
         "summary": {
@@ -140,6 +141,7 @@ def analysis_core_accuracy_gates(
     graph: Mapping[str, object],
     timeline: Mapping[str, object],
     workbook: Mapping[str, object],
+    deduplication: Mapping[str, object],
 ) -> list[dict[str, object]]:
     evidence_refs = [
         f"match_count:{len(matches)}",
@@ -148,6 +150,7 @@ def analysis_core_accuracy_gates(
         f"graph_nodes:{graph.get('summary', {}).get('node_count', 0) if isinstance(graph.get('summary'), Mapping) else 0}",
         f"timeline_events:{timeline.get('summary', {}).get('event_count', 0) if isinstance(timeline.get('summary'), Mapping) else 0}",
         f"workbook_hypotheses:{workbook.get('summary', {}).get('hypothesis_count', 0) if isinstance(workbook.get('summary'), Mapping) else 0}",
+        f"duplicate_groups:{deduplication.get('summary', {}).get('duplicate_group_count', 0) if isinstance(deduplication.get('summary'), Mapping) else 0}",
     ]
     cluster_summary = clusters.get("summary") if isinstance(clusters.get("summary"), Mapping) else {}
     entity_summary = entities.get("summary") if isinstance(entities.get("summary"), Mapping) else {}
@@ -160,6 +163,8 @@ def analysis_core_accuracy_gates(
     graph_edges = graph.get("edges") if isinstance(graph.get("edges"), list) else []
     timeline_events = timeline.get("events") if isinstance(timeline.get("events"), list) else []
     hypotheses = workbook.get("hypotheses") if isinstance(workbook.get("hypotheses"), list) else []
+    dedup_summary = deduplication.get("summary") if isinstance(deduplication.get("summary"), Mapping) else {}
+    duplicate_groups = deduplication.get("groups") if isinstance(deduplication.get("groups"), list) else []
 
     item46: list[str] = []
     if cluster_summary.get("cluster_count") is not None:
@@ -221,12 +226,24 @@ def analysis_core_accuracy_gates(
     if not ANALYSIS_NATIVE_CAPABILITIES["full_case_reindex"]:
         item50.append("persistence/versioning limitation warning")
 
+    item60: list[str] = []
+    if dedup_summary.get("unique_fingerprint_count") is not None:
+        item60.append("duplicate fingerprint generation")
+    if dedup_summary.get("duplicate_group_count") is not None:
+        item60.append("duplicate group counts")
+    if any(isinstance(row, Mapping) and row.get("match_indices") for row in duplicate_groups):
+        item60.append("representative hit links")
+    if any(isinstance(row, Mapping) and (row.get("sources") or row.get("paths")) for row in duplicate_groups):
+        item60.append("source/path references")
+    item60.append("near-duplicate limitation warning")
+
     return [
         build_accuracy_gate(46, satisfied_checks=item46, evidence_refs=evidence_refs),
         build_accuracy_gate(47, satisfied_checks=item47, evidence_refs=evidence_refs),
         build_accuracy_gate(48, satisfied_checks=item48, evidence_refs=evidence_refs),
         build_accuracy_gate(49, satisfied_checks=item49, evidence_refs=evidence_refs),
         build_accuracy_gate(50, satisfied_checks=item50, evidence_refs=evidence_refs),
+        build_accuracy_gate(60, satisfied_checks=item60, evidence_refs=evidence_refs),
     ]
 
 
@@ -323,7 +340,44 @@ def build_search_hit_deduplication(matches: Sequence[Mapping[str, object]], *, m
         },
         "groups": groups,
         "deduplication_assessment": search_deduplication_assessment(),
+        "core_accuracy_gates": search_deduplication_core_accuracy_gates(
+            groups=groups,
+            summary={
+                "duplicate_group_count": len(groups),
+                "duplicate_match_count": duplicate_match_count,
+                "unique_fingerprint_count": len(buckets),
+                "max_groups": max_groups,
+            },
+        ),
     }
+
+
+def search_deduplication_core_accuracy_gates(
+    *,
+    groups: Sequence[Mapping[str, object]],
+    summary: Mapping[str, object],
+) -> list[dict[str, object]]:
+    satisfied = []
+    if summary.get("unique_fingerprint_count") is not None:
+        satisfied.append("duplicate fingerprint generation")
+    if summary.get("duplicate_group_count") is not None:
+        satisfied.append("duplicate group counts")
+    if any(group.get("match_indices") for group in groups):
+        satisfied.append("representative hit links")
+    if any(group.get("sources") or group.get("paths") for group in groups):
+        satisfied.append("source/path references")
+    satisfied.append("near-duplicate limitation warning")
+    return [
+        build_accuracy_gate(
+            60,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"duplicate_group_count:{summary.get('duplicate_group_count', 0)}",
+                f"duplicate_match_count:{summary.get('duplicate_match_count', 0)}",
+                f"unique_fingerprint_count:{summary.get('unique_fingerprint_count', 0)}",
+            ],
+        )
+    ]
 
 
 def dedupe_fingerprint(match: Mapping[str, object]) -> str:

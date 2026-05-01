@@ -37,10 +37,16 @@ class RapidTriageOcrQueueTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["sidecar_imported_count"], 1)
             self.assertIn("#58", payload["summary"]["commercial_gap_ids"])
             self.assertIn("#59", payload["ocr_queue_report_grade_assessment"]["commercial_gap_ids"])
+            queue_gates = {gate["gap_id"]: gate for gate in payload["core_accuracy_gates"]}
+            self.assertIn("queue item generation", queue_gates["#58"]["satisfied_checks"])
+            self.assertIn("sidecar import and hashes", queue_gates["#58"]["satisfied_checks"])
+            self.assertIn("Korean language hinting", queue_gates["#59"]["satisfied_checks"])
+            self.assertIn("translation sidecar import", queue_gates["#59"]["satisfied_checks"])
             self.assertFalse(payload["ocr_queue_native_capabilities"]["native_ocr_engine_execution"])
             item = payload["items"][0]
             self.assertEqual(item["status"], "sidecar-imported")
             self.assertIn("#58", item["commercial_gap_ids"])
+            self.assertEqual(item["core_accuracy_gates"][0]["gap_id"], "#58")
             self.assertIn("#59", item["korean_ocr_translation_workflow"]["commercial_gap_ids"])
             self.assertFalse(item["report_grade_assessment"]["ready_for_court_report"])
             self.assertEqual(item["language_hint"], "ko+en")
@@ -94,6 +100,7 @@ class RapidTriageOcrQueueTests(unittest.TestCase):
             self.assertEqual(payload["items"][0]["status"], "failed-retry-queued")
             self.assertEqual(payload["items"][0]["attempt_count"], 2)
             self.assertIn("#58", payload["items"][0]["report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(payload["core_accuracy_gates"][0]["gap_id"], "#58")
 
 
 if __name__ == "__main__":

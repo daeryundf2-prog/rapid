@@ -88,6 +88,8 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("UTC normalization", analysis_gates["#49"]["satisfied_checks"])
         self.assertIn("draft hypotheses generated", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("persistence/versioning limitation warning", analysis_gates["#50"]["satisfied_checks"])
+        self.assertIn("duplicate fingerprint generation", analysis_gates["#60"]["satisfied_checks"])
+        self.assertIn("duplicate group counts", analysis_gates["#60"]["satisfied_checks"])
 
         clusters = analysis["clusters"]["clusters"]
         self.assertTrue(any(cluster["family"] == "keyword" and cluster["value"] == "password" for cluster in clusters))
@@ -117,6 +119,7 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("#60", analysis["deduplication"]["groups"][0]["commercial_gap_ids"])
         self.assertIn("#60", analysis["deduplication"]["summary"]["commercial_gap_ids"])
         self.assertIn("#60", analysis["deduplication"]["deduplication_assessment"]["commercial_gap_ids"])
+        self.assertEqual(analysis["deduplication"]["core_accuracy_gates"][0]["gap_id"], "#60")
         self.assertFalse(analysis["deduplication"]["deduplication_assessment"]["ready_for_court_report"])
 
         workbook = analysis["workbook"]

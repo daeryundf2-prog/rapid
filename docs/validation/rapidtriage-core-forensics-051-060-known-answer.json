@@ -1,0 +1,117 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #51-#60 internal fixture validation",
+  "status": "pass",
+  "datasets": [
+    {
+      "id": "core-forensics-051-review-workflow-fixture",
+      "name": "#51 reviewer workflow fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDatabaseTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [51],
+      "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_api.py"],
+      "expected": {"required_assertions": ["Review marks preserve status, verification, assignment, priority, report inclusion, history/audit warnings, and #51 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; role-based multi-user review remains commercial blocker."
+    },
+    {
+      "id": "core-forensics-052-compare-fixture",
+      "name": "#52 compare fixture assertions",
+      "source": "tests.test_rapidtriage_compare.RapidTriageCompareTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [52],
+      "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_compare.py", "tests/test_rapidtriage_api.py"],
+      "expected": {"required_assertions": ["Compare preserves A/B/C baseline review, hashes, bounded text diff, status counts, specialized-diff warning, and #52 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; semantic binary/image/table diff viewers remain future work."
+    },
+    {
+      "id": "core-forensics-053-hex-viewer-fixture",
+      "name": "#53 hex viewer fixture assertions",
+      "source": "tests.test_rapidtriage_api.RapidTriageApiTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [53],
+      "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
+      "expected": {"required_assertions": ["Source preview preserves bounded hex rows, byte offsets, preview hash, byte-search citation support, source validation warning, and #53 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; full range export and source-byte citation package remain validation-gated."
+    },
+    {
+      "id": "core-forensics-054-sqlite-viewer-fixture",
+      "name": "#54 SQLite viewer fixture assertions",
+      "source": "tests.test_rapidtriage_api.RapidTriageApiTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [54],
+      "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
+      "expected": {"required_assertions": ["SQLite preview preserves read-only open, table/schema inventory, column/index metadata, bounded row preview, deleted/WAL warning, and #54 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; deleted-row/WAL and large database corpus validation remain blockers."
+    },
+    {
+      "id": "core-forensics-055-email-viewer-fixture",
+      "name": "#55 email conversation viewer fixture assertions",
+      "source": "tests.test_rapidtriage_api.RapidTriageApiTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [55],
+      "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
+      "expected": {"required_assertions": ["Email preview preserves thread grouping, message order, participant/header fields, attachment inventory, mailbox limitations, and #55 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; native PST/OST/MSG conversation validation remains required."
+    },
+    {
+      "id": "core-forensics-056-image-gallery-fixture",
+      "name": "#56 image gallery fixture assertions",
+      "source": "tests.test_rapidtriage_media_image.RapidTriageMediaImageTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [56],
+      "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_media_image.py", "tests/test_rapidtriage_api.py"],
+      "expected": {"required_assertions": ["Image rows/previews preserve metadata, hashes, thumbnail metadata, perceptual similarity bucket, tag/report hints, classifier limitation, and #56 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; dedicated gallery UI and ML similarity validation remain blockers."
+    },
+    {
+      "id": "core-forensics-057-media-transcript-fixture",
+      "name": "#57 media transcript fixture assertions",
+      "source": "tests.test_rapidtriage_api.RapidTriageApiTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [57],
+      "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
+      "expected": {"required_assertions": ["Media preview preserves media metadata, source hashes, transcript sidecars, cue timestamps, verification warning, and #57 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; playback sandbox and ASR/transcript validation remain future work."
+    },
+    {
+      "id": "core-forensics-058-ocr-queue-fixture",
+      "name": "#58 OCR queue fixture assertions",
+      "source": "tests.test_rapidtriage_ocr_queue.RapidTriageOcrQueueTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [58],
+      "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_ocr_queue.py", "tests/test_rapidtriage_media_image.py"],
+      "expected": {"required_assertions": ["OCR queue preserves queue items, sidecar hashes, retry state, engine metadata, native OCR warning, and #58 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; actual OCR worker execution and engine logs remain blockers."
+    },
+    {
+      "id": "core-forensics-059-korean-ocr-fixture",
+      "name": "#59 Korean OCR/translation fixture assertions",
+      "source": "tests.test_rapidtriage_ocr_queue.RapidTriageOcrQueueTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [59],
+      "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_ocr_queue.py", "tests/test_rapidtriage_media_image.py"],
+      "expected": {"required_assertions": ["OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, human-review warning, and #59 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; human-certified translation and OCR calibration remain blockers."
+    },
+    {
+      "id": "core-forensics-060-search-dedup-fixture",
+      "name": "#60 search deduplication fixture assertions",
+      "source": "tests.test_rapidtriage_search_analysis.RapidTriageSearchAnalysisTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [60],
+      "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_search_analysis.py"],
+      "expected": {"required_assertions": ["Search analysis preserves duplicate fingerprints, group counts, representative hit links, source/path references, near-duplicate warning, and #60 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; UI collapse/suppression and fuzzy/media duplicate validation remain blockers."
+    }
+  ]
+}
