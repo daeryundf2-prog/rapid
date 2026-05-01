@@ -535,6 +535,13 @@ def job_queue_core_accuracy_gates(
 
 
 def cancellation_retry_assessment(job: RunJob) -> Dict[str, object]:
+    satisfied = [
+        "queued job cancellation",
+        "running cancel request recorded",
+        "failed/canceled retry support",
+        "state-file cancel flag persisted",
+        "partial output cleanup limitation warning",
+    ]
     return {
         "component": "long-running-job-cancellation-retry",
         "status": "cooperative-cancel-and-failed-canceled-retry-enabled",
@@ -543,6 +550,17 @@ def cancellation_retry_assessment(job: RunJob) -> Dict[str, object]:
         "cancellation_requested": job.cancellation_requested,
         "retry_supported_for": ["failed", "canceled"],
         "ready_for_court_report": False,
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                80,
+                satisfied_checks=satisfied,
+                evidence_refs=[
+                    f"job_status:{job.status}",
+                    f"cancellation_requested:{job.cancellation_requested}",
+                    "retry_supported_for:failed,canceled",
+                ],
+            )
+        ],
         "supports": [
             "queued-job-cancel",
             "running-job-cancel-request-record",

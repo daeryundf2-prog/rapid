@@ -625,6 +625,11 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["gap_id"], "#69")
             self.assertIn("step progress recorded", canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("#80", canceled.to_dict()["cancellation_retry_assessment"]["commercial_gap_ids"])
+            self.assertEqual(canceled.to_dict()["cancellation_retry_assessment"]["core_accuracy_gates"][0]["gap_id"], "#80")
+            self.assertIn(
+                "failed/canceled retry support",
+                canceled.to_dict()["cancellation_retry_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertTrue(all("#69" in step["commercial_gap_ids"] for step in canceled.to_dict()["steps"]))
             self.assertTrue(all(step["core_accuracy_gates"][0]["gap_id"] == "#69" for step in canceled.to_dict()["steps"]))
             self.assertTrue(all("#80" in step["operational_gap_ids"] for step in canceled.to_dict()["steps"]))

@@ -224,6 +224,8 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("Preview is read-only", preview_payload["viewer_limitations"][0])
             self.assertIn("#73", preview_payload["viewer_sandbox"]["commercial_gap_ids"])
             self.assertFalse(preview_payload["viewer_sandbox"]["executes_content"])
+            self.assertEqual(preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["gap_id"], "#73")
+            self.assertIn("read-only bounded preview", preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("#51", preview_payload["review_workflow"]["commercial_gap_ids"])
             self.assertIn("#52", preview_payload["compare_workflow"]["commercial_gap_ids"])
             self.assertEqual(preview_payload["review_workflow"]["core_accuracy_gates"][0]["gap_id"], "#51")
@@ -246,6 +248,7 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(metadata_payload["hash_status"], "computed")
             self.assertEqual(metadata_payload["hashes"]["sha256"], hash_file(Path(document_match["path"]), "sha256"))
             self.assertIn("#76", metadata_payload["hash_cache_assessment"]["commercial_gap_ids"])
+            self.assertEqual(metadata_payload["hash_cache_assessment"]["core_accuracy_gates"][0]["gap_id"], "#76")
             file_search_response = client.get(
                 f"/api/runs/{run_id}/source-search",
                 params={"path": document_match["path"], "keyword": "password"},
@@ -278,6 +281,7 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("read-only SQLite open", sqlite_preview["sqlite"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("#74", sqlite_preview["sqlite"]["sqlite_fts_optimization_assessment"]["commercial_gap_ids"])
             self.assertIn("#74", sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["commercial_gap_ids"])
+            self.assertEqual(sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["gap_id"], "#74")
             self.assertGreaterEqual(sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["searchable_text_column_count"], 1)
             self.assertEqual(sqlite_preview["sqlite"]["table_profiles"][0]["name"], "notes")
             self.assertGreaterEqual(sqlite_preview["sqlite"]["table_profiles"][0]["searchable_text_column_count"], 1)
@@ -400,6 +404,9 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("next_cursor", paged_files["pagination"])
             self.assertIn("#78", paged_files["pagination"]["commercial_gap_ids"])
             self.assertIn("#78", paged_files["pagination"]["pagination_assessment"]["commercial_gap_ids"])
+            self.assertEqual(paged_files["pagination"]["core_accuracy_gates"][0]["gap_id"], "#78")
+            self.assertEqual(paged_files["pagination"]["core_accuracy_gates"][1]["gap_id"], "#79")
+            self.assertEqual(paged_files["pagination"]["ui_virtualization"]["core_accuracy_gates"][0]["gap_id"], "#79")
             cursor_files_response = client.get(
                 f"/api/runs/{run_id}/files",
                 params={"cursor": paged_files["pagination"]["cursor"], "limit": 2},

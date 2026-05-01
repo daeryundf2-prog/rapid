@@ -131,10 +131,17 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["parser_error_count"], 1)
             self.assertIn("#71", payload["parser_errors"][0]["commercial_gap_ids"])
             self.assertIn("#71", payload["parser_crash_isolation"]["commercial_gap_ids"])
+            self.assertEqual(payload["parser_crash_isolation"]["core_accuracy_gates"][0]["gap_id"], "#71")
+            self.assertIn(
+                "per-parser exception capture",
+                payload["parser_crash_isolation"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
 
         assessment = memory_cap_enforcement_assessment(memory_cap_bytes=123456)
         self.assertEqual(assessment["memory_cap_bytes"], 123456)
         self.assertIn("#72", assessment["commercial_gap_ids"])
+        self.assertEqual(assessment["core_accuracy_gates"][0]["gap_id"], "#72")
+        self.assertIn("memory cap configuration recorded", assessment["core_accuracy_gates"][0]["satisfied_checks"])
 
     def test_run_supports_read_only_extract_safety(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -230,6 +237,9 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("#72", summary_payload["processing"]["memory_cap_enforcement"]["commercial_gap_ids"])
             self.assertIn("#75", summary_payload["processing"]["parallel_parser_scheduler"]["commercial_gap_ids"])
             self.assertIn("#75", summary_payload["safety"]["artifact_scheduler"]["commercial_gap_ids"])
+            self.assertEqual(summary_payload["processing"]["parser_crash_isolation"]["core_accuracy_gates"][0]["gap_id"], "#71")
+            self.assertEqual(summary_payload["processing"]["memory_cap_enforcement"]["core_accuracy_gates"][0]["gap_id"], "#72")
+            self.assertEqual(summary_payload["processing"]["parallel_parser_scheduler"]["core_accuracy_gates"][0]["gap_id"], "#75")
             self.assertEqual(summary_payload["resource_caps"]["memory_cap_bytes"], 0)
             self.assertIn("checkpoints", summary_payload["outputs"])
             checkpoints = json.loads((output_dir / "rapidtriage-run-checkpoints.json").read_text(encoding="utf-8"))

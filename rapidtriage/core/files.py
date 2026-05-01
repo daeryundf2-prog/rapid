@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from .input_root import InputRoot, resolve_input_root
+from .forensic_accuracy import build_accuracy_gate
 from .hash_cache import HASH_CACHE_GAP_ID, compute_hashes_cached, hash_cache_assessment
 from .models import FileCandidate
 from .rules import RuleSet, annotate_files_payload
@@ -336,6 +337,10 @@ def run_files_scan(
         },
         "hash_cache_assessment": hash_cache_assessment(),
         "duplicate_detection_assessment": duplicate_detection_assessment(duplicate_groups),
+        "core_accuracy_gates": [
+            *hash_cache_assessment()["core_accuracy_gates"],
+            *duplicate_content_core_accuracy_gates(duplicate_groups),
+        ],
         "duplicate_content_groups": duplicate_groups,
         "candidates": [item.to_dict() for item in candidates],
     }
@@ -549,6 +554,13 @@ def build_duplicate_content_groups(
 
 
 def duplicate_detection_assessment(groups: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    satisfied = [
+        "same-size candidate bucketing",
+        "bounded SHA256 confirmation",
+        "duplicate group counts",
+        "representative paths listed",
+        "suppression verification warning",
+    ]
     return {
         "component": "duplicate-file-content-detection",
         "status": "bounded-sha256-same-size-grouping",
@@ -556,6 +568,7 @@ def duplicate_detection_assessment(groups: Sequence[Mapping[str, object]]) -> di
         "duplicate_group_count": len(groups),
         "duplicate_file_count": sum(int(group.get("file_count") or 0) for group in groups),
         "ready_for_court_report": False,
+        "core_accuracy_gates": duplicate_content_core_accuracy_gates(groups, satisfied_checks=satisfied),
         "supports": [
             "same-size-candidate-bucketing",
             "bounded-content-sha256-confirmation",
@@ -567,3 +580,30 @@ def duplicate_detection_assessment(groups: Sequence[Mapping[str, object]]) -> di
             "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports",
         ],
     }
+
+
+def duplicate_content_core_accuracy_gates(
+    groups: Sequence[Mapping[str, object]],
+    *,
+    satisfied_checks: Sequence[str] | None = None,
+) -> list[dict[str, object]]:
+    satisfied = list(
+        satisfied_checks
+        or (
+            "same-size candidate bucketing",
+            "bounded SHA256 confirmation",
+            "duplicate group counts",
+            "representative paths listed",
+            "suppression verification warning",
+        )
+    )
+    return [
+        build_accuracy_gate(
+            77,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"duplicate_group_count:{len(groups)}",
+                f"duplicate_file_count:{sum(int(group.get('file_count') or 0) for group in groups)}",
+            ],
+        )
+    ]

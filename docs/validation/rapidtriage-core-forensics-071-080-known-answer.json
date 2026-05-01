@@ -1,0 +1,117 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #71-#80 internal fixture validation",
+  "status": "pass",
+  "datasets": [
+    {
+      "id": "core-forensics-071-parser-crash-fixture",
+      "name": "#71 parser crash isolation fixture assertions",
+      "source": "tests.test_rapidtriage_run.RapidTriageRunTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [71],
+      "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
+      "expected": {"required_assertions": ["Parser failures preserve isolated parser_errors, failed parser JSON output, run continuation warnings, summary counts, and #71 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; native process sandboxing and corrupt-input fuzz corpus remain blockers."
+    },
+    {
+      "id": "core-forensics-072-memory-cap-fixture",
+      "name": "#72 memory cap fixture assertions",
+      "source": "tests.test_rapidtriage_run.RapidTriageRunTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [72],
+      "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
+      "expected": {"required_assertions": ["Run summaries preserve memory cap configuration, RSS readings, stage-boundary enforcement, fail-fast warnings, hard-limit caveats, and #72 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; hard OS memory controls and platform RSS validation remain blockers."
+    },
+    {
+      "id": "core-forensics-073-preview-sandbox-fixture",
+      "name": "#73 preview sandbox fixture assertions",
+      "source": "tests.test_rapidtriage_api.RapidTriageApiTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [73],
+      "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
+      "expected": {"required_assertions": ["Source previews preserve read-only bounded preview metadata, active-content blocking, no network execution, cap metadata, OS sandbox warning, and #73 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; renderer/codecs/macros still require external sandbox validation."
+    },
+    {
+      "id": "core-forensics-074-sqlite-fts-fixture",
+      "name": "#74 large SQLite/FTS fixture assertions",
+      "source": "tests.test_rapidtriage_api.RapidTriageApiTests; tests.test_rapidtriage_case_db.RapidTriageCaseDbTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [74],
+      "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py", "tests/test_rapidtriage_case_db.py"],
+      "expected": {"required_assertions": ["SQLite outputs preserve performance pragmas, table profiles, searchable text column counts, bounded row previews, large-corpus warnings, and #74 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; 10M-row query-plan and WAL/deleted-row validation remain blockers."
+    },
+    {
+      "id": "core-forensics-075-parser-scheduler-fixture",
+      "name": "#75 parallel parser scheduler fixture assertions",
+      "source": "tests.test_rapidtriage_run.RapidTriageRunTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [75],
+      "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
+      "expected": {"required_assertions": ["Run summaries preserve bounded worker count, deterministic outputs, per-parser capture, resume-aware scheduling, local-threadpool warning, and #75 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; distributed scheduling and TB-scale backpressure validation remain blockers."
+    },
+    {
+      "id": "core-forensics-076-hash-cache-fixture",
+      "name": "#76 file hash cache fixture assertions",
+      "source": "tests.test_rapidtriage_files.RapidTriageFilesTests; tests.test_rapidtriage_api.RapidTriageApiTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [76],
+      "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_files.py", "tests/test_rapidtriage_api.py"],
+      "expected": {"required_assertions": ["Hash outputs preserve MD5/SHA1/SHA256, path-size-mtime cache metadata, hit/miss counters, hash-cache assessment, persistent-cache warning, and #76 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; persistent content-addressed cache and large-case hit-ratio validation remain blockers."
+    },
+    {
+      "id": "core-forensics-077-duplicate-detection-fixture",
+      "name": "#77 duplicate detection fixture assertions",
+      "source": "tests.test_rapidtriage_files.RapidTriageFilesTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [77],
+      "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_files.py"],
+      "expected": {"required_assertions": ["File scans preserve same-size bucketing, bounded SHA256 confirmation, duplicate group counts, representative paths, suppression warnings, and #77 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; fuzzy/media duplicate validation and analyst suppression UX remain blockers."
+    },
+    {
+      "id": "core-forensics-078-pagination-fixture",
+      "name": "#78 cursor pagination fixture assertions",
+      "source": "tests.test_rapidtriage_api.RapidTriageApiTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [78],
+      "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
+      "expected": {"required_assertions": ["API pages preserve cursor tokens, offset/limit/total metadata, next/previous cursors, bounded rows, snapshot warning, and #78 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; snapshot-isolated cursors and endpoint-wide pagination compatibility remain blockers."
+    },
+    {
+      "id": "core-forensics-079-ui-virtualization-fixture",
+      "name": "#79 UI virtualization fixture assertions",
+      "source": "tests.test_rapidtriage_api.RapidTriageApiTests; rapidtriage.web.static.app",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [79],
+      "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py", "rapidtriage/web/static/app.js"],
+      "expected": {"required_assertions": ["API pagination and web UI preserve bounded DOM row windows, visible-row disclosure, keyboard/filter flow, API pagination links, virtual-scroller warning, and #79 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; true virtual scroller, viewport persistence, and browser e2e performance evidence remain blockers."
+    },
+    {
+      "id": "core-forensics-080-cancel-retry-fixture",
+      "name": "#80 cancellation/retry fixture assertions",
+      "source": "tests.test_rapidtriage_ops.RapidTriageOpsTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [80],
+      "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
+      "expected": {"required_assertions": ["Job payloads preserve queued cancellation, running cancel request records, failed/canceled retry support, persisted cancel flags, partial-output warnings, and #80 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; parser-level cancellation under load and partial-output cleanup/resume validation remain blockers."
+    }
+  ]
+}

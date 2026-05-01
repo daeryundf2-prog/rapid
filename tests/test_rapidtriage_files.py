@@ -49,6 +49,9 @@ class RapidTriageFilesTests(unittest.TestCase):
             self.assertIn("#77", payload["summary"]["commercial_gap_ids"])
             self.assertIn("#76", payload["hash_cache_assessment"]["commercial_gap_ids"])
             self.assertIn("#77", payload["duplicate_detection_assessment"]["commercial_gap_ids"])
+            self.assertEqual(payload["hash_cache_assessment"]["core_accuracy_gates"][0]["gap_id"], "#76")
+            self.assertEqual(payload["duplicate_detection_assessment"]["core_accuracy_gates"][0]["gap_id"], "#77")
+            self.assertEqual({gate["gap_id"] for gate in payload["core_accuracy_gates"]}, {"#76", "#77"})
             category_counts = payload["summary"]["category_counts"]
             self.assertGreaterEqual(category_counts["documents"], 1)
             self.assertGreaterEqual(category_counts["archives"], 1)
@@ -133,6 +136,10 @@ class RapidTriageFilesTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["duplicate_group_count"], 1)
             self.assertEqual(payload["duplicate_content_groups"][0]["file_count"], 2)
             self.assertIn("#77", payload["duplicate_content_groups"][0]["commercial_gap_ids"])
+            self.assertIn(
+                "duplicate group counts",
+                payload["duplicate_detection_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
 
 
 if __name__ == "__main__":

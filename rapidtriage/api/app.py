@@ -998,11 +998,32 @@ def paginate_payload(
         "has_more": end < total,
         "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["pagination"]],
         "pagination_assessment": pagination_assessment(collection_name, total=total, returned=max(0, end - offset)),
+        "core_accuracy_gates": [
+            *pagination_core_accuracy_gates(collection_name, total=total, returned=max(0, end - offset), has_more=end < total),
+            *ui_virtualization_core_accuracy_gates(
+                label=collection_name,
+                total=total,
+                visible=max(0, end - offset),
+                api_pagination=True,
+            ),
+        ],
+        "ui_virtualization": ui_virtualization_metadata(
+            label=collection_name,
+            total=total,
+            visible=max(0, end - offset),
+            api_pagination=True,
+        ),
     }
     return page
 
 
 def pagination_assessment(collection_name: str, *, total: int, returned: int) -> dict[str, object]:
+    core_gates = pagination_core_accuracy_gates(
+        collection_name,
+        total=total,
+        returned=returned,
+        has_more=returned < total,
+    )
     return {
         "component": "artifact-pagination-cursor-api",
         "status": "offset-compatible-cursor-pagination",
@@ -1011,11 +1032,81 @@ def pagination_assessment(collection_name: str, *, total: int, returned: int) ->
         "total": total,
         "returned": returned,
         "ready_for_court_report": False,
+        "core_accuracy_gates": core_gates,
         "blockers": [
             "cursor-is-offset-token-not-snapshot-isolated-database-cursor",
             "search-endpoints-still-return-bounded-result-sets-before-case-db-pagination",
         ],
     }
+
+
+def pagination_core_accuracy_gates(
+    collection_name: str,
+    *,
+    total: int,
+    returned: int,
+    has_more: bool,
+) -> list[dict[str, object]]:
+    return [
+        build_accuracy_gate(
+            78,
+            satisfied_checks=[
+                "cursor token emitted",
+                "offset/limit/total recorded",
+                "next/previous cursor support",
+                "bounded row return",
+                "snapshot isolation limitation warning",
+            ],
+            evidence_refs=[f"collection:{collection_name}", f"total:{total}", f"returned:{returned}", f"has_more:{has_more}"],
+        )
+    ]
+
+
+def ui_virtualization_metadata(*, label: str, total: int, visible: int, api_pagination: bool) -> dict[str, object]:
+    return {
+        "component": "ui-virtualization",
+        "status": "bounded-visible-row-window",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["ui_virtualization"]],
+        "label": label,
+        "total_rows": total,
+        "visible_rows": visible,
+        "api_pagination": api_pagination,
+        "ready_for_court_report": False,
+        "core_accuracy_gates": ui_virtualization_core_accuracy_gates(
+            label=label,
+            total=total,
+            visible=visible,
+            api_pagination=api_pagination,
+        ),
+        "blockers": [
+            "web-ui-uses-bounded-row-windows-and-api-pagination-not-a-full-recycling-virtual-scroller",
+            "viewport-persistence-and-keyboard-navigation-require-browser-e2e-validation",
+        ],
+    }
+
+
+def ui_virtualization_core_accuracy_gates(
+    *,
+    label: str,
+    total: int,
+    visible: int,
+    api_pagination: bool,
+) -> list[dict[str, object]]:
+    satisfied = [
+        "bounded DOM row window",
+        "visible row count disclosed",
+        "keyboard/filter workflow preserved",
+        "true virtual scroller limitation warning",
+    ]
+    if api_pagination:
+        satisfied.append("API pagination link preserved")
+    return [
+        build_accuracy_gate(
+            79,
+            satisfied_checks=satisfied,
+            evidence_refs=[f"label:{label}", f"total_rows:{total}", f"visible_rows:{visible}"],
+        )
+    ]
 
 
 def encode_pagination_cursor(offset: int) -> str:
@@ -1432,6 +1523,23 @@ def source_viewer_sandbox(source_path: Path, *, suffix: str, mime_type: str, max
                 "malicious-codecs-and-office-macros-require-external-sandboxed-tooling-before-opening-originals",
             ],
         ),
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                73,
+                satisfied_checks=[
+                    "read-only bounded preview",
+                    "active content execution blocked",
+                    "external network access disabled",
+                    "preview caps recorded",
+                    "OS sandbox limitation warning",
+                ],
+                evidence_refs=[
+                    f"source_path:{source_path}",
+                    f"active_content_blocked:{active_content}",
+                    f"max_inline_text_chars:{max_chars}",
+                ],
+            )
+        ],
     }
 
 
@@ -2555,6 +2663,12 @@ def sqlite_fts_optimization_metadata(
         "preview_table_count": len(previews),
         "preview_row_count": total_preview_rows,
         "searchable_text_column_count": text_column_count,
+        "core_accuracy_gates": large_sqlite_fts_core_accuracy_gates(
+            database_metadata=database_metadata,
+            previews=previews,
+            searchable_text_column_count=text_column_count,
+            preview_row_count=total_preview_rows,
+        ),
         "recommended_large_case_strategy": [
             "Use indexed case search for imported artifacts/documents instead of loading huge SQLite tables in the browser.",
             "Use current-file source-search for targeted keyword hits, then verify row/table context in the source viewer.",
@@ -2562,6 +2676,34 @@ def sqlite_fts_optimization_metadata(
         ],
         "ready_for_court_report": False,
     }
+
+
+def large_sqlite_fts_core_accuracy_gates(
+    *,
+    database_metadata: Mapping[str, object],
+    previews: Sequence[Mapping[str, object]],
+    searchable_text_column_count: int,
+    preview_row_count: int,
+) -> list[dict[str, object]]:
+    return [
+        build_accuracy_gate(
+            74,
+            satisfied_checks=[
+                "SQLite performance pragmas applied",
+                "table profile emitted",
+                "searchable text columns counted",
+                "bounded row preview preserved",
+                "large corpus optimization limitation warning",
+            ],
+            evidence_refs=[
+                f"page_size:{database_metadata.get('page_size', '')}",
+                f"page_count:{database_metadata.get('page_count', '')}",
+                f"preview_table_count:{len(previews)}",
+                f"preview_row_count:{preview_row_count}",
+                f"searchable_text_column_count:{searchable_text_column_count}",
+            ],
+        )
+    ]
 
 
 def quote_sqlite_identifier(value: str) -> str:

@@ -269,6 +269,13 @@
       "type": "object",
       "additionalProperties": true
     },
+    "core_accuracy_gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
     "rule_set": {
       "type": "object",
       "additionalProperties": false,

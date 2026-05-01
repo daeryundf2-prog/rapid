@@ -1,6 +1,6 @@
-# RapidTriage #1-#70 Accuracy Profiles
+# RapidTriage #1-#80 Accuracy Profiles
 
-This document explains the validation and accuracy layer for commercial-parity backlog items #1 through #70.
+This document explains the validation and accuracy layer for commercial-parity backlog items #1 through #80.
 
 The goal is not to overclaim that every parser is commercial-grade. The goal is to make every parser claim measurable: each item now has a machine-readable profile that states the artifact surface, required known-answer corpus, independent oracle, required checks, minimum evidence, and reportability gate.
 
@@ -14,9 +14,9 @@ rapidtriage validation --output-dir ./validation --overwrite
 
 The generated `rapidtriage-validation-package.json` includes `core_forensics_accuracy_profiles`.
 
-It also includes `core_forensics_known_answer_template`, a 70-dataset skeleton that can be copied into a real known-answer manifest after evidence paths, expected assertions, observed outputs, and pass/fail status are filled in.
+It also includes `core_forensics_known_answer_template`, an 80-dataset skeleton that can be copied into a real known-answer manifest after evidence paths, expected assertions, observed outputs, and pass/fail status are filled in.
 
-For each #1-#70 item, attach evidence before report-grade wording:
+For each #1-#80 item, attach evidence before report-grade wording:
 
 - Source file or export hash.
 - Tool/parser version and command.
@@ -49,7 +49,9 @@ The profiles cover:
 - #56-#60: Image gallery review, media transcript preview, OCR queue, Korean OCR/translation workflow, and search hit deduplication.
 - #61-#65: Advanced search modes, keyword packs, IOC/TI enrichment, report citations, and evidence selection history.
 - #66-#70: Benchmarking, stress-test runbooks, incremental indexing, background jobs, and stage checkpoint/resume.
+- #71-#75: Parser crash isolation, memory cap enforcement, preview sandboxing, large SQLite/FTS optimization, and parallel parser scheduling.
+- #76-#80: File hash caching, duplicate detection, cursor pagination, UI virtualization, and long-running cancellation/retry.
 
 ## Court/Report Posture
 
-Every #1-#70 profile defaults to `validation-required`. This is deliberate. A parser may be useful for triage while still needing known-answer, cross-tool, or independent validation before a report can claim commercial-grade certainty.
+Every #1-#80 profile defaults to `validation-required`. This is deliberate. A parser may be useful for triage while still needing known-answer, cross-tool, or independent validation before a report can claim commercial-grade certainty.

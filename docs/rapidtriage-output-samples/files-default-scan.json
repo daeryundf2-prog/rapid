@@ -62,6 +62,11 @@
     "hit_count": "<HASH_CACHE_HIT_COUNT>",
     "miss_count": "<HASH_CACHE_MISS_COUNT>",
     "ready_for_court_report": false,
+    "core_accuracy_gates": [
+      {
+        "gap_id": "#76"
+      }
+    ],
     "blockers": [
       "cache-is-process-local-not-persistent-across-restarts",
       "cache-key-uses-path-size-mtime-not-verified-content-addressed-store",
@@ -77,6 +82,11 @@
     "duplicate_group_count": 0,
     "duplicate_file_count": 0,
     "ready_for_court_report": false,
+    "core_accuracy_gates": [
+      {
+        "gap_id": "#77"
+      }
+    ],
     "supports": [
       "same-size-candidate-bucketing",
       "bounded-content-sha256-confirmation",
@@ -88,6 +98,14 @@
       "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports"
     ]
   },
+  "core_accuracy_gates": [
+    {
+      "gap_id": "#76"
+    },
+    {
+      "gap_id": "#77"
+    }
+  ],
   "duplicate_content_groups": [],
   "candidates": [
     {

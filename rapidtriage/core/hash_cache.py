@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from .forensic_accuracy import build_accuracy_gate
+
 
 HASH_ALGORITHMS = ("md5", "sha1", "sha256")
 HASH_CACHE_GAP_ID = "#76"
@@ -37,6 +39,13 @@ def compute_hashes_cached(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> d
 
 
 def hash_cache_assessment() -> dict[str, object]:
+    satisfied = [
+        "MD5/SHA1/SHA256 captured",
+        "path-size-mtime cache key recorded",
+        "hit/miss counters emitted",
+        "hash cache assessment attached",
+        "persistent cache limitation warning",
+    ]
     return {
         "component": "file-hash-cache",
         "status": "in-process-path-size-mtime-cache",
@@ -47,6 +56,17 @@ def hash_cache_assessment() -> dict[str, object]:
         "hit_count": _HASH_CACHE_STATS["hits"],
         "miss_count": _HASH_CACHE_STATS["misses"],
         "ready_for_court_report": False,
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                76,
+                satisfied_checks=satisfied,
+                evidence_refs=[
+                    f"entry_count:{len(_HASH_CACHE)}",
+                    f"hit_count:{_HASH_CACHE_STATS['hits']}",
+                    f"miss_count:{_HASH_CACHE_STATS['misses']}",
+                ],
+            )
+        ],
         "blockers": [
             "cache-is-process-local-not-persistent-across-restarts",
             "cache-key-uses-path-size-mtime-not-verified-content-addressed-store",

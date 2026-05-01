@@ -263,12 +263,23 @@ def canonicalize_docs(payload: dict[str, Any]) -> dict[str, Any]:
 def canonicalize_files(payload: dict[str, Any]) -> dict[str, Any]:
     canonical = dict(payload)
     canonical["candidates"] = sorted(canonical["candidates"], key=lambda item: item["path"])
+    canonical["core_accuracy_gates"] = compact_core_accuracy_gates(canonical.get("core_accuracy_gates"))
     cache = canonical.get("hash_cache_assessment")
     if isinstance(cache, dict):
         cache["entry_count"] = "<HASH_CACHE_ENTRY_COUNT>"
         cache["hit_count"] = "<HASH_CACHE_HIT_COUNT>"
         cache["miss_count"] = "<HASH_CACHE_MISS_COUNT>"
+        cache["core_accuracy_gates"] = compact_core_accuracy_gates(cache.get("core_accuracy_gates"))
+    duplicate = canonical.get("duplicate_detection_assessment")
+    if isinstance(duplicate, dict):
+        duplicate["core_accuracy_gates"] = compact_core_accuracy_gates(duplicate.get("core_accuracy_gates"))
     return canonical
+
+
+def compact_core_accuracy_gates(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [{"gap_id": item.get("gap_id")} for item in value if isinstance(item, dict) and item.get("gap_id")]
 
 
 def canonicalize_extract(payload: dict[str, Any]) -> dict[str, Any]:

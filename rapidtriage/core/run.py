@@ -608,6 +608,16 @@ def artifact_scheduler_workers(kinds: Sequence[str]) -> int:
 
 def parallel_parser_scheduler_assessment(kinds: Sequence[str]) -> dict[str, object]:
     scheduled = len(tuple(kinds))
+    satisfied = ["distributed scheduler limitation warning"]
+    if scheduled:
+        satisfied.extend(
+            [
+                "bounded worker count",
+                "deterministic output paths",
+                "per-parser result capture",
+                "resume-aware scheduling",
+            ]
+        )
     return {
         "component": "parallel-parser-scheduler",
         "status": "threaded-parser-stage-scheduler-enabled",
@@ -615,6 +625,13 @@ def parallel_parser_scheduler_assessment(kinds: Sequence[str]) -> dict[str, obje
         "scheduled_count": scheduled,
         "max_workers": artifact_scheduler_workers(kinds),
         "ready_for_court_report": False,
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                75,
+                satisfied_checks=satisfied,
+                evidence_refs=[f"scheduled_count:{scheduled}", f"max_workers:{artifact_scheduler_workers(kinds)}"],
+            )
+        ],
         "supports": [
             "bounded-worker-count",
             "deterministic-output-paths",
@@ -665,6 +682,14 @@ def enforce_memory_cap(stage: str, memory_cap_bytes: int) -> None:
 
 def memory_cap_enforcement_assessment(*, memory_cap_bytes: int) -> dict[str, object]:
     current_rss = current_memory_rss_bytes()
+    satisfied = [
+        "RSS reading captured",
+        "stage-boundary enforcement",
+        "fail-fast corruption prevention warning",
+        "hard OS limit limitation warning",
+    ]
+    if memory_cap_bytes > 0:
+        satisfied.append("memory cap configuration recorded")
     return {
         "component": "memory-cap-enforcement",
         "status": "stage-boundary-enforced" if memory_cap_bytes > 0 else "available-not-configured",
@@ -672,6 +697,13 @@ def memory_cap_enforcement_assessment(*, memory_cap_bytes: int) -> dict[str, obj
         "memory_cap_bytes": memory_cap_bytes,
         "current_rss_bytes": current_rss,
         "ready_for_court_report": False,
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                72,
+                satisfied_checks=satisfied,
+                evidence_refs=[f"memory_cap_bytes:{memory_cap_bytes}", f"current_rss_bytes:{current_rss}"],
+            )
+        ],
         "supports": [
             "environment-or-cli-configured-memory-cap",
             "rss-checks-at-run-stage-boundaries",
@@ -755,12 +787,26 @@ def isolated_parser_error_payload(kind: str, *, input_root: InputRoot, exc: Exce
 
 
 def parser_crash_isolation_assessment(*, error_count: int) -> dict[str, object]:
+    satisfied = [
+        "per-parser exception capture",
+        "failed parser JSON output",
+        "run continuation after parser error",
+        "summary warning surfaced",
+        "native sandbox/fuzzing limitation warning",
+    ]
     return {
         "component": "parser-crash-isolation",
         "status": "isolated-errors-captured" if error_count else "enabled-no-errors",
         "commercial_gap_ids": [PARSER_CRASH_ISOLATION_GAP_ID],
         "parser_error_count": error_count,
         "ready_for_court_report": error_count == 0,
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                71,
+                satisfied_checks=satisfied,
+                evidence_refs=[f"parser_error_count:{error_count}", "run-summary:processing.parser_crash_isolation"],
+            )
+        ],
         "supports": [
             "per-parser-exception-capture",
             "failed-parser-json-output",

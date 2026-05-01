@@ -1625,6 +1625,23 @@ def case_db_fts_optimization_assessment(connection: sqlite3.Connection) -> dict[
             "optimize_on_close": True,
         },
         "ready_for_court_report": False,
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                74,
+                satisfied_checks=[
+                    "SQLite performance pragmas applied",
+                    "table profile emitted",
+                    "searchable text columns counted",
+                    "bounded row preview preserved",
+                    "large corpus optimization limitation warning",
+                ],
+                evidence_refs=[
+                    f"fts_table_count:{len(fts_tables)}",
+                    f"index_count:{len(indexes)}",
+                    "journal_mode:WAL-when-supported",
+                ],
+            )
+        ],
         "blockers": [
             "10m-record-benchmark-and-query-plan-regression-gates-remain-required",
             "external-source-sqlite-wal/journal-replay-is-not-part-of-case-db-indexing",

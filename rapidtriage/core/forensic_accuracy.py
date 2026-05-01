@@ -988,6 +988,146 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "partial-stage limitation warning",
         ),
     },
+    {
+        "number": 71,
+        "title": "Parser crash isolation",
+        "surface": "isolated parser failures, parser error rows, continued run summaries, and crash corpus warnings",
+        "corpus": "parser-stage fixtures with synthetic exceptions, corrupt inputs, partial artifacts, and successful sibling parsers",
+        "oracle": "expected parser_errors payload, run continuation summary, failed-parser JSON output, and crash-corpus checklist",
+        "required_checks": (
+            "per-parser exception capture",
+            "failed parser JSON output",
+            "run continuation after parser error",
+            "summary warning surfaced",
+            "native sandbox/fuzzing limitation warning",
+        ),
+    },
+    {
+        "number": 72,
+        "title": "Memory cap enforcement",
+        "surface": "configured memory cap, RSS readings, stage-boundary checks, fail-fast behavior, and platform caveats",
+        "corpus": "run fixtures with unset cap, configured cap, exceeded cap, and platform RSS reporting differences",
+        "oracle": "expected resource cap JSON, failure message, RSS evidence, and platform caveat matrix",
+        "required_checks": (
+            "memory cap configuration recorded",
+            "RSS reading captured",
+            "stage-boundary enforcement",
+            "fail-fast corruption prevention warning",
+            "hard OS limit limitation warning",
+        ),
+    },
+    {
+        "number": 73,
+        "title": "Preview sandboxing",
+        "surface": "read-only previews, active-content blocking, network denial, bounded text/hex caps, and sandbox warnings",
+        "corpus": "viewer fixtures with HTML/SVG/script, binary files, large text, SQLite, media, and structured documents",
+        "oracle": "expected viewer_sandbox metadata, active-content flags, cap metadata, and no-execution assertion",
+        "required_checks": (
+            "read-only bounded preview",
+            "active content execution blocked",
+            "external network access disabled",
+            "preview caps recorded",
+            "OS sandbox limitation warning",
+        ),
+    },
+    {
+        "number": 74,
+        "title": "Large SQLite/FTS optimization",
+        "surface": "SQLite WAL/cache pragmas, table profiles, text column counts, FTS readiness, and optimization caveats",
+        "corpus": "Case DB and source-viewer SQLite fixtures with text columns, indexes, row previews, WAL mode, and large-table caps",
+        "oracle": "expected pragma metadata, table profile summary, FTS/read-only preview output, and large-DB limitation sheet",
+        "required_checks": (
+            "SQLite performance pragmas applied",
+            "table profile emitted",
+            "searchable text columns counted",
+            "bounded row preview preserved",
+            "large corpus optimization limitation warning",
+        ),
+    },
+    {
+        "number": 75,
+        "title": "Parallel parser scheduler",
+        "surface": "bounded worker count, deterministic artifact outputs, per-parser capture, resume-aware scheduling, and queue limits",
+        "corpus": "artifact-stage fixtures with multiple parser kinds, resume reuse, synthetic parser failure, and deterministic output checks",
+        "oracle": "expected scheduler metadata, output path ordering, parser result capture, and local-threadpool caveat",
+        "required_checks": (
+            "bounded worker count",
+            "deterministic output paths",
+            "per-parser result capture",
+            "resume-aware scheduling",
+            "distributed scheduler limitation warning",
+        ),
+    },
+    {
+        "number": 76,
+        "title": "File hash cache",
+        "surface": "MD5/SHA1/SHA256 cache metadata, path-size-mtime keys, hit/miss counts, and persistence caveats",
+        "corpus": "file metadata fixtures with repeated hash requests, changed mtimes/sizes, and large-file hash caps",
+        "oracle": "expected hash values, cache hit/miss counters, invalidation behavior, and persistence limitation notes",
+        "required_checks": (
+            "MD5/SHA1/SHA256 captured",
+            "path-size-mtime cache key recorded",
+            "hit/miss counters emitted",
+            "hash cache assessment attached",
+            "persistent cache limitation warning",
+        ),
+    },
+    {
+        "number": 77,
+        "title": "Duplicate file/content detection",
+        "surface": "same-size buckets, bounded SHA256 confirmation, duplicate groups, representative paths, and suppression warnings",
+        "corpus": "file scan fixtures with exact duplicates, same-size non-duplicates, large skipped candidates, and path truncation",
+        "oracle": "expected duplicate group manifest, SHA256 equality proof, skipped-boundary records, and analyst suppression checklist",
+        "required_checks": (
+            "same-size candidate bucketing",
+            "bounded SHA256 confirmation",
+            "duplicate group counts",
+            "representative paths listed",
+            "suppression verification warning",
+        ),
+    },
+    {
+        "number": 78,
+        "title": "Artifact pagination/cursor API",
+        "surface": "cursor tokens, offsets, limits, totals, next/previous cursors, and snapshot-isolation warnings",
+        "corpus": "API fixtures covering files, documents, timeline, indicators, artifact groups, invalid cursor, and empty collections",
+        "oracle": "expected pagination metadata, cursor decode behavior, bounded rows, and API compatibility checklist",
+        "required_checks": (
+            "cursor token emitted",
+            "offset/limit/total recorded",
+            "next/previous cursor support",
+            "bounded row return",
+            "snapshot isolation limitation warning",
+        ),
+    },
+    {
+        "number": 79,
+        "title": "UI virtualization for massive result tables",
+        "surface": "bounded DOM row windows, visible-row notices, keyboard/filter flow, persisted viewport hints, and paging links",
+        "corpus": "web UI fixtures with search rows, Case DB rows, API-paged tabs, keyboard navigation, and large-table notices",
+        "oracle": "expected DOM window metadata, rendered-row cap, visible-row warning, and browser responsiveness checklist",
+        "required_checks": (
+            "bounded DOM row window",
+            "visible row count disclosed",
+            "keyboard/filter workflow preserved",
+            "API pagination link preserved",
+            "true virtual scroller limitation warning",
+        ),
+    },
+    {
+        "number": 80,
+        "title": "Long-running job cancellation/retry",
+        "surface": "queued/running cancellation flags, failed/canceled retry, state-file persistence, step metadata, and cleanup caveats",
+        "corpus": "job-store fixtures with queued cancel, running cancel request, failed retry, canceled retry, and persisted state reload",
+        "oracle": "expected job transition log, cancellation flag, retry support matrix, and partial-output cleanup checklist",
+        "required_checks": (
+            "queued job cancellation",
+            "running cancel request recorded",
+            "failed/canceled retry support",
+            "state-file cancel flag persisted",
+            "partial output cleanup limitation warning",
+        ),
+    },
 )
 
 
@@ -996,11 +1136,11 @@ def build_core_forensics_accuracy_profiles() -> dict[str, object]:
     return {
         "version": CORE_FORENSIC_ACCURACY_VERSION,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "scope": "#1-#70 validation and accuracy reinforcement",
+        "scope": "#1-#80 validation and accuracy reinforcement",
         "profile_count": len(profiles),
         "commercial_gap_ids": [f"#{item['number']}" for item in profiles],
         "status": "accuracy-profiles-ready",
-        "release_gate": "Each #1-#70 parser claim must attach pass/fail evidence against its profile before report-grade wording.",
+        "release_gate": "Each #1-#80 parser claim must attach pass/fail evidence against its profile before report-grade wording.",
         "profiles": profiles,
     }
 
@@ -1117,4 +1257,4 @@ def accuracy_profile_for_item(number: int) -> dict[str, object]:
     for item in CORE_FORENSIC_ACCURACY_ITEMS:
         if int(item["number"]) == number:
             return build_accuracy_profile(item)
-    raise KeyError(f"unknown #1-#70 forensic accuracy item: {number}")
+    raise KeyError(f"unknown #1-#80 forensic accuracy item: {number}")

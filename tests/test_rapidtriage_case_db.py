@@ -83,6 +83,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(second["schema_version"], SCHEMA_VERSION)
             self.assertTrue(REQUIRED_TABLES.issubset(set(second["tables"])))
             self.assertIn("#74", second["large_sqlite_fts_optimization"]["commercial_gap_ids"])
+            self.assertEqual(second["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["gap_id"], "#74")
             self.assertIn("artifact_fts", second["large_sqlite_fts_optimization"]["fts_tables"])
 
             with contextlib.closing(sqlite3.connect(db_path)) as connection:
