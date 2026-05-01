@@ -233,6 +233,14 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertGreaterEqual(summary_payload["processing"]["reused_output_count"], 5)
             self.assertIn("#68", summary_payload["processing"]["incremental_indexing"]["commercial_gap_ids"])
             self.assertIn("#70", summary_payload["processing"]["checkpoint_resume"]["commercial_gap_ids"])
+            incremental_uplift = summary_payload["processing"]["incremental_indexing"]["commercial_uplift_evidence"]
+            self.assertEqual(incremental_uplift["batch_id"], "commercial-uplift-066-070")
+            self.assertEqual(incremental_uplift["item_numbers"], [68])
+            self.assertIn("bounded fingerprint", " ".join(incremental_uplift["large_data_controls"]))
+            checkpoint_uplift = summary_payload["processing"]["checkpoint_resume"]["commercial_uplift_evidence"]
+            self.assertEqual(checkpoint_uplift["batch_id"], "commercial-uplift-066-070")
+            self.assertEqual(checkpoint_uplift["item_numbers"], [70])
+            self.assertIn("stage status records", " ".join(checkpoint_uplift["large_data_controls"]))
             self.assertIn("#71", summary_payload["processing"]["parser_crash_isolation"]["commercial_gap_ids"])
             self.assertIn("#72", summary_payload["processing"]["memory_cap_enforcement"]["commercial_gap_ids"])
             self.assertIn("#75", summary_payload["processing"]["parallel_parser_scheduler"]["commercial_gap_ids"])
@@ -250,13 +258,21 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("#70", checkpoints["checkpoint_resume_assessment"]["commercial_gap_ids"])
             self.assertEqual(checkpoints["core_accuracy_gates"][0]["gap_id"], "#70")
             self.assertIn("stage checkpoints emitted", checkpoints["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(checkpoints["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-066-070")
+            self.assertEqual(checkpoints["commercial_uplift_evidence"]["item_numbers"], [70])
             self.assertIn("#70", checkpoints["checkpoints"][0]["commercial_gap_ids"])
             self.assertEqual(checkpoints["checkpoints"][0]["core_accuracy_gates"][0]["gap_id"], "#70")
+            self.assertEqual(
+                checkpoints["checkpoints"][0]["commercial_uplift_evidence"]["batch_id"],
+                "commercial-uplift-066-070",
+            )
             fingerprint = json.loads((output_dir / "rapidtriage-run-fingerprint.json").read_text(encoding="utf-8"))
             self.assertIn("#68", fingerprint["summary"]["commercial_gap_ids"])
             self.assertIn("#68", fingerprint["incremental_indexing_assessment"]["commercial_gap_ids"])
             self.assertEqual(fingerprint["core_accuracy_gates"][0]["gap_id"], "#68")
             self.assertIn("input fingerprint emitted", fingerprint["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(fingerprint["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-066-070")
+            self.assertEqual(fingerprint["commercial_uplift_evidence"]["item_numbers"], [68])
 
             step_statuses = {step["name"]: step["status"] for step in summary_payload["steps"]}
             self.assertEqual(step_statuses["docs"], "reused")

@@ -212,8 +212,8 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `safety.resume`, `safety.resume_effective`, `safety.resume_disabled_reason`, and `safety.reused_outputs` describe whether stage output reuse was requested, allowed, and applied.
 - `resource_caps` records bounded extraction/fingerprint/preview settings, and `safety.artifact_scheduler` records the bounded parallel artifact scheduler strategy.
 - `rapidtriage-run-fingerprint.json` stores a bounded source tree fingerprint with scanned file count, total size, latest mtime, max files, and truncation status.
-- `rapidtriage-run-fingerprint.json` stores #68 bounded path/size/mtime fingerprint metadata, truncation status, incremental-indexing validation guidance, and #68 `core_accuracy_gates`.
-- `rapidtriage-run-checkpoints.json` stores #70 per-stage output paths, existence, size, reused flag, status counts, resume assessment, the input fingerprint used for resume decisions, and #70 `core_accuracy_gates`.
+- `rapidtriage-run-fingerprint.json` stores #68 bounded path/size/mtime fingerprint metadata, truncation status, incremental-indexing validation guidance, #68 `core_accuracy_gates`, and #68 `commercial_uplift_evidence` with reuse-safety controls and content-hash/large-case blockers.
+- `rapidtriage-run-checkpoints.json` stores #70 per-stage output paths, existence, size, reused flag, status counts, resume assessment, the input fingerprint used for resume decisions, #70 `core_accuracy_gates`, and #70 `commercial_uplift_evidence` on both summary and stage checkpoint records.
 - Run `processing` now includes #71 parser-crash isolation, #72 memory-cap enforcement, and #75 parallel parser scheduler assessments. Isolated parser failures are written as parser-specific artifact JSON with `parser_errors` instead of silently dropping the stage.
 - Validation packages include #81 known-answer manifest status, #82 parser fixture corpus coverage, #83 parser false-positive/false-negative notes, #84 independent validation report hash metadata, and #85 validation package/hash-manifest assessment fields.
 - Case DB report exports include #86 custody workflow, #87 acquisition hash workflow, #88 export-time audit hash chain, #89 deterministic report reproducibility hash, and #90 source provenance metadata on each selected report item.
@@ -300,8 +300,9 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 
 ### `benchmark` And `stress-plan`
 
-- `benchmark` outputs include #66 scale matrix rows, ingest/search metrics, memory/output sizes, run-summary links, report-grade assessment, and #66 `core_accuracy_gates`.
-- `stress-plan` outputs include #67 TB-scale scenarios, resource caps, failure thresholds, required evidence bundles, real-hardware validation warnings, and #67 `core_accuracy_gates`.
+- `benchmark` outputs include #66 scale matrix rows, ingest/search metrics, memory/output sizes, run-summary links, report-grade assessment, #66 `core_accuracy_gates`, and #66 `commercial_uplift_evidence` with hardware-matrix/release-threshold blockers.
+- `stress-plan` outputs include #67 TB-scale scenarios, resource caps, failure thresholds, required evidence bundles, real-hardware validation warnings, #67 `core_accuracy_gates`, and #67 `commercial_uplift_evidence` on the plan and each scenario.
+- Background run-job payloads expose #69 `commercial_uplift_evidence` on the queue assessment and each job step, preserving status/progress/state-file/cancel/retry controls while explicitly blocking distributed-worker and parser-level telemetry claims.
 
 ### `columnar-convert`
 

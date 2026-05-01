@@ -127,6 +127,15 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("ingest/search metrics captured", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertFalse(payload["benchmark_native_capabilities"]["continuous_10m_record_gate"])
             self.assertEqual([row["label"] for row in payload["benchmark_scale_matrix"]], ["100k", "1M", "10M"])
+            uplift = payload["commercial_uplift_evidence"]
+            self.assertEqual(uplift["batch_id"], "commercial-uplift-066-070")
+            self.assertEqual(uplift["item_numbers"], [66])
+            self.assertTrue(uplift["implemented"])
+            self.assertTrue(uplift["usable"])
+            self.assertTrue(uplift["validated"])
+            self.assertFalse(uplift["commercial_grade_ready"])
+            self.assertIn("p50/p95 search latency", " ".join(uplift["large_data_controls"]))
+            self.assertIn("published 100k/1M/10M hardware and OS benchmark matrix", uplift["remaining_external_validation"])
 
     def test_stress_plan_command_writes_large_case_runbook(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -164,6 +173,13 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("TB-scale scenarios emitted", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("#67", payload["scenarios"][0]["commercial_gap_ids"])
             self.assertFalse(payload["stress_native_capabilities"]["actual_1tb_10tb_execution"])
+            uplift = payload["commercial_uplift_evidence"]
+            self.assertEqual(uplift["batch_id"], "commercial-uplift-066-070")
+            self.assertEqual(uplift["item_numbers"], [67])
+            self.assertIn("1TB/5TB/10TB runbook scenarios", " ".join(uplift["large_data_controls"]))
+            self.assertIn("actual 1TB-10TB hardware stress runs", uplift["remaining_external_validation"])
+            scenario_uplift = payload["scenarios"][0]["commercial_uplift_evidence"]
+            self.assertEqual(scenario_uplift["item_numbers"], [67])
 
     def test_validation_command_writes_release_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -707,6 +723,13 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue(all("#69" in step["commercial_gap_ids"] for step in canceled.to_dict()["steps"]))
             self.assertTrue(all(step["core_accuracy_gates"][0]["gap_id"] == "#69" for step in canceled.to_dict()["steps"]))
             self.assertTrue(all("#80" in step["operational_gap_ids"] for step in canceled.to_dict()["steps"]))
+            queue_uplift = canceled.to_dict()["job_queue_assessment"]["commercial_uplift_evidence"]
+            self.assertEqual(queue_uplift["batch_id"], "commercial-uplift-066-070")
+            self.assertEqual(queue_uplift["item_numbers"], [69])
+            self.assertIn("local-threadpool limitation", " ".join(queue_uplift["large_data_controls"]))
+            self.assertTrue(
+                all(step["commercial_uplift_evidence"]["batch_id"] == "commercial-uplift-066-070" for step in canceled.to_dict()["steps"])
+            )
             store._executor.shutdown(wait=True)
 
     def test_build_release_script_can_assemble_portable_zip_without_building_wheel(self) -> None:

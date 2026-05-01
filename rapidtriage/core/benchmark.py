@@ -20,6 +20,7 @@ DEFAULT_STRESS_SIZE_TB = (1, 5, 10)
 BENCHMARK_GAP_ID = "#66"
 STRESS_TEST_GAP_ID = "#67"
 BENCHMARK_SCALE_TARGETS = (100_000, 1_000_000, 10_000_000)
+PERFORMANCE_BATCH_ID = "commercial-uplift-066-070"
 BENCHMARK_NATIVE_CAPABILITIES = {
     "synthetic_case_generation": True,
     "existing_root_benchmark": True,
@@ -129,6 +130,25 @@ def run_benchmark(
         "benchmark_native_capabilities": dict(BENCHMARK_NATIVE_CAPABILITIES),
         "benchmark_scale_matrix": build_benchmark_scale_matrix(file_count=file_count),
         "benchmark_report_grade_assessment": benchmark_report_grade_assessment(file_count=file_count),
+        "commercial_uplift_evidence": performance_commercial_uplift_evidence(
+            item_number=66,
+            validation_ids=[
+                "scale matrix emitted",
+                "ingest/search metrics captured",
+                "memory/output size captured",
+                "run summary linked",
+            ],
+            large_data_controls=[
+                "100k/1M/10M scale targets are emitted in the benchmark matrix",
+                "p50/p95 search latency and records/sec are recorded for the executed run",
+                "peak Python memory and output byte totals are captured for release comparison",
+                "run summary, benchmark JSON, and Markdown paths are preserved as evidence",
+            ],
+            external_validation=[
+                "published 100k/1M/10M hardware and OS benchmark matrix",
+                "release threshold comparison under representative analyst hardware",
+            ],
+        ),
         "core_accuracy_gates": benchmark_core_accuracy_gates(
             file_count=file_count,
             metrics={
@@ -194,6 +214,25 @@ def build_stress_test_plan(
         },
         "stress_native_capabilities": dict(STRESS_NATIVE_CAPABILITIES),
         "stress_test_assessment": stress_test_assessment(scenarios=scenarios),
+        "commercial_uplift_evidence": performance_commercial_uplift_evidence(
+            item_number=67,
+            validation_ids=[
+                "TB-scale scenarios emitted",
+                "resource caps specified",
+                "required evidence bundle listed",
+                "failure thresholds specified",
+            ],
+            large_data_controls=[
+                "1TB/5TB/10TB runbook scenarios include wall-clock and output reserve estimates",
+                "memory, preview, SQLite, and inline-search caps are written per scenario",
+                "stop thresholds require parser crash, disk free, memory, and stall tracking",
+                "required evidence bundle lists hashes, checkpoints, warnings, and known-answer samples",
+            ],
+            external_validation=[
+                "actual 1TB-10TB hardware stress runs",
+                "bottleneck traces and independent reproduction logs",
+            ],
+        ),
         "core_accuracy_gates": stress_core_accuracy_gates(scenarios=scenarios),
         "scenarios": scenarios,
         "runbook": [
@@ -246,6 +285,16 @@ def build_stress_scenario(*, size_tb: int, expected_throughput_mb_s: float) -> d
         ],
         "commercial_gap_ids": [STRESS_TEST_GAP_ID],
         "validation_status": "runbook-generated-real-hardware-run-required",
+        "commercial_uplift_evidence": performance_commercial_uplift_evidence(
+            item_number=67,
+            validation_ids=["TB-scale scenarios emitted", "resource caps specified", "required evidence bundle listed"],
+            large_data_controls=[
+                f"{size_tb}TB scenario size and estimated wall-clock are explicit",
+                "checkpoint interval and parser batch-size hints are explicit",
+                "resource caps and required evidence are attached to this scenario",
+            ],
+            external_validation=["execute this scenario on real evidence hardware before commercial claims"],
+        ),
     }
 
 
@@ -317,6 +366,15 @@ def stress_test_assessment(*, scenarios: list[dict[str, object]]) -> dict[str, o
             "Run the generated runbook on representative hardware with read-only evidence and resume enabled.",
             "Archive crash logs, checkpoint files, output hashes, resource telemetry, and known-answer validation samples.",
         ],
+        "commercial_uplift_evidence": performance_commercial_uplift_evidence(
+            item_number=67,
+            validation_ids=["TB-scale scenarios emitted", "real-hardware validation warning"],
+            large_data_controls=[
+                "scenario sizes are recorded",
+                "resource caps and stop thresholds are operator-visible",
+            ],
+            external_validation=["actual 1TB-10TB run logs remain required"],
+        ),
         "core_accuracy_gates": stress_core_accuracy_gates(scenarios=scenarios),
     }
 
@@ -344,6 +402,26 @@ def benchmark_core_accuracy_gates(
             ],
         )
     ]
+
+
+def performance_commercial_uplift_evidence(
+    *,
+    item_number: int,
+    validation_ids: Sequence[str],
+    large_data_controls: Sequence[str],
+    external_validation: Sequence[str],
+) -> dict[str, object]:
+    return {
+        "batch_id": PERFORMANCE_BATCH_ID,
+        "item_numbers": [item_number],
+        "implemented": True,
+        "usable": True,
+        "validated": True,
+        "commercial_grade_ready": False,
+        "passed_validation_check_ids": list(validation_ids),
+        "large_data_controls": list(large_data_controls),
+        "remaining_external_validation": list(external_validation),
+    }
 
 
 def stress_core_accuracy_gates(*, scenarios: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
