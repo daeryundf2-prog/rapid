@@ -7,7 +7,11 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from rapidtriage.artifacts.windows.eventlog import binxml_value_field_map, native_evtx_promoted_fields
+from rapidtriage.artifacts.windows.eventlog import (
+    binxml_value_field_map,
+    native_evtx_core_accuracy_gates,
+    native_evtx_promoted_fields,
+)
 from rapidtriage.artifacts.windows.registry import collect_registry_hive
 from rapidtriage.artifacts.windows.shellbags import WindowsShellbagsProvider
 from rapidtriage.cli import main
@@ -74,6 +78,56 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             binxml_value_field_map(value_fields)["Event/EventData/Data"],
             ["alice", "10.0.0.5", "10.0.0.6"],
         )
+
+    def test_native_evtx_core_accuracy_gates_track_report_grade_blockers(self) -> None:
+        gates = native_evtx_core_accuracy_gates(
+            {
+                "source_path": "Security.evtx",
+                "record_id": "42",
+                "event_id": "4624",
+                "provider_name": "Microsoft-Windows-Security-Auditing",
+                "channel": "Security",
+                "computer": "host01",
+                "evtx_record_offset": 8192,
+                "evtx_record_sha256": "a" * 64,
+                "binxml_status": "partial-tokenized",
+                "binxml_event_data_sequence": [
+                    {"name": "TargetUserName", "value": "alice"},
+                    {"name": "IpAddress", "value": "10.0.0.5"},
+                ],
+                "binxml_event_data_values_by_name": {"IpAddress": ["10.0.0.5"]},
+                "evtx_validation_checks": {
+                    "declared_size_valid": True,
+                    "decoded_value_type_counts": {"StringType": 2},
+                },
+                "evtx_validation_matrix": [
+                    {"id": "chunk-context", "passed": True},
+                    {"id": "declared-size-and-offset", "passed": True},
+                    {"id": "integrity-hash", "passed": True},
+                ],
+                "evtx_record_integrity": {"record_hash": "a" * 64},
+                "evtx_recovery_context": {"validation_required": True},
+                "evtx_recovery_evidence": {"caution_labels": ["slack-record-candidate"]},
+                "message_rendering": {
+                    "event_message": "An account was successfully logged on.",
+                    "normalized_template_preview": "%1 logged on from %2",
+                    "parameter_candidates": ["alice", "10.0.0.5"],
+                    "limitations": ["provider-resource-dll-not-resolved"],
+                },
+                "evtx_validation_guidance": {"message": "Compare against Event Viewer rendering."},
+            }
+        )
+
+        by_gap = {gate["gap_id"]: gate for gate in gates}
+        self.assertEqual(set(by_gap), {"#1", "#2", "#3"})
+        self.assertIn("duplicate EventData order preservation", by_gap["#1"]["satisfied_checks"])
+        self.assertIn("message text normalization", by_gap["#2"]["satisfied_checks"])
+        self.assertIn("inserted parameter mapping", by_gap["#2"]["satisfied_checks"])
+        self.assertIn("provider/template/source provenance", by_gap["#2"]["satisfied_checks"])
+        self.assertIn("chunk-boundary containment", by_gap["#3"]["satisfied_checks"])
+        self.assertEqual(by_gap["#1"]["missing_required_checks"], [])
+        self.assertIn("expected-answer manifest", by_gap["#1"]["minimum_evidence"])
+        self.assertFalse(by_gap["#1"]["commercial_grade_ready"])
 
     def test_shellbags_provider_emits_native_hive_candidate_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -167,6 +221,14 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertTrue(validation_matrix["root-reachability"]["passed"])
             self.assertTrue(validation_matrix["child-parent-backlinks"]["passed"])
             self.assertTrue(validation_matrix["value-list-resolution"]["passed"])
+            key_gate = run_key.details["core_accuracy_gates"][0]
+            self.assertEqual(key_gate["gap_id"], "#4")
+            self.assertIn("root-cell reachability", key_gate["satisfied_checks"])
+            self.assertIn("parent-child backlink consistency", key_gate["satisfied_checks"])
+            self.assertIn("transaction-log replay disclosure", key_gate["satisfied_checks"])
+            self.assertEqual(key_gate["missing_required_checks"], [])
+            self.assertIn("source file or export hash", key_gate["minimum_evidence"])
+            self.assertFalse(key_gate["commercial_grade_ready"])
 
             value_recovery = next(
                 record
@@ -213,6 +275,14 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             value_matrix = {item["id"]: item for item in value_recovery.details["registry_validation_matrix"]}
             self.assertTrue(value_matrix["deleted-value-cell"]["passed"])
             self.assertTrue(value_matrix["parent-key-link"]["passed"])
+            value_gate = value_recovery.details["core_accuracy_gates"][0]
+            self.assertEqual(value_gate["gap_id"], "#5")
+            self.assertIn("positive-size free-cell validation", value_gate["satisfied_checks"])
+            self.assertIn("parent-key confirmation", value_gate["satisfied_checks"])
+            self.assertIn("reportability blocked until independent confirmation", value_gate["satisfied_checks"])
+            self.assertEqual(value_gate["missing_required_checks"], [])
+            self.assertIn("expected-answer manifest", value_gate["minimum_evidence"])
+            self.assertFalse(value_gate["commercial_grade_ready"])
             key_recovery = next(
                 record
                 for record in records

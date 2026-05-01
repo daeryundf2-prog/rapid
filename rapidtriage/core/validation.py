@@ -13,6 +13,7 @@ from .audit import compute_sha256
 from .commercial_readiness import build_commercial_readiness_report
 from .docs import write_result
 from .enterprise import build_enterprise_policy
+from .forensic_accuracy import build_core_forensics_accuracy_profiles, build_core_forensics_known_answer_template
 
 
 VALIDATION_JSON_NAME = "rapidtriage-validation-package.json"
@@ -220,6 +221,8 @@ def build_validation_package(
         "checks": build_validation_checks(),
         "validation_package_assessment": build_validation_package_assessment(output_dir),
         "known_answer_validation": build_known_answer_validation(known_answer_manifest),
+        "core_forensics_accuracy_profiles": build_core_forensics_accuracy_profiles(),
+        "core_forensics_known_answer_template": build_core_forensics_known_answer_template(),
         "parser_fixture_corpus": build_parser_fixture_corpus(fixture_root),
         "parser_false_positive_false_negative_notes": build_parser_false_positive_false_negative_notes(),
         "independent_validation_report": build_independent_validation_report(independent_report),
@@ -843,6 +846,10 @@ def build_required_documents() -> list[dict[str, str]]:
         {"path": "docs/rapidtriage-user-guide.md", "purpose": "Analyst workflow and limitations from a user view."},
         {"path": "docs/rapidtriage-known-limitations.md", "purpose": "Clear non-claims and parser/acquisition gaps."},
         {"path": "docs/rapidtriage-parser-coverage.md", "purpose": "Implemented artifact and extension coverage."},
+        {
+            "path": "docs/rapidtriage-core-forensics-accuracy-profiles.md",
+            "purpose": "#1-#30 parser accuracy profile gates and pass/fail evidence requirements.",
+        },
         {"path": "docs/rapidtriage-release-checklist.md", "purpose": "Repeatable release verification checklist."},
         {"path": "docs/rapidtriage-release-notes-template.md", "purpose": "Release communication template."},
         {"path": "docs/rapidtriage-support-sla.md", "purpose": "Support severity, escalation, secure evidence intake, and patch target template."},
@@ -890,6 +897,16 @@ def render_validation_markdown(payload: Mapping[str, object]) -> str:
         else {}
     )
     known_answer = payload.get("known_answer_validation") if isinstance(payload.get("known_answer_validation"), Mapping) else {}
+    accuracy_profiles = (
+        payload.get("core_forensics_accuracy_profiles")
+        if isinstance(payload.get("core_forensics_accuracy_profiles"), Mapping)
+        else {}
+    )
+    accuracy_template = (
+        payload.get("core_forensics_known_answer_template")
+        if isinstance(payload.get("core_forensics_known_answer_template"), Mapping)
+        else {}
+    )
     fixture_corpus = payload.get("parser_fixture_corpus") if isinstance(payload.get("parser_fixture_corpus"), Mapping) else {}
     fpfn_notes = (
         payload.get("parser_false_positive_false_negative_notes")
@@ -931,6 +948,27 @@ def render_validation_markdown(payload: Mapping[str, object]) -> str:
             for item in datasets[:20]:
                 if isinstance(item, Mapping):
                     lines.append(f"- `{item.get('id', '')}` ({item.get('source', '')}): status `{item.get('status', '')}`")
+
+    lines.extend(["", "## #1-#30 Core Forensics Accuracy Profiles", ""])
+    if accuracy_profiles:
+        lines.append(f"- Version: `{accuracy_profiles.get('version', '')}`")
+        lines.append(f"- Profile count: `{accuracy_profiles.get('profile_count', 0)}`")
+        lines.append(f"- Release gate: {accuracy_profiles.get('release_gate', '')}")
+        profiles = accuracy_profiles.get("profiles", [])
+        if isinstance(profiles, list):
+            for item in profiles[:30]:
+                if isinstance(item, Mapping):
+                    checks = item.get("required_checks", [])
+                    check_count = len(checks) if isinstance(checks, list) else 0
+                    lines.append(
+                        f"- `#{item.get('number', '')}` {item.get('title', '')}: "
+                        f"{check_count} required checks; oracle `{item.get('oracle', '')}`"
+                    )
+    if accuracy_template:
+        lines.append(
+            f"- Known-answer template datasets: `{accuracy_template.get('item_count', 0)}`; "
+            f"status `{accuracy_template.get('status', '')}`"
+        )
 
     lines.extend(["", "## Parser Fixture Corpus", ""])
     if fixture_corpus:

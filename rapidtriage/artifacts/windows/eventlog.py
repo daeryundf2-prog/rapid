@@ -13,6 +13,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Iterable, Mapping, NamedTuple, Sequence
 
+from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
@@ -981,6 +982,7 @@ def collect_native_evtx_events(
         details.update(data)
         details["parser_confidence"] = native_evtx_confidence(details)
         details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
+        details["core_accuracy_gates"] = native_evtx_core_accuracy_gates(details)
         details["commercial_grade_ready"] = details["evtx_report_grade_assessment"]["report_grade_ready"]
         details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
         yield event_record(path, "eventlog-event", details)
@@ -1393,7 +1395,7 @@ def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[s
     message = details.get("message_rendering") if isinstance(details.get("message_rendering"), Mapping) else {}
     recovery = details.get("evtx_recovery_context") if isinstance(details.get("evtx_recovery_context"), Mapping) else {}
     chunk = details.get("evtx_chunk_context") if isinstance(details.get("evtx_chunk_context"), Mapping) else {}
-    binxml_status = str(details.get("evtx_binxml_status") or checks.get("binxml_status") or "")
+    binxml_status = str(details.get("evtx_binxml_status") or details.get("binxml_status") or checks.get("binxml_status") or "")
 
     if not checks.get("passes_basic_record_integrity"):
         blockers.append("record-integrity-not-proven")
@@ -1443,6 +1445,79 @@ def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[s
             "using native EVTX rows as report-grade testimony."
         ),
     }
+
+
+def native_evtx_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:
+    checks = details.get("evtx_validation_checks") if isinstance(details.get("evtx_validation_checks"), Mapping) else {}
+    recovery = details.get("evtx_recovery_context") if isinstance(details.get("evtx_recovery_context"), Mapping) else {}
+    message = details.get("message_rendering") if isinstance(details.get("message_rendering"), Mapping) else {}
+    matrix = details.get("evtx_validation_matrix") if isinstance(details.get("evtx_validation_matrix"), list) else []
+    matrix_ids = {
+        str(item.get("id"))
+        for item in matrix
+        if isinstance(item, Mapping) and item.get("passed")
+    }
+    binxml_status = str(
+        details.get("evtx_binxml_status") or details.get("binxml_status") or checks.get("binxml_status") or ""
+    )
+    event_data_sequence = (
+        details.get("binxml_event_data_sequence")
+        if isinstance(details.get("binxml_event_data_sequence"), list)
+        else []
+    )
+    event_data_values_by_name = (
+        details.get("binxml_event_data_values_by_name")
+        if isinstance(details.get("binxml_event_data_values_by_name"), Mapping)
+        else {}
+    )
+    source_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"record_id:{details.get('record_id', '')}",
+        f"record_offset:{details.get('evtx_record_offset', '')}",
+        f"record_sha256:{details.get('evtx_record_sha256', '')}",
+    ]
+
+    item1_checks: list[str] = []
+    if details.get("record_id") and details.get("evtx_record_offset", "") != "":
+        item1_checks.append("record-id and file-offset stability")
+    if details.get("event_id") or details.get("provider_name") or details.get("channel") or details.get("computer"):
+        item1_checks.append("timestamp/EventID/provider/channel/computer equality")
+    if event_data_sequence or event_data_values_by_name:
+        item1_checks.append("duplicate EventData order preservation")
+    if checks.get("decoded_value_type_counts"):
+        item1_checks.append("BinXML scalar type decoding diff")
+    if binxml_status and binxml_status not in {"basic-rendered", "template-substituted-partial"}:
+        item1_checks.append("unsupported grammar warning coverage")
+
+    item2_checks: list[str] = []
+    if details.get("event_message") or message.get("event_message") or message.get("normalized_template_preview"):
+        item2_checks.append("message text normalization")
+    if details.get("parameter_candidates") or message.get("parameter_candidates"):
+        item2_checks.append("inserted parameter mapping")
+    if message or details.get("message_catalog"):
+        item2_checks.append("provider/template/source provenance")
+    if binxml_status not in {"basic-rendered", "template-substituted-partial"}:
+        item2_checks.append("unresolved template warning")
+    if message.get("limitations") or details.get("evtx_validation_guidance"):
+        item2_checks.append("fallback-message limitation disclosure")
+
+    item3_checks: list[str] = []
+    if "chunk-context" in matrix_ids:
+        item3_checks.append("chunk-boundary containment")
+    if checks.get("declared_size_valid"):
+        item3_checks.append("record-size plausibility")
+    if details.get("evtx_record_integrity"):
+        item3_checks.append("checksum/integrity status")
+    if recovery.get("caution_labels") or details.get("evtx_recovery_evidence"):
+        item3_checks.append("candidate reason and confidence")
+    if details.get("validation_required") or recovery.get("validation_required"):
+        item3_checks.append("non-reportable default for unvalidated recovery")
+
+    return [
+        build_accuracy_gate(1, satisfied_checks=item1_checks, evidence_refs=source_refs),
+        build_accuracy_gate(2, satisfied_checks=item2_checks, evidence_refs=source_refs),
+        build_accuracy_gate(3, satisfied_checks=item3_checks, evidence_refs=source_refs),
+    ]
 
 
 def native_evtx_record_candidate_record(
@@ -1506,6 +1581,7 @@ def native_evtx_record_candidate_record(
         ),
     }
     details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
+    details["core_accuracy_gates"] = native_evtx_core_accuracy_gates(details)
     details["commercial_grade_ready"] = False
     details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
     return event_record(path, "eventlog-record-candidate", details)

@@ -7,6 +7,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 
 PARSER_VERSION = "registry-normalized-v8"
@@ -491,6 +492,21 @@ def build_registry_key_tree_records(
             extra_blockers=["native-key-tree-broad-corpus-validation-required"],
             gap_ids=["#4"],
         )
+        core_accuracy_gates = registry_core_accuracy_gates(
+            gap_ids=["#4"],
+            validation_matrix=validation_matrix,
+            details={
+                "source_path": str(path.resolve()),
+                "source_hashes": dict(source_hashes),
+                "cell_offset": key_node.get("cell_offset", 0),
+                "key_path": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+                "last_written_at": key_node.get("last_written_at", ""),
+                "allocation_status": allocation_status,
+                "value_list_offset": key_node.get("value_list_offset", 0),
+                "parent_link_consistency": relationship_profile["parent_link_consistency"],
+                "root_reachable": relationship_profile["root_reachable"],
+            },
+        )
         yield ArtifactRecord(
             provider=WindowsRegistryProvider.name,
             artifact_type="registry-key-tree-node",
@@ -547,6 +563,7 @@ def build_registry_key_tree_records(
                 "validation_flags": validation_flags,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
+                "core_accuracy_gates": core_accuracy_gates,
                 "registry_native_capabilities": REGISTRY_NATIVE_CAPABILITIES,
                 "commercial_grade_ready": report_grade_assessment["report_grade_ready"],
                 "commercial_grade_blockers": report_grade_assessment["blockers"],
@@ -600,6 +617,19 @@ def build_registry_key_recovery_records(
             "deleted-or-free-key-cell",
             validation_checks=validation_matrix,
         )
+        core_accuracy_gates = registry_core_accuracy_gates(
+            gap_ids=["#5"],
+            validation_matrix=validation_matrix,
+            details={
+                "source_path": str(path.resolve()),
+                "source_hashes": dict(source_hashes),
+                "cell_offset": candidate.get("cell_offset", 0),
+                "allocation_status": candidate.get("allocation_status", ""),
+                "positive_size_free_cell": recovery_evidence.get("positive_size_free_cell", False),
+                "recovery_evidence": recovery_evidence,
+                "recovery_profile": recovery_profile,
+            },
+        )
         yield ArtifactRecord(
             provider=WindowsRegistryProvider.name,
             artifact_type="registry-key-recovery-candidate",
@@ -622,6 +652,7 @@ def build_registry_key_recovery_records(
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
+                "core_accuracy_gates": core_accuracy_gates,
                 "registry_native_capabilities": REGISTRY_NATIVE_CAPABILITIES,
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": report_grade_assessment["blockers"],
@@ -701,6 +732,21 @@ def build_registry_value_recovery_records(
             "deleted-or-free-value-cell",
             validation_checks=validation_matrix,
         )
+        core_accuracy_gates = registry_core_accuracy_gates(
+            gap_ids=["#5"],
+            validation_matrix=validation_matrix,
+            details={
+                "source_path": str(path.resolve()),
+                "source_hashes": dict(source_hashes),
+                "cell_offset": candidate.get("cell_offset", 0),
+                "allocation_status": candidate.get("allocation_status", ""),
+                "positive_size_free_cell": recovery_evidence.get("positive_size_free_cell", False),
+                "parent_key_confidence": parent_confidence,
+                "decoded_data_preview": decoded_data,
+                "recovery_evidence": recovery_evidence,
+                "recovery_profile": recovery_profile,
+            },
+        )
         yield ArtifactRecord(
             provider=WindowsRegistryProvider.name,
             artifact_type="registry-value-recovery-candidate",
@@ -723,6 +769,7 @@ def build_registry_value_recovery_records(
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
+                "core_accuracy_gates": core_accuracy_gates,
                 "registry_native_capabilities": REGISTRY_NATIVE_CAPABILITIES,
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": report_grade_assessment["blockers"],
@@ -855,6 +902,54 @@ def registry_recovery_validation_profile(
             "and false-positive hive fixtures before using them as standalone testimony."
         ),
     }
+
+
+def registry_core_accuracy_gates(
+    *,
+    gap_ids: Sequence[str],
+    validation_matrix: Sequence[Mapping[str, object]],
+    details: Mapping[str, object],
+) -> list[dict[str, object]]:
+    matrix_ids = {
+        str(item.get("id"))
+        for item in validation_matrix
+        if isinstance(item, Mapping) and item.get("passed")
+    }
+    evidence_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"cell_offset:{details.get('cell_offset', '')}",
+    ]
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    if hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+
+    gates: list[dict[str, object]] = []
+    if "#4" in gap_ids:
+        item4_checks: list[str] = []
+        if "root-reachability" in matrix_ids:
+            item4_checks.append("root-cell reachability")
+        if "child-parent-backlinks" in matrix_ids or details.get("parent_link_consistency"):
+            item4_checks.append("parent-child backlink consistency")
+        if "value-list-resolution" in matrix_ids or details.get("value_list_offset"):
+            item4_checks.append("value-list ownership")
+        if details.get("last_written_at"):
+            item4_checks.append("last-write timestamp preservation")
+        item4_checks.append("transaction-log replay disclosure")
+        gates.append(build_accuracy_gate(4, satisfied_checks=item4_checks, evidence_refs=evidence_refs))
+    if "#5" in gap_ids:
+        item5_checks: list[str] = []
+        if details.get("positive_size_free_cell") or "deleted-value-cell" in matrix_ids or "deleted-key-cell" in matrix_ids:
+            item5_checks.append("positive-size free-cell validation")
+        if details.get("parent_key_confidence") == "key-value-list" or "parent-key-link" in matrix_ids:
+            item5_checks.append("parent-key confirmation")
+        if details.get("decoded_data_preview") or "value-type-present" in matrix_ids:
+            item5_checks.append("data-type and data-length plausibility")
+        if details.get("recovery_evidence"):
+            item5_checks.append("allocator-state evidence")
+        if details.get("recovery_profile"):
+            item5_checks.append("reportability blocked until independent confirmation")
+        gates.append(build_accuracy_gate(5, satisfied_checks=item5_checks, evidence_refs=evidence_refs))
+    return gates
 
 
 def build_registry_record(
