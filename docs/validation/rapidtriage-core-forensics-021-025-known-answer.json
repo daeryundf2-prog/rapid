@@ -92,7 +92,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Forensic container detection preserves type, source integrity, export-first disclosure, metadata/deleted blockers, encrypted/compressed warnings, and #25 core_accuracy_gates"
+          "Forensic container detection preserves type, source integrity, export-first disclosure, metadata/deleted blockers, encrypted/compressed warnings, #25 core_accuracy_gates, and #25 commercial_uplift_evidence implemented/usable/validated flags"
         ]
       },
       "notes": "Internal fixture pass; native proprietary container parsing and vendor export known-answer validation remain required."

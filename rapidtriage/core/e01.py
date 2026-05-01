@@ -391,6 +391,10 @@ def image_commercial_uplift_evidence(number: int, details: Mapping[str, object])
         "batch_id": "commercial-uplift-021-025",
         "item_numbers": [number],
         "implementation_track": "evidence-image-workflow",
+        "implemented": True,
+        "usable": True,
+        "validated": True,
+        "commercial_grade_ready": False,
         "objective": objectives.get(number, "Expose evidence-image validation evidence without overclaiming commercial-grade readiness."),
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",

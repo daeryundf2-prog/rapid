@@ -69,7 +69,7 @@
       "number": 25,
       "title": "AD1/L01/Lx01/AFF/AFF4/XVA support",
       "assertions": [
-        "Forensic container adapter preserves container type detection, source integrity, native-vs-export workflow disclosure, metadata/deleted-entry validation blockers, encrypted/compressed limitation warnings, and #25 core_accuracy_gates."
+        "Forensic container adapter preserves container type detection, source integrity, native-vs-export workflow disclosure, metadata/deleted-entry validation blockers, encrypted/compressed limitation warnings, #25 core_accuracy_gates, and #25 commercial_uplift_evidence implemented/usable/validated flags."
       ],
       "blockers_kept": [
         "native AD1/L01/Lx01/AFF/AFF4 parser",

@@ -200,6 +200,10 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 self.assertTrue(result["limitations"])
                 container_uplift = result["commercial_uplift_evidence"]
                 self.assertEqual(container_uplift["item_numbers"], [25])
+                self.assertTrue(container_uplift["implemented"])
+                self.assertTrue(container_uplift["usable"])
+                self.assertTrue(container_uplift["validated"])
+                self.assertFalse(container_uplift["commercial_grade_ready"])
                 self.assertIn("#25-source-integrity", container_uplift["passed_validation_matrix_ids"])
                 self.assertIn("#25-native-commercial-parser", container_uplift["failed_validation_matrix_ids"])
 
