@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import hashlib
 import json
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -55,6 +56,9 @@ def build_cross_tool_validation_report(
     output: Path | None = None,
     min_overlap: float = 0.8,
     backlog_items: Iterable[int] | None = None,
+    tool_versions: Mapping[str, str] | None = None,
+    tool_commands: Mapping[str, str] | None = None,
+    source_evidence: Iterable[Path] | None = None,
 ) -> dict[str, object]:
     if not reference_outputs:
         raise CrossToolValidationError("at least one --reference-output NAME=PATH is required")
@@ -71,6 +75,13 @@ def build_cross_tool_validation_report(
         for dataset in reference_datasets.values()
     ]
     mapped_items = list(dict.fromkeys(int(item) for item in (backlog_items or [])))
+    source_evidence_integrity = [file_integrity(path) for path in (source_evidence or [])]
+    tool_metadata = build_tool_metadata(
+        rapid_dataset=rapid_dataset,
+        reference_datasets=list(reference_datasets.values()),
+        tool_versions=tool_versions or {},
+        tool_commands=tool_commands or {},
+    )
     status = "pass"
     if any(item["status"] == "failed" for item in comparisons):
         status = "failed"
@@ -84,12 +95,16 @@ def build_cross_tool_validation_report(
         "rapid_output": rapid_dataset,
         "reference_outputs": list(reference_datasets.values()),
         "backlog_items": mapped_items,
+        "source_evidence_integrity": source_evidence_integrity,
+        "tool_metadata": tool_metadata,
         "comparisons": comparisons,
         "cross_tool_validation_assessment": cross_tool_validation_assessment(
             status=status,
             comparisons=comparisons,
             backlog_items=mapped_items,
             output=output,
+            source_evidence_integrity=source_evidence_integrity,
+            tool_metadata=tool_metadata,
         ),
         "operator_guidance": build_operator_guidance(comparisons),
     }
@@ -101,6 +116,7 @@ def build_cross_tool_validation_report(
             output=output,
             rapid_output=rapid_output,
             reference_outputs=reference_outputs,
+            source_evidence=source_evidence or [],
         )
     if output is not None:
         write_result(payload, output.expanduser().resolve())
@@ -118,6 +134,7 @@ def load_tool_dataset(name: str, path: Path) -> dict[str, object]:
         "name": name,
         "path": str(path),
         "format": infer_format(path),
+        "file_integrity": file_integrity(path),
         "row_count": len(rows),
         "truncated": len(rows) >= MAX_ROWS_PER_TOOL,
         "key_count": len(keys),
@@ -283,10 +300,12 @@ def build_validation_datasets(
     output: Path | None,
     rapid_output: Path,
     reference_outputs: Mapping[str, Path],
+    source_evidence: Iterable[Path],
 ) -> list[dict[str, object]]:
     evidence_paths = [str(output.expanduser().resolve())] if output is not None else [
         str(rapid_output.expanduser().resolve()),
         *[str(path.expanduser().resolve()) for path in reference_outputs.values()],
+        *[str(path.expanduser().resolve()) for path in source_evidence],
     ]
     reference_names = [str(item.get("reference_name") or "") for item in comparisons]
     return [
@@ -305,6 +324,7 @@ def build_validation_datasets(
                     "RapidTriage output and trusted reference output share record/cell keys above the configured overlap threshold.",
                     "Missing reference keys are bounded in missing_in_rapid_sample for reviewer triage.",
                     "Reference tool names, row counts, key counts, and overlap ratio are preserved.",
+                    "Cross-tool report preserves source/reference output hashes plus operator-provided tool version/command metadata when supplied.",
                 ],
                 "reference_tools": reference_names,
                 "minimum_overlap": min(
@@ -322,7 +342,24 @@ def cross_tool_validation_assessment(
     comparisons: list[Mapping[str, object]],
     backlog_items: list[int],
     output: Path | None,
+    source_evidence_integrity: list[dict[str, object]],
+    tool_metadata: Mapping[str, object],
 ) -> dict[str, object]:
+    tool_rows = tool_metadata.get("tools") if isinstance(tool_metadata.get("tools"), list) else []
+    external_tool_rows = [
+        item for item in tool_rows
+        if isinstance(item, Mapping) and item.get("name") and item.get("name") != "rapidtriage"
+    ]
+    tools_with_version = sum(1 for item in external_tool_rows if item.get("version"))
+    tools_with_command = sum(1 for item in external_tool_rows if item.get("command"))
+    source_hashes_attached = bool(source_evidence_integrity)
+    versions_attached = bool(external_tool_rows) and tools_with_version == len(external_tool_rows)
+    commands_attached = bool(external_tool_rows) and tools_with_command == len(external_tool_rows)
+    blockers = ["independent-reviewer-signoff-required"]
+    if not source_hashes_attached:
+        blockers.append("corpus-scope-and-source-hash-review-required")
+    if not versions_attached or not commands_attached:
+        blockers.append("external-tool-version-and-command-capture-required")
     return {
         "status": status,
         "backlog_items": backlog_items,
@@ -330,11 +367,64 @@ def cross_tool_validation_assessment(
         "output": str(output.expanduser().resolve()) if output is not None else "",
         "ready_for_validated_gate": bool(backlog_items) and status == "pass" and output is not None,
         "ready_for_commercial_grade": False,
-        "commercial_grade_blockers": [
-            "corpus-scope-and-source-hash-review-required",
-            "independent-reviewer-signoff-required",
-            "external-tool-version-and-command-capture-required",
-        ],
+        "source_evidence_count": len(source_evidence_integrity),
+        "tools_with_version_count": tools_with_version,
+        "tools_with_command_count": tools_with_command,
+        "commercial_grade_readiness_checks": {
+            "source_evidence_hashes_attached": source_hashes_attached,
+            "external_tool_versions_attached": versions_attached,
+            "external_tool_commands_attached": commands_attached,
+            "independent_reviewer_signoff_attached": False,
+        },
+        "commercial_grade_blockers": blockers,
+    }
+
+
+def build_tool_metadata(
+    *,
+    rapid_dataset: Mapping[str, object],
+    reference_datasets: list[Mapping[str, object]],
+    tool_versions: Mapping[str, str],
+    tool_commands: Mapping[str, str],
+) -> dict[str, object]:
+    rows: list[dict[str, object]] = []
+    for dataset in [rapid_dataset, *reference_datasets]:
+        name = str(dataset.get("name") or "")
+        rows.append(
+            {
+                "name": name,
+                "output_path": str(dataset.get("path") or ""),
+                "output_sha256": (
+                    dataset.get("file_integrity", {}).get("sha256")
+                    if isinstance(dataset.get("file_integrity"), Mapping)
+                    else ""
+                ),
+                "version": str(tool_versions.get(name) or ""),
+                "command": str(tool_commands.get(name) or ""),
+                "version_required_for_commercial_grade": name != "rapidtriage" and not tool_versions.get(name),
+                "command_required_for_commercial_grade": name != "rapidtriage" and not tool_commands.get(name),
+            }
+        )
+    return {
+        "tools": rows,
+        "version_count": sum(1 for item in rows if item.get("version")),
+        "command_count": sum(1 for item in rows if item.get("command")),
+        "commercial_grade_note": "Capture external tool version and command lines before relying on cross-tool output as commercial-grade evidence.",
+    }
+
+
+def file_integrity(path: Path) -> dict[str, object]:
+    resolved = path.expanduser().resolve()
+    stat = resolved.stat()
+    hasher = hashlib.sha256()
+    with resolved.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return {
+        "path": str(resolved),
+        "size_bytes": stat.st_size,
+        "sha256": hasher.hexdigest(),
+        "mtime_epoch": stat.st_mtime,
     }
 
 

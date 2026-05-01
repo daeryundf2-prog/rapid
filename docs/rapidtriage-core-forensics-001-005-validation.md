@@ -32,6 +32,9 @@ For real corpus validation, compare RapidTriage output with trusted tool exports
 rapidtriage cross-tool-validate \
   --rapid-output ./case-run/artifacts/eventlog.json \
   --reference-output evtxecmd=./reference/EvtxECmd-Security.csv \
+  --source-evidence ./evidence/Security.evtx \
+  --tool-version evtxecmd="EvtxECmd 1.5.0" \
+  --tool-command evtxecmd="EvtxECmd.exe -f ./evidence/Security.evtx --csv ./reference" \
   --backlog-item 1 \
   --backlog-item 2 \
   --backlog-item 3 \
@@ -44,4 +47,4 @@ rapidtriage commercial-readiness \
   --json
 ```
 
-The cross-tool report now emits a `datasets` section compatible with `commercial-readiness`. A passing report can satisfy the `validated` gate for mapped items only when the JSON report exists and the overlap threshold is met. It still does not satisfy `commercial_grade`; reviewer sign-off, corpus scope, external tool versions/commands, source hashes, and Registry transaction-log/deleted-cell validation must remain attached.
+The cross-tool report now emits a `datasets` section compatible with `commercial-readiness`. It also records SHA256/size/mtime for the RapidTriage output, each external reference output, and any `--source-evidence` path, plus operator-supplied external tool versions and commands. A passing report can satisfy the `validated` gate for mapped items only when the JSON report exists and the overlap threshold is met. It still does not satisfy `commercial_grade`; independent reviewer sign-off, corpus scope, and Registry transaction-log/deleted-cell validation must remain attached.

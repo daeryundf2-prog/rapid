@@ -146,6 +146,23 @@ def add_web_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--crash-log-dir", help="Local-only directory for web/API crash reports")
 
 
+def parse_named_cli_values(
+    values: list[str],
+    *,
+    option_name: str,
+    parser: argparse.ArgumentParser,
+) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for value in values:
+        if "=" not in value:
+            parser.error(f"{option_name} must use NAME=VALUE")
+        name, raw = value.split("=", 1)
+        if not name.strip() or not raw.strip():
+            parser.error(f"{option_name} must use NAME=VALUE")
+        parsed[name.strip()] = raw.strip()
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rapidtriage",
@@ -1171,6 +1188,21 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         type=int,
         help="Commercial-readiness backlog item number satisfied by a passing comparison; repeat for #1-#5 evidence",
+    )
+    cross_tool.add_argument(
+        "--tool-version",
+        action="append",
+        help="External tool version metadata as NAME=VERSION; repeat for EvtxECmd, RECmd, RegistryExplorer, etc.",
+    )
+    cross_tool.add_argument(
+        "--tool-command",
+        action="append",
+        help="External tool command/provenance as NAME=COMMAND; repeat for each reference export.",
+    )
+    cross_tool.add_argument(
+        "--source-evidence",
+        action="append",
+        help="Original evidence file used to produce the compared outputs; repeat to hash multiple sources.",
     )
     cross_tool.add_argument("--output", help="Optional JSON report path")
     cross_tool.add_argument("--json", action="store_true", help="Print machine-readable JSON")
@@ -2306,6 +2338,8 @@ def main(argv=None) -> int:
             if not name.strip() or not path.strip():
                 parser.error("--reference-output must use NAME=PATH")
             references[name.strip()] = Path(path).expanduser().resolve()
+        tool_versions = parse_named_cli_values(args.tool_version or [], option_name="--tool-version", parser=parser)
+        tool_commands = parse_named_cli_values(args.tool_command or [], option_name="--tool-command", parser=parser)
         try:
             payload = build_cross_tool_validation_report(
                 rapid_output=Path(args.rapid_output).expanduser().resolve(),
@@ -2313,6 +2347,9 @@ def main(argv=None) -> int:
                 output=Path(args.output).expanduser().resolve() if args.output else None,
                 min_overlap=args.min_overlap,
                 backlog_items=args.backlog_item or [],
+                tool_versions=tool_versions,
+                tool_commands=tool_commands,
+                source_evidence=[Path(path).expanduser().resolve() for path in args.source_evidence or []],
             )
         except (CrossToolValidationError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             parser.error(str(exc))
