@@ -23,7 +23,7 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             apk_path = root / "exports" / "suspicious.apk"
             apk_path.parent.mkdir()
             write_apk_fixture(apk_path)
-            app_data_path = root / "Android" / "data" / "com.example.spy" / "files" / "messages.db"
+            app_data_path = root / "Android" / "data" / "com.example.spy" / "files" / "browser_messages_media.db"
             app_data_path.parent.mkdir(parents=True)
             app_data_path.write_bytes(b"SQLite format 3\x00message-store")
             output = root / "apk-artifacts.json"
@@ -62,16 +62,32 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertTrue(any(item["value"] == "10.0.0.66" for item in details["string_pivots"]))
             self.assertIn("sha256", details["hashes"])
             self.assertGreater(details["risk_score"], 0)
+            apk_gate = details["core_accuracy_gates"][0]
+            self.assertEqual(apk_gate["gap_id"], "#30")
+            self.assertIn("binary manifest decode or limitation", apk_gate["satisfied_checks"])
+            self.assertIn("permission/component normalization", apk_gate["satisfied_checks"])
+            self.assertIn("signature chain validation", apk_gate["satisfied_checks"])
+            self.assertIn("DEX/native string pivot bounds", apk_gate["satisfied_checks"])
+            self.assertIn("app-data schema and secret-handling warnings", apk_gate["satisfied_checks"])
 
             app_data = next(item for item in payload["artifacts"] if item["artifact_type"] == "android-app-data")
             self.assertEqual(app_data["details"]["package"], "com.example.spy")
             self.assertEqual(app_data["details"]["data_category"], "database")
             self.assertIn("communication-store-candidate", app_data["details"]["risk_flags"])
+            self.assertIn("browser-store-candidate", app_data["details"]["risk_flags"])
+            self.assertIn("media-store-candidate", app_data["details"]["risk_flags"])
             self.assertFalse(app_data["details"]["validation_checks"]["secret_values_extracted"])
             self.assertIn("#29", app_data["details"]["android_report_grade_assessment"]["commercial_gap_ids"])
             self.assertIn("#30", app_data["details"]["android_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(app_data["details"]["forensic_review"]["gap_id"], "#29")
             self.assertFalse(app_data["details"]["android_native_capabilities"]["app_specific_database_decode"])
+            app_data_gates = {gate["gap_id"]: gate for gate in app_data["details"]["core_accuracy_gates"]}
+            self.assertIn("package/path attribution", app_data_gates["#29"]["satisfied_checks"])
+            self.assertIn("SMS/call/contact row validation", app_data_gates["#29"]["satisfied_checks"])
+            self.assertIn("browser/media source linkage", app_data_gates["#29"]["satisfied_checks"])
+            self.assertIn("encrypted-store limitation", app_data_gates["#29"]["satisfied_checks"])
+            self.assertIn("app-specific schema version tracking", app_data_gates["#29"]["satisfied_checks"])
+            self.assertIn("app-data schema and secret-handling warnings", app_data_gates["#30"]["satisfied_checks"])
 
 
 def write_apk_fixture(path: Path) -> None:

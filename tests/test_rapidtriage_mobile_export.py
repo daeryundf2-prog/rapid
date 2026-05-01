@@ -66,6 +66,13 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("#26", message["details"]["mobile_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(message["details"]["forensic_review"]["gap_id"], "#26")
             self.assertFalse(message["details"]["mobile_native_capabilities"]["proprietary_vendor_package_decode"])
+            message_gate = message["details"]["core_accuracy_gates"][0]
+            self.assertEqual(message_gate["gap_id"], "#26")
+            self.assertIn("source tool/version/profile detection", message_gate["satisfied_checks"])
+            self.assertIn("row count and source ID preservation", message_gate["satisfied_checks"])
+            self.assertIn("duplicate/deleted semantics", message_gate["satisfied_checks"])
+            self.assertIn("source hash and acquisition linkage", message_gate["satisfied_checks"])
+            self.assertIn("schema version compatibility warning", message_gate["satisfied_checks"])
 
             chat_messages = [
                 artifact
@@ -149,6 +156,22 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("#27", ios_file["details"]["mobile_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(ios_file["details"]["forensic_review"]["gap_id"], "#27")
             self.assertFalse(ios_file["details"]["mobile_native_capabilities"]["ios_protected_file_decryption"])
+            ios_gate = ios_file["details"]["core_accuracy_gates"][0]
+            self.assertEqual(ios_gate["gap_id"], "#27")
+            self.assertIn("Manifest.db domain/fileID mapping", ios_gate["satisfied_checks"])
+            self.assertIn("encrypted backup authority gate", ios_gate["satisfied_checks"])
+            self.assertIn("app database schema detection", ios_gate["satisfied_checks"])
+            self.assertIn("deleted-record limitation warning", ios_gate["satisfied_checks"])
+
+            ios_metadata = next(
+                artifact
+                for artifact in payload["artifacts"]
+                if artifact["artifact_type"] == "ios-backup-metadata"
+                and artifact["details"]["plist_name"] == "Info.plist"
+            )
+            metadata_gate = ios_metadata["details"]["core_accuracy_gates"][0]
+            self.assertEqual(metadata_gate["gap_id"], "#27")
+            self.assertIn("Info/Status plist consistency", metadata_gate["satisfied_checks"])
 
             keychain = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "ios-keychain-inventory")
             self.assertFalse(keychain["details"]["validation_checks"]["secrets_extracted"])
@@ -157,6 +180,13 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("#28", keychain["details"]["mobile_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(keychain["details"]["forensic_review"]["gap_id"], "#28")
             self.assertFalse(keychain["details"]["mobile_native_capabilities"]["ios_keychain_secret_decryption"])
+            keychain_gate = keychain["details"]["core_accuracy_gates"][0]
+            self.assertEqual(keychain_gate["gap_id"], "#28")
+            self.assertIn("secret values redacted by default", keychain_gate["satisfied_checks"])
+            self.assertIn("protected-data class labeling", keychain_gate["satisfied_checks"])
+            self.assertIn("authority gate before reveal/decrypt", keychain_gate["satisfied_checks"])
+            self.assertIn("record count/table inventory", keychain_gate["satisfied_checks"])
+            self.assertIn("audit log for any controlled reveal", keychain_gate["satisfied_checks"])
 
             chat_db = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-chat-database")
             self.assertEqual(chat_db["details"]["service"], "WhatsApp")

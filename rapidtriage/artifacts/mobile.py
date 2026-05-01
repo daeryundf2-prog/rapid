@@ -9,6 +9,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable, Mapping
 
+from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 from .review import build_forensic_review
@@ -418,6 +419,14 @@ def build_record(
             ),
             "mobile_report_grade_assessment": report_grade,
             "mobile_native_capabilities": mobile_native_capabilities(artifact_type),
+            "core_accuracy_gates": mobile_core_accuracy_gates(
+                artifact_type=artifact_type,
+                source_tool=source_tool,
+                source_format=source_format,
+                source_index=source_index,
+                source_hashes=source_hashes,
+                details=detail_payload,
+            ),
             "forensic_review": build_mobile_forensic_review(
                 artifact_type=artifact_type,
                 source_tool=source_tool,
@@ -1295,6 +1304,16 @@ def collect_ios_keychain_inventory(path: Path) -> ArtifactRecord:
             "event_type": "ios-keychain-inventory",
             "timestamp": "",
             "table_summaries": table_summaries,
+            "protected_data_class_handling": {
+                "status": "redacted-inventory-only",
+                "default_label": "protected-data-redacted",
+                "class_values_revealed": False,
+            },
+            "controlled_reveal_audit": {
+                "required_before_reveal": True,
+                "reveal_performed": False,
+                "audit_event_recorded": "not-applicable-no-secret-reveal",
+            },
             "validation_checks": validation,
             "commercial_grade_blockers": [
                 "Inventory only: RapidTriage does not decrypt or expose keychain secret values.",
@@ -1626,6 +1645,77 @@ def mobile_validation_matrix(
             "severity": "critical",
         },
     ]
+
+
+def mobile_core_accuracy_gates(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    details: Mapping[str, object],
+) -> list[dict[str, object]]:
+    evidence_refs = [
+        f"source_path:{optional_text(details.get('source_path'))}",
+        f"source_tool:{source_tool}",
+        f"source_format:{source_format}",
+        f"source_index:{source_index}",
+    ]
+    if source_hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{source_hashes['sha256']}")
+    record_id = source_record_id(details, source_index)
+    if record_id:
+        evidence_refs.append(f"source_record_id:{record_id}")
+
+    validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    gates: list[dict[str, object]] = []
+    if "#26" in mobile_commercial_gap_ids(artifact_type, source_tool):
+        satisfied = []
+        if source_tool and source_format and PARSER_VERSION:
+            satisfied.append("source tool/version/profile detection")
+        if source_index is not None and record_id:
+            satisfied.append("row count and source ID preservation")
+        if "deleted_state" in details or validation.get("row_count_nonzero") or validation.get("detected_artifact_type_count"):
+            satisfied.append("duplicate/deleted semantics")
+        if source_hashes.get("sha256"):
+            satisfied.append("source hash and acquisition linkage")
+        if details.get("mobile_report_grade_assessment") or details.get("commercial_grade_blockers") or not validation.get("vendor_schema_validated", False):
+            satisfied.append("schema version compatibility warning")
+        gates.append(build_accuracy_gate(26, satisfied_checks=satisfied, evidence_refs=evidence_refs))
+
+    if artifact_type in {"ios-backup-file", "ios-backup-source", "ios-backup-metadata"}:
+        satisfied = []
+        if details.get("file_id") and details.get("domain") and details.get("logical_path"):
+            satisfied.append("Manifest.db domain/fileID mapping")
+        if artifact_type == "ios-backup-source" and validation.get("manifest_db_present"):
+            satisfied.append("Manifest.db domain/fileID mapping")
+        if artifact_type == "ios-backup-metadata" and validation.get("plist_parseable"):
+            satisfied.append("Info/Status plist consistency")
+        if details.get("legal_warning") or details.get("commercial_grade_blockers") or not validation.get("encrypted_backup_unlocked", False):
+            satisfied.append("encrypted backup authority gate")
+        if "message-store-candidate" in details.get("risk_flags", []) or "structured-data-file" in details.get("risk_flags", []):
+            satisfied.append("app database schema detection")
+        if details.get("commercial_grade_blockers"):
+            satisfied.append("deleted-record limitation warning")
+        gates.append(build_accuracy_gate(27, satisfied_checks=satisfied, evidence_refs=evidence_refs))
+
+    if artifact_type == "ios-keychain-inventory":
+        table_summaries = details.get("table_summaries") if isinstance(details.get("table_summaries"), list) else []
+        satisfied = []
+        if validation.get("values_redacted") and not validation.get("secrets_extracted"):
+            satisfied.append("secret values redacted by default")
+        if details.get("protected_data_class_handling"):
+            satisfied.append("protected-data class labeling")
+        if details.get("legal_warning") and details.get("controlled_reveal_audit"):
+            satisfied.append("authority gate before reveal/decrypt")
+        if table_summaries or validation.get("opened_readonly"):
+            satisfied.append("record count/table inventory")
+        if details.get("controlled_reveal_audit"):
+            satisfied.append("audit log for any controlled reveal")
+        gates.append(build_accuracy_gate(28, satisfied_checks=satisfied, evidence_refs=evidence_refs))
+
+    return gates
 
 
 def mobile_report_grade_assessment(

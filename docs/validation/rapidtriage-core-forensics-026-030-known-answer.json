@@ -1,0 +1,97 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #26-#30 internal fixture validation",
+  "status": "pass",
+  "datasets": [
+    {
+      "id": "core-forensics-026-vendor-mobile-export-fixture",
+      "name": "#26 vendor mobile export fixture assertions",
+      "source": "tests.test_rapidtriage_mobile_export.write_mobile_export_fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [26],
+      "evidence_paths": [
+        "docs/validation/core-forensics-026-030-fixture-evidence.json",
+        "tests/test_rapidtriage_mobile_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "vendor export rows preserve source tool/profile hints, source row IDs, hashes, duplicate/deleted warnings, schema compatibility blockers, and #26 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; vendor-version schema corpora and original acquisition hash logs remain commercial-grade evidence."
+    },
+    {
+      "id": "core-forensics-027-ios-backup-fixture",
+      "name": "#27 iOS backup fixture assertions",
+      "source": "tests.test_rapidtriage_mobile_export.write_mobile_export_fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [27],
+      "evidence_paths": [
+        "docs/validation/core-forensics-026-030-fixture-evidence.json",
+        "tests/test_rapidtriage_mobile_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "iOS Manifest.db/plist rows preserve domain/fileID mapping, plist consistency, authority gates, app DB candidates, deleted-record warnings, and #27 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; encrypted backups, app database schemas, and deleted records remain validation blockers."
+    },
+    {
+      "id": "core-forensics-028-ios-keychain-fixture",
+      "name": "#28 iOS keychain fixture assertions",
+      "source": "tests.test_rapidtriage_mobile_export.write_mobile_export_fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [28],
+      "evidence_paths": [
+        "docs/validation/core-forensics-026-030-fixture-evidence.json",
+        "tests/test_rapidtriage_mobile_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "iOS keychain inventory preserves redaction, protected-data labeling, reveal authority/audit gates, table counts, and #28 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; protected-data decryption and legal reveal package remain operator-owned blockers."
+    },
+    {
+      "id": "core-forensics-029-android-artifact-fixture",
+      "name": "#29 Android backup/artifact fixture assertions",
+      "source": "tests.test_rapidtriage_android_apk.write_apk_fixture plus app-data export file",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [29],
+      "evidence_paths": [
+        "docs/validation/core-forensics-026-030-fixture-evidence.json",
+        "tests/test_rapidtriage_android_apk.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Android app-data rows preserve package/path attribution, communication/browser/media linkage hints, encrypted-store limits, schema tracking, and #29 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; Android backup payload decoding, app schemas, and encrypted/deleted stores remain commercial blockers."
+    },
+    {
+      "id": "core-forensics-030-android-apk-fixture",
+      "name": "#30 Android APK fixture assertions",
+      "source": "tests.test_rapidtriage_android_apk.write_apk_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [30],
+      "evidence_paths": [
+        "docs/validation/core-forensics-026-030-fixture-evidence.json",
+        "tests/test_rapidtriage_android_apk.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "APK rows preserve manifest, permissions/components, certificate/signature limitation, bounded DEX/native pivots, secret-handling warnings, and #30 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; binary manifests, signature-chain trust, and malware behavior validation remain required."
+    }
+  ]
+}

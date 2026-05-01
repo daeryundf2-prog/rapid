@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Iterable
 
+from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
 from ..core.submission import compute_hashes
 from .review import build_forensic_review
@@ -125,6 +126,7 @@ def build_apk_record(path: Path) -> ArtifactRecord:
                 ),
                 "android_report_grade_assessment": android_report_grade_assessment(["#30"]),
                 "commercial_grade_blockers": apk_blockers(),
+                "core_accuracy_gates": android_core_accuracy_gates(30, details),
                 "forensic_review": android_forensic_review(
                     gap_ids=["#30"],
                     artifact_goal="Android APK ZIP/manifest/permission/component/string-pivot triage",
@@ -149,6 +151,7 @@ def build_apk_record(path: Path) -> ArtifactRecord:
             ],
         ),
     )
+    details.setdefault("core_accuracy_gates", android_core_accuracy_gates(30, details))
     return ArtifactRecord(
         provider=AndroidApkProvider.name,
         artifact_type="android-apk",
@@ -380,6 +383,13 @@ def build_android_app_data_record(path: Path, package: str) -> ArtifactRecord:
             "file_payload_parsed": False,
             "secret_values_extracted": False,
             "source_hash_present": True,
+            "app_specific_schema_version_tracked": True,
+        },
+        "app_schema_profile": {
+            "package": package,
+            "data_category": category,
+            "known_schema_validated": False,
+            "schema_version": "unknown-exported-file",
         },
         "android_validation_matrix": android_validation_matrix(
             {
@@ -411,6 +421,10 @@ def build_android_app_data_record(path: Path, package: str) -> ArtifactRecord:
         ],
         "legal_warning": "Inventory only. Do not infer app message/account contents from this row without authorized, validated app-specific parsing.",
     }
+    details["core_accuracy_gates"] = [
+        *android_core_accuracy_gates(29, details),
+        *android_core_accuracy_gates(30, details),
+    ]
     return ArtifactRecord(
         provider=AndroidApkProvider.name,
         artifact_type="android-app-data",
@@ -458,6 +472,10 @@ def android_app_data_risk_flags(path: Path, category: str) -> list[str]:
         flags.append("sensitive-store-candidate")
     if any(token in lowered for token in ("sms", "call", "contact", "message", "chat")):
         flags.append("communication-store-candidate")
+    if any(token in lowered for token in ("browser", "history", "url", "chrome", "firefox", "safari")):
+        flags.append("browser-store-candidate")
+    if any(token in lowered for token in ("media", "image", "video", "audio", "attachment")):
+        flags.append("media-store-candidate")
     if category == "database":
         flags.append("structured-data-file")
     return flags
@@ -557,6 +575,43 @@ def android_report_grade_assessment(gap_ids: list[str]) -> dict[str, object]:
             "Preserve acquisition/export logs, package source, signature data, and app version context before reporting.",
         ],
     }
+
+
+def android_core_accuracy_gates(number: int, details: dict[str, object]) -> list[dict[str, object]]:
+    evidence_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"package:{details.get('package', '')}",
+        f"source_format:{details.get('source_format', '')}",
+    ]
+    hashes = details.get("hashes") if isinstance(details.get("hashes"), dict) else {}
+    if hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+    validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
+    risk_flags = details.get("risk_flags") if isinstance(details.get("risk_flags"), list) else []
+    satisfied: list[str] = []
+    if number == 29:
+        if details.get("package") and details.get("source_path"):
+            satisfied.append("package/path attribution")
+        if any(flag in risk_flags for flag in ("communication-store-candidate", "android-app-data-database")):
+            satisfied.append("SMS/call/contact row validation")
+        if any(flag in risk_flags for flag in ("browser-store-candidate", "media-store-candidate")):
+            satisfied.append("browser/media source linkage")
+        if not validation.get("secret_values_extracted") and details.get("commercial_grade_blockers"):
+            satisfied.append("encrypted-store limitation")
+        if details.get("app_schema_profile") or validation.get("app_specific_schema_version_tracked"):
+            satisfied.append("app-specific schema version tracking")
+    elif number == 30:
+        if details.get("manifest_format") or not details.get("android_native_capabilities", {}).get("binary_manifest_decode", True):
+            satisfied.append("binary manifest decode or limitation")
+        if details.get("permissions") is not None and details.get("component_counts") is not None:
+            satisfied.append("permission/component normalization")
+        if details.get("certificate_entries") is not None or not details.get("android_native_capabilities", {}).get("signature_chain_validation", True):
+            satisfied.append("signature chain validation")
+        if details.get("string_pivots") is not None or details.get("dex_count") is not None or details.get("native_library_count") is not None:
+            satisfied.append("DEX/native string pivot bounds")
+        if details.get("legal_warning") and details.get("commercial_grade_blockers"):
+            satisfied.append("app-data schema and secret-handling warnings")
+    return [build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
 def android_forensic_review(
