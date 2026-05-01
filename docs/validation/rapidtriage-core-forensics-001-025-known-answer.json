@@ -1,0 +1,605 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #1-#25 internal fixture validation bundle",
+  "status": "pass",
+  "claim_boundary": "Internal fixture-backed validated maturity for #1-#25 only; commercial-grade still requires external corpora, trusted-tool diffs, independent review, and large-case validation.",
+  "item_numbers": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25
+  ],
+  "source_manifests": [
+    "docs/validation/rapidtriage-core-forensics-001-005-known-answer.json",
+    "docs/validation/rapidtriage-core-forensics-006-010-known-answer.json",
+    "docs/validation/rapidtriage-core-forensics-011-015-known-answer.json",
+    "docs/validation/rapidtriage-core-forensics-016-020-known-answer.json",
+    "docs/validation/rapidtriage-core-forensics-021-025-known-answer.json"
+  ],
+  "datasets": [
+    {
+      "id": "core-forensics-001-evtx-binxml-fixture",
+      "name": "#1 Native EVTX BinXML fixture assertions",
+      "source": "tests.windows_artifact_fixtures EVTX fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        1
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-001-005-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py",
+        "tests/test_rapidtriage_windows_artifacts_collectors.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "EVTX record metadata, promoted fields, duplicate EventData ordering, and BinXML warning coverage are preserved"
+        ]
+      },
+      "notes": "Internal fixture pass; provider-specific grammar and external corpus validation remain commercial-grade blockers.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-001-005-known-answer.json"
+    },
+    {
+      "id": "core-forensics-002-evtx-message-fixture",
+      "name": "#2 EVTX message rendering fixture assertions",
+      "source": "tests.windows_artifact_fixtures EVTX fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        2
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-001-005-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py",
+        "tests/test_rapidtriage_windows_artifacts_collectors.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "message text, inserted parameters, provenance, unresolved template warnings, and fallback limitations are preserved"
+        ]
+      },
+      "notes": "Internal fixture pass; provider resource DLL rendering remains commercial-grade evidence.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-001-005-known-answer.json"
+    },
+    {
+      "id": "core-forensics-003-evtx-recovery-fixture",
+      "name": "#3 EVTX recovery fixture assertions",
+      "source": "tests.windows_artifact_fixtures EVTX corrupt/slack fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        3
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-001-005-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py",
+        "tests/test_rapidtriage_windows_artifacts_collectors.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "corrupt/slack candidate reason, offset context, integrity status, caution labels, and non-reportable default are preserved"
+        ]
+      },
+      "notes": "Internal fixture pass; large deleted/corrupt EVTX corpus and independent validation remain required.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-001-005-known-answer.json"
+    },
+    {
+      "id": "core-forensics-004-registry-tree-fixture",
+      "name": "#4 Registry key tree fixture assertions",
+      "source": "tests.windows_artifact_fixtures minimal registry hive",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        4
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-001-005-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts_collectors.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "registry key tree root reachability, parent-child backlinks, value-list ownership, last-write evidence, and transaction-log disclosure are preserved"
+        ]
+      },
+      "notes": "Internal fixture pass; transaction-log replay and broad hive corpus remain commercial-grade blockers.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-001-005-known-answer.json"
+    },
+    {
+      "id": "core-forensics-005-registry-deleted-fixture",
+      "name": "#5 Registry deleted key/value fixture assertions",
+      "source": "tests.windows_artifact_fixtures minimal registry hive",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        5
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-001-005-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts_collectors.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "deleted/free key and value candidates preserve allocator evidence, parent confirmation, data plausibility, and reportability blocking"
+        ]
+      },
+      "notes": "Internal fixture pass; independent deleted-cell validation and transaction-log replay remain required.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-001-005-known-answer.json"
+    },
+    {
+      "id": "core-forensics-006-sam-security-system-fixture",
+      "name": "#6 SAM/SECURITY/SYSTEM fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        6
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-006-010-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "account lifecycle RID/name/UAC/SAM F/V candidates are preserved",
+          "group membership and privilege attribution are emitted",
+          "SECURITY secret metadata is redacted and not decrypted"
+        ]
+      },
+      "notes": "Internal fixture pass; external SAM/SECURITY/SYSTEM corpora and independent parser diffs are still required for commercial-grade claims.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-006-010-known-answer.json"
+    },
+    {
+      "id": "core-forensics-007-amcache-fixture",
+      "name": "#7 Amcache fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        7
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-006-010-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Amcache path/hash/publisher/timestamp-source fields are normalized",
+          "native Amcache.hve string pivots are emitted with explicit schema blockers"
+        ]
+      },
+      "notes": "Internal fixture pass; AmcacheParser/RECmd cross-tool corpus remains commercial-grade evidence.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-006-010-known-answer.json"
+    },
+    {
+      "id": "core-forensics-008-shimcache-fixture",
+      "name": "#8 ShimCache/AppCompatCache fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        8
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-006-010-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "ShimCache path/timestamp candidates are emitted",
+          "not-proof-of-execution warning is preserved"
+        ]
+      },
+      "notes": "Internal fixture pass; OS-version native AppCompatCache binary decoding corpus remains required.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-006-010-known-answer.json"
+    },
+    {
+      "id": "core-forensics-009-bam-dam-fixture",
+      "name": "#9 BAM/DAM fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        9
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-006-010-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "BAM SID, device path, FILETIME timestamp, and ControlSet attribution are emitted"
+        ]
+      },
+      "notes": "Internal fixture pass; native SYSTEM hive binary decoding and broad Windows version validation remain required.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-006-010-known-answer.json"
+    },
+    {
+      "id": "core-forensics-010-srum-fixture",
+      "name": "#10 SRUM fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        10
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-006-010-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "SRUM source-tool counters and native ESE header/table/row candidates are emitted",
+          "native row candidates preserve app, timestamp, counters, and validation blockers"
+        ]
+      },
+      "notes": "Internal fixture pass; SrumECmd/libesedb cross-tool and full native ESE row decoding remain commercial-grade evidence.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-006-010-known-answer.json"
+    },
+    {
+      "id": "core-forensics-011-windows-edb-fixture",
+      "name": "#11 Windows.edb fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        11
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-011-015-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Windows.edb ESE header/page-map/table-family candidates are emitted",
+          "path, URL, content, deleted-state marker, and page source citation evidence is preserved",
+          "#11 core_accuracy_gates are present on native Windows.edb rows"
+        ]
+      },
+      "notes": "Internal fixture pass; esentutl/libesedb/WinSearchDBAnalyzer diffs remain commercial-grade evidence.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-011-015-known-answer.json"
+    },
+    {
+      "id": "core-forensics-012-mft-fixture",
+      "name": "#12 $MFT fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        12
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-011-015-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Native FILE record header, USA validation, filename parent reference, timestamp provenance, and resident data evidence are emitted",
+          "#12 core_accuracy_gates are present on native MFT rows"
+        ]
+      },
+      "notes": "Internal fixture pass; MFTECmd/TSK full-volume diff and nonresident/attribute-list corpora remain commercial-grade evidence.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-011-015-known-answer.json"
+    },
+    {
+      "id": "core-forensics-013-usn-fixture",
+      "name": "#13 $UsnJrnl fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        13
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-011-015-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "USN v2/v3 records, cursor bounds, reason flags, rename/delete hints, and timestamp evidence are emitted",
+          "#13 core_accuracy_gates are present on native USN rows"
+        ]
+      },
+      "notes": "Internal fixture pass; large journal replay, FRN path-cache corpus, and pagination stress validation remain commercial-grade evidence.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-011-015-known-answer.json"
+    },
+    {
+      "id": "core-forensics-014-jumplist-fixture",
+      "name": "#14 JumpList fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        14
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-011-015-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "CFB streams, DestList header/entry candidates, embedded LNK linkage, and AppID hash provenance are emitted",
+          "#14 core_accuracy_gates are present on JumpList rows"
+        ]
+      },
+      "notes": "Internal fixture pass; JLECmd/LECmd cross-tool corpus, deleted entries, and AppID mapping validation remain required.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-011-015-known-answer.json"
+    },
+    {
+      "id": "core-forensics-015-shellbags-fixture",
+      "name": "#15 ShellBags fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_minimal_shellbags_registry_hive",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        15
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-011-015-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts_collectors.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Native ShellBags key-tree candidates preserve BagMRU/Bags relationship, bag/node IDs, timestamp source, and user-hive scope",
+          "#15 core_accuracy_gates are present on native ShellBags rows"
+        ]
+      },
+      "notes": "Internal fixture pass; ShellBagsExplorer/SBECmd diff, binary shell-item decode, transaction log, and deleted/slack validation remain commercial-grade evidence.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-011-015-known-answer.json"
+    },
+    {
+      "id": "core-forensics-016-prefetch-fixture",
+      "name": "#16 Prefetch fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        16
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-016-020-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Prefetch SCCA header, common version offsets, run count, last-run timestamps, volume/file candidates, and #16 core_accuracy_gates are emitted"
+        ]
+      },
+      "notes": "Internal fixture pass; PECmd cross-tool corpus, compressed PF, and file metrics validation remain commercial-grade evidence.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-016-020-known-answer.json"
+    },
+    {
+      "id": "core-forensics-017-lnk-fixture",
+      "name": "#17 LNK fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        17
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-016-020-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Shell Link header, target path, working directory, tracker candidate, timestamp fields, and #17 core_accuracy_gates are emitted"
+        ]
+      },
+      "notes": "Internal fixture pass; LECmd cross-tool corpus and full shell-item property store validation remain required.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-016-020-known-answer.json"
+    },
+    {
+      "id": "core-forensics-018-system-fixture",
+      "name": "#18 Windows system artifact fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        18
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-016-020-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Task/WMI risk semantics, Defender/Firewall/WER normalized fields, source hashes, and #18 core_accuracy_gates are emitted"
+        ]
+      },
+      "notes": "Internal fixture pass; TaskCache, WMI native decode, Defender/Firewall policy correlation, and WER dump/CAB linkage remain required.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-016-020-known-answer.json"
+    },
+    {
+      "id": "core-forensics-019-browser-storage-fixture",
+      "name": "#19 Browser storage fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        19
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-016-020-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Browser storage inventory preserves profile attribution, cache/session/extension/sync/cookie stores, legal warning, and #19 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; full cache/session/schema decoding and audited secret handling remain required.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-016-020-known-answer.json"
+    },
+    {
+      "id": "core-forensics-020-browser-timeline-fixture",
+      "name": "#20 Unified browser timeline fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        20
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-016-020-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Unified browser timeline rows preserve timestamps, profile attribution, source indices, limitation disclosure, and #20 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; multi-profile dedupe, Safari parity, deleted history, and version-specific transition validation remain required.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-016-020-known-answer.json"
+    },
+    {
+      "id": "core-forensics-021-ai-transcript-fixture",
+      "name": "#21 AI transcript fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        21
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-021-025-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "AI browser storage transcript candidates preserve Q/A pairing, orphan counts, source hashes, storage provenance, and #21 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; service-side export validation and schema-version corpus remain commercial-grade evidence.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-021-025-known-answer.json"
+    },
+    {
+      "id": "core-forensics-022-e01-fixture",
+      "name": "#22 E01/Ex01 workflow fixture assertions",
+      "source": "tests.test_rapidtriage_e01 fake libewf/Sleuth Kit workflow",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        22
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-021-025-fixture-evidence.json",
+        "tests/test_rapidtriage_evidence.py",
+        "tests/test_rapidtriage_e01.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "E01 adapter and extraction metadata preserve source integrity, tool/command evidence, partition offset, read-only recovery, limitations, and #22 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; real E01/Ex01 corpora, corrupt/encrypted images, and independent libewf/Sleuth Kit matrix remain required.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-021-025-known-answer.json"
+    },
+    {
+      "id": "core-forensics-023-raw-split-fixture",
+      "name": "#23 RAW/split image fixture assertions",
+      "source": "tests.test_rapidtriage_e01 fake Sleuth Kit workflow",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        23
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-021-025-fixture-evidence.json",
+        "tests/test_rapidtriage_evidence.py",
+        "tests/test_rapidtriage_e01.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "RAW/split adapter and extraction metadata preserve split ordering/gap checks, partition parsing, tsk_recover audit, deleted-file expectations, encrypted warnings, and #23 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; large damaged split-set and filesystem known-answer validation remain required.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-021-025-known-answer.json"
+    },
+    {
+      "id": "core-forensics-024-virtual-disk-fixture",
+      "name": "#24 Virtual disk fixture assertions",
+      "source": "tests.test_rapidtriage_e01 fake qemu-img/Sleuth Kit workflow",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        24
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-021-025-fixture-evidence.json",
+        "tests/test_rapidtriage_evidence.py",
+        "tests/test_rapidtriage_e01.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Virtual disk adapter and extraction metadata preserve qemu-img evidence, converted raw hash/provenance, nested extraction, VM limitations, and #24 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; snapshot/differencing chains, hypervisor metadata, and large VM-disk corpus remain required.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-021-025-known-answer.json"
+    },
+    {
+      "id": "core-forensics-025-container-fixture",
+      "name": "#25 AD1/L01/Lx01/AFF/AFF4 fixture assertions",
+      "source": "tests.test_rapidtriage_evidence adapter detection fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [
+        25
+      ],
+      "evidence_paths": [
+        "docs/validation/core-forensics-021-025-fixture-evidence.json",
+        "tests/test_rapidtriage_evidence.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Forensic container detection preserves type, source integrity, export-first disclosure, metadata/deleted blockers, encrypted/compressed warnings, #25 core_accuracy_gates, and #25 commercial_uplift_evidence implemented/usable/validated flags"
+        ]
+      },
+      "notes": "Internal fixture pass; native proprietary container parsing and vendor export known-answer validation remain required.",
+      "source_manifest": "docs/validation/rapidtriage-core-forensics-021-025-known-answer.json"
+    }
+  ]
+}

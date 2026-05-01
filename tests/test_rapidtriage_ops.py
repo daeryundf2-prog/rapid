@@ -389,6 +389,57 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertFalse(first_item["maturity_gates"]["commercial_grade"]["passed"])
         self.assertEqual(first_item["next_required_gate"], "commercial_grade")
 
+    def test_commercial_readiness_requires_present_validation_evidence_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            validation_package = Path(tmp_dir) / "validation.json"
+            validation_package.write_text(
+                json.dumps(
+                    {
+                        "command": "validation",
+                        "known_answer_validation": {
+                            "datasets": [
+                                {
+                                    "id": "missing-evtx-known-answer",
+                                    "name": "Missing EVTX known-answer",
+                                    "status": "pass",
+                                    "backlog_items": [1],
+                                    "evidence_paths": [str(Path(tmp_dir) / "missing.json")],
+                                }
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["commercial-readiness", "--validation-package", str(validation_package), "--json"])
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["validation_evidence_summary"]["items_with_passed_validation_evidence"], 0)
+        first_item = next(item for item in payload["all_items"] if item["number"] == 1)
+        self.assertFalse(first_item["maturity_gates"]["validated"]["passed"])
+
+    def test_commercial_readiness_accepts_core_forensics_001_025_bundle(self) -> None:
+        bundle = Path("docs/validation/rapidtriage-core-forensics-001-025-known-answer.json").resolve()
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["commercial-readiness", "--validation-package", str(bundle), "--json"])
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        summary = payload["validation_evidence_summary"]
+        self.assertEqual(summary["items_with_passed_validation_evidence"], 25)
+        self.assertEqual(summary["mapped_item_numbers"][:25], list(range(1, 26)))
+        validated_items = [
+            item for item in payload["all_items"]
+            if 1 <= int(item["number"]) <= 25
+        ]
+        self.assertTrue(all(item["maturity_gates"]["validated"]["passed"] for item in validated_items))
+        self.assertTrue(all(item["next_required_gate"] == "commercial_grade" for item in validated_items))
+        self.assertFalse(payload["commercial_claim_allowed"])
+
     def test_commercial_readiness_writes_known_answer_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output = Path(tmp_dir) / "known-answer-runs.template.json"

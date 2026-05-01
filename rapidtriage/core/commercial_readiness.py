@@ -62,8 +62,8 @@ def load_validation_evidence(validation_package_path: Path | None = None) -> dic
         if not isinstance(dataset, Mapping):
             continue
         status = str(dataset.get("status") or "").lower()
-        evidence_paths_present = dataset.get("evidence_paths_present")
-        if status != "pass" or evidence_paths_present is False:
+        evidence_paths_present = validation_evidence_paths_present(dataset, manifest_path=resolved)
+        if status != "pass" or not evidence_paths_present:
             continue
         for number in validation_target_numbers(dataset):
             evidence_by_item.setdefault(number, []).append(
@@ -74,10 +74,34 @@ def load_validation_evidence(validation_package_path: Path | None = None) -> dic
                     "status": status,
                     "manifest_path": str(resolved),
                     "evidence_paths": list(dataset.get("evidence_paths") or []),
+                    "evidence_paths_present": True,
                     "notes": str(dataset.get("notes") or ""),
                 }
             )
     return evidence_by_item
+
+
+def validation_evidence_paths_present(dataset: Mapping[str, object], *, manifest_path: Path) -> bool:
+    explicit = dataset.get("evidence_paths_present")
+    if explicit is False:
+        return False
+    raw_paths = dataset.get("evidence_paths")
+    if not isinstance(raw_paths, list) or not raw_paths:
+        return bool(explicit is True)
+    repo_root = Path(__file__).resolve().parents[2]
+    for raw_path in raw_paths:
+        text = str(raw_path).strip()
+        if not text:
+            return False
+        candidate = Path(text).expanduser()
+        candidates = [candidate] if candidate.is_absolute() else [
+            Path.cwd() / candidate,
+            manifest_path.parent / candidate,
+            repo_root / candidate,
+        ]
+        if not any(path.exists() for path in candidates):
+            return False
+    return True
 
 
 def validation_datasets_from_payload(payload: Mapping[str, object]) -> list[object]:
