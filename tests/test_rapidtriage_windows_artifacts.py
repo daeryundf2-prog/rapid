@@ -823,6 +823,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(inherited_debug["privilege"], "SeDebugPrivilege")
             self.assertEqual(inherited_debug["via_groups"], ["Administrators"])
             self.assertIn("high-risk-privilege", inherited_debug["risk_flags"])
+            lifecycle_gate = lifecycle["details"]["core_accuracy_gates"][0]
+            self.assertEqual(lifecycle_gate["gap_id"], "#6")
+            self.assertIn("RID/name/SID consistency", lifecycle_gate["satisfied_checks"])
+            self.assertIn("UAC flag decoding", lifecycle_gate["satisfied_checks"])
+            self.assertIn("group alias membership reconstruction", lifecycle_gate["satisfied_checks"])
+            self.assertIn("privilege assignment attribution", lifecycle_gate["satisfied_checks"])
+            self.assertIn("secret-value redaction and authority gate", lifecycle_gate["satisfied_checks"])
+            self.assertFalse(lifecycle_gate["commercial_grade_ready"])
             group = next(item for item in group_rows if item["details"]["group_name"] == "Administrators")
             self.assertFalse(group["details"]["commercial_grade_ready"])
             self.assertEqual(group["details"]["member_count"], 1)
@@ -942,6 +950,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(exported_amcache["details"]["forensic_review"]["gap_id"], "#7")
             self.assertIn("Amcache", exported_amcache["details"]["forensic_review"]["artifact_goal"])
             self.assertFalse(exported_amcache["details"]["execution_native_capabilities"]["native_amcache_schema_decode"])
+            amcache_gate = exported_amcache["details"]["core_accuracy_gates"][0]
+            self.assertEqual(amcache_gate["gap_id"], "#7")
+            self.assertIn("schema-version detection", amcache_gate["satisfied_checks"])
+            self.assertIn("path/hash/publisher extraction", amcache_gate["satisfied_checks"])
+            self.assertIn("execution caveat wording", amcache_gate["satisfied_checks"])
+            self.assertFalse(amcache_gate["commercial_grade_ready"])
             native_amcache_hive = next(item for item in artifacts if item["artifact_type"] == "amcache-hive")
             self.assertGreaterEqual(native_amcache_hive["details"]["amcache_hive_evidence"]["candidate_path_count"], 1)
             self.assertEqual(
@@ -970,6 +984,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("#9", bam["details"]["execution_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(bam["details"]["forensic_review"]["gap_id"], "#9")
             self.assertIn("bam-execution-indicator", bam["details"]["risk_flags"])
+            bam_gate = bam["details"]["core_accuracy_gates"][0]
+            self.assertEqual(bam_gate["gap_id"], "#9")
+            self.assertIn("SID extraction", bam_gate["satisfied_checks"])
+            self.assertIn("device path normalization", bam_gate["satisfied_checks"])
+            self.assertIn("FILETIME validity", bam_gate["satisfied_checks"])
+            self.assertIn("ControlSet attribution", bam_gate["satisfied_checks"])
             self.assertTrue(shimcache["details"]["validation_required"])
             self.assertEqual(shimcache["details"]["execution_caveat"], "Presence in ShimCache is not proof the executable ran.")
             self.assertEqual(
@@ -987,6 +1007,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("native-appcompatcache-layout-decoding-required", shimcache["details"]["commercial_grade_blockers"])
             self.assertIn("#8", shimcache["details"]["execution_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(shimcache["details"]["forensic_review"]["gap_id"], "#8")
+            shimcache_gate = shimcache["details"]["core_accuracy_gates"][0]
+            self.assertEqual(shimcache_gate["gap_id"], "#8")
+            self.assertIn("not-proof-of-execution warning", shimcache_gate["satisfied_checks"])
+            self.assertIn("malformed binary bounds checks", shimcache_gate["satisfied_checks"])
             self.assertEqual(srum_rows[0]["details"]["app_id"], "powershell.exe")
             self.assertEqual(srum_rows[0]["details"]["bytes_received"], 2048)
             self.assertEqual(srum_rows[0]["details"]["bytes_total"], 2560)
@@ -1022,6 +1046,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("#10", srum_database_rows[0]["details"]["execution_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(srum_database_rows[0]["details"]["forensic_review"]["gap_id"], "#10")
             self.assertFalse(srum_database_rows[0]["details"]["execution_native_capabilities"]["native_srum_page_row_decode"])
+            srum_db_gate = srum_database_rows[0]["details"]["core_accuracy_gates"][0]
+            self.assertEqual(srum_db_gate["gap_id"], "#10")
+            self.assertIn("ESE page checksum validation", srum_db_gate["satisfied_checks"])
+            self.assertIn("catalog/table mapping", srum_db_gate["satisfied_checks"])
+            self.assertIn("native-row confidence scoring", srum_db_gate["satisfied_checks"])
             self.assertTrue(any("powershell.exe" in value.lower() for value in srum_database_rows[0]["details"]["path_candidates"]))
             self.assertTrue(any(item["details"]["app_id"] == "powershell.exe" for item in srum_pivots))
             self.assertTrue(any(item["details"]["url"] == "https://download.example/tools/installer.exe" for item in srum_pivots))

@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Iterable, Mapping
 
+from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review
 from .registry import MAX_HIVE_CELL_SCAN_BYTES, iter_registry_cell_candidates, parse_registry_hive_header
@@ -270,6 +271,17 @@ def sam_account_candidate_details(
         gap_ids=["#6"],
         extra_blockers=["native-sam-account-fv-binary-decoding-required"],
     )
+    core_accuracy_gates = os_account_core_accuracy_gates(
+        {
+            "source_path": str(path.resolve()),
+            "source_hashes": dict(source_hashes),
+            "cell_offset": candidate.get("cell_offset", 0),
+            "user_name": user_name,
+            "rid": rid_hex,
+            "validation_checks": validation_checks,
+            "uac_flags": [],
+        }
+    )
     return {
         "parser": "windows-sam-hive-native-account-scan",
         "parser_version": PARSER_VERSION,
@@ -297,6 +309,7 @@ def sam_account_candidate_details(
         "validation_checks": validation_checks,
         "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
         "os_account_report_grade_assessment": report_grade,
+        "core_accuracy_gates": core_accuracy_gates,
         "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
         "account_privilege_deep_parse_profile": account_privilege_deep_parse_profile(
             artifact_scope="native-sam-account-key-candidate",
@@ -345,6 +358,19 @@ def sam_group_candidate_details(
         gap_ids=["#6"],
         extra_blockers=["native-sam-alias-member-binary-decoding-required"],
     )
+    core_accuracy_gates = os_account_core_accuracy_gates(
+        {
+            "source_path": str(path.resolve()),
+            "source_hashes": dict(source_hashes),
+            "cell_offset": candidate.get("cell_offset", 0),
+            "group_name": group_name,
+            "rid": alias_rid_hex,
+            "validation_checks": validation_checks,
+            "group_sid_candidates": [SAM_BUILTIN_GROUP_SIDS[group_name]]
+            if group_name in SAM_BUILTIN_GROUP_SIDS
+            else [],
+        }
+    )
     return {
         "parser": "windows-sam-hive-native-group-scan",
         "parser_version": PARSER_VERSION,
@@ -371,6 +397,7 @@ def sam_group_candidate_details(
         "validation_checks": validation_checks,
         "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
         "os_account_report_grade_assessment": report_grade,
+        "core_accuracy_gates": core_accuracy_gates,
         "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
         "account_privilege_deep_parse_profile": account_privilege_deep_parse_profile(
             artifact_scope="native-sam-group-alias-candidate",
@@ -583,6 +610,15 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
             gap_ids=["#6"],
             extra_blockers=["security-secret-decryption-not-implemented", "lsa-policy-context-validation-required"],
         )
+        core_accuracy_gates = os_account_core_accuracy_gates(
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": dict(source_hashes),
+                "secret_name": item.get("secret_name", ""),
+                "secret_value_metadata": item.get("values", {}),
+                "validation_checks": validation_checks,
+            }
+        )
         yield ArtifactRecord(
             provider=WindowsOsAccountProvider.name,
             artifact_type="windows-lsa-policy-location",
@@ -607,6 +643,7 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "validation_checks": validation_checks,
                 "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
                 "os_account_report_grade_assessment": report_grade,
+                "core_accuracy_gates": core_accuracy_gates,
                 "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
                 "validation_guidance": "This row identifies sensitive LSA/SECURITY policy locations only; secrets are not decrypted and must be handled under legal authorization.",
                 "commercial_grade_ready": False,
@@ -628,6 +665,16 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
             validation_required=True,
             gap_ids=["#6"],
             extra_blockers=["lsa-policy-export-or-native-validation-required"],
+        )
+        core_accuracy_gates = os_account_core_accuracy_gates(
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": dict(source_hashes),
+                "privilege": item.get("privilege", ""),
+                "assigned_sids": list(item.get("assigned_sids") or []),
+                "assigned_principal_hints": privilege_principal_hints(item),
+                "validation_checks": validation_checks,
+            }
         )
         yield ArtifactRecord(
             provider=WindowsOsAccountProvider.name,
@@ -653,6 +700,7 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "validation_checks": validation_checks,
                 "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
                 "os_account_report_grade_assessment": report_grade,
+                "core_accuracy_gates": core_accuracy_gates,
                 "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
                 "commercial_grade_ready": False,
                 "commercial_grade_blockers": report_grade["blockers"],
@@ -676,6 +724,17 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
             validation_required=True,
             gap_ids=["#6"],
             extra_blockers=["native-sam-alias-member-binary-decoding-required", "domain-context-validation-required"],
+        )
+        core_accuracy_gates = os_account_core_accuracy_gates(
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": dict(source_hashes),
+                "group_name": group.get("group_name", ""),
+                "member_sids": list(group.get("member_sids") or []),
+                "member_names": list(group.get("member_names") or []),
+                "group_sid_candidates": list(group.get("group_sid_candidates") or []),
+                "validation_checks": validation_checks,
+            }
         )
         yield ArtifactRecord(
             provider=WindowsOsAccountProvider.name,
@@ -707,6 +766,7 @@ def build_system_security_records(path: Path, hints: dict[str, object], source_h
                 "validation_checks": validation_checks,
                 "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
                 "os_account_report_grade_assessment": report_grade,
+                "core_accuracy_gates": core_accuracy_gates,
                 "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
                 "validation_guidance": "Registry exports can identify group membership hints, but validate against native SAM alias member attributes and domain context before final testimony.",
                 "commercial_grade_ready": False,
@@ -739,6 +799,19 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 "security-policy-secret-decryption-not-implemented",
                 "domain-context-and-transaction-log-validation-required",
             ],
+        )
+        core_accuracy_gates = os_account_core_accuracy_gates(
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": dict(source_hashes),
+                "user_name": user_name,
+                "rid": rid,
+                "uac_flags": list(account.get("uac_flags") or []),
+                "sam_binary_fields": dict(account.get("sam_binary_fields") or {}),
+                "group_membership_hints": group_rows,
+                "account_security_context": security_context,
+                "validation_checks": validation_checks,
+            }
         )
         yield ArtifactRecord(
             provider=WindowsOsAccountProvider.name,
@@ -774,6 +847,7 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 "validation_checks": validation_checks,
                 "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
                 "os_account_report_grade_assessment": report_grade,
+                "core_accuracy_gates": core_accuracy_gates,
                 "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
                 "account_privilege_deep_parse_profile": account_privilege_deep_parse_profile(
                     artifact_scope="account-lifecycle-security-context",
@@ -1045,6 +1119,40 @@ def account_privilege_deep_parse_profile(
         "commercial_grade_blockers": list(report_grade.get("blockers") or []),
         "legal_handling": "SECURITY secrets are inventoried as metadata only; decryption requires explicit lawful authority and audit logging.",
     }
+
+
+def os_account_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:
+    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    evidence_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"cell_offset:{details.get('cell_offset', '')}",
+    ]
+    if hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+
+    satisfied: list[str] = []
+    if (
+        (details.get("user_name") and details.get("rid"))
+        or checks.get("has_user_name_candidate")
+        or checks.get("has_rid_candidate")
+        or details.get("group_sid_candidates")
+    ):
+        satisfied.append("RID/name/SID consistency")
+    if details.get("uac_flags") or checks.get("native_sam_fv_candidate_decoding_available"):
+        satisfied.append("UAC flag decoding")
+    if details.get("group_membership_hints") or details.get("member_sids") or details.get("group_sid_candidates"):
+        satisfied.append("group alias membership reconstruction")
+    security_context = (
+        details.get("account_security_context") if isinstance(details.get("account_security_context"), Mapping) else {}
+    )
+    if details.get("privilege") or details.get("assigned_sids") or security_context.get("inherited_privilege_count"):
+        satisfied.append("privilege assignment attribution")
+    secret_metadata = details.get("secret_value_metadata") if isinstance(details.get("secret_value_metadata"), Mapping) else {}
+    if secret_metadata or details.get("secret_name") or not OS_ACCOUNT_NATIVE_CAPABILITIES["security_secret_decryption"]:
+        satisfied.append("secret-value redaction and authority gate")
+
+    return [build_accuracy_gate(6, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
 def os_account_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, object]]:

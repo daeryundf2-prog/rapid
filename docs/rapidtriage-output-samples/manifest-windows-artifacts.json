@@ -1680,6 +1680,56 @@
               "validation-check-failed:row-level-decoding-available"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/System32/sru/SRUDB.dat",
+                  "source_index:",
+                  "source_sha256:fba689278af9583bb1c19b42000438c9006d37e09a63251ef444a4221949b734"
+                ],
+                "gap_id": "#10",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "tagged column decoding",
+                  "counter/timestamp semantics"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "satisfied_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "native-row confidence scoring"
+                ],
+                "status": "validation-required",
+                "title": "SRUM full ESE table parser"
+              }
+            ],
             "coverage_status": "ese-header-string-scan",
             "ese_header": {
               "file_type": 1,
@@ -2092,6 +2142,55 @@
               "validation-check-failed:row-level-decoding-available"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/System32/sru/SRUDB.dat",
+                  "source_index:3",
+                  "source_sha256:fba689278af9583bb1c19b42000438c9006d37e09a63251ef444a4221949b734"
+                ],
+                "gap_id": "#10",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "satisfied_checks": [],
+                "status": "validation-required",
+                "title": "SRUM full ESE table parser"
+              }
+            ],
             "coverage_status": "native-ese-string-pivot",
             "evidence_strength": "application-resource-usage-string-pivot",
             "executable_path": "",
@@ -2308,6 +2407,55 @@
               "validation-check-failed:row-level-decoding-available"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/System32/sru/SRUDB.dat",
+                  "source_index:1",
+                  "source_sha256:fba689278af9583bb1c19b42000438c9006d37e09a63251ef444a4221949b734"
+                ],
+                "gap_id": "#10",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "satisfied_checks": [],
+                "status": "validation-required",
+                "title": "SRUM full ESE table parser"
+              }
+            ],
             "coverage_status": "native-ese-string-pivot",
             "evidence_strength": "application-resource-usage-string-pivot",
             "executable_path": "",
@@ -2524,6 +2672,55 @@
               "validation-check-failed:row-level-decoding-available"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/System32/sru/SRUDB.dat",
+                  "source_index:0",
+                  "source_sha256:fba689278af9583bb1c19b42000438c9006d37e09a63251ef444a4221949b734"
+                ],
+                "gap_id": "#10",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "satisfied_checks": [],
+                "status": "validation-required",
+                "title": "SRUM full ESE table parser"
+              }
+            ],
             "coverage_status": "native-ese-string-pivot",
             "evidence_strength": "application-resource-usage-string-pivot",
             "executable_path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
@@ -2738,6 +2935,55 @@
               "validation-check-failed:row-level-decoding-available"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/System32/sru/SRUDB.dat",
+                  "source_index:2",
+                  "source_sha256:fba689278af9583bb1c19b42000438c9006d37e09a63251ef444a4221949b734"
+                ],
+                "gap_id": "#10",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "satisfied_checks": [],
+                "status": "validation-required",
+                "title": "SRUM full ESE table parser"
+              }
+            ],
             "coverage_status": "native-ese-string-pivot",
             "evidence_strength": "application-resource-usage-string-pivot",
             "executable_path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
@@ -2953,6 +3199,56 @@
               "validation-check-failed:row-level-decoding-available"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/System32/sru/SRUDB.dat",
+                  "source_index:0",
+                  "source_sha256:fba689278af9583bb1c19b42000438c9006d37e09a63251ef444a4221949b734"
+                ],
+                "gap_id": "#10",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "ESE page checksum validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "satisfied_checks": [
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "status": "validation-required",
+                "title": "SRUM full ESE table parser"
+              }
+            ],
             "counter_candidates": {
               "bytes_received": 2048,
               "bytes_sent": 512
@@ -3208,6 +3504,56 @@
               "validation-check-failed:row-level-decoding-available"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/System32/sru/SRUDB.dat",
+                  "source_index:0",
+                  "source_sha256:fba689278af9583bb1c19b42000438c9006d37e09a63251ef444a4221949b734"
+                ],
+                "gap_id": "#10",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "ESE page checksum validation",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "satisfied_checks": [
+                  "catalog/table mapping"
+                ],
+                "status": "validation-required",
+                "title": "SRUM full ESE table parser"
+              }
+            ],
             "coverage_status": "native-ese-table-string-candidate",
             "evidence_strength": "srum-table-presence-candidate",
             "execution_native_capabilities": {
@@ -3405,6 +3751,56 @@
               "validation-check-failed:row-level-decoding-available"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/System32/sru/SRUDB.dat",
+                  "source_index:1",
+                  "source_sha256:fba689278af9583bb1c19b42000438c9006d37e09a63251ef444a4221949b734"
+                ],
+                "gap_id": "#10",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "ESE page checksum validation",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "satisfied_checks": [
+                  "catalog/table mapping"
+                ],
+                "status": "validation-required",
+                "title": "SRUM full ESE table parser"
+              }
+            ],
             "coverage_status": "native-ese-table-string-candidate",
             "evidence_strength": "srum-table-presence-candidate",
             "execution_native_capabilities": {
@@ -3594,6 +3990,56 @@
               "validation-check-failed:row-level-decoding-available"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/System32/sru/SRUDB.dat",
+                  "source_index:2",
+                  "source_sha256:fba689278af9583bb1c19b42000438c9006d37e09a63251ef444a4221949b734"
+                ],
+                "gap_id": "#10",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "ESE page checksum validation",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "ESE page checksum validation",
+                  "catalog/table mapping",
+                  "tagged column decoding",
+                  "counter/timestamp semantics",
+                  "native-row confidence scoring"
+                ],
+                "satisfied_checks": [
+                  "catalog/table mapping"
+                ],
+                "status": "validation-required",
+                "title": "SRUM full ESE table parser"
+              }
+            ],
             "coverage_status": "native-ese-table-string-candidate",
             "evidence_strength": "srum-table-presence-candidate",
             "execution_native_capabilities": {

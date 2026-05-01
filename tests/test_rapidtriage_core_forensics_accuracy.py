@@ -83,6 +83,56 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertIn("Native EVTX BinXML full parsing", markdown)
             self.assertIn("Known-answer template datasets", markdown)
 
+    def test_core_forensics_6_10_manifest_promotes_validated_maturity_when_attached(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "validation"
+            manifest = Path("docs/validation/rapidtriage-core-forensics-006-010-known-answer.json")
+
+            exit_code = main(
+                [
+                    "validation",
+                    "--output-dir",
+                    str(output),
+                    "--known-answer-manifest",
+                    str(manifest),
+                    "--json",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads((output / "rapidtriage-validation-package.json").read_text(encoding="utf-8"))
+            known_answer = payload["known_answer_validation"]
+            self.assertEqual(known_answer["status"], "all-passed")
+            self.assertEqual(known_answer["dataset_count"], 5)
+            self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
+
+            readiness = Path(tmp_dir) / "readiness"
+            readiness_exit = main(
+                [
+                    "commercial-readiness",
+                    "--validation-package",
+                    str(output / "rapidtriage-validation-package.json"),
+                    "--output-dir",
+                    str(readiness),
+                    "--json",
+                ]
+            )
+
+            self.assertEqual(readiness_exit, 0)
+            readiness_payload = json.loads(
+                (readiness / "rapidtriage-commercial-readiness.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                readiness_payload["validation_evidence_summary"]["mapped_item_numbers"],
+                [6, 7, 8, 9, 10],
+            )
+            items = {item["number"]: item for item in readiness_payload["all_items"]}
+            for number in range(6, 11):
+                with self.subTest(number=number):
+                    self.assertTrue(items[number]["maturity_gates"]["validated"]["passed"])
+                    self.assertEqual(items[number]["highest_maturity_stage"], "validated")
+                    self.assertFalse(items[number]["maturity_gates"]["commercial_grade"]["passed"])
+
 
 if __name__ == "__main__":
     unittest.main()

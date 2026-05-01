@@ -1,0 +1,107 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #6-#10 internal fixture validation",
+  "status": "pass",
+  "datasets": [
+    {
+      "id": "core-forensics-006-sam-security-system-fixture",
+      "name": "#6 SAM/SECURITY/SYSTEM fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [6],
+      "evidence_paths": [
+        "docs/validation/core-forensics-006-010-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "account lifecycle RID/name/UAC/SAM F/V candidates are preserved",
+          "group membership and privilege attribution are emitted",
+          "SECURITY secret metadata is redacted and not decrypted"
+        ]
+      },
+      "notes": "Internal fixture pass; external SAM/SECURITY/SYSTEM corpora and independent parser diffs are still required for commercial-grade claims."
+    },
+    {
+      "id": "core-forensics-007-amcache-fixture",
+      "name": "#7 Amcache fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [7],
+      "evidence_paths": [
+        "docs/validation/core-forensics-006-010-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Amcache path/hash/publisher/timestamp-source fields are normalized",
+          "native Amcache.hve string pivots are emitted with explicit schema blockers"
+        ]
+      },
+      "notes": "Internal fixture pass; AmcacheParser/RECmd cross-tool corpus remains commercial-grade evidence."
+    },
+    {
+      "id": "core-forensics-008-shimcache-fixture",
+      "name": "#8 ShimCache/AppCompatCache fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [8],
+      "evidence_paths": [
+        "docs/validation/core-forensics-006-010-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "ShimCache path/timestamp candidates are emitted",
+          "not-proof-of-execution warning is preserved"
+        ]
+      },
+      "notes": "Internal fixture pass; OS-version native AppCompatCache binary decoding corpus remains required."
+    },
+    {
+      "id": "core-forensics-009-bam-dam-fixture",
+      "name": "#9 BAM/DAM fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [9],
+      "evidence_paths": [
+        "docs/validation/core-forensics-006-010-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "BAM SID, device path, FILETIME timestamp, and ControlSet attribution are emitted"
+        ]
+      },
+      "notes": "Internal fixture pass; native SYSTEM hive binary decoding and broad Windows version validation remain required."
+    },
+    {
+      "id": "core-forensics-010-srum-fixture",
+      "name": "#10 SRUM fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [10],
+      "evidence_paths": [
+        "docs/validation/core-forensics-006-010-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "SRUM source-tool counters and native ESE header/table/row candidates are emitted",
+          "native row candidates preserve app, timestamp, counters, and validation blockers"
+        ]
+      },
+      "notes": "Internal fixture pass; SrumECmd/libesedb cross-tool and full native ESE row decoding remain commercial-grade evidence."
+    }
+  ]
+}
