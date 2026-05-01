@@ -54,6 +54,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `category_counts`
   - `maturity_gate_definitions`
   - `maturity_gate_summary`
+  - `commercial_uplift_plan`
   - `validation_evidence_summary`
   - `priority_work_plan`
   - `all_items`
@@ -65,6 +66,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `maturity_gates` always evaluates `implemented`, `usable`, `validated`, and `commercial_grade` in order. A higher gate must not be claimed until every earlier gate passes.
 - `maturity_gate_summary` includes `next_gate_samples` and `next_gate_blocker_counts` so reviewers can see where work is blocked without reading all 120 items.
 - `priority_work_plan` lists the next highest-priority backlog items with `current_stage`, `next_gate`, and `required_action`; use `--next-gate validated --limit 10` to focus JSON output on one maturity gate.
+- `commercial_uplift_plan` selects the highest-priority non-commercial items, defaults to 70 goals, and splits them into five-item batches. Each goal includes `objective`, `implementation_track`, `acceptance_evidence`, `large_data_strategy`, `remaining_gap`, `external_evidence_required`, and `internal_next_step`. The plan-level `large_data_strategy` records the streaming, checkpointing, cursor API, virtualized UI, and benchmark proof expectations for large evidence sets.
 - `validation_evidence_summary` is populated by `--validation-package`. Only passing known-answer datasets that explicitly name backlog item numbers can satisfy an item's `validated` gate; this never bypasses `commercial_grade` blockers.
 - `--write-known-answer-template PATH` writes a not-run known-answer manifest template plus Markdown sidecar for the selected `--next-gate`/`--limit` items. The generated datasets include `backlog_items`, `required_assertions`, `reference_tools`, `minimum_evidence`, and `status: "not-run"` so validation evidence cannot be accidentally treated as passed.
 - `--write-known-answer-template-dir DIR --template-items 1-120 --template-batch-size 5` writes 24 not-run template pairs plus `known-answer-template-batches.index.json/.md`, allowing the 120-item backlog to be validated in repeatable five-item batches.

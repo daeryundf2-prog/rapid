@@ -2,7 +2,7 @@
 
 This is the current 120-item commercial parity backlog for moving RapidTriage toward AXIOM/WISDOM-class usefulness. It is intentionally strict: an item is not `Done` unless it is implemented, fixture-backed where practical, documented, and safe to explain to a forensic user without overstating evidence strength.
 
-Status legend: `Done`, `Partial+`, `Partial`, `Planned`, `External`.
+Status legend: `Done`, `Partial++`, `Partial+`, `Partial`, `Planned`, `External`. `Partial++` means a workflow is implemented, internally validated, and materially stronger than `Partial+`, but still has explicit commercial-grade blockers such as independent validation, signed infrastructure, broad corpus proof, or real large-case evidence.
 
 Compatibility note: the earlier historical item 121, NTUSER.DAT and UsrClass.dat deep analysis, is now folded into items 4, 5, 6, 15, 18, 65, 90, and 91 so the active execution list follows the user's latest 120-item structure.
 

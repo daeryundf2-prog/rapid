@@ -1089,6 +1089,7 @@ def build_parser() -> argparse.ArgumentParser:
               rapidtriage commercial-readiness --next-gate validated --limit 10
               rapidtriage commercial-readiness --next-gate validated --limit 5 --write-known-answer-template ./known-answer-runs.template.json
               rapidtriage commercial-readiness --template-items 1-120 --template-batch-size 5 --write-known-answer-template-dir ./known-answer-batches
+              rapidtriage commercial-readiness --uplift-targets 70 --uplift-batch-size 5 --output-dir ./commercial-uplift
               rapidtriage commercial-readiness --strict
             """
         ),
@@ -1128,6 +1129,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=5,
         help="Number of backlog items per known-answer template batch (default: 5)",
+    )
+    commercial_readiness.add_argument(
+        "--uplift-targets",
+        type=int,
+        default=70,
+        help="Number of prioritized non-commercial goals to include in the commercial uplift plan (default: 70)",
+    )
+    commercial_readiness.add_argument(
+        "--uplift-batch-size",
+        type=int,
+        default=5,
+        help="Number of uplift goals per execution batch (default: 5)",
     )
     commercial_readiness.add_argument("--strict", action="store_true", help="Exit non-zero when commercial gaps remain")
     commercial_readiness.add_argument("--json", action="store_true", help="Print machine-readable JSON")
@@ -2170,6 +2183,8 @@ def main(argv=None) -> int:
                 validation_package_path=(
                     Path(args.validation_package).expanduser().resolve() if args.validation_package else None
                 ),
+                uplift_targets=args.uplift_targets,
+                uplift_batch_size=args.uplift_batch_size,
             )
         except CommercialReadinessError as exc:
             parser.error(str(exc))

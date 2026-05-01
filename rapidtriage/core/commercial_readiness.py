@@ -17,6 +17,8 @@ BACKLOG_ITEM_RE = re.compile(
     r"^(?P<number>\d+)\.\s+(?P<title>.+?)\.\s+Status:\s+(?P<status>[^.]+)\.\s*(?P<body>.*)$"
 )
 MATURITY_GATE_ORDER = ("implemented", "usable", "validated", "commercial_grade")
+COMMERCIAL_UPLIFT_DEFAULT_TARGET_COUNT = 70
+COMMERCIAL_UPLIFT_DEFAULT_BATCH_SIZE = 5
 MATURITY_GATE_DEFINITIONS = {
     "implemented": "Code, workflow, import path, or release artifact evidence exists.",
     "usable": "An analyst can reach the feature through CLI/API/UI/docs without custom patching.",
@@ -447,6 +449,8 @@ def build_commercial_readiness_report(
     backlog_path: Path | None = None,
     output_dir: Path | None = None,
     validation_package_path: Path | None = None,
+    uplift_targets: int = COMMERCIAL_UPLIFT_DEFAULT_TARGET_COUNT,
+    uplift_batch_size: int = COMMERCIAL_UPLIFT_DEFAULT_BATCH_SIZE,
 ) -> dict[str, object]:
     backlog_path = (backlog_path or default_backlog_path()).expanduser().resolve()
     if not backlog_path.is_file():
@@ -475,6 +479,12 @@ def build_commercial_readiness_report(
     commercial_claim_allowed = not non_commercial
     readiness_score = calculate_readiness_score(items)
     maturity_gate_summary = build_maturity_gate_summary(items)
+    commercial_uplift_plan = build_commercial_uplift_plan(
+        items,
+        readiness_score=readiness_score,
+        target_count=uplift_targets,
+        batch_size=uplift_batch_size,
+    )
     payload: dict[str, object] = {
         "command": "commercial-readiness",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -495,6 +505,7 @@ def build_commercial_readiness_report(
         "category_counts": category_counts,
         "maturity_gate_definitions": dict(MATURITY_GATE_DEFINITIONS),
         "maturity_gate_summary": maturity_gate_summary,
+        "commercial_uplift_plan": commercial_uplift_plan,
         "validation_evidence_summary": validation_evidence_summary,
         "priority_work_plan": build_priority_work_plan(items),
         "all_items": items,
@@ -934,7 +945,7 @@ def calculate_readiness_score(items: Iterable[dict[str, object]]) -> int:
     earned = 0.0
     status_points = {
         "Done": 1.0,
-        "Partial++": 0.78,
+        "Partial++": 0.88,
         "Partial+": 0.65,
         "Partial": 0.45,
         "External+": 0.35,
@@ -1011,6 +1022,249 @@ def build_operator_guidance(non_commercial: list[dict[str, object]]) -> list[str
     ]
 
 
+def build_commercial_uplift_plan(
+    items: Iterable[dict[str, object]],
+    *,
+    readiness_score: int,
+    target_count: int = COMMERCIAL_UPLIFT_DEFAULT_TARGET_COUNT,
+    batch_size: int = COMMERCIAL_UPLIFT_DEFAULT_BATCH_SIZE,
+) -> dict[str, object]:
+    """Build a repeatable, prioritized plan for moving strict blockers forward."""
+
+    item_list = list(items)
+    safe_target_count = max(0, target_count)
+    safe_batch_size = max(1, batch_size)
+    candidates = [
+        item for item in sorted(item_list, key=priority_sort_key)
+        if item.get("next_required_gate")
+    ][:safe_target_count]
+    goals = [
+        build_commercial_uplift_goal(item, priority_rank=index + 1, batch_size=safe_batch_size)
+        for index, item in enumerate(candidates)
+    ]
+    batches: list[dict[str, object]] = []
+    for index in range(0, len(goals), safe_batch_size):
+        batch_goals = goals[index : index + safe_batch_size]
+        batch_numbers = [goal["number"] for goal in batch_goals]
+        batches.append(
+            {
+                "batch_number": len(batches) + 1,
+                "item_numbers": batch_numbers,
+                "item_count": len(batch_goals),
+                "primary_categories": sorted({str(goal["category"]) for goal in batch_goals}),
+                "required_outputs": [
+                    "code_or_workflow_change",
+                    "unit_or_fixture_test",
+                    "known_answer_or_cross_tool_artifact",
+                    "documentation_update",
+                    "commercial_readiness_recalculation",
+                    "git_commit",
+                ],
+                "goals": batch_goals,
+            }
+        )
+
+    category_counts: dict[str, int] = {}
+    for goal in goals:
+        category = str(goal["category"])
+        category_counts[category] = category_counts.get(category, 0) + 1
+
+    return {
+        "version": "commercial-uplift-plan-v1",
+        "status": "active" if goals else "complete",
+        "current_readiness_score": readiness_score,
+        "target_goal_count": safe_target_count,
+        "selected_goal_count": len(goals),
+        "batch_size": safe_batch_size,
+        "batch_count": len(batches),
+        "category_counts": category_counts,
+        "score_strategy": [
+            "Do not raise commercial-grade gates by wording alone.",
+            "Prioritize critical parser depth, then validation/legal, then performance and UX bottlenecks.",
+            "Attach real corpus, cross-tool diff, benchmark, or operator evidence before claiming commercial parity.",
+            "Use five-item batches so every uplift produces code, tests, docs, validation evidence, and a commit.",
+        ],
+        "large_data_strategy": build_large_data_strategy(),
+        "goals": goals,
+        "batches": batches,
+    }
+
+
+def build_commercial_uplift_goal(
+    item: dict[str, object],
+    *,
+    priority_rank: int,
+    batch_size: int,
+) -> dict[str, object]:
+    number = int(item.get("number") or 0)
+    category = str(item.get("category") or "unknown")
+    blockers = [str(blocker) for blocker in item.get("commercial_blockers") or []]
+    remaining = gate_remaining_text(item, str(item.get("next_required_gate") or "commercial_grade"))
+    return {
+        "priority_rank": priority_rank,
+        "batch_number": ((priority_rank - 1) // max(1, batch_size)) + 1,
+        "number": number,
+        "title": str(item.get("title") or ""),
+        "category": category,
+        "severity": str(item.get("severity") or ""),
+        "current_status": str(item.get("status") or ""),
+        "current_stage": str(item.get("highest_maturity_stage") or "none"),
+        "next_gate": str(item.get("next_required_gate") or ""),
+        "objective": uplift_objective_for_item(number, category),
+        "implementation_track": uplift_track_for_item(number, category),
+        "acceptance_evidence": uplift_acceptance_evidence_for_item(number, category),
+        "large_data_strategy": large_data_strategy_for_item(number, category),
+        "remaining_gap": remaining,
+        "commercial_blockers": blockers,
+        "external_evidence_required": external_evidence_required(blockers, remaining),
+        "internal_next_step": internal_next_step_for_item(number, category, remaining),
+    }
+
+
+def uplift_objective_for_item(number: int, category: str) -> str:
+    if 1 <= number <= 25:
+        return "Promote the artifact from validation-required candidate output to report-grade native parsing with source offsets, hashes, confidence, and trusted-tool diff evidence."
+    if 26 <= number <= 45:
+        return "Turn mobile, messenger, email, or cloud handling into a versioned import/acquisition workflow with redaction, schema tracking, and legal authority gates."
+    if 46 <= number <= 65:
+        return "Reduce analyst review friction with scalable search, viewer, comparison, citation, and review-state workflows that preserve provenance."
+    if 66 <= number <= 80:
+        return "Prove large-case behavior through bounded memory, resumable jobs, cursor APIs, deterministic scheduling, and benchmark evidence."
+    if 81 <= number <= 100:
+        return "Harden court defensibility with known-answer validation, audit chains, provenance completeness, legal warnings, and reproducible exhibit bundles."
+    if 101 <= number <= 120:
+        return "Produce operator-verifiable release, security, deployment, support, and monitoring evidence without overstating unavailable external services."
+    return f"Close the remaining {category} commercial-readiness blocker with measurable implementation and validation evidence."
+
+
+def uplift_track_for_item(number: int, category: str) -> str:
+    if 1 <= number <= 25:
+        return "native-parser-depth"
+    if 26 <= number <= 45:
+        return "schema-import-and-authority-gates"
+    if 46 <= number <= 65:
+        return "analyst-ux-and-review"
+    if 66 <= number <= 80:
+        return "large-scale-performance"
+    if 81 <= number <= 100:
+        return "legal-validation"
+    if 101 <= number <= 120:
+        return "release-operations"
+    return category
+
+
+def uplift_acceptance_evidence_for_item(number: int, category: str) -> list[str]:
+    common = [
+        "updated production code or operator workflow",
+        "unit/fixture test covering success and limitation behavior",
+        "documentation of user-facing behavior and remaining limits",
+        "commercial-readiness output showing the next blocker has changed or narrowed",
+    ]
+    if 1 <= number <= 25:
+        return [
+            "record/row-level output with source offsets and hashes",
+            "trusted-tool or known-answer diff artifact",
+            "malformed/deleted/large fixture coverage where relevant",
+            *common,
+        ]
+    if 26 <= number <= 45:
+        return [
+            "versioned schema matrix or provider export contract",
+            "secret/value redaction and authority-gate evidence",
+            "sample import fixture with expected rows",
+            *common,
+        ]
+    if 46 <= number <= 65:
+        return [
+            "cursor-paged API or virtualized UI evidence",
+            "review/citation state persisted in Case DB or export",
+            "viewer/search smoke test for large result sets",
+            *common,
+        ]
+    if 66 <= number <= 80:
+        return [
+            "benchmark or stress-plan JSON with hardware/resource assumptions",
+            "checkpoint/resume/cancel or bounded-memory evidence",
+            "deterministic output and retry behavior test",
+            *common,
+        ]
+    if 81 <= number <= 100:
+        return [
+            "known-answer, audit, hash-chain, or provenance package evidence",
+            "report/export artifact with limitation text",
+            "reproducibility or tamper-evidence test",
+            *common,
+        ]
+    return [
+        "release/deployment/security evidence artifact",
+        "operator smoke or policy check",
+        "explicit blocker for external signing, notarization, support, or CI where applicable",
+        *common,
+    ]
+
+
+def large_data_strategy_for_item(number: int, category: str) -> str:
+    if number in {10, 11, 12, 13, 22, 23, 24}:
+        return "Use streaming or mmap-friendly parsing, cursor checkpoints, bounded page/record batches, and never require whole-image or whole-database memory residency."
+    if 1 <= number <= 25:
+        return "Emit bounded row batches with stable offsets, parser confidence, and per-file checkpoint metadata so corrupt artifacts cannot block the case."
+    if 26 <= number <= 45:
+        return "Import provider exports in batches, keep raw payloads external or hashed, and maintain schema-version cursors for very large chat/mail/cloud datasets."
+    if 46 <= number <= 65:
+        return "Route every large table, timeline, graph, and gallery through cursor APIs, server-side filters, dedupe suppression, and virtualized viewers."
+    if 66 <= number <= 80:
+        return "Measure throughput, peak memory, p95 latency, retry behavior, and checkpoint reuse across 100k/1M/10M-row scenarios before raising claims."
+    if 81 <= number <= 100:
+        return "Keep validation and report bundles manifest-based with hashes instead of copying large evidence blobs unless explicitly selected."
+    if 101 <= number <= 120:
+        return "Package and verify release artifacts without embedding evidence data; smoke tests should use small known-answer cases and recorded large-case logs."
+    return "Keep processing incremental, bounded, checkpointed, and evidence-hash referenced."
+
+
+def internal_next_step_for_item(number: int, category: str, remaining: str) -> str:
+    if external_evidence_required([], remaining) and 101 <= number <= 120:
+        return "Record the external blocker, add an operator evidence slot, and implement the strongest local smoke/policy check available."
+    if 1 <= number <= 25:
+        return "Add one deeper native parser assertion, a fixture or cross-tool comparator hook, and a reportability warning test."
+    if 26 <= number <= 45:
+        return "Add a versioned schema/import fixture plus redaction and legal-authority checks."
+    if 46 <= number <= 65:
+        return "Add a user-facing search/view/review workflow improvement with persisted state and pagination coverage."
+    if 66 <= number <= 80:
+        return "Add benchmark/checkpoint/resource evidence and enforce bounded processing in the relevant path."
+    if 81 <= number <= 100:
+        return "Add validation-package, audit, provenance, or report evidence that can be independently reviewed."
+    return "Add release-operation evidence and keep external commercial blockers explicit."
+
+
+def external_evidence_required(blockers: list[str], remaining: str) -> bool:
+    text = " ".join([*blockers, remaining]).lower()
+    markers = (
+        "external",
+        "independent",
+        "signing",
+        "notarization",
+        "staffed",
+        "hosted",
+        "hardware",
+        "10tb",
+        "third-party",
+        "contractual",
+    )
+    return any(marker in text for marker in markers)
+
+
+def build_large_data_strategy() -> dict[str, object]:
+    return {
+        "rule": "Large evidence must be streamed, checkpointed, cursor-paged, and hash-referenced; UI and reports must never require loading all rows.",
+        "parser_runtime": "Keep Python as orchestration/API/UI glue; move hot EVTX/Registry/ESE/MFT/USN/hash/OCR workers toward Rust or isolated native subprocesses.",
+        "storage": "Use SQLite/PostgreSQL for case metadata, FTS/Tantivy-style indexes for search, and Parquet/DuckDB-style sidecars for large analytical outputs when needed.",
+        "api": "Every massive table/search/timeline endpoint should expose cursor tokens, limits, total estimates, and snapshot warnings.",
+        "ui": "Use virtualized result tables, lazy previews, dedupe collapse, and explicit loading/progress states.",
+        "proof": "Publish benchmark JSON with hardware profile, evidence size, record count, wall time, peak memory, p95 latency, failures, and resume behavior.",
+    }
+
+
 def render_commercial_readiness_markdown(payload: dict[str, object]) -> str:
     lines = [
         "# RapidTriage Commercial Readiness Gate",
@@ -1061,6 +1315,49 @@ def render_commercial_readiness_markdown(payload: dict[str, object]) -> str:
             f"- `#{item.get('number')}` {item.get('title', '')} "
             f"({item.get('category', '')}, {item.get('severity', '')}, next `{item.get('next_gate', '')}`): {action}"
         )
+    uplift_plan = payload.get("commercial_uplift_plan") if isinstance(payload.get("commercial_uplift_plan"), dict) else {}
+    if uplift_plan:
+        lines.extend(
+            [
+                "",
+                "## 70-Goal Commercial Uplift Plan",
+                "",
+                f"- Status: `{uplift_plan.get('status', '')}`",
+                f"- Selected goals: `{uplift_plan.get('selected_goal_count', 0)}`/`{uplift_plan.get('target_goal_count', 0)}`",
+                f"- Batch size: `{uplift_plan.get('batch_size', 0)}`",
+                f"- Batch count: `{uplift_plan.get('batch_count', 0)}`",
+                f"- Current readiness score: `{uplift_plan.get('current_readiness_score', 0)}/100`",
+                "",
+                "### Large Data Strategy",
+                "",
+            ]
+        )
+        large_strategy = uplift_plan.get("large_data_strategy")
+        if isinstance(large_strategy, dict):
+            for key, value in large_strategy.items():
+                lines.append(f"- `{key}`: {value}")
+        lines.extend(["", "### Five-Item Batches", ""])
+        for batch in uplift_plan.get("batches", []):
+            if not isinstance(batch, dict):
+                continue
+            item_numbers = ", ".join(f"#{number}" for number in batch.get("item_numbers", []))
+            categories = ", ".join(str(item) for item in batch.get("primary_categories", []))
+            lines.append(
+                f"- Batch `{batch.get('batch_number')}` ({item_numbers}) categories `{categories}`: "
+                f"{batch.get('item_count', 0)} goals"
+            )
+        lines.extend(["", "### First Goals", ""])
+        for goal in uplift_plan.get("goals", [])[:20]:
+            if not isinstance(goal, dict):
+                continue
+            remaining = str(goal.get("remaining_gap") or "")
+            if len(remaining) > 160:
+                remaining = remaining[:157].rstrip() + "..."
+            lines.append(
+                f"- Rank `{goal.get('priority_rank')}` batch `{goal.get('batch_number')}` "
+                f"`#{goal.get('number')}` {goal.get('title', '')}: {goal.get('objective', '')} "
+                f"Remaining: {remaining}"
+            )
     lines.extend([
         "",
         "## Required Release Evidence",

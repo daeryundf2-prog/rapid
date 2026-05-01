@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from rapidtriage.api.app import create_app
 from rapidtriage.cli import build_parser, main, run_web_server
 from rapidtriage.core.crash import write_crash_report
+from rapidtriage.core.commercial_readiness import calculate_readiness_score
 from rapidtriage.core.jobs import RunJobStore, RunRequest
 from rapidtriage.core.sample_case import run_sample_workflow
 
@@ -39,6 +40,8 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("--strict", commands["commercial-readiness"].format_help())
         self.assertIn("--write-known-answer-template", commands["commercial-readiness"].format_help())
         self.assertIn("--write-known-answer-template-dir", commands["commercial-readiness"].format_help())
+        self.assertIn("--uplift-targets", commands["commercial-readiness"].format_help())
+        self.assertIn("--uplift-batch-size", commands["commercial-readiness"].format_help())
         self.assertIn("cross-tool-validate", commands)
         self.assertIn("--reference-output", commands["cross-tool-validate"].format_help())
         self.assertIn("confidence-dashboard", commands)
@@ -267,6 +270,58 @@ class RapidTriageOpsTests(unittest.TestCase):
             critical_numbers = {item["number"] for item in payload["critical_non_commercial_items"]}
             self.assertIn(1, critical_numbers)
             self.assertIn(25, critical_numbers)
+
+    def test_commercial_readiness_includes_prioritized_commercial_uplift_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "commercial-readiness",
+                        "--uplift-targets",
+                        "70",
+                        "--uplift-batch-size",
+                        "5",
+                        "--output-dir",
+                        tmp_dir,
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            plan = payload["commercial_uplift_plan"]
+            self.assertEqual(plan["version"], "commercial-uplift-plan-v1")
+            self.assertEqual(plan["target_goal_count"], 70)
+            self.assertEqual(plan["selected_goal_count"], 70)
+            self.assertEqual(plan["batch_size"], 5)
+            self.assertEqual(plan["batch_count"], 14)
+            self.assertIn("parser_runtime", plan["large_data_strategy"])
+            self.assertIn("core-forensics", plan["category_counts"])
+            first_goal = plan["goals"][0]
+            self.assertEqual(first_goal["number"], 1)
+            self.assertEqual(first_goal["priority_rank"], 1)
+            self.assertEqual(first_goal["batch_number"], 1)
+            self.assertEqual(first_goal["implementation_track"], "native-parser-depth")
+            self.assertIn("large_data_strategy", first_goal)
+            self.assertGreaterEqual(len(first_goal["acceptance_evidence"]), 4)
+            first_batch = plan["batches"][0]
+            self.assertEqual(first_batch["item_numbers"], [1, 2, 3, 4, 5])
+            self.assertIn("commercial_readiness_recalculation", first_batch["required_outputs"])
+            markdown = (Path(tmp_dir) / "rapidtriage-commercial-readiness.md").read_text(encoding="utf-8")
+            self.assertIn("70-Goal Commercial Uplift Plan", markdown)
+            self.assertIn("Large Data Strategy", markdown)
+
+    def test_commercial_readiness_scores_partial_plus_plus_above_partial_plus(self) -> None:
+        base = {
+            "severity": "critical",
+            "category": "core-forensics",
+        }
+        partial_plus_score = calculate_readiness_score([{**base, "status": "Partial+"}])
+        partial_plus_plus_score = calculate_readiness_score([{**base, "status": "Partial++"}])
+
+        self.assertGreater(partial_plus_plus_score, partial_plus_score)
+        self.assertLess(partial_plus_plus_score, 100)
 
     def test_commercial_readiness_can_focus_next_gate_items(self) -> None:
         stdout = io.StringIO()
