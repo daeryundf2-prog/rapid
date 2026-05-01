@@ -1268,6 +1268,146 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "review/reportability fields preserved",
         ),
     },
+    {
+        "number": 91,
+        "title": "Parser confidence scoring",
+        "surface": "parser confidence, coverage status, reportability, validation warnings, and evidence strength per report item",
+        "corpus": "Case DB report fixtures with mixed reportable, validation-required, and low-confidence parser outputs",
+        "oracle": "parser-confidence calibration table, reportability checklist, and reviewer signoff",
+        "required_checks": (
+            "parser confidence preserved",
+            "reportability state recorded",
+            "coverage status recorded",
+            "validation warnings derived",
+            "evidence strength surfaced",
+        ),
+    },
+    {
+        "number": 92,
+        "title": "Validation-required warning UX",
+        "surface": "warning counts, item warning reasons, report badges/metadata, and reviewer guidance",
+        "corpus": "Report fixtures with missing hashes, unsupported parser states, validation-required flags, and partial coverage",
+        "oracle": "reviewer warning checklist, UI/report badge inventory, and expected warning reason manifest",
+        "required_checks": (
+            "validation warning reasons emitted",
+            "summary warning counts emitted",
+            "report guidance emitted",
+            "validation-required state preserved",
+            "warning UX limitation disclosed",
+        ),
+    },
+    {
+        "number": 93,
+        "title": "Legal limitation statement per artifact",
+        "surface": "artifact limitations, parser caveats, jurisdiction caveat, and analyst-review blockers",
+        "corpus": "Report fixtures covering files, documents, artifacts, indicators, timeline rows, and parser-provided limitations",
+        "oracle": "legal wording checklist, parser limitation inventory, and forensic-lead review",
+        "required_checks": (
+            "artifact limitation text emitted",
+            "parser-provided limitations preserved",
+            "jurisdiction caveat emitted",
+            "analyst review blocker emitted",
+            "limitation count summarized",
+        ),
+    },
+    {
+        "number": 94,
+        "title": "Court exhibit export package",
+        "surface": "selected exhibit index, exhibit IDs, output hashes, source references, review status, and verification steps",
+        "corpus": "Reviewer bundle fixtures with selected evidence, report exports, hashes, skipped items, and sanitized report previews",
+        "oracle": "court exhibit checklist, bundle manifest hash comparison, and selected-evidence manifest",
+        "required_checks": (
+            "exhibit IDs assigned",
+            "selected evidence hashes preserved",
+            "generated output hashes captured",
+            "source references preserved",
+            "verification steps emitted",
+        ),
+    },
+    {
+        "number": 95,
+        "title": "External tool version capture",
+        "surface": "external tool availability, path, command, return code, version output, and capture errors",
+        "corpus": "Release validation package fixtures across Python, libewf/Sleuth Kit, qemu-img, OCR, and Node runtimes",
+        "oracle": "release environment inventory, command transcript, and operator-preserved tool logs",
+        "required_checks": (
+            "tool inventory emitted",
+            "tool path captured when available",
+            "version command captured",
+            "capture error recorded",
+            "per-run limitation warning",
+        ),
+    },
+    {
+        "number": 96,
+        "title": "Write-blocker/acquisition metadata recording",
+        "surface": "operator, acquisition timestamps, source identifier, write-blocker, acquisition tool/version, whole-source hash, and missing-field checks",
+        "corpus": "Case DB acquisition fixtures with complete and incomplete metadata records linked to evidence sources",
+        "oracle": "acquisition form checklist, write-blocker log, source hash manifest, and examiner handoff record",
+        "required_checks": (
+            "operator/source metadata recorded",
+            "write-blocker field recorded",
+            "whole-source hash field recorded",
+            "missing required fields listed",
+            "submission readiness flag emitted",
+        ),
+    },
+    {
+        "number": 97,
+        "title": "Timezone normalization validation",
+        "surface": "original timestamps, source timezone, UTC assumption, timestamp kind, parser/source samples, and missing timezone counts",
+        "corpus": "Case DB event fixtures with UTC, local, missing, and source-specific timezone values",
+        "oracle": "timeline timezone checklist, source parser assumptions, and known timestamp fixture manifest",
+        "required_checks": (
+            "event timezone inventory emitted",
+            "missing timezone count emitted",
+            "timestamp samples preserved",
+            "UTC assumption disclosed",
+            "review-required flag emitted",
+        ),
+    },
+    {
+        "number": 98,
+        "title": "Clock skew analysis",
+        "surface": "parsed timestamp ranges, impossible/future timestamp warnings, baseline requirement, and heuristic caveat",
+        "corpus": "Case DB event fixtures with normal, pre-1980, future, and baseline-comparison timestamps",
+        "oracle": "clock-skew known-answer manifest, acquisition notes, trusted external timestamp comparison",
+        "required_checks": (
+            "parsed timestamp range emitted",
+            "skew warning records emitted",
+            "warning count summarized",
+            "baseline requirement disclosed",
+            "heuristic limitation emitted",
+        ),
+    },
+    {
+        "number": 99,
+        "title": "Evidence contamination warning",
+        "surface": "evidence roots, staged output location, zero-byte sources, stat failures, write-blocker integration status, and review warnings",
+        "corpus": "Case DB evidence-source fixtures with output-under-evidence, staged-under-root, zero-byte source, and stat-failure cases",
+        "oracle": "contamination checklist, acquisition metadata, filesystem stat evidence, and write-blocker policy",
+        "required_checks": (
+            "contamination warning records emitted",
+            "warning count summarized",
+            "output-under-evidence checks emitted",
+            "write-blocker integration limitation emitted",
+            "review-required flag emitted",
+        ),
+    },
+    {
+        "number": 100,
+        "title": "Tamper-evident audit bundle",
+        "surface": "generated output hashes, previous-entry hash chain, entry hashes, head hash, verification steps, and signing limitation",
+        "corpus": "Reviewer bundle fixtures with report exports, exhibit index, selected evidence, bundle audit, and deterministic output hashing",
+        "oracle": "tamper-evident bundle recomputation, archive hash manifest, and external signing/notarization evidence",
+        "required_checks": (
+            "generated output hashes captured",
+            "previous-entry hash chain generated",
+            "entry hashes emitted",
+            "head hash recorded",
+            "external signing limitation emitted",
+        ),
+    },
 )
 
 
@@ -1276,11 +1416,11 @@ def build_core_forensics_accuracy_profiles() -> dict[str, object]:
     return {
         "version": CORE_FORENSIC_ACCURACY_VERSION,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "scope": "#1-#90 validation and accuracy reinforcement",
+        "scope": "#1-#100 validation and accuracy reinforcement",
         "profile_count": len(profiles),
         "commercial_gap_ids": [f"#{item['number']}" for item in profiles],
         "status": "accuracy-profiles-ready",
-        "release_gate": "Each #1-#90 parser claim must attach pass/fail evidence against its profile before report-grade wording.",
+        "release_gate": "Each #1-#100 parser/legal claim must attach pass/fail evidence against its profile before report-grade wording.",
         "profiles": profiles,
     }
 
@@ -1326,10 +1466,10 @@ def build_accuracy_profile(item: Mapping[str, object]) -> dict[str, object]:
             "timezone_or_timestamp_semantics_required": number in {
                 1, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 20, 22, 23, 24, 26, 27, 29, 31, 32,
                 33, 34, 35, 36, 37, 38, 39, 40, 43, 44, 45, 49, 51, 55, 57, 58, 59, 64, 65, 66, 67,
-                86, 88, 89, 90,
+                86, 88, 89, 90, 91, 96, 97, 98,
             },
             "secret_redaction_required": number in {19, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 40, 41, 42, 63},
-            "legal_or_authority_gate_required": number in {19, 22, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38, 39, 40, 41, 42, 63, 64, 65, 81, 84, 85, 86, 87, 88, 89, 90},
+            "legal_or_authority_gate_required": number in {19, 22, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38, 39, 40, 41, 42, 63, 64, 65, 81, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 96, 97, 98, 99, 100},
             "cross_tool_diff_required": True,
             "known_answer_required": True,
         },
@@ -1398,4 +1538,4 @@ def accuracy_profile_for_item(number: int) -> dict[str, object]:
     for item in CORE_FORENSIC_ACCURACY_ITEMS:
         if int(item["number"]) == number:
             return build_accuracy_profile(item)
-    raise KeyError(f"unknown #1-#90 forensic accuracy item: {number}")
+    raise KeyError(f"unknown #1-#100 forensic accuracy item: {number}")

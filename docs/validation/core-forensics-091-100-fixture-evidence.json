@@ -1,0 +1,78 @@
+{
+  "schema": "rapidtriage-fixture-evidence-v1",
+  "scope": "#91-#100 internal fixture validation",
+  "status": "pass",
+  "generated_for": "RapidTriage commercial-readiness internal validated maturity gate",
+  "evidence": [
+    {
+      "item": 91,
+      "title": "Parser confidence scoring",
+      "test_files": ["tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_core_forensics_accuracy.py"],
+      "assertions": ["Case DB report items preserve parser confidence, reportability, coverage status, validation warning derivation, evidence strength, and #91 core_accuracy_gates."],
+      "remaining_external_validation": ["Parser-specific confidence calibration tables and cross-tool confidence validation."]
+    },
+    {
+      "item": 92,
+      "title": "Validation-required warning UX",
+      "test_files": ["tests/test_rapidtriage_case_db.py"],
+      "assertions": ["Report exports preserve warning reasons, summary warning counts, guidance, validation-required state, warning UX limitation, and #92 core_accuracy_gates."],
+      "remaining_external_validation": ["End-to-end web badge checks across every large result table."]
+    },
+    {
+      "item": 93,
+      "title": "Legal limitation statement per artifact",
+      "test_files": ["tests/test_rapidtriage_case_db.py"],
+      "assertions": ["Report items preserve artifact limitation text, parser-provided limitations, jurisdiction caveat, analyst-review blockers, limitation counts, and #93 core_accuracy_gates."],
+      "remaining_external_validation": ["Jurisdiction-approved legal wording and formal signoff."]
+    },
+    {
+      "item": 94,
+      "title": "Court exhibit export package",
+      "test_files": ["tests/test_rapidtriage_final_roadmap.py"],
+      "assertions": ["Reviewer bundles preserve exhibit IDs, selected evidence hashes, generated output hashes, source references, verification steps, and #94 core_accuracy_gates."],
+      "remaining_external_validation": ["Signed/notarized exhibit manifests and court-specific forms."]
+    },
+    {
+      "item": 95,
+      "title": "External tool version capture",
+      "test_files": ["tests/test_rapidtriage_ops.py"],
+      "assertions": ["Validation packages preserve external tool inventory, availability/path/command/version/capture errors, limitation warnings, and #95 core_accuracy_gates."],
+      "remaining_external_validation": ["Per-run external parser/import command transcripts and original tool logs."]
+    },
+    {
+      "item": 96,
+      "title": "Write-blocker/acquisition metadata recording",
+      "test_files": ["tests/test_rapidtriage_case_db.py"],
+      "assertions": ["Case DB report exports preserve operator/source metadata, write-blocker fields, whole-source hash fields, missing-field checks, readiness flag, and #96 core_accuracy_gates."],
+      "remaining_external_validation": ["Integrated write-blocker device metadata and signed handoff forms."]
+    },
+    {
+      "item": 97,
+      "title": "Timezone normalization validation",
+      "test_files": ["tests/test_rapidtriage_case_db.py"],
+      "assertions": ["Report exports preserve timezone inventory, missing timezone counts, timestamp samples, UTC assumption, review-required flag, and #97 core_accuracy_gates."],
+      "remaining_external_validation": ["Parser-specific timezone assumption matrix and multi-source reconciliation."]
+    },
+    {
+      "item": 98,
+      "title": "Clock skew analysis",
+      "test_files": ["tests/test_rapidtriage_case_db.py"],
+      "assertions": ["Report exports preserve parsed timestamp ranges, skew warnings, warning counts, baseline requirement, heuristic caveat, and #98 core_accuracy_gates."],
+      "remaining_external_validation": ["Host/device baseline model and multi-device skew validation."]
+    },
+    {
+      "item": 99,
+      "title": "Evidence contamination warning",
+      "test_files": ["tests/test_rapidtriage_case_db.py"],
+      "assertions": ["Report exports preserve contamination warning records, warning counts, output-under-evidence checks, write-blocker limitation, review-required flag, and #99 core_accuracy_gates."],
+      "remaining_external_validation": ["Persistent acquisition-time mtime comparison and write-blocker integration."]
+    },
+    {
+      "item": 100,
+      "title": "Tamper-evident audit bundle",
+      "test_files": ["tests/test_rapidtriage_final_roadmap.py"],
+      "assertions": ["Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, external signing limitation, and #100 core_accuracy_gates."],
+      "remaining_external_validation": ["External signing/notarization."]
+    }
+  ]
+}

@@ -12,6 +12,7 @@ from typing import Mapping, Sequence
 from .case import load_case_payload
 from .case_report import build_case_report_markdown, report_export_csp, write_case_report_exports
 from .docs import write_result
+from .forensic_accuracy import build_accuracy_gate
 from .submission import build_submission_manifest, compute_hashes
 
 COURT_EXHIBIT_EXPORT_GAP_ID = "#94"
@@ -340,6 +341,10 @@ def build_court_exhibit_index(
         },
         "exhibits": exhibit_items,
         "output_hashes": output_hashes,
+        "core_accuracy_gates": court_exhibit_core_accuracy_gates(
+            exhibits=exhibit_items,
+            output_hashes=output_hashes,
+        ),
         "custody_note": "This index documents selected report exhibits and generated bundle outputs. It does not include original evidence images.",
         "verification_steps": [
             "Verify archive SHA256 from rapidtriage-bundle-manifest.json.",
@@ -378,6 +383,7 @@ def build_tamper_evident_audit_bundle(*, output_paths: Sequence[tuple[str, Path]
             "commercial_gap_ids": [TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID],
         },
         "entries": entries,
+        "core_accuracy_gates": tamper_evident_bundle_core_accuracy_gates(entries=entries, head_hash=previous_hash),
         "verification_steps": [
             "Recompute each output hash.",
             "Recompute each entry_hash in order using previous_entry_hash.",
@@ -385,6 +391,55 @@ def build_tamper_evident_audit_bundle(*, output_paths: Sequence[tuple[str, Path]
         ],
         "limitation": "This is an export-time hash chain. External signing/notarization is still required for formal immutability.",
     }
+
+
+def court_exhibit_core_accuracy_gates(
+    *,
+    exhibits: Sequence[Mapping[str, object]],
+    output_hashes: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    satisfied = ["verification steps emitted"]
+    if exhibits and all(item.get("exhibit_id") for item in exhibits):
+        satisfied.append("exhibit IDs assigned")
+    if any(item.get("sha256") for item in exhibits):
+        satisfied.append("selected evidence hashes preserved")
+    if output_hashes:
+        satisfied.append("generated output hashes captured")
+    if any(item.get("source_reference") for item in exhibits):
+        satisfied.append("source references preserved")
+    return [
+        build_accuracy_gate(
+            94,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"exhibit_count:{len(exhibits)}",
+                f"output_hash_count:{len(output_hashes)}",
+            ],
+        )
+    ]
+
+
+def tamper_evident_bundle_core_accuracy_gates(
+    *,
+    entries: Sequence[Mapping[str, object]],
+    head_hash: str,
+) -> list[dict[str, object]]:
+    satisfied = ["external signing limitation emitted"]
+    if entries:
+        satisfied.append("generated output hashes captured")
+    if all("previous_entry_hash" in item for item in entries):
+        satisfied.append("previous-entry hash chain generated")
+    if all(item.get("entry_hash") for item in entries):
+        satisfied.append("entry hashes emitted")
+    if head_hash:
+        satisfied.append("head hash recorded")
+    return [
+        build_accuracy_gate(
+            100,
+            satisfied_checks=satisfied,
+            evidence_refs=[f"entry_count:{len(entries)}", f"head_hash:{head_hash}"],
+        )
+    ]
 
 
 def copy_if_requested(source: Path, destination: Path) -> None:

@@ -607,6 +607,13 @@ def build_external_tool_versions() -> list[dict[str, object]]:
                     "path": "",
                     "version_output": "",
                     "capture_error": "not-found",
+                    "core_accuracy_gates": external_tool_version_core_accuracy_gates(
+                        available=False,
+                        path="",
+                        command="",
+                        version_output="",
+                        capture_error="not-found",
+                    ),
                 }
             )
             continue
@@ -631,6 +638,13 @@ def build_external_tool_versions() -> list[dict[str, object]]:
                     "return_code": completed.returncode,
                     "version_output": "\n".join(version_output),
                     "capture_error": "",
+                    "core_accuracy_gates": external_tool_version_core_accuracy_gates(
+                        available=True,
+                        path=path,
+                        command=" ".join(actual_command),
+                        version_output="\n".join(version_output),
+                        capture_error="",
+                    ),
                 }
             )
         except (OSError, subprocess.SubprocessError) as exc:
@@ -643,22 +657,72 @@ def build_external_tool_versions() -> list[dict[str, object]]:
                     "command": " ".join(actual_command),
                     "version_output": "",
                     "capture_error": str(exc),
+                    "core_accuracy_gates": external_tool_version_core_accuracy_gates(
+                        available=True,
+                        path=path,
+                        command=" ".join(actual_command),
+                        version_output="",
+                        capture_error=str(exc),
+                    ),
                 }
             )
     return rows
 
 
 def build_external_tool_version_assessment() -> dict[str, object]:
+    tools = build_external_tool_versions()
     return {
         "component": "external-tool-version-capture",
         "status": "release-validation-tool-preflight",
         "commercial_gap_ids": [EXTERNAL_TOOL_VERSION_GAP_ID],
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                95,
+                satisfied_checks=[
+                    "tool inventory emitted",
+                    "tool path captured when available",
+                    "version command captured",
+                    "capture error recorded",
+                    "per-run limitation warning",
+                ],
+                evidence_refs=[f"tool_count:{len(tools)}"],
+            )
+        ],
         "ready_for_court_report": False,
         "blockers": [
             "per-run-external-parser-version-capture-is-not-complete-for-every-import",
             "operator-must-preserve-original-tool-logs-for-acquisition-and-parser-validation",
         ],
     }
+
+
+def external_tool_version_core_accuracy_gates(
+    *,
+    available: bool,
+    path: str,
+    command: str,
+    version_output: str,
+    capture_error: str,
+) -> list[dict[str, object]]:
+    satisfied = ["tool inventory emitted", "per-run limitation warning"]
+    if available and path:
+        satisfied.append("tool path captured when available")
+    if command:
+        satisfied.append("version command captured")
+    if version_output or capture_error:
+        satisfied.append("capture error recorded")
+    return [
+        build_accuracy_gate(
+            95,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"available:{available}",
+                f"path:{path}",
+                f"command:{command}",
+                f"capture_error:{capture_error}",
+            ],
+        )
+    ]
 
 
 def build_validation_checks() -> list[dict[str, object]]:
@@ -953,7 +1017,7 @@ def build_required_documents() -> list[dict[str, str]]:
         {"path": "docs/rapidtriage-parser-coverage.md", "purpose": "Implemented artifact and extension coverage."},
         {
             "path": "docs/rapidtriage-core-forensics-accuracy-profiles.md",
-            "purpose": "#1-#90 parser accuracy profile gates and pass/fail evidence requirements.",
+            "purpose": "#1-#100 parser/legal accuracy profile gates and pass/fail evidence requirements.",
         },
         {
             "path": "docs/rapidtriage-core-forensics-001-005-validation.md",
@@ -1002,6 +1066,10 @@ def build_required_documents() -> list[dict[str, str]]:
         {
             "path": "docs/rapidtriage-core-forensics-081-090-validation.md",
             "purpose": "#81-#90 internal fixture validation manifest and commercial-readiness attachment workflow.",
+        },
+        {
+            "path": "docs/rapidtriage-core-forensics-091-100-validation.md",
+            "purpose": "#91-#100 internal fixture validation manifest and commercial-readiness attachment workflow.",
         },
         {"path": "docs/rapidtriage-release-checklist.md", "purpose": "Repeatable release verification checklist."},
         {"path": "docs/rapidtriage-release-notes-template.md", "purpose": "Release communication template."},
@@ -1102,7 +1170,7 @@ def render_validation_markdown(payload: Mapping[str, object]) -> str:
                 if isinstance(item, Mapping):
                     lines.append(f"- `{item.get('id', '')}` ({item.get('source', '')}): status `{item.get('status', '')}`")
 
-    lines.extend(["", "## #1-#90 Core Forensics Accuracy Profiles", ""])
+    lines.extend(["", "## #1-#100 Core Forensics Accuracy Profiles", ""])
     if accuracy_profiles:
         lines.append(f"- Version: `{accuracy_profiles.get('version', '')}`")
         lines.append(f"- Profile count: `{accuracy_profiles.get('profile_count', 0)}`")

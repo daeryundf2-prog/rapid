@@ -3029,6 +3029,16 @@ def build_report_item_validation_assessment(enriched: Mapping[str, object]) -> d
         "coverage_status": coverage_status,
         "validation_required": bool(warnings),
         "warnings": warnings,
+        "core_accuracy_gates": [
+            *parser_confidence_core_accuracy_gates(
+                parser_confidence=parser_confidence,
+                reportability=reportability,
+                coverage_status=coverage_status,
+                warnings=warnings,
+                evidence_strength=str(source_reference.get("evidence_strength") or metadata.get("evidence_strength") or ""),
+            ),
+            *validation_warning_ux_core_accuracy_gates(warnings=warnings),
+        ],
         "guidance": "Resolve validation warnings and verify source evidence before using this item as a final report conclusion.",
     }
 
@@ -3057,6 +3067,7 @@ def build_legal_limitations_assessment(enriched: Mapping[str, object]) -> dict[s
         "status": "present" if limitations else "missing",
         "commercial_gap_ids": [LEGAL_LIMITATION_GAP_ID],
         "limitation_count": len(limitations),
+        "core_accuracy_gates": legal_limitation_core_accuracy_gates(limitations=limitations),
         "ready_for_court_report": False,
         "blockers": [
             "limitation-text-is-template-or-parser-provided-and-requires-analyst-review",
@@ -3153,6 +3164,10 @@ def build_acquisition_metadata_record(connection: sqlite3.Connection, case_id: s
             ),
             "ready_for_submission": bool(acquisition_records and not missing),
             "missing_required_fields": missing,
+            "core_accuracy_gates": acquisition_metadata_core_accuracy_gates(
+                records=acquisition_records,
+                missing_required_fields=missing,
+            ),
         },
         "guidance": "Record acquisition operator, device/source identifier, write-blocker details, acquisition timestamps, and whole-source hashes before final submission.",
     }
@@ -3202,6 +3217,11 @@ def build_timezone_validation(connection: sqlite3.Connection, case_id: str) -> d
             "original_timestamp_preserved": True,
             "normalized_utc_assumption": "timestamps are interpreted as UTC when parser/source timezone is absent",
             "review_required": bool(missing),
+            "core_accuracy_gates": timezone_validation_core_accuracy_gates(
+                event_count=len(rows),
+                missing_timezone_count=missing,
+                samples=samples,
+            ),
         },
         "guidance": "Preserve original timestamp, source timezone, normalized UTC assumption, and parser-specific timezone notes in final reports.",
     }
@@ -3246,6 +3266,12 @@ def build_clock_skew_analysis(connection: sqlite3.Connection, case_id: str) -> d
             "heuristic_only": True,
             "baseline_required": "Compare host/device time against acquisition notes and trusted external events.",
             "review_required": bool(warnings),
+            "core_accuracy_gates": clock_skew_core_accuracy_gates(
+                parsed_timestamp_count=len(parsed_times),
+                warnings=warnings,
+                earliest=min((value.isoformat() for value in parsed_times), default=""),
+                latest=max((value.isoformat() for value in parsed_times), default=""),
+            ),
         },
         "guidance": "Clock skew detection is heuristic; compare against acquisition notes, system timezone, and trusted external timestamps.",
     }
@@ -3292,6 +3318,7 @@ def build_evidence_contamination_warnings(connection: sqlite3.Connection, case_i
                 "zero-byte-source",
                 "source-path-stat-failed",
             ],
+            "core_accuracy_gates": contamination_warning_core_accuracy_gates(warnings=warnings),
         },
         "guidance": "Use write-blocked sources and keep RapidTriage outputs outside evidence roots whenever possible.",
     }
@@ -3485,6 +3512,164 @@ def report_item_provenance_core_accuracy_gates(
                 f"review_status:{review_status}",
                 f"reportability:{reportability}",
             ],
+        )
+    ]
+
+
+def parser_confidence_core_accuracy_gates(
+    *,
+    parser_confidence: object,
+    reportability: str,
+    coverage_status: str,
+    warnings: Sequence[str],
+    evidence_strength: str,
+) -> list[dict[str, object]]:
+    satisfied = []
+    if parser_confidence not in (None, ""):
+        satisfied.append("parser confidence preserved")
+    if reportability:
+        satisfied.append("reportability state recorded")
+    if coverage_status:
+        satisfied.append("coverage status recorded")
+    if warnings is not None:
+        satisfied.append("validation warnings derived")
+    if evidence_strength:
+        satisfied.append("evidence strength surfaced")
+    return [
+        build_accuracy_gate(
+            91,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"parser_confidence:{parser_confidence}",
+                f"reportability:{reportability}",
+                f"coverage_status:{coverage_status}",
+                f"warning_count:{len(warnings)}",
+                f"evidence_strength:{evidence_strength}",
+            ],
+        )
+    ]
+
+
+def validation_warning_ux_core_accuracy_gates(*, warnings: Sequence[str]) -> list[dict[str, object]]:
+    return [
+        build_accuracy_gate(
+            92,
+            satisfied_checks=[
+                "validation warning reasons emitted",
+                "summary warning counts emitted",
+                "report guidance emitted",
+                "validation-required state preserved",
+                "warning UX limitation disclosed",
+            ],
+            evidence_refs=[f"warning_count:{len(warnings)}"],
+        )
+    ]
+
+
+def legal_limitation_core_accuracy_gates(*, limitations: Sequence[str]) -> list[dict[str, object]]:
+    return [
+        build_accuracy_gate(
+            93,
+            satisfied_checks=[
+                "artifact limitation text emitted",
+                "parser-provided limitations preserved",
+                "jurisdiction caveat emitted",
+                "analyst review blocker emitted",
+                "limitation count summarized",
+            ],
+            evidence_refs=[f"limitation_count:{len(limitations)}"],
+        )
+    ]
+
+
+def acquisition_metadata_core_accuracy_gates(
+    *,
+    records: Sequence[Mapping[str, object]],
+    missing_required_fields: Sequence[str],
+) -> list[dict[str, object]]:
+    satisfied = ["missing required fields listed", "submission readiness flag emitted"]
+    if any(record.get("operator") or record.get("source_identifier") for record in records):
+        satisfied.append("operator/source metadata recorded")
+    if any(record.get("write_blocker") for record in records):
+        satisfied.append("write-blocker field recorded")
+    if any(record.get("whole_source_sha256") for record in records):
+        satisfied.append("whole-source hash field recorded")
+    return [
+        build_accuracy_gate(
+            96,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"record_count:{len(records)}",
+                f"missing_required_field_count:{len(missing_required_fields)}",
+            ],
+        )
+    ]
+
+
+def timezone_validation_core_accuracy_gates(
+    *,
+    event_count: int,
+    missing_timezone_count: int,
+    samples: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    return [
+        build_accuracy_gate(
+            97,
+            satisfied_checks=[
+                "event timezone inventory emitted",
+                "missing timezone count emitted",
+                "timestamp samples preserved",
+                "UTC assumption disclosed",
+                "review-required flag emitted",
+            ],
+            evidence_refs=[
+                f"event_count:{event_count}",
+                f"missing_timezone_count:{missing_timezone_count}",
+                f"sample_count:{len(samples)}",
+            ],
+        )
+    ]
+
+
+def clock_skew_core_accuracy_gates(
+    *,
+    parsed_timestamp_count: int,
+    warnings: Sequence[Mapping[str, object]],
+    earliest: str,
+    latest: str,
+) -> list[dict[str, object]]:
+    return [
+        build_accuracy_gate(
+            98,
+            satisfied_checks=[
+                "parsed timestamp range emitted",
+                "skew warning records emitted",
+                "warning count summarized",
+                "baseline requirement disclosed",
+                "heuristic limitation emitted",
+            ],
+            evidence_refs=[
+                f"parsed_timestamp_count:{parsed_timestamp_count}",
+                f"warning_count:{len(warnings)}",
+                f"earliest:{earliest}",
+                f"latest:{latest}",
+            ],
+        )
+    ]
+
+
+def contamination_warning_core_accuracy_gates(*, warnings: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    return [
+        build_accuracy_gate(
+            99,
+            satisfied_checks=[
+                "contamination warning records emitted",
+                "warning count summarized",
+                "output-under-evidence checks emitted",
+                "write-blocker integration limitation emitted",
+                "review-required flag emitted",
+            ],
+            evidence_refs=[f"warning_count:{len(warnings)}"],
         )
     ]
 

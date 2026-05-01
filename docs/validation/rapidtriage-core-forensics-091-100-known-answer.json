@@ -1,0 +1,117 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #91-#100 internal fixture validation",
+  "status": "pass",
+  "datasets": [
+    {
+      "id": "core-forensics-091-parser-confidence",
+      "name": "#91 parser confidence fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDbTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [91],
+      "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_core_forensics_accuracy.py"],
+      "expected": {"required_assertions": ["Case DB report items preserve parser confidence, reportability, coverage status, warning derivation, evidence strength, and #91 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; parser-specific confidence calibration remains blocker."
+    },
+    {
+      "id": "core-forensics-092-validation-warning-ux",
+      "name": "#92 validation warning UX fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDbTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [92],
+      "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
+      "expected": {"required_assertions": ["Report exports preserve warning reasons, summary warning counts, report guidance, validation-required state, warning UX limitation, and #92 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; full web badge coverage remains blocker."
+    },
+    {
+      "id": "core-forensics-093-legal-limitations",
+      "name": "#93 legal limitation fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDbTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [93],
+      "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
+      "expected": {"required_assertions": ["Report items preserve artifact limitation text, parser-provided limitations, jurisdiction caveat, analyst-review blockers, limitation counts, and #93 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; jurisdiction-approved legal wording remains blocker."
+    },
+    {
+      "id": "core-forensics-094-court-exhibit",
+      "name": "#94 court exhibit export fixture assertions",
+      "source": "tests.test_rapidtriage_final_roadmap.RapidTriageFinalRoadmapTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [94],
+      "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_final_roadmap.py"],
+      "expected": {"required_assertions": ["Reviewer bundles preserve exhibit IDs, selected evidence hashes, generated output hashes, source references, verification steps, and #94 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; signed/notarized exhibit manifests remain blocker."
+    },
+    {
+      "id": "core-forensics-095-external-tool-versions",
+      "name": "#95 external tool version fixture assertions",
+      "source": "tests.test_rapidtriage_ops.RapidTriageOpsTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [95],
+      "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
+      "expected": {"required_assertions": ["Validation packages preserve tool inventory, availability/path/command/version/capture errors, limitation warnings, and #95 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; per-run tool transcripts remain blocker."
+    },
+    {
+      "id": "core-forensics-096-acquisition-metadata",
+      "name": "#96 acquisition metadata fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDbTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [96],
+      "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
+      "expected": {"required_assertions": ["Case DB report exports preserve operator/source metadata, write-blocker field, whole-source hash field, missing required fields, readiness flag, and #96 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; write-blocker device integration and signed handoff forms remain blockers."
+    },
+    {
+      "id": "core-forensics-097-timezone-validation",
+      "name": "#97 timezone validation fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDbTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [97],
+      "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
+      "expected": {"required_assertions": ["Report exports preserve timezone inventory, missing timezone counts, timestamp samples, UTC assumption, review-required flag, and #97 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; parser-specific timezone matrix remains blocker."
+    },
+    {
+      "id": "core-forensics-098-clock-skew",
+      "name": "#98 clock skew fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDbTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [98],
+      "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
+      "expected": {"required_assertions": ["Report exports preserve parsed timestamp range, skew warning records, warning count, baseline requirement, heuristic limitation, and #98 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; host/device baseline comparison remains blocker."
+    },
+    {
+      "id": "core-forensics-099-contamination-warning",
+      "name": "#99 evidence contamination fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDbTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [99],
+      "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
+      "expected": {"required_assertions": ["Report exports preserve contamination warnings, warning count, output-under-evidence checks, write-blocker limitation, review-required flag, and #99 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; acquisition-time mtime and write-blocker integration remain blockers."
+    },
+    {
+      "id": "core-forensics-100-tamper-evident-bundle",
+      "name": "#100 tamper-evident bundle fixture assertions",
+      "source": "tests.test_rapidtriage_final_roadmap.RapidTriageFinalRoadmapTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [100],
+      "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_final_roadmap.py"],
+      "expected": {"required_assertions": ["Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, external signing limitation, and #100 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; external signing/notarization remains blocker."
+    }
+  ]
+}
