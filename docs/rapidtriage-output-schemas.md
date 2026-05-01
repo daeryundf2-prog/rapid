@@ -245,6 +245,10 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `analysis.workbook` creates draft hypotheses, review questions, and next actions with #50 status; it is a triage aid and must be verified against source rows and hashes.
 - `analysis.core_accuracy_gates` emits #46~#50 and #60 gate objects showing which required clustering, entity, graph, timeline, workbook, and duplicate-hit checks are satisfied and which remain validation-required.
 - `analysis.commercial_uplift_evidence` emits #46~#50 batch evidence with passed/failed validation IDs by item, search-analysis caps, truncation flags, report blockers, and explicit reminders that persistent review state, full-case reindexing, graph paging, timeline skew validation, and editable workbook versioning are not yet commercial-ready.
+- Top-level search output emits #61 `commercial_uplift_evidence` with query mode, fuzzy/proximity options, result caps, passed checks, and blockers for multilingual relevance corpora, query-builder validation, and measured FP/FN tuning.
+- Keyword-pack API output emits #62 `commercial_uplift_evidence` on each pack and on the library assessment with pack/keyword counts, provenance refs, deduplication state, and signed-pack/editor blockers.
+- Indicator summaries emit #63 `commercial_uplift_evidence` with offline TI feed refs, local-only/no-external-call controls, indicator/source caps, and signed/STIX/TAXII/confidence-decay blockers.
+- Case DB report exports emit #64/#65 `commercial_uplift_evidence` on report citation and evidence-selection history managers with citation/history counts, source refs, selected-item controls, and exhibit-numbering/multi-user-signing blockers.
 
 ### `source-preview` API
 

@@ -82,6 +82,8 @@ def build_indicator_summary(
 
     type_counts = Counter(str(item["type"]) for item in indicators)
     rule_counts = Counter(rule for item in indicators for rule in item.get("matched_rules", []))
+    core_accuracy_gates = ioc_ti_core_accuracy_gates(indicators=indicators, ti_feed_sources=ti_feed_sources)
+    assessment = ti_enrichment_assessment(ti_feed_sources=ti_feed_sources)
     return {
         "command": "indicators",
         "generated_at": dt.datetime.now().isoformat(),
@@ -105,8 +107,16 @@ def build_indicator_summary(
         },
         "ti_feed_sources": ti_feed_sources,
         "indicator_native_capabilities": dict(INDICATOR_NATIVE_CAPABILITIES),
-        "ti_enrichment_assessment": ti_enrichment_assessment(ti_feed_sources=ti_feed_sources),
-        "core_accuracy_gates": ioc_ti_core_accuracy_gates(indicators=indicators, ti_feed_sources=ti_feed_sources),
+        "ti_enrichment_assessment": assessment,
+        "core_accuracy_gates": core_accuracy_gates,
+        "commercial_uplift_evidence": ioc_ti_commercial_uplift_evidence(
+            indicators=indicators,
+            ti_feed_sources=ti_feed_sources,
+            core_accuracy_gates=core_accuracy_gates,
+            assessment=assessment,
+            max_indicators=max_indicators,
+            max_sources_per_indicator=max_sources_per_indicator,
+        ),
         "indicators": indicators,
     }
 
@@ -403,6 +413,49 @@ def ioc_ti_core_accuracy_gates(
             ],
         )
     ]
+
+
+def ioc_ti_commercial_uplift_evidence(
+    *,
+    indicators: Sequence[Mapping[str, object]],
+    ti_feed_sources: Sequence[Mapping[str, object]],
+    core_accuracy_gates: Sequence[Mapping[str, object]],
+    assessment: Mapping[str, object],
+    max_indicators: int,
+    max_sources_per_indicator: int,
+) -> dict[str, object]:
+    passed = []
+    for gate in core_accuracy_gates:
+        if gate.get("gap_id") == IOC_TI_GAP_ID:
+            passed.extend(str(item) for item in gate.get("satisfied_checks") or [])
+    return {
+        "batch_id": "commercial-uplift-061-065",
+        "item_numbers": [63],
+        "implementation_track": "offline-ioc-ti-enrichment-gate",
+        "source_refs": [
+            f"indicator_count:{len(indicators)}",
+            f"ti_feed_count:{len(ti_feed_sources)}",
+            *[f"ti_feed:{item.get('name', '')}:{item.get('version', '')}" for item in ti_feed_sources[:5]],
+        ],
+        "passed_validation_check_ids": sorted(set(passed)),
+        "failed_validation_check_ids": [
+            "signed-feed-package-validation",
+            "stix-taxii-import",
+            "confidence-decay-workflow",
+            "external-ti-api-governance",
+        ],
+        "commercial_blockers": list(assessment.get("blockers") or []),
+        "large_data_controls": {
+            "max_indicators": max_indicators,
+            "max_sources_per_indicator": max_sources_per_indicator,
+            "indicator_count": len(indicators),
+            "ti_feed_count": len(ti_feed_sources),
+            "external_ti_api_calls": False,
+            "local_only_enrichment": True,
+            "signed_feed_packages": False,
+        },
+        "reporting_status": "offline-feed-enabled" if ti_feed_sources else "available-no-feed-loaded",
+    }
 
 
 def normalize_feed_type(value: str) -> str:

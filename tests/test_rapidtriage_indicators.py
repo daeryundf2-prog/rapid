@@ -78,6 +78,11 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             self.assertEqual(manual_payload["core_accuracy_gates"][0]["gap_id"], "#63")
             self.assertIn("offline feed provenance", manual_payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("local-only/no-external-call warning", manual_payload["core_accuracy_gates"][0]["satisfied_checks"])
+            ioc_uplift = manual_payload["commercial_uplift_evidence"]
+            self.assertEqual(ioc_uplift["batch_id"], "commercial-uplift-061-065")
+            self.assertEqual(ioc_uplift["item_numbers"], [63])
+            self.assertIn("offline feed provenance", ioc_uplift["passed_validation_check_ids"])
+            self.assertFalse(ioc_uplift["large_data_controls"]["external_ti_api_calls"])
             self.assertFalse(manual_payload["indicator_native_capabilities"]["external_ti_api_calls"])
             self.assertEqual(manual_payload["ti_feed_sources"][0]["name"], "unit-ti-plugin")
             self.assertEqual(manual_payload["ti_feed_sources"][0]["version"], "2026.04")

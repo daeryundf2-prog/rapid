@@ -306,6 +306,11 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             self.assertEqual(fuzzy["core_accuracy_gates"][0]["gap_id"], "#61")
             self.assertIn("query mode and options recorded", fuzzy["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("proximity metadata preserved", fuzzy["core_accuracy_gates"][0]["satisfied_checks"])
+            search_uplift = fuzzy["commercial_uplift_evidence"]
+            self.assertEqual(search_uplift["batch_id"], "commercial-uplift-061-065")
+            self.assertEqual(search_uplift["item_numbers"], [61])
+            self.assertIn("query mode and options recorded", search_uplift["passed_validation_check_ids"])
+            self.assertFalse(search_uplift["large_data_controls"]["full_linguistic_stemming"])
             self.assertTrue(fuzzy["search_native_capabilities"]["regex_search"])
             self.assertEqual(fuzzy["matches"][0]["search_match"]["mode"], "fuzzy")
             self.assertIn("#61", fuzzy["matches"][0]["search_match"]["commercial_gap_ids"])

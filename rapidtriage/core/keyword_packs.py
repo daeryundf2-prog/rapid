@@ -122,26 +122,42 @@ def resolve_keyword_packs(
 
 
 def list_keyword_packs() -> list[dict[str, object]]:
-    return [
-        {
+    rows = []
+    for name, keywords in sorted(BUILTIN_KEYWORD_PACKS.items()):
+        gates = keyword_pack_core_accuracy_gates(
+            pack_count=1,
+            keyword_count=len(keywords),
+            custom_file_count=0,
+            provenance_refs=[f"builtin_pack:{name}"],
+        )
+        rows.append(
+            {
             "name": name,
             "keyword_count": len(keywords),
             "keywords": keywords,
             "commercial_gap_ids": [KEYWORD_PACK_GAP_ID],
             "library_scope": "built-in-triage-starter-pack",
             "ready_for_court_report": False,
-            "core_accuracy_gates": keyword_pack_core_accuracy_gates(
+            "core_accuracy_gates": gates,
+            "commercial_uplift_evidence": keyword_pack_commercial_uplift_evidence(
                 pack_count=1,
                 keyword_count=len(keywords),
                 custom_file_count=0,
                 provenance_refs=[f"builtin_pack:{name}"],
+                core_accuracy_gates=gates,
             ),
-        }
-        for name, keywords in sorted(BUILTIN_KEYWORD_PACKS.items())
-    ]
+            }
+        )
+    return rows
 
 
 def keyword_pack_library_assessment() -> dict[str, object]:
+    gates = keyword_pack_core_accuracy_gates(
+        pack_count=len(BUILTIN_KEYWORD_PACKS),
+        keyword_count=sum(len(values) for values in BUILTIN_KEYWORD_PACKS.values()),
+        custom_file_count=0,
+        provenance_refs=["builtin_pack_library"],
+    )
     return {
         "component": "saved-keyword-pack-library",
         "status": "implemented-baseline-validation-required",
@@ -153,11 +169,13 @@ def keyword_pack_library_assessment() -> dict[str, object]:
             "Document which built-in and custom packs were used for each case search.",
             "Review false positives/negatives and add case-specific terms before report reliance.",
         ],
-        "core_accuracy_gates": keyword_pack_core_accuracy_gates(
+        "core_accuracy_gates": gates,
+        "commercial_uplift_evidence": keyword_pack_commercial_uplift_evidence(
             pack_count=len(BUILTIN_KEYWORD_PACKS),
             keyword_count=sum(len(values) for values in BUILTIN_KEYWORD_PACKS.values()),
             custom_file_count=0,
             provenance_refs=["builtin_pack_library"],
+            core_accuracy_gates=gates,
         ),
     }
 
@@ -184,6 +202,43 @@ def keyword_pack_core_accuracy_gates(
             ],
         )
     ]
+
+
+def keyword_pack_commercial_uplift_evidence(
+    *,
+    pack_count: int,
+    keyword_count: int,
+    custom_file_count: int,
+    provenance_refs: Sequence[str],
+    core_accuracy_gates: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    passed = []
+    for gate in core_accuracy_gates:
+        if gate.get("gap_id") == KEYWORD_PACK_GAP_ID:
+            passed.extend(str(item) for item in gate.get("satisfied_checks") or [])
+    return {
+        "batch_id": "commercial-uplift-061-065",
+        "item_numbers": [62],
+        "implementation_track": "saved-keyword-pack-library-gate",
+        "source_refs": list(provenance_refs),
+        "passed_validation_check_ids": sorted(set(passed)),
+        "failed_validation_check_ids": [
+            "per-case-pack-editor",
+            "signed-pack-distribution",
+            "release-reviewed-pack-versioning",
+            "language-domain-specific-pack-corpus",
+        ],
+        "commercial_blockers": list(KEYWORD_PACK_REPORT_GRADE_BLOCKERS),
+        "large_data_controls": {
+            "pack_count": pack_count,
+            "keyword_count": keyword_count,
+            "custom_file_count": custom_file_count,
+            "deduplicated_expansion": True,
+            "signed_pack_library": False,
+            "case_pack_editor": False,
+        },
+        "reporting_status": "implemented-baseline-validation-required",
+    }
 
 
 def add_keyword(output: list[str], seen: set[str], keyword: object) -> None:

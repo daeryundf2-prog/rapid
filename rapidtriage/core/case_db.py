@@ -2711,29 +2711,56 @@ def build_report_citation_index(items: Sequence[Mapping[str, object]]) -> list[d
 
 
 def build_report_citation_manager(citation_index: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    gates = citation_manager_core_accuracy_gates(
+        citation_count=len(citation_index),
+        has_source_reference=any(bool(item.get("source_reference")) for item in citation_index),
+    )
+    blockers = [
+        "citation-index-depends-on-imported-source-reference-completeness",
+        "analyst-must-verify-source-hashes-parser-confidence-and-review-history-before-report-use",
+    ]
     return {
         "component": "report-citation-manager",
         "status": "implemented-baseline-validation-required",
         "commercial_gap_ids": ["#64"],
         "citation_count": len(citation_index),
         "ready_for_court_report": False,
-        "blockers": [
-            "citation-index-depends-on-imported-source-reference-completeness",
-            "analyst-must-verify-source-hashes-parser-confidence-and-review-history-before-report-use",
-        ],
+        "blockers": blockers,
         "recommended_validation": [
             "Confirm every report item has both a review citation and source-record citation.",
             "Preserve the exported citation index with the report and source hash manifest.",
         ],
-        "core_accuracy_gates": citation_manager_core_accuracy_gates(
-            citation_count=len(citation_index),
-            has_source_reference=any(bool(item.get("source_reference")) for item in citation_index),
+        "core_accuracy_gates": gates,
+        "commercial_uplift_evidence": case_report_commercial_uplift_evidence(
+            item_number=64,
+            component="report-citation-manager",
+            core_accuracy_gates=gates,
+            blockers=blockers,
+            source_refs=[f"citation_count:{len(citation_index)}"],
+            controls={
+                "citation_count": len(citation_index),
+                "source_reference_present": any(bool(item.get("source_reference")) for item in citation_index),
+                "exhibit_numbering_ui": False,
+                "source_hash_completeness_validation": False,
+            },
         ),
     }
 
 
 def build_evidence_selection_version_history(items: Sequence[Mapping[str, object]]) -> dict[str, object]:
     history_count = sum(len(item.get("review_history") or []) for item in items if isinstance(item.get("review_history"), list))
+    history_rows = [
+        history
+        for item in items
+        if isinstance(item.get("review_history"), list)
+        for history in item.get("review_history", [])
+        if isinstance(history, Mapping)
+    ]
+    gates = evidence_selection_core_accuracy_gates(history_rows=history_rows)
+    blockers = [
+        "selection-history-is-local-sqlite-not-multi-user-signed-collaboration",
+        "review-inclusion-changes-still-require-source-verification-before-reporting",
+    ]
     return {
         "component": "evidence-selection-version-history",
         "status": "implemented-baseline-validation-required",
@@ -2741,21 +2768,53 @@ def build_evidence_selection_version_history(items: Sequence[Mapping[str, object
         "selected_item_count": len(items),
         "review_history_count": history_count,
         "ready_for_court_report": False,
-        "blockers": [
-            "selection-history-is-local-sqlite-not-multi-user-signed-collaboration",
-            "review-inclusion-changes-still-require-source-verification-before-reporting",
-        ],
+        "blockers": blockers,
         "recommended_validation": [
             "Review version rows for status, verification, tags, assignee, priority, and include-in-report changes.",
             "Export the Case DB report JSON with the final report so selection history remains reproducible.",
         ],
-        "core_accuracy_gates": evidence_selection_core_accuracy_gates(history_rows=[
-            history
-            for item in items
-            if isinstance(item.get("review_history"), list)
-            for history in item.get("review_history", [])
-            if isinstance(history, Mapping)
-        ]),
+        "core_accuracy_gates": gates,
+        "commercial_uplift_evidence": case_report_commercial_uplift_evidence(
+            item_number=65,
+            component="evidence-selection-version-history",
+            core_accuracy_gates=gates,
+            blockers=blockers,
+            source_refs=[f"selected_item_count:{len(items)}", f"review_history_count:{history_count}"],
+            controls={
+                "selected_item_count": len(items),
+                "review_history_count": history_count,
+                "local_sqlite_history": True,
+                "multi_user_signed_history": False,
+                "conflict_resolution": False,
+            },
+        ),
+    }
+
+
+def case_report_commercial_uplift_evidence(
+    *,
+    item_number: int,
+    component: str,
+    core_accuracy_gates: Sequence[Mapping[str, object]],
+    blockers: Sequence[str],
+    source_refs: Sequence[str],
+    controls: Mapping[str, object],
+) -> dict[str, object]:
+    gap_id = f"#{item_number}"
+    passed = []
+    for gate in core_accuracy_gates:
+        if gate.get("gap_id") == gap_id:
+            passed.extend(str(item) for item in gate.get("satisfied_checks") or [])
+    return {
+        "batch_id": "commercial-uplift-061-065",
+        "item_numbers": [item_number],
+        "implementation_track": component,
+        "source_refs": list(source_refs),
+        "passed_validation_check_ids": sorted(set(passed)),
+        "failed_validation_check_ids": list(blockers),
+        "commercial_blockers": list(blockers),
+        "large_data_controls": dict(controls),
+        "reporting_status": "implemented-baseline-validation-required",
     }
 
 

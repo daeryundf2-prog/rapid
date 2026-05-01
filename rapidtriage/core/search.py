@@ -94,6 +94,8 @@ def run_unified_search(
         for keyword in match.get("matched_keywords", []):
             keyword_counts[str(keyword)] = keyword_counts.get(str(keyword), 0) + 1
 
+    core_accuracy_gates = search_core_accuracy_gates(matches=matches, options=search_options)
+    report_grade = search_report_grade_assessment()
     payload: Dict[str, object] = {
         "command": "search",
         "generated_at": dt.datetime.now().isoformat(),
@@ -121,12 +123,60 @@ def run_unified_search(
             "errors": ocr_errors,
         },
         "search_native_capabilities": dict(SEARCH_NATIVE_CAPABILITIES),
-        "search_report_grade_assessment": search_report_grade_assessment(),
-        "core_accuracy_gates": search_core_accuracy_gates(matches=matches, options=search_options),
+        "search_report_grade_assessment": report_grade,
+        "core_accuracy_gates": core_accuracy_gates,
+        "commercial_uplift_evidence": search_commercial_uplift_evidence(
+            matches=matches,
+            options=search_options,
+            core_accuracy_gates=core_accuracy_gates,
+            report_grade=report_grade,
+            limit=limit,
+        ),
     }
     if include_analysis:
         payload["analysis"] = build_search_analysis(matches, normalized)
     return payload
+
+
+def search_commercial_uplift_evidence(
+    *,
+    matches: Sequence[Mapping[str, object]],
+    options: Mapping[str, object],
+    core_accuracy_gates: Sequence[Mapping[str, object]],
+    report_grade: Mapping[str, object],
+    limit: int,
+) -> dict[str, object]:
+    passed = []
+    for gate in core_accuracy_gates:
+        if gate.get("gap_id") == SEARCH_FEATURE_GAP_ID:
+            passed.extend(str(item) for item in gate.get("satisfied_checks") or [])
+    return {
+        "batch_id": "commercial-uplift-061-065",
+        "item_numbers": [61],
+        "implementation_track": "advanced-search-query-gate",
+        "source_refs": [
+            f"match_count:{len(matches)}",
+            f"search_mode:{options.get('search_mode', '')}",
+            f"proximity_window:{options.get('proximity_window', 0)}",
+        ],
+        "passed_validation_check_ids": sorted(set(passed)),
+        "failed_validation_check_ids": [
+            "multilingual-relevance-corpus",
+            "query-builder-ux-validation",
+            "tuned-false-positive-false-negative-metrics",
+        ],
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "result_limit": limit,
+            "match_count": len(matches),
+            "search_mode": str(options.get("search_mode") or ""),
+            "fuzzy_distance": int(options.get("fuzzy_distance") or 0),
+            "proximity_window": int(options.get("proximity_window") or 0),
+            "full_linguistic_stemming": False,
+            "semantic_near_duplicate_search": False,
+        },
+        "reporting_status": "implemented-baseline-validation-required",
+    }
 
 
 def load_run_summary(run_summary: Mapping[str, object] | Path) -> Mapping[str, object]:
