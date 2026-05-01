@@ -1,0 +1,105 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #1-#5 internal fixture validation",
+  "status": "pass",
+  "datasets": [
+    {
+      "id": "core-forensics-001-evtx-binxml-fixture",
+      "name": "#1 Native EVTX BinXML fixture assertions",
+      "source": "tests.windows_artifact_fixtures EVTX fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [1],
+      "evidence_paths": [
+        "docs/validation/core-forensics-001-005-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py",
+        "tests/test_rapidtriage_windows_artifacts_collectors.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "EVTX record metadata, promoted fields, duplicate EventData ordering, and BinXML warning coverage are preserved"
+        ]
+      },
+      "notes": "Internal fixture pass; provider-specific grammar and external corpus validation remain commercial-grade blockers."
+    },
+    {
+      "id": "core-forensics-002-evtx-message-fixture",
+      "name": "#2 EVTX message rendering fixture assertions",
+      "source": "tests.windows_artifact_fixtures EVTX fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [2],
+      "evidence_paths": [
+        "docs/validation/core-forensics-001-005-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py",
+        "tests/test_rapidtriage_windows_artifacts_collectors.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "message text, inserted parameters, provenance, unresolved template warnings, and fallback limitations are preserved"
+        ]
+      },
+      "notes": "Internal fixture pass; provider resource DLL rendering remains commercial-grade evidence."
+    },
+    {
+      "id": "core-forensics-003-evtx-recovery-fixture",
+      "name": "#3 EVTX recovery fixture assertions",
+      "source": "tests.windows_artifact_fixtures EVTX corrupt/slack fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [3],
+      "evidence_paths": [
+        "docs/validation/core-forensics-001-005-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py",
+        "tests/test_rapidtriage_windows_artifacts_collectors.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "corrupt/slack candidate reason, offset context, integrity status, caution labels, and non-reportable default are preserved"
+        ]
+      },
+      "notes": "Internal fixture pass; large deleted/corrupt EVTX corpus and independent validation remain required."
+    },
+    {
+      "id": "core-forensics-004-registry-tree-fixture",
+      "name": "#4 Registry key tree fixture assertions",
+      "source": "tests.windows_artifact_fixtures minimal registry hive",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [4],
+      "evidence_paths": [
+        "docs/validation/core-forensics-001-005-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts_collectors.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "registry key tree root reachability, parent-child backlinks, value-list ownership, last-write evidence, and transaction-log disclosure are preserved"
+        ]
+      },
+      "notes": "Internal fixture pass; transaction-log replay and broad hive corpus remain commercial-grade blockers."
+    },
+    {
+      "id": "core-forensics-005-registry-deleted-fixture",
+      "name": "#5 Registry deleted key/value fixture assertions",
+      "source": "tests.windows_artifact_fixtures minimal registry hive",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [5],
+      "evidence_paths": [
+        "docs/validation/core-forensics-001-005-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts_collectors.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "deleted/free key and value candidates preserve allocator evidence, parent confirmation, data plausibility, and reportability blocking"
+        ]
+      },
+      "notes": "Internal fixture pass; independent deleted-cell validation and transaction-log replay remain required."
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+{
+  "schema": "rapidtriage-core-forensics-fixture-evidence-v1",
+  "scope": "#1-#5 internal fixture validation",
+  "status": "pass",
+  "claim_boundary": "Internal fixture-backed validation for implemented+usable+validated maturity only; commercial-grade still requires external corpora, independent review, and trusted-tool diffs.",
+  "fixture_sources": [
+    "tests/windows_artifact_fixtures.py",
+    "tests/test_rapidtriage_windows_artifacts.py",
+    "tests/test_rapidtriage_windows_artifacts_collectors.py"
+  ],
+  "collector_commands": [
+    "rapidtriage artifacts <fixture-root> --kind eventlog --output eventlog.json",
+    "rapidtriage artifacts <fixture-root> --kind windows-registry --output registry.json",
+    "rapidtriage manifest <fixture-root> --output manifest.json"
+  ],
+  "validated_items": [
+    {
+      "number": 1,
+      "title": "Native EVTX BinXML full parsing",
+      "assertions": [
+        "native_evtx_core_accuracy_gates records EventRecordID, file offset, provider/channel/EventID/computer pivots, duplicate EventData ordering, scalar type decoding, and unsupported grammar warnings.",
+        "fixture EVTX rows preserve source hash, record metadata, promoted EventData fields, and #1 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "complete provider-specific BinXML grammar coverage",
+        "external EVTX known-answer corpus",
+        "EvtxECmd/Hayabusa record-level diff"
+      ]
+    },
+    {
+      "number": 2,
+      "title": "EVTX event template/message rendering",
+      "assertions": [
+        "message_rendering provenance, fallback message text, parameter mapping, unresolved-template warning, and limitation disclosure are represented in #2 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "provider manifest/resource DLL rendering",
+        "cross-tool rendered-message diff"
+      ]
+    },
+    {
+      "number": 3,
+      "title": "EVTX deleted/corrupt record recovery validation",
+      "assertions": [
+        "eventlog-record-candidate rows preserve recovery status, candidate reason, offset/integrity context, caution labels, non-reportable default, and #3 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "large slack/deleted/corrupt EVTX corpus",
+        "independent corrupt-record validation"
+      ]
+    },
+    {
+      "number": 4,
+      "title": "Registry hive full key tree reconstruction",
+      "assertions": [
+        "registry-key-tree-node rows preserve root reachability, parent-child backlinks, value-list ownership, last-write timestamp evidence, transaction-log disclosure, source hashes, and #4 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "transaction-log replay",
+        "broad malformed/large hive corpus"
+      ]
+    },
+    {
+      "number": 5,
+      "title": "Registry deleted key/value recovery",
+      "assertions": [
+        "registry-key-recovery-candidate and registry-value-recovery-candidate rows preserve positive-size free-cell evidence, parent-key confirmation, data plausibility, allocator evidence, reportability blocking, and #5 core_accuracy_gates."
+      ],
+      "blockers_kept": [
+        "full allocator-state testimony validation",
+        "transaction-log replay",
+        "second-parser deleted-cell confirmation"
+      ]
+    }
+  ]
+}

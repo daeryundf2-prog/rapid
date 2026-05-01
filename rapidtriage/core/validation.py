@@ -851,6 +851,10 @@ def build_required_documents() -> list[dict[str, str]]:
             "purpose": "#1-#30 parser accuracy profile gates and pass/fail evidence requirements.",
         },
         {
+            "path": "docs/rapidtriage-core-forensics-001-005-validation.md",
+            "purpose": "#1-#5 internal fixture validation manifest and commercial-readiness attachment workflow.",
+        },
+        {
             "path": "docs/rapidtriage-core-forensics-006-010-validation.md",
             "purpose": "#6-#10 internal fixture validation manifest and commercial-readiness attachment workflow.",
         },
