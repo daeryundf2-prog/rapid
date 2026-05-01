@@ -109,6 +109,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("secret/cookie opt-in legal gate", browser_gates["#19"]["satisfied_checks"])
             self.assertIn("timestamp normalization", browser_gates["#20"]["satisfied_checks"])
             self.assertIn("Safari scope limitation disclosure", browser_gates["#20"]["satisfied_checks"])
+            browser_uplift = chrome["details"]["commercial_uplift_evidence"]
+            self.assertEqual(browser_uplift["batch_id"], "commercial-uplift-016-020")
+            self.assertEqual(browser_uplift["item_numbers"], [19, 20])
+            self.assertIn("unified-timeline", browser_uplift["passed_validation_matrix_ids"])
+            self.assertTrue(browser_uplift["large_data_controls"]["secret_values_redacted_by_default"])
             self.assertEqual(chrome["details"]["unified_timeline_count"], 2)
             self.assertEqual(chrome["details"]["unified_timeline"][0]["timeline_type"], "visit")
             self.assertEqual(chrome["details"]["unified_timeline"][0]["browser"], "chrome")
@@ -181,6 +186,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("strict legal warning", storage_gates["#42"]["satisfied_checks"])
             self.assertIn("opt-in reveal workflow warning", storage_gates["#42"]["satisfied_checks"])
             self.assertIn("audit and scope review requirement", storage_gates["#42"]["satisfied_checks"])
+            storage_uplift = storage_inventory["details"]["commercial_uplift_evidence"]
+            self.assertEqual(storage_uplift["batch_id"], "commercial-uplift-016-020")
+            self.assertEqual(storage_uplift["item_numbers"], [19, 20])
+            self.assertGreaterEqual(storage_uplift["large_data_controls"]["storage_inventory_count"], 5)
             inventory_types = {row["storage_type"] for row in storage_inventory["details"]["storage_inventory"]}
             self.assertIn("cache", inventory_types)
             self.assertIn("cookie", inventory_types)
@@ -222,6 +231,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("target/working-dir/arguments extraction", lnk_gate["satisfied_checks"])
             self.assertIn("tracker GUID validation", lnk_gate["satisfied_checks"])
             self.assertIn("timestamp/source field provenance", lnk_gate["satisfied_checks"])
+            lnk_uplift = details["commercial_uplift_evidence"]
+            self.assertEqual(lnk_uplift["batch_id"], "commercial-uplift-016-020")
+            self.assertEqual(lnk_uplift["item_numbers"], [17])
+            self.assertIn("has-valid-header", lnk_uplift["passed_validation_matrix_ids"])
+            self.assertTrue(lnk_uplift["large_data_controls"]["property_store_decode_required_for_commercial_claims"])
             self.assertEqual(len(details["source_hashes"]["sha256"]), 64)
             self.assertEqual(automatic["details"]["jump_list_parse_status"], "parsed-ole-stream-lnk")
             self.assertEqual(automatic["details"]["ole_parse_status"], "parsed")
@@ -1208,6 +1222,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("run count and last-run timestamps", prefetch_gate["satisfied_checks"])
             self.assertIn("volume/file metrics", prefetch_gate["satisfied_checks"])
             self.assertIn("compressed PF handling", prefetch_gate["missing_required_checks"])
+            prefetch_uplift = details["commercial_uplift_evidence"]
+            self.assertEqual(prefetch_uplift["batch_id"], "commercial-uplift-016-020")
+            self.assertEqual(prefetch_uplift["item_numbers"], [16])
+            self.assertIn("scca-signature", prefetch_uplift["passed_validation_matrix_ids"])
+            self.assertTrue(
+                prefetch_uplift["large_data_controls"]["full_file_metrics_decode_required_for_commercial_claims"]
+            )
             self.assertTrue(any("POWERSHELL.EXE" in path for path in details["referenced_paths"]))
             self.assertEqual(details["volume_candidate_count"], 1)
             self.assertEqual(details["volume_candidates"][0]["volume_device_path"], r"\DEVICE\HARDDISKVOLUME3")
@@ -1218,6 +1239,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(references[0]["details"]["volume_device_path"], r"\DEVICE\HARDDISKVOLUME3")
             self.assertEqual(references[0]["details"]["last_run_at"], "2024-04-01T09:10:11+00:00")
             self.assertTrue(references[0]["details"]["validation_required"])
+            self.assertEqual(references[0]["details"]["commercial_uplift_evidence"]["item_numbers"], [16])
             self.assertFalse(references[0]["details"]["commercial_grade_ready"])
             self.assertIn("#16", references[0]["details"]["prefetch_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(references[0]["details"]["forensic_review"]["gap_id"], "#16")
@@ -1621,6 +1643,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(wmi_gate["gap_id"], "#18")
             self.assertIn("event semantics and risk rules", wmi_gate["satisfied_checks"])
             self.assertIn("WMI consumer/filter binding validation", wmi_gate["missing_required_checks"])
+            wmi_uplift = wmi[0]["details"]["commercial_uplift_evidence"]
+            self.assertEqual(wmi_uplift["batch_id"], "commercial-uplift-016-020")
+            self.assertEqual(wmi_uplift["item_numbers"], [18])
+            self.assertIn("wmi-source-parsed", wmi_uplift["passed_validation_matrix_ids"])
+            self.assertTrue(wmi_uplift["large_data_controls"]["native_repository_or_rule_store_decode_required"])
             self.assertIn("wmi-string:commandlineeventconsumer", wmi[0]["details"]["risk_flags"])
             self.assertTrue(any("powershell.exe" in value.lower() for value in wmi[0]["details"]["path_candidates"]))
             self.assertIn("https://example.test/wmi-payload", wmi[0]["details"]["url_candidates"])
@@ -1653,6 +1680,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(task_gate["gap_id"], "#18")
             self.assertIn("event semantics and risk rules", task_gate["satisfied_checks"])
             self.assertIn("Task XML/TaskCache correlation", task_gate["missing_required_checks"])
+            task_uplift = task["details"]["commercial_uplift_evidence"]
+            self.assertEqual(task_uplift["batch_id"], "commercial-uplift-016-020")
+            self.assertEqual(task_uplift["item_numbers"], [18])
+            self.assertIn("task-exec-action", task_uplift["passed_validation_matrix_ids"])
+            self.assertIn("task-report-grade-correlation", task_uplift["failed_validation_matrix_ids"])
             self.assertEqual(len(task["details"]["source_hashes"]["sha256"]), 64)
             self.assertIn("task-string:powershell", task["details"]["risk_flags"])
             self.assertIn("task-user-writable-path", task["details"]["risk_flags"])

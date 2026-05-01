@@ -214,6 +214,50 @@
               "cross-browser-timeline-known-answer-corpus-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-016-020",
+              "commercial_blockers": [
+                "full-browser-cache-entry-decoding-not-implemented",
+                "cookie-value-decryption-and-legal-opt-in-not-implemented",
+                "extension-schema-and-sync-engine-validation-required",
+                "sync-engine-state-validation-required",
+                "cross-browser-session-restore-decoding-incomplete",
+                "cross-browser-timeline-known-answer-corpus-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "storage-inventory",
+                "storage-report-grade",
+                "cross-browser-known-answer"
+              ],
+              "implementation_track": "ux-and-parser-depth",
+              "item_numbers": [
+                19,
+                20
+              ],
+              "large_data_controls": {
+                "browser_version_corpus_required_for_commercial_claims": true,
+                "max_browser_timeline_rows": 1000,
+                "max_storage_inventory_files": 5000,
+                "secret_values_redacted_by_default": true,
+                "storage_inventory_count": 0,
+                "unified_timeline_count": 1
+              },
+              "next_internal_step": "Finish cache/session schema decoding, deleted-history recovery, Safari parity, and browser-version known-answer validation.",
+              "objective": "Expose browser cache/session inventory and unified timeline validation evidence without overclaiming secret/deleted-state support.",
+              "passed_validation_matrix_ids": [
+                "history-or-download-source",
+                "unified-timeline"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+                "source_sha256:a500ca837ddabfd418bd3103fb020923eb2d21ca85e4bfa38e2af8159573c99a",
+                "artifact_type:browser-history",
+                "browser:firefox",
+                "profile:default-release"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -544,6 +588,50 @@
               "cross-browser-timeline-known-answer-corpus-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-016-020",
+              "commercial_blockers": [
+                "full-browser-cache-entry-decoding-not-implemented",
+                "cookie-value-decryption-and-legal-opt-in-not-implemented",
+                "extension-schema-and-sync-engine-validation-required",
+                "sync-engine-state-validation-required",
+                "cross-browser-session-restore-decoding-incomplete",
+                "cross-browser-timeline-known-answer-corpus-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "storage-inventory",
+                "storage-report-grade",
+                "cross-browser-known-answer"
+              ],
+              "implementation_track": "ux-and-parser-depth",
+              "item_numbers": [
+                19,
+                20
+              ],
+              "large_data_controls": {
+                "browser_version_corpus_required_for_commercial_claims": true,
+                "max_browser_timeline_rows": 1000,
+                "max_storage_inventory_files": 5000,
+                "secret_values_redacted_by_default": true,
+                "storage_inventory_count": 0,
+                "unified_timeline_count": 3
+              },
+              "next_internal_step": "Finish cache/session schema decoding, deleted-history recovery, Safari parity, and browser-version known-answer validation.",
+              "objective": "Expose browser cache/session inventory and unified timeline validation evidence without overclaiming secret/deleted-state support.",
+              "passed_validation_matrix_ids": [
+                "history-or-download-source",
+                "unified-timeline"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                "source_sha256:779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c",
+                "artifact_type:browser-history-downloads",
+                "browser:chrome",
+                "profile:Default"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -952,6 +1040,50 @@
               "cross-browser-timeline-known-answer-corpus-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-016-020",
+              "commercial_blockers": [
+                "full-browser-cache-entry-decoding-not-implemented",
+                "cookie-value-decryption-and-legal-opt-in-not-implemented",
+                "extension-schema-and-sync-engine-validation-required",
+                "sync-engine-state-validation-required",
+                "cross-browser-session-restore-decoding-incomplete",
+                "cross-browser-timeline-known-answer-corpus-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "storage-inventory",
+                "storage-report-grade",
+                "cross-browser-known-answer"
+              ],
+              "implementation_track": "ux-and-parser-depth",
+              "item_numbers": [
+                19,
+                20
+              ],
+              "large_data_controls": {
+                "browser_version_corpus_required_for_commercial_claims": true,
+                "max_browser_timeline_rows": 1000,
+                "max_storage_inventory_files": 5000,
+                "secret_values_redacted_by_default": true,
+                "storage_inventory_count": 0,
+                "unified_timeline_count": 2
+              },
+              "next_internal_step": "Finish cache/session schema decoding, deleted-history recovery, Safari parity, and browser-version known-answer validation.",
+              "objective": "Expose browser cache/session inventory and unified timeline validation evidence without overclaiming secret/deleted-state support.",
+              "passed_validation_matrix_ids": [
+                "history-or-download-source",
+                "unified-timeline"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+                "source_sha256:da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639",
+                "artifact_type:browser-history-downloads",
+                "browser:edge",
+                "profile:Profile 1"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -1924,6 +2056,48 @@
               "validation-check-failed:has-shell-item-idlist"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-016-020",
+              "commercial_blockers": [
+                "full-shell-item-property-store-decoding-required",
+                "recent-files-validation-required",
+                "tracker-data-known-answer-corpus-validation-required",
+                "validation-check-failed:full-property-store-decode-available",
+                "validation-check-failed:has-link-info",
+                "validation-check-failed:has-shell-item-idlist"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "has-link-info",
+                "has-shell-item-idlist",
+                "full-property-store-decode-available"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                17
+              ],
+              "large_data_controls": {
+                "bounded_extra_data_blocks": true,
+                "max_extra_data_blocks": 64,
+                "max_shell_items": 128,
+                "property_store_decode_required_for_commercial_claims": true
+              },
+              "next_internal_step": "Finish Shell Item property store semantics and tracker/LinkInfo known-answer corpus validation.",
+              "objective": "Expose Shell Link header, LinkInfo/StringData/ExtraData validation and remaining property-store blockers.",
+              "passed_validation_matrix_ids": [
+                "has-valid-header",
+                "has-target-path",
+                "has-timestamps",
+                "has-tracker-data"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/Case Notes.lnk",
+                "source_sha256:9acc17da47c5d23d5d4c6307982fe7726fa5714d1fb26f5ae429d06b0a463f8d",
+                "target_path:C:\\Users\\alice\\Documents\\Case Notes.docx",
+                "artifact_type:recent-shortcut"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -10572,6 +10746,46 @@
               "Trace chains, directory strings, and file information sections are not fully version-validated.",
               "Known-answer corpus validation across malformed, compressed, and cross-version Prefetch files is incomplete."
             ],
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-016-020",
+              "commercial_blockers": [
+                "full-file-metrics-array-decoding-not-implemented",
+                "mft-file-reference-decoding-not-implemented",
+                "authoritative-volume-table-decoding-not-implemented",
+                "trace-chain-directory-section-validation-required",
+                "known-answer-prefetch-corpus-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "file-metrics-report-grade"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                16
+              ],
+              "large_data_controls": {
+                "bounded_prefetch_scan": true,
+                "full_file_metrics_decode_required_for_commercial_claims": true,
+                "max_referenced_paths": 200,
+                "prefetch_version": 30,
+                "scan_limit_bytes": 1048576
+              },
+              "next_internal_step": "Finish file metrics, MFT reference, authoritative volume, compressed PF, and cross-version corpus validation.",
+              "objective": "Expose Prefetch version/layout validation, referenced-path evidence, and commercial blockers.",
+              "passed_validation_matrix_ids": [
+                "scca-signature",
+                "supported-common-layout",
+                "declared-size-match",
+                "execution-counters-present"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
+                "source_index:",
+                "source_sha256:4ed0441ececfe85a462ba5770a37ae31ada11a969d8a3f75ab7fa567ed6c0d5a",
+                "artifact_type:prefetch-file"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -10827,6 +11041,46 @@
               "Trace chains, directory strings, and file information sections are not fully version-validated.",
               "Known-answer corpus validation across malformed, compressed, and cross-version Prefetch files is incomplete."
             ],
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-016-020",
+              "commercial_blockers": [
+                "full-file-metrics-array-decoding-not-implemented",
+                "mft-file-reference-decoding-not-implemented",
+                "authoritative-volume-table-decoding-not-implemented",
+                "trace-chain-directory-section-validation-required",
+                "known-answer-prefetch-corpus-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "file-metrics-report-grade"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                16
+              ],
+              "large_data_controls": {
+                "bounded_prefetch_scan": true,
+                "full_file_metrics_decode_required_for_commercial_claims": true,
+                "max_referenced_paths": 200,
+                "prefetch_version": 30,
+                "scan_limit_bytes": 1048576
+              },
+              "next_internal_step": "Finish file metrics, MFT reference, authoritative volume, compressed PF, and cross-version corpus validation.",
+              "objective": "Expose Prefetch version/layout validation, referenced-path evidence, and commercial blockers.",
+              "passed_validation_matrix_ids": [
+                "scca-signature",
+                "supported-common-layout",
+                "declared-size-match",
+                "execution-counters-present"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
+                "source_index:0",
+                "source_sha256:4ed0441ececfe85a462ba5770a37ae31ada11a969d8a3f75ab7fa567ed6c0d5a",
+                "artifact_type:prefetch-reference"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -11018,6 +11272,39 @@
               "known-answer-system-artifact-corpus-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-016-020",
+              "commercial_blockers": [
+                "defender-event-and-mpcmdrun-correlation-not-implemented"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "defender-report-grade-correlation"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                18
+              ],
+              "large_data_controls": {
+                "actual_scan_bytes": 0,
+                "bounded_wmi_scan_bytes": 0,
+                "cross_artifact_correlation_required_for_commercial_claims": true,
+                "native_repository_or_rule_store_decode_required": false
+              },
+              "next_internal_step": "Finish TaskCache, Defender/EventLog, Firewall rule-store, WER dump/CAB, and WMI repository correlation validation.",
+              "objective": "Expose Windows system artifact semantics, risk-rule evidence, and correlation blockers.",
+              "passed_validation_matrix_ids": [
+                "defender-source-parsed",
+                "defender-interesting-entries"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
+                "source_sha256:122bb5f0a02d6904c5818a5d7f2da3553f01bdb37d85500fb4c69afe770ad731",
+                "artifact_type:defender-support-log",
+                "artifact_family:defender"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -11197,6 +11484,39 @@
               "known-answer-system-artifact-corpus-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-016-020",
+              "commercial_blockers": [
+                "firewall-rule-store-correlation-not-implemented"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "firewall-report-grade-correlation"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                18
+              ],
+              "large_data_controls": {
+                "actual_scan_bytes": 0,
+                "bounded_wmi_scan_bytes": 0,
+                "cross_artifact_correlation_required_for_commercial_claims": true,
+                "native_repository_or_rule_store_decode_required": true
+              },
+              "next_internal_step": "Finish TaskCache, Defender/EventLog, Firewall rule-store, WER dump/CAB, and WMI repository correlation validation.",
+              "objective": "Expose Windows system artifact semantics, risk-rule evidence, and correlation blockers.",
+              "passed_validation_matrix_ids": [
+                "firewall-source-parsed",
+                "firewall-w3c-rows"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
+                "source_sha256:a96274791ced73ab67dd0987a4e08f5f813c1c5b543fda3cc501d163bd462f3e",
+                "artifact_type:firewall-log",
+                "artifact_family:firewall"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -11405,6 +11725,41 @@
               "task-history-event-correlation-not-implemented"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-016-020",
+              "commercial_blockers": [
+                "task-cache-registry-correlation-not-implemented",
+                "task-security-descriptor-validation-not-implemented",
+                "task-history-event-correlation-not-implemented"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "task-report-grade-correlation"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                18
+              ],
+              "large_data_controls": {
+                "actual_scan_bytes": 0,
+                "bounded_wmi_scan_bytes": 0,
+                "cross_artifact_correlation_required_for_commercial_claims": true,
+                "native_repository_or_rule_store_decode_required": true
+              },
+              "next_internal_step": "Finish TaskCache, Defender/EventLog, Firewall rule-store, WER dump/CAB, and WMI repository correlation validation.",
+              "objective": "Expose Windows system artifact semantics, risk-rule evidence, and correlation blockers.",
+              "passed_validation_matrix_ids": [
+                "task-scheduler-source-parsed",
+                "task-exec-action"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
+                "source_sha256:67f0d7c2747654b49140ab0a51f30fcf2ff41d4792b2b60bc77725f32b897f79",
+                "artifact_type:task-scheduler-task",
+                "artifact_family:task-scheduler"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -11638,6 +11993,41 @@
               "wer-cab-metadata-validation-not-implemented"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-016-020",
+              "commercial_blockers": [
+                "wer-dump-file-correlation-not-implemented",
+                "wer-reportqueue-state-validation-not-implemented",
+                "wer-cab-metadata-validation-not-implemented"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "wer-report-grade-correlation"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                18
+              ],
+              "large_data_controls": {
+                "actual_scan_bytes": 0,
+                "bounded_wmi_scan_bytes": 0,
+                "cross_artifact_correlation_required_for_commercial_claims": true,
+                "native_repository_or_rule_store_decode_required": false
+              },
+              "next_internal_step": "Finish TaskCache, Defender/EventLog, Firewall rule-store, WER dump/CAB, and WMI repository correlation validation.",
+              "objective": "Expose Windows system artifact semantics, risk-rule evidence, and correlation blockers.",
+              "passed_validation_matrix_ids": [
+                "wer-source-parsed",
+                "wer-core-fields"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
+                "source_sha256:83260608bb0ab69fd0500bc550a6d55a26881c92c36dd12f3b35cd13f2c01b36",
+                "artifact_type:wer-report",
+                "artifact_family:wer"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -11861,6 +12251,39 @@
               "known-answer-system-artifact-corpus-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-016-020",
+              "commercial_blockers": [
+                "native-wmi-repository-decoding-not-implemented"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "wmi-persistence-pivots",
+                "wmi-native-report-grade"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                18
+              ],
+              "large_data_controls": {
+                "actual_scan_bytes": 29,
+                "bounded_wmi_scan_bytes": 8388608,
+                "cross_artifact_correlation_required_for_commercial_claims": true,
+                "native_repository_or_rule_store_decode_required": true
+              },
+              "next_internal_step": "Finish TaskCache, Defender/EventLog, Firewall rule-store, WER dump/CAB, and WMI repository correlation validation.",
+              "objective": "Expose Windows system artifact semantics, risk-rule evidence, and correlation blockers.",
+              "passed_validation_matrix_ids": [
+                "wmi-source-parsed"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
+                "source_sha256:460fe33f8af0c81663b71e4c639af092c35bcc4b79c00e4574b1ea2a21741148",
+                "artifact_type:wmi-repository-file",
+                "artifact_family:wmi"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {

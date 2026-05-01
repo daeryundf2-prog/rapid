@@ -143,6 +143,18 @@ class WindowsPrefetchProvider:
                     "prefetch_validation_matrix": prefetch_validation_matrix(validation_checks),
                     "prefetch_report_grade_assessment": report_grade,
                     "prefetch_native_capabilities": dict(PREFETCH_NATIVE_CAPABILITIES),
+                    "commercial_uplift_evidence": prefetch_commercial_uplift_evidence(
+                        {
+                            "source_path": str(path.resolve()),
+                            "source_hashes": source_hashes,
+                            "artifact_type": "prefetch-file",
+                            "prefetch_validation_matrix": prefetch_validation_matrix(validation_checks),
+                            "prefetch_report_grade_assessment": report_grade,
+                            "size": stat_result.st_size,
+                            "referenced_path_count": header.get("referenced_path_count", 0),
+                            "prefetch_version": header.get("prefetch_version", 0),
+                        }
+                    ),
                     "forensic_review": build_forensic_review(
                         gap_id="#16",
                         artifact_goal="Prefetch execution, run count, last-run, volume and file-reference evidence",
@@ -347,6 +359,18 @@ def build_prefetch_reference_record(
             "prefetch_validation_matrix": prefetch_validation_matrix(validation_checks),
             "prefetch_report_grade_assessment": report_grade,
             "prefetch_native_capabilities": dict(PREFETCH_NATIVE_CAPABILITIES),
+            "commercial_uplift_evidence": prefetch_commercial_uplift_evidence(
+                {
+                    "source_path": str(path.resolve()),
+                    "source_hashes": dict(source_hashes),
+                    "source_index": index,
+                    "artifact_type": "prefetch-reference",
+                    "prefetch_validation_matrix": prefetch_validation_matrix(validation_checks),
+                    "prefetch_report_grade_assessment": report_grade,
+                    "referenced_path": referenced_path,
+                    "prefetch_version": header.get("prefetch_version", 0),
+                }
+            ),
             "forensic_review": build_forensic_review(
                 gap_id="#16",
                 artifact_goal="Prefetch referenced file/volume pivot evidence",
@@ -534,6 +558,45 @@ def prefetch_report_grade_assessment(checks: object) -> dict[str, object]:
             "Validate key execution claims with PECmd or another known-answer-validated Prefetch parser.",
             "Correlate Prefetch run counts/timestamps with Amcache, ShimCache, SRUM, BAM, EVTX, and $MFT/$UsnJrnl.",
         ],
+    }
+
+
+def prefetch_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, object]:
+    matrix = details.get("prefetch_validation_matrix") if isinstance(details.get("prefetch_validation_matrix"), list) else []
+    report_grade = (
+        details.get("prefetch_report_grade_assessment")
+        if isinstance(details.get("prefetch_report_grade_assessment"), Mapping)
+        else {}
+    )
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    return {
+        "batch_id": "commercial-uplift-016-020",
+        "item_numbers": [16],
+        "implementation_track": "native-parser-depth",
+        "objective": "Expose Prefetch version/layout validation, referenced-path evidence, and commercial blockers.",
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"source_index:{details.get('source_index', '')}",
+            f"source_sha256:{hashes.get('sha256', '')}",
+            f"artifact_type:{details.get('artifact_type', '')}",
+        ],
+        "passed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+        ],
+        "failed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+        ],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "bounded_prefetch_scan": True,
+            "scan_limit_bytes": MAX_PREFETCH_SCAN_BYTES,
+            "max_referenced_paths": MAX_REFERENCED_PATHS,
+            "prefetch_version": int(details.get("prefetch_version") or 0),
+            "full_file_metrics_decode_required_for_commercial_claims": True,
+        },
+        "next_internal_step": "Finish file metrics, MFT reference, authoritative volume, compressed PF, and cross-version corpus validation.",
+        "external_evidence_required": True,
     }
 
 

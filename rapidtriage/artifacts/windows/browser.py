@@ -340,6 +340,19 @@ def build_browser_artifacts(
         "browser_validation_matrix": browser_validation_matrix(validation_checks),
         "browser_report_grade_assessment": report_grade,
         "browser_native_capabilities": dict(BROWSER_NATIVE_CAPABILITIES),
+        "commercial_uplift_evidence": browser_commercial_uplift_evidence(
+            {
+                "source_path": str(source_path.resolve()),
+                "source_hashes": source_hashes,
+                "artifact_type": artifact_type,
+                "browser": browser,
+                "profile": profile,
+                "browser_validation_matrix": browser_validation_matrix(validation_checks),
+                "browser_report_grade_assessment": report_grade,
+                "storage_inventory_count": len(storage_inventory),
+                "unified_timeline_count": len(unified_timeline),
+            }
+        ),
         "forensic_review": build_forensic_review(
             gap_id="#20",
             artifact_goal="Unified browser history/download timeline with cache/session/extension/sync inventory context",
@@ -668,6 +681,18 @@ def build_browser_storage_inventory_record(
             "browser_validation_matrix": browser_validation_matrix(validation_context),
             "browser_report_grade_assessment": report_grade,
             "browser_native_capabilities": dict(BROWSER_NATIVE_CAPABILITIES),
+            "commercial_uplift_evidence": browser_commercial_uplift_evidence(
+                {
+                    "source_path": str(profile_dir.resolve()),
+                    "artifact_type": artifact_type,
+                    "browser": browser,
+                    "profile": profile,
+                    "browser_validation_matrix": browser_validation_matrix(validation_context),
+                    "browser_report_grade_assessment": report_grade,
+                    "storage_inventory_count": len(storage_inventory),
+                    "sensitive_inventory_count": sensitive_count,
+                }
+            ),
             "forensic_review": build_forensic_review(
                 gap_id="#19",
                 artifact_goal="Browser cache/session/extension/sync/cookie/credential inventory and legal-scope review",
@@ -783,6 +808,47 @@ def browser_report_grade_assessment(checks: Mapping[str, object]) -> Dict[str, o
             "Validate cache/session/cookie/extension findings with browser-specific parsers and legal scope review.",
             "Correlate unified browser timeline rows with filesystem, downloads, Zone.Identifier, EVTX, and cloud/app exports.",
         ],
+    }
+
+
+def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[str, object]:
+    matrix = details.get("browser_validation_matrix") if isinstance(details.get("browser_validation_matrix"), list) else []
+    report_grade = (
+        details.get("browser_report_grade_assessment")
+        if isinstance(details.get("browser_report_grade_assessment"), Mapping)
+        else {}
+    )
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    return {
+        "batch_id": "commercial-uplift-016-020",
+        "item_numbers": [19, 20],
+        "implementation_track": "ux-and-parser-depth",
+        "objective": "Expose browser cache/session inventory and unified timeline validation evidence without overclaiming secret/deleted-state support.",
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"source_sha256:{hashes.get('sha256', '')}",
+            f"artifact_type:{details.get('artifact_type', '')}",
+            f"browser:{details.get('browser', '')}",
+            f"profile:{details.get('profile', '')}",
+        ],
+        "passed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+        ],
+        "failed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+        ],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "max_browser_timeline_rows": MAX_BROWSER_TIMELINE_ROWS,
+            "max_storage_inventory_files": MAX_BROWSER_INVENTORY_FILES,
+            "storage_inventory_count": int(details.get("storage_inventory_count") or 0),
+            "unified_timeline_count": int(details.get("unified_timeline_count") or 0),
+            "secret_values_redacted_by_default": True,
+            "browser_version_corpus_required_for_commercial_claims": True,
+        },
+        "next_internal_step": "Finish cache/session schema decoding, deleted-history recovery, Safari parity, and browser-version known-answer validation.",
+        "external_evidence_required": True,
     }
 
 

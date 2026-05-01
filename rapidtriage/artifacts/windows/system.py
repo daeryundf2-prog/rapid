@@ -4,7 +4,7 @@ import datetime as dt
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from ...core.audit import compute_sha256
 from ...core.forensic_accuracy import build_accuracy_gate
@@ -208,6 +208,16 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
                 "system_validation_matrix": system_validation_matrix("task-scheduler", validation_checks),
                 "system_report_grade_assessment": system_report_grade_assessment("task-scheduler", validation_checks),
                 "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
+                "commercial_uplift_evidence": system_commercial_uplift_evidence(
+                    "task-scheduler",
+                    {
+                        "source_path": str(path.resolve()),
+                        "source_hashes": {"sha256": compute_sha256(path)},
+                        "artifact_type": "task-scheduler-task",
+                        "system_validation_matrix": system_validation_matrix("task-scheduler", validation_checks),
+                        "system_report_grade_assessment": system_report_grade_assessment("task-scheduler", validation_checks),
+                    },
+                ),
                 "forensic_review": system_forensic_review(
                     "task-scheduler",
                     [
@@ -291,6 +301,16 @@ def collect_defender_support(root: Path) -> Iterable[ArtifactRecord]:
                 "system_validation_matrix": system_validation_matrix("defender", validation_checks),
                 "system_report_grade_assessment": system_report_grade_assessment("defender", validation_checks),
                 "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
+                "commercial_uplift_evidence": system_commercial_uplift_evidence(
+                    "defender",
+                    {
+                        "source_path": str(path.resolve()),
+                        "source_hashes": {"sha256": compute_sha256(path)},
+                        "artifact_type": "defender-support-log",
+                        "system_validation_matrix": system_validation_matrix("defender", validation_checks),
+                        "system_report_grade_assessment": system_report_grade_assessment("defender", validation_checks),
+                    },
+                ),
                 "forensic_review": system_forensic_review(
                     "defender",
                     [f"entry_count={len(lines)}", f"interesting_entry_count={len(interesting)}"],
@@ -348,6 +368,16 @@ def collect_firewall_logs(root: Path) -> Iterable[ArtifactRecord]:
                 "system_validation_matrix": system_validation_matrix("firewall", validation_checks),
                 "system_report_grade_assessment": system_report_grade_assessment("firewall", validation_checks),
                 "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
+                "commercial_uplift_evidence": system_commercial_uplift_evidence(
+                    "firewall",
+                    {
+                        "source_path": str(path.resolve()),
+                        "source_hashes": {"sha256": compute_sha256(path)},
+                        "artifact_type": "firewall-log",
+                        "system_validation_matrix": system_validation_matrix("firewall", validation_checks),
+                        "system_report_grade_assessment": system_report_grade_assessment("firewall", validation_checks),
+                    },
+                ),
                 "forensic_review": system_forensic_review(
                     "firewall",
                     [
@@ -779,6 +809,44 @@ def system_core_accuracy_gates(artifact_family: str, details: dict[str, object])
     return [build_accuracy_gate(18, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
+def system_commercial_uplift_evidence(artifact_family: str, details: Mapping[str, object]) -> dict[str, object]:
+    matrix = details.get("system_validation_matrix") if isinstance(details.get("system_validation_matrix"), list) else []
+    report_grade = (
+        details.get("system_report_grade_assessment")
+        if isinstance(details.get("system_report_grade_assessment"), Mapping)
+        else {}
+    )
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    return {
+        "batch_id": "commercial-uplift-016-020",
+        "item_numbers": [18],
+        "implementation_track": "native-parser-depth",
+        "objective": "Expose Windows system artifact semantics, risk-rule evidence, and correlation blockers.",
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"source_sha256:{hashes.get('sha256', '')}",
+            f"artifact_type:{details.get('artifact_type', '')}",
+            f"artifact_family:{artifact_family}",
+        ],
+        "passed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+        ],
+        "failed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+        ],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "bounded_wmi_scan_bytes": WMI_SCAN_LIMIT if artifact_family == "wmi" else 0,
+            "actual_scan_bytes": int(details.get("scan_bytes") or 0),
+            "cross_artifact_correlation_required_for_commercial_claims": True,
+            "native_repository_or_rule_store_decode_required": artifact_family in {"wmi", "firewall", "task-scheduler"},
+        },
+        "next_internal_step": "Finish TaskCache, Defender/EventLog, Firewall rule-store, WER dump/CAB, and WMI repository correlation validation.",
+        "external_evidence_required": True,
+    }
+
+
 def system_forensic_review(
     artifact_family: str,
     primary_evidence: list[str],
@@ -869,6 +937,16 @@ def normalized_wer_report(path: Path, fields: dict[str, str]) -> dict[str, objec
         "system_validation_matrix": system_validation_matrix("wer", validation_checks),
         "system_report_grade_assessment": system_report_grade_assessment("wer", validation_checks),
         "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
+        "commercial_uplift_evidence": system_commercial_uplift_evidence(
+            "wer",
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": {"sha256": compute_sha256(path)},
+                "artifact_type": "wer-report",
+                "system_validation_matrix": system_validation_matrix("wer", validation_checks),
+                "system_report_grade_assessment": system_report_grade_assessment("wer", validation_checks),
+            },
+        ),
         "forensic_review": system_forensic_review(
             "wer",
             [
@@ -1038,6 +1116,17 @@ def wmi_repository_pivots(path: Path) -> dict[str, object]:
         "system_validation_matrix": system_validation_matrix("wmi", validation_checks),
         "system_report_grade_assessment": system_report_grade_assessment("wmi", validation_checks),
         "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
+        "commercial_uplift_evidence": system_commercial_uplift_evidence(
+            "wmi",
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": {"sha256": compute_sha256(path)},
+                "artifact_type": "wmi-repository-file",
+                "scan_bytes": len(blob),
+                "system_validation_matrix": system_validation_matrix("wmi", validation_checks),
+                "system_report_grade_assessment": system_report_grade_assessment("wmi", validation_checks),
+            },
+        ),
         "forensic_review": system_forensic_review(
             "wmi",
             [

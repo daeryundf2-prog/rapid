@@ -170,6 +170,15 @@ def parse_lnk_metadata(path: Path) -> dict[str, object]:
             "source_hashes": file_hashes(path),
         }
     )
+    if metadata.get("lnk_parse_status") == "parsed":
+        metadata["commercial_uplift_evidence"] = lnk_commercial_uplift_evidence(
+            {
+                **metadata,
+                "source_path": str(path.resolve()),
+                "source_hashes": file_hashes(path),
+                "artifact_type": "recent-shortcut",
+            }
+        )
     return metadata
 
 
@@ -1019,6 +1028,44 @@ def recent_report_grade_assessment(
         "validated_strengths": [str(item.get("id")) for item in validation_matrix if item.get("passed")],
         "commercial_gap_ids": gap_ids,
         "next_validation_step": "Validate JumpList DestList semantics, deleted entries, account context, and Shell Link property stores with known-answer corpus before report-grade use.",
+    }
+
+
+def lnk_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, object]:
+    matrix = details.get("recent_validation_matrix") if isinstance(details.get("recent_validation_matrix"), list) else []
+    report_grade = (
+        details.get("recent_report_grade_assessment")
+        if isinstance(details.get("recent_report_grade_assessment"), Mapping)
+        else {}
+    )
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    return {
+        "batch_id": "commercial-uplift-016-020",
+        "item_numbers": [17],
+        "implementation_track": "native-parser-depth",
+        "objective": "Expose Shell Link header, LinkInfo/StringData/ExtraData validation and remaining property-store blockers.",
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"source_sha256:{hashes.get('sha256', '')}",
+            f"target_path:{details.get('target_path', '')}",
+            f"artifact_type:{details.get('artifact_type', '')}",
+        ],
+        "passed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+        ],
+        "failed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+        ],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "bounded_extra_data_blocks": True,
+            "max_extra_data_blocks": MAX_LNK_EXTRA_DATA_BLOCKS,
+            "max_shell_items": MAX_LNK_SHELL_ITEMS,
+            "property_store_decode_required_for_commercial_claims": True,
+        },
+        "next_internal_step": "Finish Shell Item property store semantics and tracker/LinkInfo known-answer corpus validation.",
+        "external_evidence_required": True,
     }
 
 
