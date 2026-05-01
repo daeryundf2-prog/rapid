@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 
 from .case_db import SCHEMA_VERSION
+from .forensic_accuracy import build_accuracy_gate
 from .submission import compute_hashes
 
 
@@ -49,6 +50,12 @@ def build_case_backup(*, database_path: Path, output_dir: Path, overwrite: bool 
         "output_dir": str(destination_dir),
         "schema": inspect_case_database_schema(source),
         "migration_readiness": build_migration_readiness(source),
+        "core_accuracy_gates": backup_restore_core_accuracy_gates(
+            copied=copied,
+            schema=inspect_case_database_schema(source),
+            restored=False,
+            hash_verified=False,
+        ),
         "copied_count": len(copied),
         "files": copied,
         "restore_guidance": "Run rapidtriage case-restore BACKUP_MANIFEST --output restored-case.db, then verify hashes.",
@@ -90,6 +97,12 @@ def restore_case_backup(*, manifest_path: Path, output_path: Path, overwrite: bo
         "hash_verified": hashes.get("sha256") == source_hashes.get("sha256"),
         "schema": inspect_case_database_schema(destination),
         "migration_readiness": manifest.get("migration_readiness", {}),
+        "core_accuracy_gates": backup_restore_core_accuracy_gates(
+            copied=[database_file],
+            schema=inspect_case_database_schema(destination),
+            restored=True,
+            hash_verified=hashes.get("sha256") == source_hashes.get("sha256"),
+        ),
     }
 
 
@@ -136,4 +149,44 @@ def build_migration_readiness(path: Path) -> dict[str, object]:
             "Run case-db list/report smoke checks against the restored copy.",
             "Compare source/restored SHA256 and record any schema migration warnings.",
         ],
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                111,
+                satisfied_checks=[
+                    "backup manifest generated",
+                    "database hashes captured",
+                    "schema inventory captured",
+                    "migration rehearsal requirement recorded",
+                ],
+                evidence_refs=[f"current_schema_version:{current}", f"expected_schema_version:{expected}"],
+            )
+        ],
     }
+
+
+def backup_restore_core_accuracy_gates(
+    *,
+    copied: list[dict[str, object]],
+    schema: dict[str, object],
+    restored: bool,
+    hash_verified: bool,
+) -> list[dict[str, object]]:
+    satisfied = ["backup manifest generated", "migration rehearsal requirement recorded"]
+    if any(item.get("hashes") for item in copied):
+        satisfied.append("database hashes captured")
+    if schema.get("table_count") is not None:
+        satisfied.append("schema inventory captured")
+    if restored and hash_verified:
+        satisfied.append("restore hash verified")
+    return [
+        build_accuracy_gate(
+            111,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"copied_count:{len(copied)}",
+                f"schema_version:{schema.get('current_schema_version')}",
+                f"restored:{restored}",
+                f"hash_verified:{hash_verified}",
+            ],
+        )
+    ]

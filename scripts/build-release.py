@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from rapidtriage.core.commercial_readiness import build_commercial_readiness_report
+from rapidtriage.core.forensic_accuracy import build_accuracy_gate
 
 WINDOWS_SIGNED_INSTALLER_GAP_ID = "#101"
 MACOS_NOTARIZED_PACKAGE_GAP_ID = "#102"
@@ -193,16 +194,19 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
             "windows_signed_installer": {
                 "status": "external-required",
                 "commercial_gap_ids": [WINDOWS_SIGNED_INSTALLER_GAP_ID],
+                "core_accuracy_gates": release_packaging_core_accuracy_gate(101),
                 "required_evidence": ["Authenticode signature", "timestamp authority", "fresh Windows smoke test"],
             },
             "macos_notarized_package": {
                 "status": "external-required",
                 "commercial_gap_ids": [MACOS_NOTARIZED_PACKAGE_GAP_ID],
+                "core_accuracy_gates": release_packaging_core_accuracy_gate(102),
                 "required_evidence": ["codesign verification", "notarization ticket", "Gatekeeper assessment"],
             },
             "linux_package": {
                 "status": "packaging-plan-ready",
                 "commercial_gap_ids": [LINUX_PACKAGE_GAP_ID],
+                "core_accuracy_gates": release_packaging_core_accuracy_gate(103),
                 "supported_outputs": ["portable zip", "wheel", "sdist"],
                 "future_outputs": ["deb", "rpm", "AppImage"],
                 "plan": "packaging-plan.json",
@@ -210,6 +214,7 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
             "auto_update_channel": {
                 "status": "manifest-generated",
                 "commercial_gap_ids": [AUTO_UPDATE_CHANNEL_GAP_ID],
+                "core_accuracy_gates": release_packaging_core_accuracy_gate(104),
                 "manifest": "update-manifest.json",
                 "enterprise_disable_supported": True,
             },
@@ -226,6 +231,7 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                     MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID,
                     DEPENDENCY_VULNERABILITY_MONITORING_GAP_ID,
                 ],
+                "core_accuracy_gates": operations_documents_core_accuracy_gates(),
                 "documents": [
                     "docs/rapidtriage-release-notes-template.md",
                     "docs/rapidtriage-lts-hotfix-policy.md",
@@ -278,6 +284,7 @@ def write_packaging_plan(output_dir: Path) -> None:
         "platform_packages": {
             "windows": {
                 "commercial_gap_ids": [WINDOWS_SIGNED_INSTALLER_GAP_ID],
+                "core_accuracy_gates": release_packaging_core_accuracy_gate(101),
                 "target_outputs": ["msi", "exe"],
                 "current_status": "external-signing-required",
                 "build_steps": [
@@ -295,6 +302,7 @@ def write_packaging_plan(output_dir: Path) -> None:
             },
             "macos": {
                 "commercial_gap_ids": [MACOS_NOTARIZED_PACKAGE_GAP_ID],
+                "core_accuracy_gates": release_packaging_core_accuracy_gate(102),
                 "target_outputs": ["pkg", "dmg"],
                 "current_status": "external-codesign-notarization-required",
                 "build_steps": [
@@ -312,6 +320,7 @@ def write_packaging_plan(output_dir: Path) -> None:
             },
             "linux": {
                 "commercial_gap_ids": [LINUX_PACKAGE_GAP_ID],
+                "core_accuracy_gates": release_packaging_core_accuracy_gate(103),
                 "target_outputs": ["deb", "rpm", "AppImage"],
                 "current_status": "portable-zip-wheel-ready-package-wrapper-pending",
                 "build_steps": [
@@ -387,6 +396,7 @@ def write_update_manifest(output_dir: Path) -> None:
         "name": "rapidtriage-update-manifest",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "commercial_gap_ids": [AUTO_UPDATE_CHANNEL_GAP_ID],
+        "core_accuracy_gates": release_packaging_core_accuracy_gate(104),
         "channel": "manual",
         "auto_update_enabled_by_default": False,
         "enterprise_disable": True,
@@ -395,6 +405,68 @@ def write_update_manifest(output_dir: Path) -> None:
         "signature_policy": "Public distribution requires signed Windows/macOS artifacts; portable ZIP distribution must verify SHA256SUMS.",
     }
     (output_dir / "update-manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def release_packaging_core_accuracy_gate(number: int) -> list[dict[str, object]]:
+    checks = {
+        101: [
+            "windows installer target declared",
+            "authenticode evidence requirement recorded",
+            "timestamp authority requirement recorded",
+            "windows smoke test requirement recorded",
+            "external signing blocker disclosed",
+        ],
+        102: [
+            "macos package target declared",
+            "codesign evidence requirement recorded",
+            "notarization requirement recorded",
+            "gatekeeper smoke requirement recorded",
+            "external notarization blocker disclosed",
+        ],
+        103: [
+            "linux package targets declared",
+            "portable zip or python distribution generated",
+            "dependency inventory generated",
+            "linux smoke requirement recorded",
+            "package wrapper blocker disclosed",
+        ],
+        104: [
+            "update manifest generated",
+            "artifact hashes recorded",
+            "enterprise disable recorded",
+            "rollback guidance recorded",
+            "public hosting/signing blocker disclosed",
+        ],
+    }
+    return [
+        build_accuracy_gate(
+            number,
+            satisfied_checks=checks[number],
+            evidence_refs=["scripts/build-release.py", "release-manifest.json", "packaging-plan.json"],
+        )
+    ]
+
+
+def operations_documents_core_accuracy_gates() -> list[dict[str, object]]:
+    checks_by_item = {
+        112: ["release notes template packaged", "known limits section required", "validation state section required", "migration notes section required", "CI changelog blocker disclosed"],
+        113: ["LTS policy document packaged", "hotfix criteria documented", "backport validation documented", "emergency patch gate documented", "operator maintenance blocker disclosed"],
+        114: ["support SLA document packaged", "severity levels emitted", "response targets emitted", "secure intake requirement emitted", "staffed support blocker disclosed"],
+        115: ["training curriculum packaged", "analyst curriculum documented", "admin curriculum documented", "validation exercise documented", "training delivery blocker disclosed"],
+        116: ["quickstart lab documented", "sample workflow command recorded", "ingest/search/review/report steps documented", "bundle verification documented", "real training run blocker disclosed"],
+        117: ["admin guide packaged", "install/update guidance documented", "auth/network guidance documented", "backup/restore guidance documented", "deployment proof blocker disclosed"],
+        118: ["security baseline emitted", "auth/network hardening documented", "export rendering safety documented", "crash redaction documented", "independent AppSec blocker disclosed"],
+        119: ["preview sandboxing documented", "active content blocking documented", "parser crash isolation documented", "hostile evidence guidance documented", "OS sandbox blocker disclosed"],
+        120: ["dependency inventory emitted", "vulnerability scan attempted", "release blocking policy recorded", "dependency monitoring script packaged", "CI scheduled scan blocker disclosed"],
+    }
+    return [
+        build_accuracy_gate(
+            number,
+            satisfied_checks=checks,
+            evidence_refs=["rapidtriage-portable.zip", "docs operations package", "scripts/check-dependencies.py"],
+        )
+        for number, checks in checks_by_item.items()
+    ]
 
 
 def verify_sha256s(output_dir: Path) -> int:

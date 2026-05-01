@@ -9,6 +9,8 @@ import uuid
 from pathlib import Path
 from typing import Mapping
 
+from .forensic_accuracy import build_accuracy_gate
+
 
 DEFAULT_CRASH_DIR = Path.home() / ".rapidtriage" / "crash-reports"
 CRASH_REPORTING_GAP_ID = "#105"
@@ -33,6 +35,19 @@ def write_crash_report(
         "crash_id": crash_id,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "commercial_gap_ids": [CRASH_REPORTING_GAP_ID],
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                105,
+                satisfied_checks=[
+                    "local crash report written",
+                    "sensitive context redacted",
+                    "runtime metadata captured",
+                    "no-upload policy recorded",
+                    "operator export limitation disclosed",
+                ],
+                evidence_refs=[f"crash_id:{crash_id}", f"path:{report_path}"],
+            )
+        ],
         "local_only": True,
         "privacy_note": "Crash reports are written locally and are never uploaded by RapidTriage.",
         "exception": {

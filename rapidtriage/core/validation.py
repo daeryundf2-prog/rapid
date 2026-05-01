@@ -401,6 +401,7 @@ def build_deployment_operations_assessment() -> dict[str, object]:
     return {
         "status": "repo-evidence-and-operator-gates-present",
         "commercial_gap_ids": DEPLOYMENT_OPERATIONS_GAP_IDS,
+        "core_accuracy_gates": deployment_operations_core_accuracy_gates(),
         "code_owned_items": ["#104", "#105", "#106", "#107", "#108", "#110", "#111", "#112", "#113", "#115", "#116", "#117", "#118", "#119", "#120"],
         "external_operator_items": ["#101", "#102", "#103", "#109", "#114"],
         "release_guidance": [
@@ -409,6 +410,39 @@ def build_deployment_operations_assessment() -> dict[str, object]:
             "Run backup/restore, dependency monitoring, validation package, benchmark, and smoke checks for each release.",
         ],
     }
+
+
+def deployment_operations_core_accuracy_gates() -> list[dict[str, object]]:
+    checks_by_item = {
+        101: ["windows installer target declared", "authenticode evidence requirement recorded", "timestamp authority requirement recorded", "windows smoke test requirement recorded", "external signing blocker disclosed"],
+        102: ["macos package target declared", "codesign evidence requirement recorded", "notarization requirement recorded", "gatekeeper smoke requirement recorded", "external notarization blocker disclosed"],
+        103: ["linux package targets declared", "portable zip or python distribution generated", "dependency inventory generated", "linux smoke requirement recorded", "package wrapper blocker disclosed"],
+        104: ["update manifest generated", "artifact hashes recorded", "enterprise disable recorded", "rollback guidance recorded", "public hosting/signing blocker disclosed"],
+        105: ["local crash report written", "sensitive context redacted", "runtime metadata captured", "no-upload policy recorded", "operator export limitation disclosed"],
+        106: ["telemetry disabled recorded", "evidence/crash upload disabled recorded", "localhost default recorded", "remote auth token requirement recorded", "local-only limitation disclosed"],
+        107: ["license requirement state recorded", "offline license hash captured when present", "network activation disabled recorded", "evidence-touch false recorded", "paid activation blocker disclosed"],
+        108: ["role matrix emitted", "active role evaluated", "active permissions emitted", "export controls recorded", "per-action enforcement blocker disclosed"],
+        109: ["multi-user disabled state recorded", "network guardrails emitted", "identity provider requirement recorded", "locking/conflict requirement recorded", "security review blocker disclosed"],
+        110: ["audit trail scope recorded", "recorded fields listed", "tamper evidence linkage recorded", "identity model caveat recorded", "multi-user conflict blocker disclosed"],
+        111: ["backup manifest generated", "database hashes captured", "schema inventory captured", "restore hash verified", "migration rehearsal requirement recorded"],
+        112: ["release notes template packaged", "known limits section required", "validation state section required", "migration notes section required", "CI changelog blocker disclosed"],
+        113: ["LTS policy document packaged", "hotfix criteria documented", "backport validation documented", "emergency patch gate documented", "operator maintenance blocker disclosed"],
+        114: ["support SLA document packaged", "severity levels emitted", "response targets emitted", "secure intake requirement emitted", "staffed support blocker disclosed"],
+        115: ["training curriculum packaged", "analyst curriculum documented", "admin curriculum documented", "validation exercise documented", "training delivery blocker disclosed"],
+        116: ["quickstart lab documented", "sample workflow command recorded", "ingest/search/review/report steps documented", "bundle verification documented", "real training run blocker disclosed"],
+        117: ["admin guide packaged", "install/update guidance documented", "auth/network guidance documented", "backup/restore guidance documented", "deployment proof blocker disclosed"],
+        118: ["security baseline emitted", "auth/network hardening documented", "export rendering safety documented", "crash redaction documented", "independent AppSec blocker disclosed"],
+        119: ["preview sandboxing documented", "active content blocking documented", "parser crash isolation documented", "hostile evidence guidance documented", "OS sandbox blocker disclosed"],
+        120: ["dependency inventory emitted", "vulnerability scan attempted", "release blocking policy recorded", "dependency monitoring script packaged", "CI scheduled scan blocker disclosed"],
+    }
+    return [
+        build_accuracy_gate(
+            number,
+            satisfied_checks=checks,
+            evidence_refs=["rapidtriage validation deployment_operations_assessment"],
+        )
+        for number, checks in checks_by_item.items()
+    ]
 
 
 def build_parser_fixture_corpus(fixture_root: Path) -> dict[str, object]:
@@ -1017,7 +1051,7 @@ def build_required_documents() -> list[dict[str, str]]:
         {"path": "docs/rapidtriage-parser-coverage.md", "purpose": "Implemented artifact and extension coverage."},
         {
             "path": "docs/rapidtriage-core-forensics-accuracy-profiles.md",
-            "purpose": "#1-#100 parser/legal accuracy profile gates and pass/fail evidence requirements.",
+            "purpose": "#1-#120 parser/legal/operations accuracy profile gates and pass/fail evidence requirements.",
         },
         {
             "path": "docs/rapidtriage-core-forensics-001-005-validation.md",
@@ -1070,6 +1104,10 @@ def build_required_documents() -> list[dict[str, str]]:
         {
             "path": "docs/rapidtriage-core-forensics-091-100-validation.md",
             "purpose": "#91-#100 internal fixture validation manifest and commercial-readiness attachment workflow.",
+        },
+        {
+            "path": "docs/rapidtriage-core-forensics-101-120-validation.md",
+            "purpose": "#101-#120 internal fixture validation manifest and commercial-readiness attachment workflow.",
         },
         {"path": "docs/rapidtriage-release-checklist.md", "purpose": "Repeatable release verification checklist."},
         {"path": "docs/rapidtriage-release-notes-template.md", "purpose": "Release communication template."},
@@ -1170,7 +1208,7 @@ def render_validation_markdown(payload: Mapping[str, object]) -> str:
                 if isinstance(item, Mapping):
                     lines.append(f"- `{item.get('id', '')}` ({item.get('source', '')}): status `{item.get('status', '')}`")
 
-    lines.extend(["", "## #1-#100 Core Forensics Accuracy Profiles", ""])
+    lines.extend(["", "## #1-#120 Core Forensics Accuracy Profiles", ""])
     if accuracy_profiles:
         lines.append(f"- Version: `{accuracy_profiles.get('version', '')}`")
         lines.append(f"- Profile count: `{accuracy_profiles.get('profile_count', 0)}`")

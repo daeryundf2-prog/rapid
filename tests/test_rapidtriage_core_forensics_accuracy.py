@@ -15,13 +15,13 @@ from rapidtriage.core.forensic_accuracy import (
 
 
 class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
-    def test_accuracy_profiles_cover_items_1_through_100_with_required_controls(self) -> None:
+    def test_accuracy_profiles_cover_items_1_through_120_with_required_controls(self) -> None:
         payload = build_core_forensics_accuracy_profiles()
 
-        self.assertEqual(payload["profile_count"], 100)
+        self.assertEqual(payload["profile_count"], 120)
         profiles = payload["profiles"]
-        self.assertEqual([item["number"] for item in profiles], list(range(1, 101)))
-        self.assertEqual(len(CORE_FORENSIC_ACCURACY_ITEMS), 100)
+        self.assertEqual([item["number"] for item in profiles], list(range(1, 121)))
+        self.assertEqual(len(CORE_FORENSIC_ACCURACY_ITEMS), 120)
 
         for profile in profiles:
             with self.subTest(item=profile["number"]):
@@ -90,6 +90,26 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         clock_skew = accuracy_profile_for_item(98)
         contamination = accuracy_profile_for_item(99)
         tamper_bundle = accuracy_profile_for_item(100)
+        windows_installer = accuracy_profile_for_item(101)
+        macos_package = accuracy_profile_for_item(102)
+        linux_package = accuracy_profile_for_item(103)
+        auto_update = accuracy_profile_for_item(104)
+        crash_reporting = accuracy_profile_for_item(105)
+        local_only = accuracy_profile_for_item(106)
+        license_activation = accuracy_profile_for_item(107)
+        rbac = accuracy_profile_for_item(108)
+        multi_user = accuracy_profile_for_item(109)
+        collaboration_audit = accuracy_profile_for_item(110)
+        backup_restore = accuracy_profile_for_item(111)
+        release_notes = accuracy_profile_for_item(112)
+        lts_policy = accuracy_profile_for_item(113)
+        support_sla = accuracy_profile_for_item(114)
+        training = accuracy_profile_for_item(115)
+        quickstart = accuracy_profile_for_item(116)
+        admin_guide = accuracy_profile_for_item(117)
+        security_hardening = accuracy_profile_for_item(118)
+        malicious_sandbox = accuracy_profile_for_item(119)
+        dependency_monitoring = accuracy_profile_for_item(120)
 
         self.assertIn("duplicate EventData order preservation", evtx["required_checks"])
         self.assertTrue(evtx["accuracy_controls"]["offset_or_record_id_required"])
@@ -158,16 +178,36 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("write-blocker integration limitation emitted", contamination["required_checks"])
         self.assertIn("previous-entry hash chain generated", tamper_bundle["required_checks"])
         self.assertTrue(tamper_bundle["accuracy_controls"]["legal_or_authority_gate_required"])
+        self.assertIn("authenticode evidence requirement recorded", windows_installer["required_checks"])
+        self.assertIn("notarization requirement recorded", macos_package["required_checks"])
+        self.assertIn("linux package targets declared", linux_package["required_checks"])
+        self.assertIn("update manifest generated", auto_update["required_checks"])
+        self.assertIn("sensitive context redacted", crash_reporting["required_checks"])
+        self.assertIn("telemetry disabled recorded", local_only["required_checks"])
+        self.assertIn("network activation disabled recorded", license_activation["required_checks"])
+        self.assertIn("role matrix emitted", rbac["required_checks"])
+        self.assertIn("multi-user disabled state recorded", multi_user["required_checks"])
+        self.assertIn("tamper evidence linkage recorded", collaboration_audit["required_checks"])
+        self.assertIn("restore hash verified", backup_restore["required_checks"])
+        self.assertIn("release notes template packaged", release_notes["required_checks"])
+        self.assertIn("hotfix criteria documented", lts_policy["required_checks"])
+        self.assertIn("staffed support blocker disclosed", support_sla["required_checks"])
+        self.assertIn("training curriculum packaged", training["required_checks"])
+        self.assertIn("sample workflow command recorded", quickstart["required_checks"])
+        self.assertIn("admin guide packaged", admin_guide["required_checks"])
+        self.assertIn("independent AppSec blocker disclosed", security_hardening["required_checks"])
+        self.assertIn("OS sandbox blocker disclosed", malicious_sandbox["required_checks"])
+        self.assertIn("release blocking policy recorded", dependency_monitoring["required_checks"])
 
     def test_known_answer_template_maps_every_profile_to_a_dataset(self) -> None:
         template = build_core_forensics_known_answer_template()
 
         self.assertEqual(template["status"], "template-not-run")
-        self.assertEqual(template["item_count"], 100)
+        self.assertEqual(template["item_count"], 120)
         datasets = template["datasets"]
-        self.assertEqual([item["backlog_items"][0] for item in datasets], [str(number) for number in range(1, 101)])
+        self.assertEqual([item["backlog_items"][0] for item in datasets], [str(number) for number in range(1, 121)])
         self.assertEqual(datasets[0]["id"], "core-forensics-01")
-        self.assertEqual(datasets[-1]["id"], "core-forensics-100")
+        self.assertEqual(datasets[-1]["id"], "core-forensics-120")
         for dataset in datasets:
             with self.subTest(dataset=dataset["id"]):
                 self.assertEqual(dataset["status"], "not-run")
@@ -182,15 +222,15 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             payload = json.loads((output / "rapidtriage-validation-package.json").read_text(encoding="utf-8"))
             profiles = payload["core_forensics_accuracy_profiles"]
-            self.assertEqual(profiles["profile_count"], 100)
+            self.assertEqual(profiles["profile_count"], 120)
             self.assertEqual(profiles["profiles"][0]["number"], 1)
-            self.assertEqual(profiles["profiles"][-1]["number"], 100)
+            self.assertEqual(profiles["profiles"][-1]["number"], 120)
             template = payload["core_forensics_known_answer_template"]
-            self.assertEqual(template["item_count"], 100)
+            self.assertEqual(template["item_count"], 120)
             self.assertEqual(template["datasets"][0]["id"], "core-forensics-01")
 
             markdown = (output / "rapidtriage-validation-report.md").read_text(encoding="utf-8")
-            self.assertIn("#1-#100 Core Forensics Accuracy Profiles", markdown)
+            self.assertIn("#1-#120 Core Forensics Accuracy Profiles", markdown)
             self.assertIn("Native EVTX BinXML full parsing", markdown)
             self.assertIn("Known-answer template datasets", markdown)
 
@@ -839,6 +879,56 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             )
             items = {item["number"]: item for item in readiness_payload["all_items"]}
             for number in range(91, 101):
+                with self.subTest(number=number):
+                    self.assertTrue(items[number]["maturity_gates"]["validated"]["passed"])
+                    self.assertEqual(items[number]["highest_maturity_stage"], "validated")
+                    self.assertFalse(items[number]["maturity_gates"]["commercial_grade"]["passed"])
+
+    def test_core_forensics_101_120_manifest_promotes_validated_maturity_when_attached(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "validation"
+            manifest = Path("docs/validation/rapidtriage-core-forensics-101-120-known-answer.json")
+
+            exit_code = main(
+                [
+                    "validation",
+                    "--output-dir",
+                    str(output),
+                    "--known-answer-manifest",
+                    str(manifest),
+                    "--json",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads((output / "rapidtriage-validation-package.json").read_text(encoding="utf-8"))
+            known_answer = payload["known_answer_validation"]
+            self.assertEqual(known_answer["status"], "all-passed")
+            self.assertEqual(known_answer["dataset_count"], 20)
+            self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
+
+            readiness = Path(tmp_dir) / "readiness"
+            readiness_exit = main(
+                [
+                    "commercial-readiness",
+                    "--validation-package",
+                    str(output / "rapidtriage-validation-package.json"),
+                    "--output-dir",
+                    str(readiness),
+                    "--json",
+                ]
+            )
+
+            self.assertEqual(readiness_exit, 0)
+            readiness_payload = json.loads(
+                (readiness / "rapidtriage-commercial-readiness.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                readiness_payload["validation_evidence_summary"]["mapped_item_numbers"],
+                list(range(101, 121)),
+            )
+            items = {item["number"]: item for item in readiness_payload["all_items"]}
+            for number in range(101, 121):
                 with self.subTest(number=number):
                     self.assertTrue(items[number]["maturity_gates"]["validated"]["passed"])
                     self.assertEqual(items[number]["highest_maturity_stage"], "validated")
