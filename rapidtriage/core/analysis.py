@@ -102,6 +102,7 @@ def build_search_analysis(
         workbook=workbook,
         deduplication=deduplication,
     )
+    report_grade = analysis_report_grade_assessment()
     return {
         "summary": {
             "match_count": len(normalized_matches),
@@ -123,13 +124,93 @@ def build_search_analysis(
         "deduplication": deduplication,
         "workbook": workbook,
         "core_accuracy_gates": core_accuracy_gates,
+        "commercial_uplift_evidence": analysis_commercial_uplift_evidence(
+            matches=normalized_matches,
+            clusters=clusters,
+            entities=entities,
+            graph=graph,
+            timeline=timeline,
+            workbook=workbook,
+            core_accuracy_gates=core_accuracy_gates,
+            report_grade=report_grade,
+            max_clusters=max_clusters,
+            max_entities=max_entities,
+            max_graph_edges=max_graph_edges,
+            max_timeline_events=max_timeline_events,
+        ),
         "analysis_native_capabilities": dict(ANALYSIS_NATIVE_CAPABILITIES),
-        "analysis_report_grade_assessment": analysis_report_grade_assessment(),
+        "analysis_report_grade_assessment": report_grade,
         "limitations": [
             "Analysis pivots are derived from bounded search results, not a full re-index.",
             "Entities and clusters are triage aids; verify source rows and hashes before reporting.",
             "Graph output is capped to keep web and CLI review responsive on large cases.",
         ],
+    }
+
+
+def analysis_commercial_uplift_evidence(
+    *,
+    matches: Sequence[Mapping[str, object]],
+    clusters: Mapping[str, object],
+    entities: Mapping[str, object],
+    graph: Mapping[str, object],
+    timeline: Mapping[str, object],
+    workbook: Mapping[str, object],
+    core_accuracy_gates: Sequence[Mapping[str, object]],
+    report_grade: Mapping[str, object],
+    max_clusters: int,
+    max_entities: int,
+    max_graph_edges: int,
+    max_timeline_events: int,
+) -> dict[str, object]:
+    passed_by_item = {
+        str(gate.get("gap_id")): list(gate.get("satisfied_checks") or [])
+        for gate in core_accuracy_gates
+        if str(gate.get("gap_id")) in {"#46", "#47", "#48", "#49", "#50"}
+    }
+    failed_by_item: dict[str, list[str]] = {
+        "#46": ["persistent-cluster-review-state", "near-duplicate-text-media-clustering"],
+        "#47": ["analyst-verified-entity-resolution", "entity-merge-split-workflow"],
+        "#48": ["interactive-graph-canvas", "server-side-graph-paging", "saved-graph-layouts"],
+        "#49": ["full-case-timeline-join", "timezone-skew-validation", "cursor-paged-timeline"],
+        "#50": ["editable-persistent-workbook", "evidence-attachment-workflow", "workbook-version-history"],
+    }
+    cluster_summary = clusters.get("summary") if isinstance(clusters.get("summary"), Mapping) else {}
+    entity_summary = entities.get("summary") if isinstance(entities.get("summary"), Mapping) else {}
+    graph_summary = graph.get("summary") if isinstance(graph.get("summary"), Mapping) else {}
+    timeline_summary = timeline.get("summary") if isinstance(timeline.get("summary"), Mapping) else {}
+    workbook_summary = workbook.get("summary") if isinstance(workbook.get("summary"), Mapping) else {}
+    return {
+        "batch_id": "commercial-uplift-046-050",
+        "item_numbers": [46, 47, 48, 49, 50],
+        "implementation_track": "search-analysis-ux-gates",
+        "source_refs": [
+            f"matches:{len(matches)}",
+            f"clusters:{cluster_summary.get('cluster_count', 0)}",
+            f"entities:{entity_summary.get('entity_count', 0)}",
+            f"graph_edges:{graph_summary.get('edge_count', 0)}",
+            f"timeline_events:{timeline_summary.get('event_count', 0)}",
+            f"hypotheses:{workbook_summary.get('hypothesis_count', 0)}",
+        ],
+        "passed_validation_check_ids_by_item": passed_by_item,
+        "failed_validation_check_ids_by_item": failed_by_item,
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "max_clusters": max_clusters,
+            "max_entities": max_entities,
+            "max_graph_match_nodes": MAX_GRAPH_MATCH_NODES,
+            "max_graph_edges": max_graph_edges,
+            "max_timeline_events": max_timeline_events,
+            "max_cluster_representatives": MAX_CLUSTER_REPRESENTATIVES,
+            "max_entity_match_references": MAX_ENTITY_MATCH_REFERENCES,
+            "cluster_truncated": bool(cluster_summary.get("truncated")),
+            "entity_truncated": bool(entity_summary.get("truncated")),
+            "graph_truncated": bool(graph_summary.get("truncated")),
+            "timeline_truncated": bool(timeline_summary.get("truncated")),
+            "persistent_review_state": False,
+            "full_case_reindex": False,
+        },
+        "reporting_status": "triage-only-validation-required",
     }
 
 

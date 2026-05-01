@@ -90,6 +90,17 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("persistence/versioning limitation warning", analysis_gates["#50"]["satisfied_checks"])
         self.assertIn("duplicate fingerprint generation", analysis_gates["#60"]["satisfied_checks"])
         self.assertIn("duplicate group counts", analysis_gates["#60"]["satisfied_checks"])
+        analysis_uplift = analysis["commercial_uplift_evidence"]
+        self.assertEqual(analysis_uplift["batch_id"], "commercial-uplift-046-050")
+        self.assertEqual(analysis_uplift["item_numbers"], [46, 47, 48, 49, 50])
+        self.assertIn("bounded cluster generation", analysis_uplift["passed_validation_check_ids_by_item"]["#46"])
+        self.assertIn("entity extraction across supported types", analysis_uplift["passed_validation_check_ids_by_item"]["#47"])
+        self.assertIn("relationship edges built", analysis_uplift["passed_validation_check_ids_by_item"]["#48"])
+        self.assertIn("timestamp extraction", analysis_uplift["passed_validation_check_ids_by_item"]["#49"])
+        self.assertIn("draft hypotheses generated", analysis_uplift["passed_validation_check_ids_by_item"]["#50"])
+        self.assertIn("persistent-cluster-review-state", analysis_uplift["failed_validation_check_ids_by_item"]["#46"])
+        self.assertFalse(analysis_uplift["large_data_controls"]["persistent_review_state"])
+        self.assertFalse(analysis_uplift["large_data_controls"]["full_case_reindex"])
 
         clusters = analysis["clusters"]["clusters"]
         self.assertTrue(any(cluster["family"] == "keyword" and cluster["value"] == "password" for cluster in clusters))
