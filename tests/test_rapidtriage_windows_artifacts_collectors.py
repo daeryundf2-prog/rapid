@@ -168,6 +168,13 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("#15", key_tree.details["shellbag_report_grade_assessment"]["commercial_gap_ids"])
             self.assertFalse(key_tree.details["shellbag_native_capabilities"]["binary_shell_item_decode"])
             self.assertIn("requires_dedicated_shellbags_parser", key_tree.details["validation_checks"])
+            shellbag_gate = key_tree.details["core_accuracy_gates"][0]
+            self.assertEqual(shellbag_gate["gap_id"], "#15")
+            self.assertIn("BagMRU/Bags relationship", shellbag_gate["satisfied_checks"])
+            self.assertIn("timestamp source labeling", shellbag_gate["satisfied_checks"])
+            self.assertIn("UsrClass/NTUSER correlation", shellbag_gate["satisfied_checks"])
+            self.assertIn("deleted/slack validation warning", shellbag_gate["satisfied_checks"])
+            self.assertIn("shell item binary decoding", shellbag_gate["missing_required_checks"])
 
     def test_registry_hive_reconstructs_native_key_and_value_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review
 
@@ -216,6 +217,16 @@ def build_mft_inventory_record(path: Path) -> ArtifactRecord:
             "recommended_parsers": ["MFTECmd", "analyzeMFT", "The Sleuth Kit/fls-icat"],
             "validation_required": True,
             "validation_checks": validation_checks,
+            "core_accuracy_gates": ntfs_core_accuracy_gates(
+                "mft-file",
+                {
+                    "source_path": str(path.resolve()),
+                    "source_hashes": file_hashes(path),
+                    "record_header_samples": mft_records[:50],
+                    "path_candidates": path_candidates[:50],
+                    "validation_checks": validation_checks,
+                },
+            ),
             "ntfs_validation_matrix": ntfs_validation_matrix(validation_checks),
             "ntfs_report_grade_assessment": report_grade,
             "ntfs_native_capabilities": NTFS_FILESYSTEM_CAPABILITIES,
@@ -284,6 +295,16 @@ def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
             "recommended_parsers": ["MFTECmd", "UsnJrnl2Csv", "The Sleuth Kit"],
             "validation_required": True,
             "validation_checks": validation_checks,
+            "core_accuracy_gates": ntfs_core_accuracy_gates(
+                "usn-journal-file",
+                {
+                    "source_path": str(path.resolve()),
+                    "source_hashes": file_hashes(path),
+                    "record_samples": records[:50],
+                    "scan_metadata": scan_metadata,
+                    "validation_checks": validation_checks,
+                },
+            ),
             "ntfs_validation_matrix": ntfs_validation_matrix(validation_checks),
             "ntfs_report_grade_assessment": report_grade,
             "ntfs_native_capabilities": NTFS_FILESYSTEM_CAPABILITIES,
@@ -347,6 +368,23 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
         "validation_status": str(record.get("validation_status") or "unknown"),
         "validation_warnings": list(record.get("validation_warnings") or []),
         "validation_checks": dict(record.get("validation_checks") or {}),
+        "core_accuracy_gates": ntfs_core_accuracy_gates(
+            "mft-record",
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": file_hashes(path),
+                "source_index": index,
+                "file_path": file_path,
+                "parent_reference": str(parent_reference or ""),
+                "timestamp": timestamp,
+                "timestamp_source": timestamp_source,
+                "sequence_validation": dict(record.get("sequence_validation") or {}),
+                "attribute_types": list(record.get("attribute_types") or []),
+                "data_attributes": list(record.get("data_attributes") or [])[:10],
+                "file_name_entries": file_name_entries[:10],
+                "validation_checks": dict(record.get("validation_checks") or {}),
+            },
+        ),
         "parser_confidence": record.get("parser_confidence", 0.0),
         "mft_record_evidence": mft_record_evidence(record, file_path),
         "evidence_strength": "ntfs-mft-native-attribute-metadata",
@@ -445,6 +483,24 @@ def build_native_usn_record(path: Path, record: Mapping[str, object], index: int
         "validation_status": str(record.get("validation_status") or "unknown"),
         "validation_warnings": list(record.get("validation_warnings") or []),
         "validation_checks": dict(record.get("validation_checks") or {}),
+        "core_accuracy_gates": ntfs_core_accuracy_gates(
+            "usn-record",
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": file_hashes(path),
+                "source_index": index,
+                "file_path": str(record.get("file_name") or ""),
+                "timestamp": str(record.get("timestamp") or ""),
+                "reason_flags": list(record.get("reason_flags") or []),
+                "rename_hint": str(record.get("rename_hint") or ""),
+                "deleted_hint": bool(record.get("deleted_hint")),
+                "record_cursor": record.get("record_cursor", record.get("record_offset", 0)),
+                "next_record_cursor": record.get("next_record_cursor", 0),
+                "file_reference_number_decoded": dict(record.get("file_reference_number_decoded") or {}),
+                "parent_file_reference_number_decoded": dict(record.get("parent_file_reference_number_decoded") or {}),
+                "validation_checks": dict(record.get("validation_checks") or {}),
+            },
+        ),
         "parser_confidence": record.get("parser_confidence", 0.0),
         "usn_record_evidence": usn_record_evidence(record),
         "evidence_strength": "ntfs-usn-native-record",
@@ -772,6 +828,7 @@ def build_filesystem_record(path: Path, family: str, row: Mapping[str, object], 
     }
     details["validation_required"] = False
     details["validation_checks"] = validation_checks
+    details["core_accuracy_gates"] = ntfs_core_accuracy_gates(artifact_type, details)
     details["ntfs_validation_matrix"] = ntfs_validation_matrix(validation_checks)
     details["ntfs_report_grade_assessment"] = ntfs_report_grade_assessment(
         details["ntfs_validation_matrix"],
@@ -789,6 +846,52 @@ def build_filesystem_record(path: Path, family: str, row: Mapping[str, object], 
         supported=True,
         details=details,
     )
+
+
+def ntfs_core_accuracy_gates(artifact_type: str, details: Mapping[str, object]) -> list[dict[str, object]]:
+    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    evidence_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"source_index:{details.get('source_index', '')}",
+    ]
+    if details.get("record_cursor") not in (None, ""):
+        evidence_refs.append(f"record_cursor:{details.get('record_cursor')}")
+    if hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+
+    if artifact_type in {"mft-file", "mft-record"}:
+        data_attributes = [item for item in details.get("data_attributes") or [] if isinstance(item, Mapping)]
+        satisfied: list[str] = []
+        if checks.get("sequence_fixup_valid") or checks.get("has_sequence_validation") or details.get("sequence_validation"):
+            satisfied.append("USA validation")
+        if "$ATTRIBUTE_LIST" in list(details.get("attribute_types") or []):
+            satisfied.append("attribute-list extension resolution")
+        if details.get("file_path") or details.get("path_candidates") or details.get("parent_reference"):
+            satisfied.append("parent path reconstruction")
+        if any(item.get("resident") is False or item.get("runlist_preview") for item in data_attributes):
+            satisfied.append("runlist decoding")
+        if details.get("timestamp") or details.get("timestamp_source") or checks.get("timestamp_fields_present") or checks.get("has_timestamp_validation"):
+            satisfied.append("timestamp/source field provenance")
+        return [build_accuracy_gate(12, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
+
+    if artifact_type in {"usn-journal-file", "usn-record"}:
+        samples = [item for item in details.get("record_samples") or [] if isinstance(item, Mapping)]
+        sample_reasons = [flag for item in samples for flag in list(item.get("reason_flags") or [])]
+        satisfied = []
+        if checks.get("record_length_aligned") or checks.get("record_limit_not_reached") or checks.get("cursor_progress_validated"):
+            satisfied.append("record-size bounds")
+        if details.get("reason_flags") or sample_reasons:
+            satisfied.append("reason flag decoding")
+        if details.get("parent_file_reference_number_decoded") or details.get("file_reference_number_decoded"):
+            satisfied.append("FRN path cache replay")
+        if details.get("rename_hint") or details.get("deleted_hint") or any("RENAME" in str(flag) or "DELETE" in str(flag) for flag in sample_reasons):
+            satisfied.append("rename/delete ordering")
+        if details.get("record_cursor") not in (None, "") or checks.get("cursor_progress_validated"):
+            satisfied.append("cursor determinism at scale")
+        return [build_accuracy_gate(13, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
+
+    return []
 
 
 def normalize_key(value: object) -> str:

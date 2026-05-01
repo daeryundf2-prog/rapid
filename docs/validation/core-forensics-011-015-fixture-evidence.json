@@ -1,0 +1,85 @@
+{
+  "schema": "rapidtriage-core-forensics-fixture-evidence-v1",
+  "scope": "#11-#15 internal fixture validation",
+  "status": "pass",
+  "claim_boundary": "Internal fixture-backed validation for implemented+usable+validated maturity only; commercial-grade still requires external corpora, independent review, and trusted-tool diffs.",
+  "fixture_sources": [
+    "tests/windows_artifact_fixtures.py",
+    "tests/test_rapidtriage_windows_artifacts.py",
+    "tests/test_rapidtriage_windows_artifacts_collectors.py"
+  ],
+  "collector_commands": [
+    "rapidtriage artifacts <fixture-root> --kind windows-search-index --output search-index.json",
+    "rapidtriage artifacts <fixture-root> --kind windows-filesystem --output filesystem.json",
+    "rapidtriage artifacts <fixture-root> --kind recent-files --output recent.json",
+    "rapidtriage artifacts <fixture-root> --kind windows-shellbags --output shellbags.json"
+  ],
+  "validated_items": [
+    {
+      "number": 11,
+      "title": "Windows.edb full ESE parser",
+      "assertions": [
+        "windows-search-edb-file rows preserve ESE header/page-map/table-family metadata, source hashes, path/URL/content pivots, and #11 core_accuracy_gates.",
+        "windows-search-edb-page-candidate rows preserve page index, page offset, page hash, table marker hits, page-local path/content candidates, and page-level source citation.",
+        "windows-search-edb-row-candidate rows correlate path/content/deleted-state markers and retain validation-required blockers."
+      ],
+      "blockers_kept": [
+        "full native ESE catalog/table/row decoding",
+        "authoritative row-level timestamp/property extraction",
+        "deleted/index-state validation against trusted ESE tools"
+      ]
+    },
+    {
+      "number": 12,
+      "title": "$MFT full attribute parser",
+      "assertions": [
+        "mft-record rows preserve FILE header, USA validation, standard information timestamps, filename parent reference, resident data evidence, source hashes, and #12 core_accuracy_gates.",
+        "mft-file inventory rows preserve bounded native record counts, sequence validation counts, timestamp validation counts, and attribute type counts."
+      ],
+      "blockers_kept": [
+        "attribute-list extension record resolution",
+        "report-grade nonresident data-run decoding",
+        "full-volume parent path reconstruction"
+      ]
+    },
+    {
+      "number": 13,
+      "title": "$UsnJrnl large-scale timeline parser",
+      "assertions": [
+        "usn-record rows preserve record-size bounds, cursor progression, v2/v3 identity decoding, reason flags, rename/delete hints, timestamps, source hashes, and #13 core_accuracy_gates.",
+        "usn-journal-file inventory rows preserve scan metadata, next-cursor state, record-version counts, large-record counts, and timestamp ranges."
+      ],
+      "blockers_kept": [
+        "full FRN path-cache replay",
+        "large-corpus pagination validation",
+        "full journal replay/correlation"
+      ]
+    },
+    {
+      "number": 14,
+      "title": "JumpList DestList deep parser",
+      "assertions": [
+        "jumplist-automatic rows preserve CFB stream inventory, DestList header/entry candidates, embedded LNK linkage, AppID hash provenance, deleted-entry warning, source hashes, and #14 core_accuracy_gates.",
+        "jumplist_evidence links destination target paths back to stream and DestList candidate metadata."
+      ],
+      "blockers_kept": [
+        "OS-version-specific DestList field semantics",
+        "deleted-entry recovery",
+        "report-grade AppID mapping database"
+      ]
+    },
+    {
+      "number": 15,
+      "title": "ShellBags native hive parser",
+      "assertions": [
+        "shellbag-native-candidate rows preserve BagMRU/Bags relationship candidates, bag/node IDs, timestamp source labeling, NTUSER/UsrClass scope, deleted/slack warning, source hashes, and #15 core_accuracy_gates.",
+        "ShellBags native rows keep binary shell-item decode and transaction-log replay blockers explicit."
+      ],
+      "blockers_kept": [
+        "full binary shell-item payload decoding",
+        "BagMRU/Bags relationship validation against dedicated parsers",
+        "transaction-log replay and deleted/slack testimony validation"
+      ]
+    }
+  ]
+}

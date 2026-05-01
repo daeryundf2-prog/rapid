@@ -927,6 +927,56 @@
             ],
             "commercial_grade_ready": false,
             "container_hint": "custom-binary",
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": false
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/5f7b5f1e01b83767.automaticDestinations-ms",
+                  "app_id_hash:5f7b5f1e01b83767",
+                  "source_sha256:ae143e19a1ddda24e8396b307d423f857ba63cbfcf31cbb4537c1e36d0c22eee"
+                ],
+                "gap_id": "#14",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "CFB stream inventory",
+                  "DestList header/entry layout"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "CFB stream inventory",
+                  "DestList header/entry layout",
+                  "embedded LNK linkage",
+                  "AppID mapping provenance",
+                  "deleted-entry warning"
+                ],
+                "satisfied_checks": [
+                  "embedded LNK linkage",
+                  "AppID mapping provenance",
+                  "deleted-entry warning"
+                ],
+                "status": "validation-required",
+                "title": "JumpList DestList deep parser"
+              }
+            ],
             "coverage_status": "mapped",
             "destination_count": 1,
             "destination_stream_count": 0,
@@ -1180,6 +1230,56 @@
             ],
             "commercial_grade_ready": false,
             "container_hint": "custom-binary",
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": false
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/CustomDestinations/9b9cdc69c1c24e2b.customDestinations-ms",
+                  "app_id_hash:9b9cdc69c1c24e2b",
+                  "source_sha256:c04f2f402446ea24335c08475374b0167bc59f82017cb8c64ef9cf95f2eb382d"
+                ],
+                "gap_id": "#14",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "CFB stream inventory",
+                  "DestList header/entry layout"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "CFB stream inventory",
+                  "DestList header/entry layout",
+                  "embedded LNK linkage",
+                  "AppID mapping provenance",
+                  "deleted-entry warning"
+                ],
+                "satisfied_checks": [
+                  "embedded LNK linkage",
+                  "AppID mapping provenance",
+                  "deleted-entry warning"
+                ],
+                "status": "validation-required",
+                "title": "JumpList DestList deep parser"
+              }
+            ],
             "coverage_status": "mapped",
             "destination_count": 1,
             "destination_stream_count": 0,
@@ -5350,6 +5450,56 @@
             "content_candidates": [
               "rapid forensic case notes"
             ],
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "property ID/name mapping",
+                  "deleted/index-state validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "catalog/table/page mapping",
+                  "path/URL/content correlation",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
             "coverage_status": "ese-header-string-scan",
             "edb_analysis_method": {
               "commercial_position": "triage-grade-page-correlation-not-full-native-row-decode",
@@ -5794,6 +5944,58 @@
             "content_candidates": [
               "rapid forensic case notes"
             ],
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:0",
+                  "page_offset:8192",
+                  "page_sha256:87d724ce0e1453e554ea129d8fce472161876c086df7463db8dac0e058b1786e",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "deleted/index-state validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
             "coverage_status": "native-ese-page-map-candidate",
             "evidence_strength": "windows-search-page-local-string-correlation",
             "forensic_review": {
@@ -6042,6 +6244,56 @@
             ],
             "commercial_grade_ready": false,
             "content_snippet": "rapid forensic case notes",
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:2",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "deleted/index-state validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "path/URL/content correlation",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
             "coverage_status": "native-ese-string-pivot",
             "evidence_strength": "search-index-string-pivot",
             "extension": "",
@@ -6183,6 +6435,56 @@
             ],
             "commercial_grade_ready": false,
             "content_snippet": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:0",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "deleted/index-state validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "path/URL/content correlation",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
             "coverage_status": "native-ese-string-pivot",
             "evidence_strength": "search-index-string-pivot",
             "extension": ".docx",
@@ -6324,6 +6626,56 @@
             ],
             "commercial_grade_ready": false,
             "content_snippet": "https://example.com/search-hit",
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:3",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "deleted/index-state validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "path/URL/content correlation",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
             "coverage_status": "native-ese-string-pivot",
             "evidence_strength": "search-index-string-pivot",
             "extension": "",
@@ -6466,6 +6818,56 @@
             ],
             "commercial_grade_ready": false,
             "content_snippet": "https://example.com/search-hit",
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:1",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "deleted/index-state validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "path/URL/content correlation",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
             "coverage_status": "native-ese-string-pivot",
             "evidence_strength": "search-index-string-pivot",
             "extension": "",
@@ -6616,6 +7018,56 @@
             ],
             "commercial_grade_ready": false,
             "content_snippet": "rapid forensic case notes",
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:2",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "property ID/name mapping"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "catalog/table/page mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
             "coverage_status": "native-ese-correlated-string-row-candidate",
             "deleted_state": "candidate-marker-present",
             "evidence_strength": "windows-search-correlated-native-string-candidate",
@@ -6811,6 +7263,56 @@
             ],
             "commercial_grade_ready": false,
             "content_snippet": "rapid forensic case notes",
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:0",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "property ID/name mapping"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "catalog/table/page mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
             "coverage_status": "native-ese-correlated-string-row-candidate",
             "deleted_state": "candidate-marker-present",
             "evidence_strength": "windows-search-correlated-native-string-candidate",
@@ -7010,6 +7512,56 @@
             ],
             "commercial_grade_ready": false,
             "content_snippet": "rapid forensic case notes",
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:1",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "property ID/name mapping"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "catalog/table/page mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
             "coverage_status": "native-ese-correlated-string-row-candidate",
             "deleted_state": "candidate-marker-present",
             "evidence_strength": "windows-search-correlated-native-string-candidate",
@@ -7241,420 +7793,56 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
-            "coverage_status": "native-ese-table-string-candidate",
-            "evidence_strength": "windows-search-table-presence-candidate",
-            "forensic_review": {
-              "artifact_goal": "Windows.edb native table-family candidate",
-              "blockers": [
-                "native-ese-catalog-decoding-required",
-                "row-level-path-url-content-decoding-required",
-                "row-level-timestamp-and-deleted-state-validation-required",
-                "validation-check-failed:deleted-state-decoded-from-native-rows",
-                "validation-check-failed:ese-catalog-decoded",
-                "validation-check-failed:requires-windows-search-parser",
-                "validation-check-failed:row-level-decoding-available",
-                "validation-check-failed:timestamps-decoded-from-native-rows",
-                "windows-search-table-schema-decoding-required",
-                "windows-search-validation-required"
-              ],
-              "caveats": [
-                "Table family is detected from native strings, not decoded from the ESE catalog."
-              ],
-              "gap_id": "#11",
-              "next_validation_step": "Validate Windows.edb paths, content, timestamps, and deleted/index state with a full ESE/Search parser before report-grade use.",
-              "primary_evidence": [
-                "table=content-index",
-                "markers=2"
-              ],
-              "report_grade_ready": false,
-              "review_status": "triage-review",
-              "validation_required": true
-            },
-            "matched_marker_count": 2,
-            "matched_markers": [
-              "contents",
-              "system.search.contents"
-            ],
-            "parser": "windows-search-edb-table-candidate",
-            "parser_confidence": 0.5,
-            "parser_version": "windows-search-index-import-v6",
-            "raw_preview": "SystemIndex_GthrPth WorkID ItemUrl SystemIndex_PropertyStore System.ItemPathDisplay System.FileName System.DateModified System.Search.Contents IsDeleted CrawlStatus C:\\Users\\alice\\Documents\\Case Notes.docx rapid forensic case notes https://example.com/search-hit",
-            "reportability": "triage",
-            "risk_flags": [
-              "windows-search-table:content-index"
-            ],
-            "risk_score": 20,
-            "search_index_native_capabilities": {
-              "content_candidate_string_scan": true,
-              "csv_json_export_import": true,
-              "ese_header_probe": true,
-              "native_deleted_state_decode": false,
-              "native_ese_catalog_decode": false,
-              "native_long_value_tree_decode": false,
-              "native_page_map_triage": true,
-              "native_row_level_decode": false,
-              "native_space_tree_decode": false,
-              "native_string_pivots": true,
-              "native_table_schema_decode": false,
-              "native_timestamp_decode": false,
-              "page_level_marker_correlation": true,
-              "table_family_marker_detection": true
-            },
-            "search_index_report_grade_assessment": {
-              "blockers": [
-                "native-ese-catalog-decoding-required",
-                "row-level-path-url-content-decoding-required",
-                "row-level-timestamp-and-deleted-state-validation-required",
-                "validation-check-failed:deleted-state-decoded-from-native-rows",
-                "validation-check-failed:ese-catalog-decoded",
-                "validation-check-failed:requires-windows-search-parser",
-                "validation-check-failed:row-level-decoding-available",
-                "validation-check-failed:timestamps-decoded-from-native-rows",
-                "windows-search-table-schema-decoding-required",
-                "windows-search-validation-required"
-              ],
-              "commercial_gap_ids": [
-                "#11"
-              ],
-              "next_validation_step": "Validate Windows.edb paths, content, timestamps, and deleted/index state with a full ESE/Search parser before report-grade use.",
-              "report_grade_ready": false,
-              "status": "validation-required",
-              "validated_strengths": [
-                "ese-signature-valid"
-              ]
-            },
-            "search_index_validation_matrix": [
+            "core_accuracy_gates": [
               {
-                "detail": true,
-                "id": "ese-signature-valid",
-                "label": "ESE signature valid",
-                "passed": true,
-                "severity": "critical"
-              },
-              {
-                "detail": false,
-                "id": "ese-catalog-decoded",
-                "label": "ESE catalog decoded",
-                "passed": false,
-                "severity": "critical"
-              },
-              {
-                "detail": false,
-                "id": "row-level-decoding-available",
-                "label": "Row-level decoding",
-                "passed": false,
-                "severity": "critical"
-              },
-              {
-                "detail": false,
-                "id": "timestamps-decoded-from-native-rows",
-                "label": "Native row timestamps",
-                "passed": false,
-                "severity": "high"
-              },
-              {
-                "detail": false,
-                "id": "deleted-state-decoded-from-native-rows",
-                "label": "Native deleted state",
-                "passed": false,
-                "severity": "high"
-              },
-              {
-                "detail": true,
-                "id": "requires-windows-search-parser",
-                "label": "Windows Search parser validation",
-                "passed": false,
-                "severity": "critical"
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:0",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "path/URL/content correlation",
+                  "deleted/index-state validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
               }
             ],
-            "source_format": "ese-edb",
-            "source_hashes": {
-              "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
-            },
-            "source_index": 3,
-            "source_path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
-            "table_family": "content-index",
-            "validation_checks": {
-              "deleted_state_decoded_from_native_rows": false,
-              "ese_catalog_decoded": false,
-              "ese_signature_valid": true,
-              "page_size_detected": 8192,
-              "requires_windows_search_parser": true,
-              "row_level_decoding_available": false,
-              "table_family_marker_count": 2,
-              "timestamps_decoded_from_native_rows": false
-            },
-            "validation_guidance": "This row identifies likely Windows Search table families from native ESE strings only; validate rows, paths, content, timestamps, and deleted/index state with a full Windows Search EDB parser.",
-            "validation_required": true
-          },
-          "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
-          "provider": "windows-search-index",
-          "supported": true
-        },
-        {
-          "artifact_type": "windows-search-edb-table-candidate",
-          "details": {
-            "candidate_metadata": {
-              "content_candidate_count": 1,
-              "page_candidate_count": 1,
-              "page_count_scanned": 1,
-              "page_count_total": 2,
-              "page_marker_family_counts": [
-                {
-                  "count": 1,
-                  "value": "content-index"
-                },
-                {
-                  "count": 1,
-                  "value": "deleted-state"
-                },
-                {
-                  "count": 1,
-                  "value": "gather-path"
-                },
-                {
-                  "count": 1,
-                  "value": "gather-record"
-                },
-                {
-                  "count": 1,
-                  "value": "property-store"
-                }
-              ],
-              "path_candidate_count": 1,
-              "row_candidate_count": 3,
-              "string_scan_bytes": 16384,
-              "table_candidate_count": 5,
-              "table_candidate_families": [
-                "gather-path",
-                "gather-record",
-                "property-store",
-                "content-index",
-                "deleted-state"
-              ],
-              "url_candidate_count": 1
-            },
-            "commercial_grade_blockers": [
-              "native-ese-catalog-decoding-required",
-              "row-level-path-url-content-decoding-required",
-              "row-level-timestamp-and-deleted-state-validation-required",
-              "validation-check-failed:deleted-state-decoded-from-native-rows",
-              "validation-check-failed:ese-catalog-decoded",
-              "validation-check-failed:requires-windows-search-parser",
-              "validation-check-failed:row-level-decoding-available",
-              "validation-check-failed:timestamps-decoded-from-native-rows",
-              "windows-search-table-schema-decoding-required",
-              "windows-search-validation-required"
-            ],
-            "commercial_grade_ready": false,
-            "coverage_status": "native-ese-table-string-candidate",
-            "evidence_strength": "windows-search-table-presence-candidate",
-            "forensic_review": {
-              "artifact_goal": "Windows.edb native table-family candidate",
-              "blockers": [
-                "native-ese-catalog-decoding-required",
-                "row-level-path-url-content-decoding-required",
-                "row-level-timestamp-and-deleted-state-validation-required",
-                "validation-check-failed:deleted-state-decoded-from-native-rows",
-                "validation-check-failed:ese-catalog-decoded",
-                "validation-check-failed:requires-windows-search-parser",
-                "validation-check-failed:row-level-decoding-available",
-                "validation-check-failed:timestamps-decoded-from-native-rows",
-                "windows-search-table-schema-decoding-required",
-                "windows-search-validation-required"
-              ],
-              "caveats": [
-                "Table family is detected from native strings, not decoded from the ESE catalog."
-              ],
-              "gap_id": "#11",
-              "next_validation_step": "Validate Windows.edb paths, content, timestamps, and deleted/index state with a full ESE/Search parser before report-grade use.",
-              "primary_evidence": [
-                "table=deleted-state",
-                "markers=4"
-              ],
-              "report_grade_ready": false,
-              "review_status": "triage-review",
-              "validation_required": true
-            },
-            "matched_marker_count": 4,
-            "matched_markers": [
-              "crawlstatus",
-              "deleted",
-              "isdeleted",
-              "status"
-            ],
-            "parser": "windows-search-edb-table-candidate",
-            "parser_confidence": 0.62,
-            "parser_version": "windows-search-index-import-v6",
-            "raw_preview": "SystemIndex_GthrPth WorkID ItemUrl SystemIndex_PropertyStore System.ItemPathDisplay System.FileName System.DateModified System.Search.Contents IsDeleted CrawlStatus C:\\Users\\alice\\Documents\\Case Notes.docx rapid forensic case notes https://example.com/search-hit",
-            "reportability": "triage",
-            "risk_flags": [
-              "windows-search-table:deleted-state"
-            ],
-            "risk_score": 20,
-            "search_index_native_capabilities": {
-              "content_candidate_string_scan": true,
-              "csv_json_export_import": true,
-              "ese_header_probe": true,
-              "native_deleted_state_decode": false,
-              "native_ese_catalog_decode": false,
-              "native_long_value_tree_decode": false,
-              "native_page_map_triage": true,
-              "native_row_level_decode": false,
-              "native_space_tree_decode": false,
-              "native_string_pivots": true,
-              "native_table_schema_decode": false,
-              "native_timestamp_decode": false,
-              "page_level_marker_correlation": true,
-              "table_family_marker_detection": true
-            },
-            "search_index_report_grade_assessment": {
-              "blockers": [
-                "native-ese-catalog-decoding-required",
-                "row-level-path-url-content-decoding-required",
-                "row-level-timestamp-and-deleted-state-validation-required",
-                "validation-check-failed:deleted-state-decoded-from-native-rows",
-                "validation-check-failed:ese-catalog-decoded",
-                "validation-check-failed:requires-windows-search-parser",
-                "validation-check-failed:row-level-decoding-available",
-                "validation-check-failed:timestamps-decoded-from-native-rows",
-                "windows-search-table-schema-decoding-required",
-                "windows-search-validation-required"
-              ],
-              "commercial_gap_ids": [
-                "#11"
-              ],
-              "next_validation_step": "Validate Windows.edb paths, content, timestamps, and deleted/index state with a full ESE/Search parser before report-grade use.",
-              "report_grade_ready": false,
-              "status": "validation-required",
-              "validated_strengths": [
-                "ese-signature-valid"
-              ]
-            },
-            "search_index_validation_matrix": [
-              {
-                "detail": true,
-                "id": "ese-signature-valid",
-                "label": "ESE signature valid",
-                "passed": true,
-                "severity": "critical"
-              },
-              {
-                "detail": false,
-                "id": "ese-catalog-decoded",
-                "label": "ESE catalog decoded",
-                "passed": false,
-                "severity": "critical"
-              },
-              {
-                "detail": false,
-                "id": "row-level-decoding-available",
-                "label": "Row-level decoding",
-                "passed": false,
-                "severity": "critical"
-              },
-              {
-                "detail": false,
-                "id": "timestamps-decoded-from-native-rows",
-                "label": "Native row timestamps",
-                "passed": false,
-                "severity": "high"
-              },
-              {
-                "detail": false,
-                "id": "deleted-state-decoded-from-native-rows",
-                "label": "Native deleted state",
-                "passed": false,
-                "severity": "high"
-              },
-              {
-                "detail": true,
-                "id": "requires-windows-search-parser",
-                "label": "Windows Search parser validation",
-                "passed": false,
-                "severity": "critical"
-              }
-            ],
-            "source_format": "ese-edb",
-            "source_hashes": {
-              "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
-            },
-            "source_index": 4,
-            "source_path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
-            "table_family": "deleted-state",
-            "validation_checks": {
-              "deleted_state_decoded_from_native_rows": false,
-              "ese_catalog_decoded": false,
-              "ese_signature_valid": true,
-              "page_size_detected": 8192,
-              "requires_windows_search_parser": true,
-              "row_level_decoding_available": false,
-              "table_family_marker_count": 4,
-              "timestamps_decoded_from_native_rows": false
-            },
-            "validation_guidance": "This row identifies likely Windows Search table families from native ESE strings only; validate rows, paths, content, timestamps, and deleted/index state with a full Windows Search EDB parser.",
-            "validation_required": true
-          },
-          "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
-          "provider": "windows-search-index",
-          "supported": true
-        },
-        {
-          "artifact_type": "windows-search-edb-table-candidate",
-          "details": {
-            "candidate_metadata": {
-              "content_candidate_count": 1,
-              "page_candidate_count": 1,
-              "page_count_scanned": 1,
-              "page_count_total": 2,
-              "page_marker_family_counts": [
-                {
-                  "count": 1,
-                  "value": "content-index"
-                },
-                {
-                  "count": 1,
-                  "value": "deleted-state"
-                },
-                {
-                  "count": 1,
-                  "value": "gather-path"
-                },
-                {
-                  "count": 1,
-                  "value": "gather-record"
-                },
-                {
-                  "count": 1,
-                  "value": "property-store"
-                }
-              ],
-              "path_candidate_count": 1,
-              "row_candidate_count": 3,
-              "string_scan_bytes": 16384,
-              "table_candidate_count": 5,
-              "table_candidate_families": [
-                "gather-path",
-                "gather-record",
-                "property-store",
-                "content-index",
-                "deleted-state"
-              ],
-              "url_candidate_count": 1
-            },
-            "commercial_grade_blockers": [
-              "native-ese-catalog-decoding-required",
-              "row-level-path-url-content-decoding-required",
-              "row-level-timestamp-and-deleted-state-validation-required",
-              "validation-check-failed:deleted-state-decoded-from-native-rows",
-              "validation-check-failed:ese-catalog-decoded",
-              "validation-check-failed:requires-windows-search-parser",
-              "validation-check-failed:row-level-decoding-available",
-              "validation-check-failed:timestamps-decoded-from-native-rows",
-              "windows-search-table-schema-decoding-required",
-              "windows-search-validation-required"
-            ],
-            "commercial_grade_ready": false,
             "coverage_status": "native-ese-table-string-candidate",
             "evidence_strength": "windows-search-table-presence-candidate",
             "forensic_review": {
@@ -7862,6 +8050,56 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:1",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "path/URL/content correlation",
+                  "deleted/index-state validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
             "coverage_status": "native-ese-table-string-candidate",
             "evidence_strength": "windows-search-table-presence-candidate",
             "forensic_review": {
@@ -8069,6 +8307,56 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:2",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "path/URL/content correlation",
+                  "deleted/index-state validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
             "coverage_status": "native-ese-table-string-candidate",
             "evidence_strength": "windows-search-table-presence-candidate",
             "forensic_review": {
@@ -8222,6 +8510,520 @@
           "supported": true
         },
         {
+          "artifact_type": "windows-search-edb-table-candidate",
+          "details": {
+            "candidate_metadata": {
+              "content_candidate_count": 1,
+              "page_candidate_count": 1,
+              "page_count_scanned": 1,
+              "page_count_total": 2,
+              "page_marker_family_counts": [
+                {
+                  "count": 1,
+                  "value": "content-index"
+                },
+                {
+                  "count": 1,
+                  "value": "deleted-state"
+                },
+                {
+                  "count": 1,
+                  "value": "gather-path"
+                },
+                {
+                  "count": 1,
+                  "value": "gather-record"
+                },
+                {
+                  "count": 1,
+                  "value": "property-store"
+                }
+              ],
+              "path_candidate_count": 1,
+              "row_candidate_count": 3,
+              "string_scan_bytes": 16384,
+              "table_candidate_count": 5,
+              "table_candidate_families": [
+                "gather-path",
+                "gather-record",
+                "property-store",
+                "content-index",
+                "deleted-state"
+              ],
+              "url_candidate_count": 1
+            },
+            "commercial_grade_blockers": [
+              "native-ese-catalog-decoding-required",
+              "row-level-path-url-content-decoding-required",
+              "row-level-timestamp-and-deleted-state-validation-required",
+              "validation-check-failed:deleted-state-decoded-from-native-rows",
+              "validation-check-failed:ese-catalog-decoded",
+              "validation-check-failed:requires-windows-search-parser",
+              "validation-check-failed:row-level-decoding-available",
+              "validation-check-failed:timestamps-decoded-from-native-rows",
+              "windows-search-table-schema-decoding-required",
+              "windows-search-validation-required"
+            ],
+            "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:3",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "path/URL/content correlation",
+                  "deleted/index-state validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
+            "coverage_status": "native-ese-table-string-candidate",
+            "evidence_strength": "windows-search-table-presence-candidate",
+            "forensic_review": {
+              "artifact_goal": "Windows.edb native table-family candidate",
+              "blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "caveats": [
+                "Table family is detected from native strings, not decoded from the ESE catalog."
+              ],
+              "gap_id": "#11",
+              "next_validation_step": "Validate Windows.edb paths, content, timestamps, and deleted/index state with a full ESE/Search parser before report-grade use.",
+              "primary_evidence": [
+                "table=content-index",
+                "markers=2"
+              ],
+              "report_grade_ready": false,
+              "review_status": "triage-review",
+              "validation_required": true
+            },
+            "matched_marker_count": 2,
+            "matched_markers": [
+              "contents",
+              "system.search.contents"
+            ],
+            "parser": "windows-search-edb-table-candidate",
+            "parser_confidence": 0.5,
+            "parser_version": "windows-search-index-import-v6",
+            "raw_preview": "SystemIndex_GthrPth WorkID ItemUrl SystemIndex_PropertyStore System.ItemPathDisplay System.FileName System.DateModified System.Search.Contents IsDeleted CrawlStatus C:\\Users\\alice\\Documents\\Case Notes.docx rapid forensic case notes https://example.com/search-hit",
+            "reportability": "triage",
+            "risk_flags": [
+              "windows-search-table:content-index"
+            ],
+            "risk_score": 20,
+            "search_index_native_capabilities": {
+              "content_candidate_string_scan": true,
+              "csv_json_export_import": true,
+              "ese_header_probe": true,
+              "native_deleted_state_decode": false,
+              "native_ese_catalog_decode": false,
+              "native_long_value_tree_decode": false,
+              "native_page_map_triage": true,
+              "native_row_level_decode": false,
+              "native_space_tree_decode": false,
+              "native_string_pivots": true,
+              "native_table_schema_decode": false,
+              "native_timestamp_decode": false,
+              "page_level_marker_correlation": true,
+              "table_family_marker_detection": true
+            },
+            "search_index_report_grade_assessment": {
+              "blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "commercial_gap_ids": [
+                "#11"
+              ],
+              "next_validation_step": "Validate Windows.edb paths, content, timestamps, and deleted/index state with a full ESE/Search parser before report-grade use.",
+              "report_grade_ready": false,
+              "status": "validation-required",
+              "validated_strengths": [
+                "ese-signature-valid"
+              ]
+            },
+            "search_index_validation_matrix": [
+              {
+                "detail": true,
+                "id": "ese-signature-valid",
+                "label": "ESE signature valid",
+                "passed": true,
+                "severity": "critical"
+              },
+              {
+                "detail": false,
+                "id": "ese-catalog-decoded",
+                "label": "ESE catalog decoded",
+                "passed": false,
+                "severity": "critical"
+              },
+              {
+                "detail": false,
+                "id": "row-level-decoding-available",
+                "label": "Row-level decoding",
+                "passed": false,
+                "severity": "critical"
+              },
+              {
+                "detail": false,
+                "id": "timestamps-decoded-from-native-rows",
+                "label": "Native row timestamps",
+                "passed": false,
+                "severity": "high"
+              },
+              {
+                "detail": false,
+                "id": "deleted-state-decoded-from-native-rows",
+                "label": "Native deleted state",
+                "passed": false,
+                "severity": "high"
+              },
+              {
+                "detail": true,
+                "id": "requires-windows-search-parser",
+                "label": "Windows Search parser validation",
+                "passed": false,
+                "severity": "critical"
+              }
+            ],
+            "source_format": "ese-edb",
+            "source_hashes": {
+              "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+            },
+            "source_index": 3,
+            "source_path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+            "table_family": "content-index",
+            "validation_checks": {
+              "deleted_state_decoded_from_native_rows": false,
+              "ese_catalog_decoded": false,
+              "ese_signature_valid": true,
+              "page_size_detected": 8192,
+              "requires_windows_search_parser": true,
+              "row_level_decoding_available": false,
+              "table_family_marker_count": 2,
+              "timestamps_decoded_from_native_rows": false
+            },
+            "validation_guidance": "This row identifies likely Windows Search table families from native ESE strings only; validate rows, paths, content, timestamps, and deleted/index state with a full Windows Search EDB parser.",
+            "validation_required": true
+          },
+          "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+          "provider": "windows-search-index",
+          "supported": true
+        },
+        {
+          "artifact_type": "windows-search-edb-table-candidate",
+          "details": {
+            "candidate_metadata": {
+              "content_candidate_count": 1,
+              "page_candidate_count": 1,
+              "page_count_scanned": 1,
+              "page_count_total": 2,
+              "page_marker_family_counts": [
+                {
+                  "count": 1,
+                  "value": "content-index"
+                },
+                {
+                  "count": 1,
+                  "value": "deleted-state"
+                },
+                {
+                  "count": 1,
+                  "value": "gather-path"
+                },
+                {
+                  "count": 1,
+                  "value": "gather-record"
+                },
+                {
+                  "count": 1,
+                  "value": "property-store"
+                }
+              ],
+              "path_candidate_count": 1,
+              "row_candidate_count": 3,
+              "string_scan_bytes": 16384,
+              "table_candidate_count": 5,
+              "table_candidate_families": [
+                "gather-path",
+                "gather-record",
+                "property-store",
+                "content-index",
+                "deleted-state"
+              ],
+              "url_candidate_count": 1
+            },
+            "commercial_grade_blockers": [
+              "native-ese-catalog-decoding-required",
+              "row-level-path-url-content-decoding-required",
+              "row-level-timestamp-and-deleted-state-validation-required",
+              "validation-check-failed:deleted-state-decoded-from-native-rows",
+              "validation-check-failed:ese-catalog-decoded",
+              "validation-check-failed:requires-windows-search-parser",
+              "validation-check-failed:row-level-decoding-available",
+              "validation-check-failed:timestamps-decoded-from-native-rows",
+              "windows-search-table-schema-decoding-required",
+              "windows-search-validation-required"
+            ],
+            "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                  "source_index:4",
+                  "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "path/URL/content correlation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
+            "coverage_status": "native-ese-table-string-candidate",
+            "evidence_strength": "windows-search-table-presence-candidate",
+            "forensic_review": {
+              "artifact_goal": "Windows.edb native table-family candidate",
+              "blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "caveats": [
+                "Table family is detected from native strings, not decoded from the ESE catalog."
+              ],
+              "gap_id": "#11",
+              "next_validation_step": "Validate Windows.edb paths, content, timestamps, and deleted/index state with a full ESE/Search parser before report-grade use.",
+              "primary_evidence": [
+                "table=deleted-state",
+                "markers=4"
+              ],
+              "report_grade_ready": false,
+              "review_status": "triage-review",
+              "validation_required": true
+            },
+            "matched_marker_count": 4,
+            "matched_markers": [
+              "crawlstatus",
+              "deleted",
+              "isdeleted",
+              "status"
+            ],
+            "parser": "windows-search-edb-table-candidate",
+            "parser_confidence": 0.62,
+            "parser_version": "windows-search-index-import-v6",
+            "raw_preview": "SystemIndex_GthrPth WorkID ItemUrl SystemIndex_PropertyStore System.ItemPathDisplay System.FileName System.DateModified System.Search.Contents IsDeleted CrawlStatus C:\\Users\\alice\\Documents\\Case Notes.docx rapid forensic case notes https://example.com/search-hit",
+            "reportability": "triage",
+            "risk_flags": [
+              "windows-search-table:deleted-state"
+            ],
+            "risk_score": 20,
+            "search_index_native_capabilities": {
+              "content_candidate_string_scan": true,
+              "csv_json_export_import": true,
+              "ese_header_probe": true,
+              "native_deleted_state_decode": false,
+              "native_ese_catalog_decode": false,
+              "native_long_value_tree_decode": false,
+              "native_page_map_triage": true,
+              "native_row_level_decode": false,
+              "native_space_tree_decode": false,
+              "native_string_pivots": true,
+              "native_table_schema_decode": false,
+              "native_timestamp_decode": false,
+              "page_level_marker_correlation": true,
+              "table_family_marker_detection": true
+            },
+            "search_index_report_grade_assessment": {
+              "blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "commercial_gap_ids": [
+                "#11"
+              ],
+              "next_validation_step": "Validate Windows.edb paths, content, timestamps, and deleted/index state with a full ESE/Search parser before report-grade use.",
+              "report_grade_ready": false,
+              "status": "validation-required",
+              "validated_strengths": [
+                "ese-signature-valid"
+              ]
+            },
+            "search_index_validation_matrix": [
+              {
+                "detail": true,
+                "id": "ese-signature-valid",
+                "label": "ESE signature valid",
+                "passed": true,
+                "severity": "critical"
+              },
+              {
+                "detail": false,
+                "id": "ese-catalog-decoded",
+                "label": "ESE catalog decoded",
+                "passed": false,
+                "severity": "critical"
+              },
+              {
+                "detail": false,
+                "id": "row-level-decoding-available",
+                "label": "Row-level decoding",
+                "passed": false,
+                "severity": "critical"
+              },
+              {
+                "detail": false,
+                "id": "timestamps-decoded-from-native-rows",
+                "label": "Native row timestamps",
+                "passed": false,
+                "severity": "high"
+              },
+              {
+                "detail": false,
+                "id": "deleted-state-decoded-from-native-rows",
+                "label": "Native deleted state",
+                "passed": false,
+                "severity": "high"
+              },
+              {
+                "detail": true,
+                "id": "requires-windows-search-parser",
+                "label": "Windows Search parser validation",
+                "passed": false,
+                "severity": "critical"
+              }
+            ],
+            "source_format": "ese-edb",
+            "source_hashes": {
+              "sha256": "c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b"
+            },
+            "source_index": 4,
+            "source_path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+            "table_family": "deleted-state",
+            "validation_checks": {
+              "deleted_state_decoded_from_native_rows": false,
+              "ese_catalog_decoded": false,
+              "ese_signature_valid": true,
+              "page_size_detected": 8192,
+              "requires_windows_search_parser": true,
+              "row_level_decoding_available": false,
+              "table_family_marker_count": 4,
+              "timestamps_decoded_from_native_rows": false
+            },
+            "validation_guidance": "This row identifies likely Windows Search table families from native ESE strings only; validate rows, paths, content, timestamps, and deleted/index state with a full Windows Search EDB parser.",
+            "validation_required": true
+          },
+          "path": "<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+          "provider": "windows-search-index",
+          "supported": true
+        },
+        {
           "artifact_type": "windows-search-index-entry",
           "details": {
             "accessed_at": "",
@@ -8236,6 +9038,56 @@
             ],
             "commercial_grade_ready": false,
             "content_snippet": "rapid forensic case notes",
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/analysis/windows-search-index.csv",
+                  "source_index:0",
+                  "source_sha256:13a3a3181d5d8859b9d506e6ed73ad23220683c060edab43ec41df69f03bccdb"
+                ],
+                "gap_id": "#11",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "catalog/table/page mapping",
+                  "deleted/index-state validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "catalog/table/page mapping",
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "deleted/index-state validation",
+                  "page-level source citation"
+                ],
+                "satisfied_checks": [
+                  "property ID/name mapping",
+                  "path/URL/content correlation",
+                  "page-level source citation"
+                ],
+                "status": "validation-required",
+                "title": "Windows.edb full ESE parser"
+              }
+            ],
             "coverage_status": "mapped",
             "created_at": "",
             "entry_id": "7",

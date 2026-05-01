@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review
 from .registry import (
@@ -238,6 +239,25 @@ def build_native_shellbag_record(
             "relationships with a dedicated ShellBags parser before report-grade use."
         ),
         "validation_checks": checks,
+        "core_accuracy_gates": shellbag_core_accuracy_gates(
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": dict(source_hashes),
+                "hive_name": path.name,
+                "user_hive_scope": "ntuser" if path.name.upper() == "NTUSER.DAT" else "usrclass",
+                "candidate_source": candidate_source,
+                "source_key_path": source_key_path,
+                "shellbag_section": section,
+                "bag_id_candidates": bag_ids,
+                "node_id_candidates": node_ids,
+                "path_candidates": path_candidates,
+                "timestamp_candidates": timestamp_candidates,
+                "allocation_status": allocation_status,
+                "cell_offset": cell_offset,
+                "hbin_offset": hbin_offset,
+                "validation_checks": checks,
+            }
+        ),
         "shellbag_validation_matrix": shellbag_validation_matrix(checks),
         "shellbag_report_grade_assessment": report_grade,
         "shellbag_native_capabilities": SHELLBAG_CAPABILITIES,
@@ -444,6 +464,31 @@ def shellbag_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, o
             passed = not bool(value)
         matrix.append({"id": key.replace("_", "-"), "label": label, "passed": passed, "severity": severity, "detail": value})
     return matrix
+
+
+def shellbag_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:
+    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    evidence_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"cell_offset:{details.get('cell_offset', '')}",
+        f"hbin_offset:{details.get('hbin_offset', '')}",
+    ]
+    if hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+
+    satisfied: list[str] = []
+    if details.get("bag_id_candidates") or details.get("node_id_candidates") or details.get("shellbag_section") in {"bagmru", "bags"}:
+        satisfied.append("BagMRU/Bags relationship")
+    if checks.get("binary_shell_item_decoding_available"):
+        satisfied.append("shell item binary decoding")
+    if details.get("timestamp_candidates"):
+        satisfied.append("timestamp source labeling")
+    if details.get("user_hive_scope") in {"ntuser", "usrclass"} or str(details.get("hive_name") or "").upper() in {"NTUSER.DAT", "USRCLASS.DAT"}:
+        satisfied.append("UsrClass/NTUSER correlation")
+    if not SHELLBAG_CAPABILITIES["deleted_slack_shellbag_validation"]:
+        satisfied.append("deleted/slack validation warning")
+    return [build_accuracy_gate(15, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
 def shellbag_report_grade_assessment(

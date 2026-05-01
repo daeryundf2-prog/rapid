@@ -858,6 +858,10 @@ def build_required_documents() -> list[dict[str, str]]:
             "path": "docs/rapidtriage-core-forensics-006-010-validation.md",
             "purpose": "#6-#10 internal fixture validation manifest and commercial-readiness attachment workflow.",
         },
+        {
+            "path": "docs/rapidtriage-core-forensics-011-015-validation.md",
+            "purpose": "#11-#15 internal fixture validation manifest and commercial-readiness attachment workflow.",
+        },
         {"path": "docs/rapidtriage-release-checklist.md", "purpose": "Repeatable release verification checklist."},
         {"path": "docs/rapidtriage-release-notes-template.md", "purpose": "Release communication template."},
         {"path": "docs/rapidtriage-support-sla.md", "purpose": "Support severity, escalation, secure evidence intake, and patch target template."},

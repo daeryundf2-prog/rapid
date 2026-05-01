@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence, Tuple
 
+from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review, isoformat_from_timestamp, iter_windows_user_homes
 
@@ -444,6 +445,17 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         blockers=jumplist_commercial_blockers(destlist_metadata),
     )
     evidence = jumplist_evidence(path, artifact_type, data, stream_summaries, destinations, destlist_metadata)
+    core_accuracy_gates = jumplist_core_accuracy_gates(
+        {
+            "source_path": str(path.resolve()),
+            "source_hashes": file_hashes(path),
+            "application_id_hash": path.stem.split(".", 1)[0],
+            "ole_streams": stream_summaries,
+            "destinations": destinations,
+            "destlist_metadata": destlist_metadata,
+            "validation_checks": validation_checks,
+        }
+    )
     return {
         "jump_list_parse_status": "parsed-ole-stream-lnk" if ole_streams and destinations else "parsed-embedded-lnk" if destinations else "inventory",
         "coverage_status": "native-destlist-candidate" if destlist_metadata.get("destlist_parse_status") == "parsed-candidate" else "mapped",
@@ -463,6 +475,7 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         "destinations": destinations,
         "jumplist_evidence": evidence,
         "validation_checks": validation_checks,
+        "core_accuracy_gates": core_accuracy_gates,
         "recent_validation_matrix": recent_validation_matrix(validation_checks),
         "recent_report_grade_assessment": report_grade,
         "recent_native_capabilities": JUMPLIST_CAPABILITIES,
@@ -533,6 +546,34 @@ def jumplist_evidence(
             "treat deleted DestList entries as unsupported until slack recovery is validated",
         ],
     }
+
+
+def jumplist_core_accuracy_gates(details: dict[str, object]) -> list[dict[str, object]]:
+    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), dict) else {}
+    destlist_metadata = (
+        details.get("destlist_metadata") if isinstance(details.get("destlist_metadata"), dict) else {}
+    )
+    destinations = [item for item in details.get("destinations") or [] if isinstance(item, dict)]
+    evidence_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"app_id_hash:{details.get('application_id_hash', '')}",
+    ]
+    if hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+
+    satisfied: list[str] = []
+    if details.get("ole_streams") or checks.get("has_ole_stream_inventory"):
+        satisfied.append("CFB stream inventory")
+    if destlist_metadata.get("destlist_header_candidates") or destlist_metadata.get("destlist_entry_candidates"):
+        satisfied.append("DestList header/entry layout")
+    if destinations and any(destination.get("stream_path") or destination.get("target_path") for destination in destinations):
+        satisfied.append("embedded LNK linkage")
+    if details.get("application_id_hash"):
+        satisfied.append("AppID mapping provenance")
+    if not JUMPLIST_CAPABILITIES["destlist_deleted_entry_recovery"]:
+        satisfied.append("deleted-entry warning")
+    return [build_accuracy_gate(14, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
 def extract_jumplist_destinations(

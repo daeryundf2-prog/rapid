@@ -1,0 +1,108 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #11-#15 internal fixture validation",
+  "status": "pass",
+  "datasets": [
+    {
+      "id": "core-forensics-011-windows-edb-fixture",
+      "name": "#11 Windows.edb fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [11],
+      "evidence_paths": [
+        "docs/validation/core-forensics-011-015-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Windows.edb ESE header/page-map/table-family candidates are emitted",
+          "path, URL, content, deleted-state marker, and page source citation evidence is preserved",
+          "#11 core_accuracy_gates are present on native Windows.edb rows"
+        ]
+      },
+      "notes": "Internal fixture pass; esentutl/libesedb/WinSearchDBAnalyzer diffs remain commercial-grade evidence."
+    },
+    {
+      "id": "core-forensics-012-mft-fixture",
+      "name": "#12 $MFT fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [12],
+      "evidence_paths": [
+        "docs/validation/core-forensics-011-015-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Native FILE record header, USA validation, filename parent reference, timestamp provenance, and resident data evidence are emitted",
+          "#12 core_accuracy_gates are present on native MFT rows"
+        ]
+      },
+      "notes": "Internal fixture pass; MFTECmd/TSK full-volume diff and nonresident/attribute-list corpora remain commercial-grade evidence."
+    },
+    {
+      "id": "core-forensics-013-usn-fixture",
+      "name": "#13 $UsnJrnl fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [13],
+      "evidence_paths": [
+        "docs/validation/core-forensics-011-015-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "USN v2/v3 records, cursor bounds, reason flags, rename/delete hints, and timestamp evidence are emitted",
+          "#13 core_accuracy_gates are present on native USN rows"
+        ]
+      },
+      "notes": "Internal fixture pass; large journal replay, FRN path-cache corpus, and pagination stress validation remain commercial-grade evidence."
+    },
+    {
+      "id": "core-forensics-014-jumplist-fixture",
+      "name": "#14 JumpList fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [14],
+      "evidence_paths": [
+        "docs/validation/core-forensics-011-015-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "CFB streams, DestList header/entry candidates, embedded LNK linkage, and AppID hash provenance are emitted",
+          "#14 core_accuracy_gates are present on JumpList rows"
+        ]
+      },
+      "notes": "Internal fixture pass; JLECmd/LECmd cross-tool corpus, deleted entries, and AppID mapping validation remain required."
+    },
+    {
+      "id": "core-forensics-015-shellbags-fixture",
+      "name": "#15 ShellBags fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_minimal_shellbags_registry_hive",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [15],
+      "evidence_paths": [
+        "docs/validation/core-forensics-011-015-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts_collectors.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Native ShellBags key-tree candidates preserve BagMRU/Bags relationship, bag/node IDs, timestamp source, and user-hive scope",
+          "#15 core_accuracy_gates are present on native ShellBags rows"
+        ]
+      },
+      "notes": "Internal fixture pass; ShellBagsExplorer/SBECmd diff, binary shell-item decode, transaction log, and deleted/slack validation remain commercial-grade evidence."
+    }
+  ]
+}

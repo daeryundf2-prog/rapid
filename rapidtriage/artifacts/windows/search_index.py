@@ -8,6 +8,7 @@ from collections import Counter
 from pathlib import Path, PureWindowsPath
 from typing import Iterable, Mapping, Sequence
 
+from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review
 from .ese import build_ese_page_map, build_ese_string_pivots, probe_ese_database
@@ -197,6 +198,18 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
             },
             "validation_required": True,
             "validation_checks": validation_checks,
+            "core_accuracy_gates": windows_search_core_accuracy_gates(
+                "windows-search-edb-file",
+                {
+                    "source_path": str(path.resolve()),
+                    "source_hashes": file_hashes(path),
+                    "ese_page_map": page_map,
+                    "table_families": table_families,
+                    "row_candidates": row_candidates,
+                    "content_candidates": content_candidates,
+                    "validation_checks": validation_checks,
+                },
+            ),
             "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
             "search_index_report_grade_assessment": report_grade,
             "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
@@ -292,6 +305,20 @@ def build_edb_pivot_records(path: Path, inventory_details: Mapping[str, object])
                     "validation_required": True,
                     "validation_guidance": "Windows.edb native string pivots identify indexed paths/URLs/text present in the database; validate full table fields and timestamps with a dedicated Windows Search EDB parser.",
                     "validation_checks": validation_checks,
+                    "core_accuracy_gates": windows_search_core_accuracy_gates(
+                        "windows-search-edb-pivot",
+                        {
+                            "source_path": str(path.resolve()),
+                            "source_hashes": source_hashes,
+                            "source_index": index,
+                            "candidate_kind": candidate_kind,
+                            "candidate_value": candidate_value,
+                            "item_path": item_path,
+                            "url": url,
+                            "content_snippet": candidate_value[:1000],
+                            "validation_checks": validation_checks,
+                        },
+                    ),
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
@@ -396,6 +423,22 @@ def build_edb_page_candidate_records(path: Path, inventory_details: Mapping[str,
                     "validation_required": True,
                     "validation_guidance": "This candidate groups strings found on the same ESE page and preserves page offset/hash for review. It is not a decoded Windows Search row; validate with a full ESE catalog/table decoder before report use.",
                     "validation_checks": validation_checks,
+                    "core_accuracy_gates": windows_search_core_accuracy_gates(
+                        "windows-search-edb-page-candidate",
+                        {
+                            "source_path": str(path.resolve()),
+                            "source_hashes": source_hashes,
+                            "source_index": index,
+                            "page_index": int(sample.get("page_index") or 0),
+                            "page_offset": int(sample.get("page_offset") or 0),
+                            "page_sha256": str(sample.get("page_sha256") or ""),
+                            "path_candidates": path_candidates,
+                            "url_candidates": url_candidates,
+                            "content_candidates": content_candidates,
+                            "table_marker_hits": table_marker_hits,
+                            "validation_checks": validation_checks,
+                        },
+                    ),
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
@@ -475,6 +518,17 @@ def build_edb_table_candidate_records(path: Path, inventory_details: Mapping[str
                     "validation_required": True,
                     "validation_guidance": "This row identifies likely Windows Search table families from native ESE strings only; validate rows, paths, content, timestamps, and deleted/index state with a full Windows Search EDB parser.",
                     "validation_checks": validation_checks,
+                    "core_accuracy_gates": windows_search_core_accuracy_gates(
+                        "windows-search-edb-table-candidate",
+                        {
+                            "source_path": str(path.resolve()),
+                            "source_hashes": source_hashes,
+                            "source_index": index,
+                            "table_family": table_family,
+                            "matched_markers": matched,
+                            "validation_checks": validation_checks,
+                        },
+                    ),
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
@@ -569,6 +623,21 @@ def build_edb_row_candidate_records(path: Path, inventory_details: Mapping[str, 
                     "validation_required": True,
                     "validation_guidance": "This row correlates native Windows.edb path, URL, and content strings for triage search/review. It is not a decoded ESE row; validate timestamps, deleted state, and table columns with a dedicated Windows Search EDB parser.",
                     "validation_checks": validation_checks,
+                    "core_accuracy_gates": windows_search_core_accuracy_gates(
+                        "windows-search-edb-row-candidate",
+                        {
+                            "source_path": str(path.resolve()),
+                            "source_hashes": source_hashes,
+                            "source_index": index,
+                            "item_path": item_path,
+                            "url": url,
+                            "content_snippet": content_snippet,
+                            "table_family_candidates": table_families,
+                            "deleted_state": "candidate-marker-present" if has_deleted_markers else "not-decoded",
+                            "candidate_basis": candidate.get("correlation_method", ""),
+                            "validation_checks": validation_checks,
+                        },
+                    ),
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
@@ -658,6 +727,19 @@ def build_search_index_entry(
         "store": str(first_value(lowered, "Store", "Catalog", "Scope") or ""),
         "validation_required": False,
         "validation_checks": validation_checks,
+        "core_accuracy_gates": windows_search_core_accuracy_gates(
+            "windows-search-index-entry",
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": dict(source_hashes),
+                "source_index": index,
+                "item_path": item_path,
+                "url": str(first_value(lowered, "URL", "System.ItemUrl", "ItemUrl") or ""),
+                "content_snippet": content,
+                "property_fields": list(lowered),
+                "validation_checks": validation_checks,
+            },
+        ),
         "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
         "search_index_report_grade_assessment": report_grade,
         "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
@@ -937,6 +1019,36 @@ def search_index_report_grade_assessment(
         "commercial_gap_ids": ["#11"],
         "next_validation_step": "Validate Windows.edb paths, content, timestamps, and deleted/index state with a full ESE/Search parser before report-grade use.",
     }
+
+
+def windows_search_core_accuracy_gates(artifact_type: str, details: Mapping[str, object]) -> list[dict[str, object]]:
+    if not artifact_type.startswith("windows-search"):
+        return []
+    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    evidence_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"source_index:{details.get('source_index', '')}",
+    ]
+    if details.get("page_offset") not in (None, ""):
+        evidence_refs.append(f"page_offset:{details.get('page_offset')}")
+    if details.get("page_sha256"):
+        evidence_refs.append(f"page_sha256:{details.get('page_sha256')}")
+    if hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+
+    satisfied: list[str] = []
+    if details.get("ese_page_map") or details.get("table_family") or details.get("table_families") or details.get("table_family_candidates") or checks.get("ese_page_map_built"):
+        satisfied.append("catalog/table/page mapping")
+    if details.get("property_fields") or details.get("matched_markers") or details.get("table_marker_hits") or details.get("table_family") == "property-store":
+        satisfied.append("property ID/name mapping")
+    if details.get("item_path") or details.get("url") or details.get("content_snippet") or details.get("path_candidates") or details.get("url_candidates") or details.get("content_candidates"):
+        satisfied.append("path/URL/content correlation")
+    if details.get("deleted_state") == "candidate-marker-present" or details.get("table_family") == "deleted-state" or "deleted-state" in list(details.get("table_family_candidates") or []):
+        satisfied.append("deleted/index-state validation")
+    if details.get("page_offset") not in (None, "") or details.get("page_sha256") or checks.get("ese_page_map_built") or hashes.get("sha256"):
+        satisfied.append("page-level source citation")
+    return [build_accuracy_gate(11, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
 def detect_search_table_families(pivots: Mapping[str, object]) -> list[str]:
