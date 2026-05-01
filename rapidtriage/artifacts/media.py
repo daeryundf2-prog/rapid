@@ -5,7 +5,7 @@ import io
 import hashlib
 import re
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 try:
     import cv2  # type: ignore[import-not-found]
@@ -200,6 +200,7 @@ def build_image_record(path: Path) -> ArtifactRecord:
         )
         artifact_type = "media-image"
     details["core_accuracy_gates"] = media_core_accuracy_gates(details=details, source_path=resolved)
+    details["commercial_uplift_evidence"] = media_image_commercial_uplift_evidence(details=details, source_path=resolved)
     return ArtifactRecord(
         provider=MediaImageProvider.name,
         artifact_type=artifact_type,
@@ -377,6 +378,47 @@ def media_core_accuracy_gates(*, details: dict[str, object], source_path: Path) 
         build_accuracy_gate(58, satisfied_checks=item58, evidence_refs=evidence_refs),
         build_accuracy_gate(59, satisfied_checks=item59, evidence_refs=evidence_refs),
     ]
+
+
+def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], source_path: Path) -> dict[str, object]:
+    gates = details.get("core_accuracy_gates") if isinstance(details.get("core_accuracy_gates"), list) else []
+    passed_by_item: dict[str, list[str]] = {}
+    for gate in gates:
+        if isinstance(gate, Mapping) and gate.get("gap_id") in {"#56", "#58", "#59"}:
+            passed_by_item[str(gate["gap_id"])] = list(gate.get("satisfied_checks") or [])
+    ocr_sidecar = details.get("ocr_sidecar") if isinstance(details.get("ocr_sidecar"), Mapping) else {}
+    translation_sidecar = details.get("translation_sidecar") if isinstance(details.get("translation_sidecar"), Mapping) else {}
+    return {
+        "batch_id": "commercial-uplift-056-060",
+        "item_numbers": [56, 58, 59],
+        "implementation_track": "image-gallery-ocr-review-gates",
+        "source_refs": [
+            f"source_path:{source_path}",
+            f"source_sha256:{details.get('hashes', {}).get('sha256', '') if isinstance(details.get('hashes'), Mapping) else ''}",
+            f"ocr_sidecar:{ocr_sidecar.get('source_path', '')}",
+            f"translation_sidecar:{translation_sidecar.get('source_path', '')}",
+        ],
+        "passed_validation_check_ids_by_item": passed_by_item,
+        "failed_validation_check_ids_by_item": {
+            "#56": ["dedicated-gallery-grid", "persistent-tags", "ml-visual-similarity", "deepfake-classifier-validation"],
+            "#58": ["native-ocr-engine-execution", "engine-retry-logs", "case-db-ocr-job-persistence"],
+            "#59": ["built-in-korean-ocr-execution", "machine-translation-worker", "confidence-calibration-corpus"],
+        },
+        "commercial_blockers": list(MEDIA_REPORT_GRADE_BLOCKERS),
+        "large_data_controls": {
+            "source_size": int(details.get("source_size") or 0),
+            "thumbnail_inline_available": bool(
+                isinstance(details.get("thumbnail_preview"), Mapping) and details["thumbnail_preview"].get("available")
+            ),
+            "perceptual_hash_present": bool(details.get("perceptual_hash")),
+            "similarity_bucket_present": bool(details.get("similarity_bucket")),
+            "ocr_sidecar_imported": bool(ocr_sidecar),
+            "translation_sidecar_imported": bool(translation_sidecar),
+            "native_ocr_execution": False,
+            "machine_translation_execution": False,
+        },
+        "reporting_status": "triage-only-validation-required",
+    }
 
 
 def load_ocr_sidecar(path: Path) -> dict[str, object]:

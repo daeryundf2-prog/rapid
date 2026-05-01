@@ -131,6 +131,12 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("#60", analysis["deduplication"]["summary"]["commercial_gap_ids"])
         self.assertIn("#60", analysis["deduplication"]["deduplication_assessment"]["commercial_gap_ids"])
         self.assertEqual(analysis["deduplication"]["core_accuracy_gates"][0]["gap_id"], "#60")
+        dedup_uplift = analysis["deduplication"]["commercial_uplift_evidence"]
+        self.assertEqual(dedup_uplift["batch_id"], "commercial-uplift-056-060")
+        self.assertEqual(dedup_uplift["item_numbers"], [60])
+        self.assertIn("duplicate fingerprint generation", dedup_uplift["passed_validation_check_ids"])
+        self.assertIn("ui-collapse-suppression-workflow", dedup_uplift["failed_validation_check_ids"])
+        self.assertFalse(dedup_uplift["large_data_controls"]["case_db_suppression_state"])
         self.assertFalse(analysis["deduplication"]["deduplication_assessment"]["ready_for_court_report"])
 
         workbook = analysis["workbook"]

@@ -2086,6 +2086,7 @@ def build_image_preview(source_path: Path, *, image_url: str) -> Dict[str, objec
             },
             "gallery_review_assessment": image_gallery_review_assessment(details),
             "core_accuracy_gates": image_viewer_core_accuracy_gates(source_path=source_path, details=details),
+            "commercial_uplift_evidence": image_viewer_commercial_uplift_evidence(source_path=source_path, details=details),
             "ocr_queue_assessment": details.get("ocr_queue_assessment") if isinstance(details.get("ocr_queue_assessment"), dict) else {},
             "korean_ocr_translation_workflow": details.get("korean_ocr_translation_workflow") if isinstance(details.get("korean_ocr_translation_workflow"), dict) else {},
         }
@@ -2103,6 +2104,7 @@ def build_image_preview(source_path: Path, *, image_url: str) -> Dict[str, objec
             },
             "gallery_review_assessment": image_gallery_review_assessment({}),
             "core_accuracy_gates": image_viewer_core_accuracy_gates(source_path=source_path, details={}),
+            "commercial_uplift_evidence": image_viewer_commercial_uplift_evidence(source_path=source_path, details={}),
         }
     return {
         "preview_type": "image",
@@ -2140,6 +2142,35 @@ def image_gallery_review_assessment(details: Mapping[str, object]) -> dict[str, 
         ],
         "source_perceptual_hash_present": bool(details.get("perceptual_hash")),
     }
+
+
+def image_viewer_commercial_uplift_evidence(*, source_path: Path, details: Mapping[str, object]) -> dict[str, object]:
+    gates = image_viewer_core_accuracy_gates(source_path=source_path, details=details)
+    blockers = [
+        "dedicated-large-gallery-virtualization-and-bulk-tagging-remain-limited",
+        "similarity-is-perceptual-hash-bucket-not-ml-validated",
+        "deepfake-and-sensitive-media-classification-not-implemented",
+        "selected-image-report-export-flow-not-complete",
+    ]
+    return viewer_workflow_commercial_uplift_evidence(
+        item_number=56,
+        component="image-gallery-review-mode",
+        core_accuracy_gates=gates,
+        blockers=blockers,
+        source_refs=[
+            f"source_path:{source_path}",
+            f"perceptual_hash:{details.get('perceptual_hash', '')}",
+            f"similarity_bucket:{details.get('similarity_bucket', '')}",
+        ],
+        controls={
+            "thumbnail_preview": bool(details.get("thumbnail_preview")),
+            "perceptual_hash_present": bool(details.get("perceptual_hash")),
+            "similarity_bucket_present": bool(details.get("similarity_bucket")),
+            "compare_ready": bool(details.get("perceptual_hash")),
+            "dedicated_virtualized_gallery": False,
+            "persistent_gallery_tags": False,
+        },
+    )
 
 
 def hex_viewer_core_accuracy_gates(
@@ -2330,6 +2361,30 @@ def build_media_preview(source_path: Path, *, mime_type: str) -> Dict[str, objec
                 source_path=source_path,
                 metadata=metadata,
                 sidecars=sidecars,
+            ),
+            "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
+                item_number=57,
+                component="video-audio-preview-and-transcript",
+                core_accuracy_gates=media_viewer_core_accuracy_gates(
+                    source_path=source_path,
+                    metadata=metadata,
+                    sidecars=sidecars,
+                ),
+                blockers=[
+                    "media-playback-and-transcoding-not-performed-inline",
+                    "automatic-speech-recognition-not-executed-by-viewer",
+                    "transcript-sidecar-alignment-must-be-verified-against-original-media",
+                    "selected-cue-report-export-not-implemented",
+                ],
+                source_refs=[f"source_path:{source_path}", f"transcript_sidecar_count:{len(sidecars)}"],
+                controls={
+                    "source_hashes_captured": source_path.stat().st_size <= 128 * 1024 * 1024,
+                    "transcript_sidecar_count": len(sidecars),
+                    "cue_count": sum(len(item.get("cues") or []) for item in sidecars),
+                    "playback_executed_inline": False,
+                    "asr_executed_inline": False,
+                    "selected_cue_export": False,
+                },
             ),
             "limitations": [
                 "Media playback/transcoding is not performed by the local viewer.",

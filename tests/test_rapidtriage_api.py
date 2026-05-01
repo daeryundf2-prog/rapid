@@ -370,6 +370,10 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("#56", image_preview["image"]["gallery_review"]["commercial_gap_ids"])
             self.assertIn("#56", image_preview["image"]["gallery_review_assessment"]["commercial_gap_ids"])
             self.assertEqual(image_preview["image"]["core_accuracy_gates"][0]["gap_id"], "#56")
+            image_uplift = image_preview["image"]["commercial_uplift_evidence"]
+            self.assertEqual(image_uplift["item_numbers"], [56])
+            self.assertIn("perceptual similarity bucket", image_uplift["passed_validation_check_ids"])
+            self.assertFalse(image_uplift["large_data_controls"]["dedicated_virtualized_gallery"])
             self.assertIn("#58", image_preview["image"]["ocr_queue_assessment"]["commercial_gap_ids"])
             self.assertIn("#59", image_preview["image"]["korean_ocr_translation_workflow"]["commercial_gap_ids"])
             self.assertIn("similarity-bucketed", image_preview["image"]["gallery_review"]["tag_suggestions"])
@@ -386,6 +390,10 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertTrue(media_preview["media"]["review"]["cue_navigation_available"])
             self.assertIn("#57", media_preview["media"]["media_transcript_assessment"]["commercial_gap_ids"])
             self.assertEqual(media_preview["media"]["core_accuracy_gates"][0]["gap_id"], "#57")
+            media_uplift = media_preview["media"]["commercial_uplift_evidence"]
+            self.assertEqual(media_uplift["item_numbers"], [57])
+            self.assertIn("transcript sidecars imported", media_uplift["passed_validation_check_ids"])
+            self.assertFalse(media_uplift["large_data_controls"]["playback_executed_inline"])
             self.assertEqual(media_preview["media"]["media_transcript_assessment"]["cue_count"], 1)
             self.assertEqual(media_preview["media"]["transcript_sidecars"][0]["cues"][0]["start"], "00:00:00,000")
             self.assertIn("#57", media_preview["media"]["transcript_sidecars"][0]["commercial_gap_ids"])

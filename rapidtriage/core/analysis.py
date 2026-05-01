@@ -409,6 +409,13 @@ def build_search_hit_deduplication(matches: Sequence[Mapping[str, object]], *, m
         )
         if len(groups) >= max_groups:
             break
+    summary = {
+        "duplicate_group_count": len(groups),
+        "duplicate_match_count": duplicate_match_count,
+        "unique_fingerprint_count": len(buckets),
+        "max_groups": max_groups,
+    }
+    core_accuracy_gates = search_deduplication_core_accuracy_gates(groups=groups, summary=summary)
     return {
         "summary": {
             "duplicate_group_count": len(groups),
@@ -421,14 +428,11 @@ def build_search_hit_deduplication(matches: Sequence[Mapping[str, object]], *, m
         },
         "groups": groups,
         "deduplication_assessment": search_deduplication_assessment(),
-        "core_accuracy_gates": search_deduplication_core_accuracy_gates(
+        "core_accuracy_gates": core_accuracy_gates,
+        "commercial_uplift_evidence": search_deduplication_commercial_uplift_evidence(
             groups=groups,
-            summary={
-                "duplicate_group_count": len(groups),
-                "duplicate_match_count": duplicate_match_count,
-                "unique_fingerprint_count": len(buckets),
-                "max_groups": max_groups,
-            },
+            summary=summary,
+            core_accuracy_gates=core_accuracy_gates,
         ),
     }
 
@@ -459,6 +463,47 @@ def search_deduplication_core_accuracy_gates(
             ],
         )
     ]
+
+
+def search_deduplication_commercial_uplift_evidence(
+    *,
+    groups: Sequence[Mapping[str, object]],
+    summary: Mapping[str, object],
+    core_accuracy_gates: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    passed = []
+    for gate in core_accuracy_gates:
+        if gate.get("gap_id") == SEARCH_DEDUP_GAP_ID:
+            passed.extend(str(item) for item in gate.get("satisfied_checks") or [])
+    assessment = search_deduplication_assessment()
+    return {
+        "batch_id": "commercial-uplift-056-060",
+        "item_numbers": [60],
+        "implementation_track": "search-hit-deduplication-gate",
+        "source_refs": [
+            f"duplicate_group_count:{summary.get('duplicate_group_count', 0)}",
+            f"duplicate_match_count:{summary.get('duplicate_match_count', 0)}",
+            f"unique_fingerprint_count:{summary.get('unique_fingerprint_count', 0)}",
+        ],
+        "passed_validation_check_ids": sorted(set(passed)),
+        "failed_validation_check_ids": [
+            "ui-collapse-suppression-workflow",
+            "fuzzy-near-duplicate-text-grouping",
+            "perceptual-media-duplicate-grouping",
+            "case-db-duplicate-suppression-state",
+        ],
+        "commercial_blockers": list(assessment["blockers"]),
+        "large_data_controls": {
+            "max_groups": int(summary.get("max_groups") or 0),
+            "group_count": len(groups),
+            "duplicate_match_count": int(summary.get("duplicate_match_count") or 0),
+            "representative_first_review": True,
+            "hash_or_preview_fingerprint": True,
+            "media_perceptual_duplicate_grouping": False,
+            "case_db_suppression_state": False,
+        },
+        "reporting_status": "implemented-baseline-validation-required",
+    }
 
 
 def dedupe_fingerprint(match: Mapping[str, object]) -> str:

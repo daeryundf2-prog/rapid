@@ -58,6 +58,13 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertGreaterEqual(details["parser_confidence"], 0.8)
             self.assertTrue(details["ocr_candidate"])
             self.assertIn("#56", details["gallery_review_mode"]["commercial_gap_ids"])
+            media_uplift = details["commercial_uplift_evidence"]
+            self.assertEqual(media_uplift["batch_id"], "commercial-uplift-056-060")
+            self.assertEqual(media_uplift["item_numbers"], [56, 58, 59])
+            self.assertIn("image metadata and source hashes", media_uplift["passed_validation_check_ids_by_item"]["#56"])
+            self.assertIn("sidecar import and hashes", media_uplift["passed_validation_check_ids_by_item"]["#58"])
+            self.assertIn("Korean language hinting", media_uplift["passed_validation_check_ids_by_item"]["#59"])
+            self.assertFalse(media_uplift["large_data_controls"]["native_ocr_execution"])
             self.assertEqual(details["ocr_plan"]["status"], "sidecar-imported")
             self.assertIn("#58", details["ocr_plan"]["commercial_gap_ids"])
             self.assertEqual(details["ocr_plan"]["recommended_languages"], ["kor", "eng"])

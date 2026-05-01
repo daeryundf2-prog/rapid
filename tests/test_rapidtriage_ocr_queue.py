@@ -43,10 +43,17 @@ class RapidTriageOcrQueueTests(unittest.TestCase):
             self.assertIn("Korean language hinting", queue_gates["#59"]["satisfied_checks"])
             self.assertIn("translation sidecar import", queue_gates["#59"]["satisfied_checks"])
             self.assertFalse(payload["ocr_queue_native_capabilities"]["native_ocr_engine_execution"])
+            queue_uplift = payload["commercial_uplift_evidence"]
+            self.assertEqual(queue_uplift["batch_id"], "commercial-uplift-056-060")
+            self.assertEqual(queue_uplift["item_numbers"], [58, 59])
+            self.assertIn("sidecar import and hashes", queue_uplift["passed_validation_check_ids_by_item"]["#58"])
+            self.assertIn("Korean language hinting", queue_uplift["passed_validation_check_ids_by_item"]["#59"])
+            self.assertFalse(queue_uplift["large_data_controls"]["native_ocr_engine_execution"])
             item = payload["items"][0]
             self.assertEqual(item["status"], "sidecar-imported")
             self.assertIn("#58", item["commercial_gap_ids"])
             self.assertEqual(item["core_accuracy_gates"][0]["gap_id"], "#58")
+            self.assertEqual(item["commercial_uplift_evidence"]["item_numbers"], [58, 59])
             self.assertIn("#59", item["korean_ocr_translation_workflow"]["commercial_gap_ids"])
             self.assertFalse(item["report_grade_assessment"]["ready_for_court_report"])
             self.assertEqual(item["language_hint"], "ko+en")

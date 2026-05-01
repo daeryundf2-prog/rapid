@@ -88,6 +88,7 @@ def build_ocr_queue(
         status_counts[status] = status_counts.get(status, 0) + 1
         language = str(item.get("language_hint") or "unknown")
         language_counts[language] = language_counts.get(language, 0) + 1
+    core_accuracy_gates = ocr_queue_core_accuracy_gates(items=items, root=resolved_root)
     return {
         "command": "ocr-queue",
         "schema_version": OCR_QUEUE_SCHEMA_VERSION,
@@ -110,7 +111,12 @@ def build_ocr_queue(
         },
         "ocr_queue_native_capabilities": dict(OCR_QUEUE_NATIVE_CAPABILITIES),
         "ocr_queue_report_grade_assessment": ocr_queue_report_grade_assessment(),
-        "core_accuracy_gates": ocr_queue_core_accuracy_gates(items=items, root=resolved_root),
+        "core_accuracy_gates": core_accuracy_gates,
+        "commercial_uplift_evidence": ocr_queue_commercial_uplift_evidence(
+            items=items,
+            root=resolved_root,
+            core_accuracy_gates=core_accuracy_gates,
+        ),
         "items": items,
         "review_guidance": [
             "Sidecar OCR text is treated as post-acquisition review material; preserve the original sidecar hashes.",
@@ -141,6 +147,17 @@ def build_ocr_queue_item(
     metadata = sidecar.get("metadata") if isinstance(sidecar.get("metadata"), Mapping) else {}
     language_hint = str(metadata.get("language") or sidecar.get("language_hint") or language_hint_for_path_or_text(resolved, text))
     confidence = optional_float(metadata.get("confidence"))
+    item_context = {
+        "source_path": str(resolved),
+        "status": status,
+        "sidecar": sidecar,
+        "translation_sidecar": translation_sidecar,
+        "language_hint": language_hint,
+        "confidence": confidence,
+        "metadata": metadata,
+        "quality_metrics": ocr_quality_metrics(text) if text else {},
+    }
+    item_gates = ocr_queue_item_core_accuracy_gates(item_context=item_context)
     return {
         "queue_id": stable_queue_id(resolved),
         "source_path": str(resolved),
@@ -160,16 +177,11 @@ def build_ocr_queue_item(
         "retryable": status in {"queued", "failed-retry-queued"},
         "validation_status": "review-sidecar-text" if sidecar else "requires-ocr-run",
         "commercial_gap_ids": ["#58", "#59"],
-        "core_accuracy_gates": ocr_queue_item_core_accuracy_gates(item_context={
-            "source_path": str(resolved),
-            "status": status,
-            "sidecar": sidecar,
-            "translation_sidecar": translation_sidecar,
-            "language_hint": language_hint,
-            "confidence": confidence,
-            "metadata": metadata,
-            "quality_metrics": ocr_quality_metrics(text) if text else {},
-        }),
+        "core_accuracy_gates": item_gates,
+        "commercial_uplift_evidence": ocr_queue_item_commercial_uplift_evidence(
+            item_context=item_context,
+            core_accuracy_gates=item_gates,
+        ),
         "korean_ocr_translation_workflow": {
             "commercial_gap_ids": ["#59"],
             "language_hint": language_hint,
@@ -217,6 +229,83 @@ def ocr_queue_core_accuracy_gates(*, items: list[dict[str, object]], root: Path)
         build_accuracy_gate(58, satisfied_checks=item58, evidence_refs=evidence_refs),
         build_accuracy_gate(59, satisfied_checks=item59, evidence_refs=evidence_refs),
     ]
+
+
+def ocr_queue_commercial_uplift_evidence(
+    *,
+    items: list[dict[str, object]],
+    root: Path,
+    core_accuracy_gates: list[dict[str, object]],
+) -> dict[str, object]:
+    passed_by_item = {
+        str(gate.get("gap_id")): list(gate.get("satisfied_checks") or [])
+        for gate in core_accuracy_gates
+        if str(gate.get("gap_id")) in {"#58", "#59"}
+    }
+    return {
+        "batch_id": "commercial-uplift-056-060",
+        "item_numbers": [58, 59],
+        "implementation_track": "ocr-queue-korean-translation-gates",
+        "source_refs": [f"root:{root}", f"candidate_count:{len(items)}"],
+        "passed_validation_check_ids_by_item": passed_by_item,
+        "failed_validation_check_ids_by_item": {
+            "#58": ["native-ocr-engine-execution", "engine-specific-retry-logs", "case-db-ocr-job-persistence"],
+            "#59": ["built-in-korean-ocr-execution", "machine-translation-worker", "certified-translation-workflow"],
+        },
+        "commercial_blockers": list(OCR_QUEUE_REPORT_GRADE_BLOCKERS),
+        "large_data_controls": {
+            "candidate_count": len(items),
+            "sidecar_imported_count": sum(1 for item in items if str(item.get("status")) == "sidecar-imported"),
+            "queued_count": sum(1 for item in items if str(item.get("status")) == "queued"),
+            "failed_retry_queued_count": sum(1 for item in items if str(item.get("status")) == "failed-retry-queued"),
+            "native_ocr_engine_execution": False,
+            "case_db_job_persistence": False,
+        },
+        "reporting_status": "queue-ready-validation-required",
+    }
+
+
+def ocr_queue_item_commercial_uplift_evidence(
+    *,
+    item_context: Mapping[str, object],
+    core_accuracy_gates: list[dict[str, object]],
+) -> dict[str, object]:
+    passed_by_item = {
+        str(gate.get("gap_id")): list(gate.get("satisfied_checks") or [])
+        for gate in core_accuracy_gates
+        if str(gate.get("gap_id")) in {"#58", "#59"}
+    }
+    sidecar = item_context.get("sidecar") if isinstance(item_context.get("sidecar"), Mapping) else {}
+    translation_sidecar = (
+        item_context.get("translation_sidecar")
+        if isinstance(item_context.get("translation_sidecar"), Mapping)
+        else {}
+    )
+    return {
+        "batch_id": "commercial-uplift-056-060",
+        "item_numbers": [58, 59],
+        "implementation_track": "ocr-queue-item-gate",
+        "source_refs": [
+            f"source_path:{item_context.get('source_path', '')}",
+            f"sidecar:{sidecar.get('path', '')}",
+            f"translation_sidecar:{translation_sidecar.get('path', '')}",
+        ],
+        "passed_validation_check_ids_by_item": passed_by_item,
+        "failed_validation_check_ids_by_item": {
+            "#58": ["native-ocr-engine-execution"],
+            "#59": ["machine-translation-worker", "human-certified-translation"],
+        },
+        "commercial_blockers": list(OCR_QUEUE_REPORT_GRADE_BLOCKERS),
+        "large_data_controls": {
+            "status": str(item_context.get("status") or ""),
+            "sidecar_imported": bool(sidecar),
+            "translation_sidecar_imported": bool(translation_sidecar),
+            "confidence_present": item_context.get("confidence") is not None,
+            "quality_metrics_present": bool(item_context.get("quality_metrics")),
+            "native_ocr_engine_execution": False,
+        },
+        "reporting_status": "sidecar-review-required" if sidecar else "ocr-run-required",
+    }
 
 
 def ocr_queue_item_core_accuracy_gates(*, item_context: Mapping[str, object]) -> list[dict[str, object]]:
