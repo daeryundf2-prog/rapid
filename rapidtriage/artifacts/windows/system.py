@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable
 
 from ...core.audit import compute_sha256
+from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review, isoformat_from_timestamp
 
@@ -192,6 +193,18 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
                 "parser_confidence": "high" if command and uri else "medium",
                 "validation_required": True,
                 "validation_checks": validation_checks,
+                "core_accuracy_gates": system_core_accuracy_gates(
+                    "task-scheduler",
+                    {
+                        "source_path": str(path.resolve()),
+                        "source_hashes": {"sha256": compute_sha256(path)},
+                        "validation_checks": validation_checks,
+                        "risk_flags": risk_flags,
+                        "actions": action_details,
+                        "trigger_details": trigger_details,
+                        "normalized_action": normalized_task_action(command, arguments, working_directory),
+                    },
+                ),
                 "system_validation_matrix": system_validation_matrix("task-scheduler", validation_checks),
                 "system_report_grade_assessment": system_report_grade_assessment("task-scheduler", validation_checks),
                 "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
@@ -266,6 +279,15 @@ def collect_defender_support(root: Path) -> Iterable[ArtifactRecord]:
                 "parser_confidence": "medium",
                 "validation_required": True,
                 "validation_checks": validation_checks,
+                "core_accuracy_gates": system_core_accuracy_gates(
+                    "defender",
+                    {
+                        "source_path": str(path.resolve()),
+                        "source_hashes": {"sha256": compute_sha256(path)},
+                        "validation_checks": validation_checks,
+                        "interesting_entries": interesting,
+                    },
+                ),
                 "system_validation_matrix": system_validation_matrix("defender", validation_checks),
                 "system_report_grade_assessment": system_report_grade_assessment("defender", validation_checks),
                 "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
@@ -314,6 +336,15 @@ def collect_firewall_logs(root: Path) -> Iterable[ArtifactRecord]:
                 "parser_confidence": "medium" if rows else "low",
                 "validation_required": True,
                 "validation_checks": validation_checks,
+                "core_accuracy_gates": system_core_accuracy_gates(
+                    "firewall",
+                    {
+                        "source_path": str(path.resolve()),
+                        "source_hashes": {"sha256": compute_sha256(path)},
+                        "validation_checks": validation_checks,
+                        "sample_entries": rows[:20],
+                    },
+                ),
                 "system_validation_matrix": system_validation_matrix("firewall", validation_checks),
                 "system_report_grade_assessment": system_report_grade_assessment("firewall", validation_checks),
                 "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
@@ -727,6 +758,27 @@ def system_report_grade_assessment(artifact_family: str, checks: dict[str, objec
     }
 
 
+def system_core_accuracy_gates(artifact_family: str, details: dict[str, object]) -> list[dict[str, object]]:
+    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), dict) else {}
+    evidence_refs = [f"source_path:{details.get('source_path', '')}", f"family:{artifact_family}"]
+    if hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+
+    satisfied: list[str] = []
+    if details.get("risk_flags") or checks.get("interesting_entries_present") or checks.get("blocked_entries_present") or checks.get("persistence_terms_present"):
+        satisfied.append("event semantics and risk rules")
+    if artifact_family == "task-scheduler" and checks.get("taskcache_registry_validated"):
+        satisfied.append("Task XML/TaskCache correlation")
+    if artifact_family in {"defender", "firewall"} and (details.get("interesting_entries") or details.get("sample_entries")):
+        satisfied.append("Defender/Firewall field normalization")
+    if artifact_family == "wer" and checks.get("dump_file_correlated") and checks.get("cab_metadata_validated"):
+        satisfied.append("WER dump/cab linkage")
+    if artifact_family == "wmi" and checks.get("consumer_filter_binding_reconstructed"):
+        satisfied.append("WMI consumer/filter binding validation")
+    return [build_accuracy_gate(18, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
+
+
 def system_forensic_review(
     artifact_family: str,
     primary_evidence: list[str],
@@ -804,6 +856,16 @@ def normalized_wer_report(path: Path, fields: dict[str, str]) -> dict[str, objec
         "problem_signature": wer_problem_signature(fields),
         "validation_required": True,
         "validation_checks": validation_checks,
+        "core_accuracy_gates": system_core_accuracy_gates(
+            "wer",
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": {"sha256": compute_sha256(path)},
+                "validation_checks": validation_checks,
+                "report_id": report_id,
+                "problem_signature": wer_problem_signature(fields),
+            },
+        ),
         "system_validation_matrix": system_validation_matrix("wer", validation_checks),
         "system_report_grade_assessment": system_report_grade_assessment("wer", validation_checks),
         "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),
@@ -962,6 +1024,17 @@ def wmi_repository_pivots(path: Path) -> dict[str, object]:
         "parser_confidence": "medium" if interesting else "low",
         "validation_required": True,
         "validation_checks": validation_checks,
+        "core_accuracy_gates": system_core_accuracy_gates(
+            "wmi",
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": {"sha256": compute_sha256(path)},
+                "validation_checks": validation_checks,
+                "interesting_strings": interesting,
+                "path_candidates": path_candidates,
+                "url_candidates": url_candidates,
+            },
+        ),
         "system_validation_matrix": system_validation_matrix("wmi", validation_checks),
         "system_report_grade_assessment": system_report_grade_assessment("wmi", validation_checks),
         "system_native_capabilities": dict(SYSTEM_NATIVE_CAPABILITIES),

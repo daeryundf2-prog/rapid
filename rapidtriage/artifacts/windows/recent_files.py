@@ -162,7 +162,15 @@ def parse_lnk_metadata(path: Path) -> dict[str, object]:
         data = path.read_bytes()
     except OSError:
         return {"lnk_parse_status": "read-error"}
-    return parse_lnk_metadata_from_bytes(data)
+    metadata = parse_lnk_metadata_from_bytes(data)
+    metadata["core_accuracy_gates"] = lnk_core_accuracy_gates(
+        {
+            **metadata,
+            "source_path": str(path.resolve()),
+            "source_hashes": file_hashes(path),
+        }
+    )
+    return metadata
 
 
 def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
@@ -236,6 +244,22 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
         "tracker_data": tracker_data,
         "string_data_offset": string_offset,
         "validation_checks": validation_checks,
+        "core_accuracy_gates": lnk_core_accuracy_gates(
+            {
+                "validation_checks": validation_checks,
+                "target_path": target_path,
+                "working_dir": string_data.get("working_dir", ""),
+                "command_line_arguments": string_data.get("command_line_arguments", ""),
+                "link_info": link_info,
+                "tracker_data": tracker_data,
+                "target_created_at": windows_filetime_to_iso(read_u64(data, 0x1C)),
+                "target_accessed_at": windows_filetime_to_iso(read_u64(data, 0x24)),
+                "target_modified_at": windows_filetime_to_iso(read_u64(data, 0x2C)),
+                "link_flag_names": flag_names(link_flags, LNK_FLAG_NAMES),
+                "source_path": "",
+                "source_hashes": {},
+            }
+        ),
         "recent_validation_matrix": recent_validation_matrix(validation_checks),
         "recent_report_grade_assessment": report_grade,
         "recent_native_capabilities": JUMPLIST_CAPABILITIES,
@@ -298,6 +322,29 @@ def parse_lnk_shell_item_metadata(data: bytes, link_flags: int) -> dict[str, obj
         "item_count": len(items),
         "items": items,
     }
+
+
+def lnk_core_accuracy_gates(details: dict[str, object]) -> list[dict[str, object]]:
+    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
+    link_info = details.get("link_info") if isinstance(details.get("link_info"), dict) else {}
+    tracker_data = details.get("tracker_data") if isinstance(details.get("tracker_data"), dict) else {}
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), dict) else {}
+    evidence_refs = [f"source_path:{details.get('source_path', '')}"]
+    if hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+
+    satisfied: list[str] = []
+    if checks.get("has_valid_header") and details.get("link_flag_names") is not None:
+        satisfied.append("header flag consistency")
+    if details.get("target_path") or details.get("working_dir") or details.get("command_line_arguments"):
+        satisfied.append("target/working-dir/arguments extraction")
+    if link_info.get("local_base_path") or link_info.get("common_path_suffix"):
+        satisfied.append("drive/network metadata")
+    if tracker_data:
+        satisfied.append("tracker GUID validation")
+    if details.get("target_created_at") or details.get("target_accessed_at") or details.get("target_modified_at"):
+        satisfied.append("timestamp/source field provenance")
+    return [build_accuracy_gate(17, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
 def parse_lnk_extra_data(data: bytes, offset: int) -> tuple[list[dict[str, object]], dict[str, object]]:

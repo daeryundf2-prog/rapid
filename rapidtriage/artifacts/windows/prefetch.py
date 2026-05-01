@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from ...core.audit import compute_sha256
+from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review, isoformat_from_timestamp
 
@@ -101,6 +102,14 @@ class WindowsPrefetchProvider:
             source_hashes = {"sha256": compute_sha256(path)}
             validation_checks = header.get("prefetch_validation_checks") or {}
             report_grade = prefetch_report_grade_assessment(validation_checks)
+            core_accuracy_gates = prefetch_core_accuracy_gates(
+                {
+                    "source_path": str(path.resolve()),
+                    "source_hashes": source_hashes,
+                    "validation_checks": validation_checks,
+                    **header,
+                }
+            )
             yield ArtifactRecord(
                 provider=self.name,
                 artifact_type="prefetch-file",
@@ -127,6 +136,7 @@ class WindowsPrefetchProvider:
                     "timestamp_source": "prefetch_file_modified_at",
                     "evidence_strength": "execution-indicator",
                     "validation_required": True,
+                    "core_accuracy_gates": core_accuracy_gates,
                     "commercial_grade_ready": False,
                     "commercial_grade_blockers": list(PREFETCH_REPORT_GRADE_BLOCKERS),
                     "commercial_readiness_blockers": list(PREFETCH_COMMERCIAL_BLOCKERS),
@@ -292,6 +302,16 @@ def build_prefetch_reference_record(
     executable_name = str(header.get("header_executable_name") or executable_hint(path.name))
     validation_checks = header.get("prefetch_validation_checks") or {}
     report_grade = prefetch_report_grade_assessment(validation_checks)
+    core_accuracy_gates = prefetch_core_accuracy_gates(
+        {
+            "source_path": str(path.resolve()),
+            "source_hashes": dict(source_hashes),
+            "source_index": index,
+            "validation_checks": validation_checks,
+            **header,
+            "referenced_path": referenced_path,
+        }
+    )
     return ArtifactRecord(
         provider=WindowsPrefetchProvider.name,
         artifact_type="prefetch-reference",
@@ -320,6 +340,7 @@ def build_prefetch_reference_record(
             "timestamp_source": "prefetch_last_run_at",
             "evidence_strength": "prefetch-file-reference",
             "validation_required": True,
+            "core_accuracy_gates": core_accuracy_gates,
             "commercial_grade_ready": False,
             "commercial_grade_blockers": list(PREFETCH_REPORT_GRADE_BLOCKERS),
             "commercial_readiness_blockers": list(PREFETCH_COMMERCIAL_BLOCKERS),
@@ -514,6 +535,33 @@ def prefetch_report_grade_assessment(checks: object) -> dict[str, object]:
             "Correlate Prefetch run counts/timestamps with Amcache, ShimCache, SRUM, BAM, EVTX, and $MFT/$UsnJrnl.",
         ],
     }
+
+
+def prefetch_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:
+    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    version_metadata = (
+        details.get("prefetch_version_metadata")
+        if isinstance(details.get("prefetch_version_metadata"), Mapping)
+        else {}
+    )
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    evidence_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"source_index:{details.get('source_index', '')}",
+    ]
+    if hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+
+    satisfied: list[str] = []
+    if checks.get("has_scca_signature") or details.get("binary_format_detected"):
+        satisfied.append("SCCA/header validation")
+    if version_metadata.get("supported_common_layout"):
+        satisfied.append("version-specific section offsets")
+    if checks.get("run_count_present") or checks.get("last_run_times_present") or details.get("last_run_times"):
+        satisfied.append("run count and last-run timestamps")
+    if details.get("volume_candidates") or details.get("file_reference_candidates") or details.get("referenced_path"):
+        satisfied.append("volume/file metrics")
+    return [build_accuracy_gate(16, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
 def read_prefetch_executable_name(blob: bytes) -> str:

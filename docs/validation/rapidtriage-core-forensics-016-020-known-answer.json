@@ -1,0 +1,102 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #16-#20 internal fixture validation",
+  "status": "pass",
+  "datasets": [
+    {
+      "id": "core-forensics-016-prefetch-fixture",
+      "name": "#16 Prefetch fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [16],
+      "evidence_paths": [
+        "docs/validation/core-forensics-016-020-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Prefetch SCCA header, common version offsets, run count, last-run timestamps, volume/file candidates, and #16 core_accuracy_gates are emitted"
+        ]
+      },
+      "notes": "Internal fixture pass; PECmd cross-tool corpus, compressed PF, and file metrics validation remain commercial-grade evidence."
+    },
+    {
+      "id": "core-forensics-017-lnk-fixture",
+      "name": "#17 LNK fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [17],
+      "evidence_paths": [
+        "docs/validation/core-forensics-016-020-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Shell Link header, target path, working directory, tracker candidate, timestamp fields, and #17 core_accuracy_gates are emitted"
+        ]
+      },
+      "notes": "Internal fixture pass; LECmd cross-tool corpus and full shell-item property store validation remain required."
+    },
+    {
+      "id": "core-forensics-018-system-fixture",
+      "name": "#18 Windows system artifact fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [18],
+      "evidence_paths": [
+        "docs/validation/core-forensics-016-020-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Task/WMI risk semantics, Defender/Firewall/WER normalized fields, source hashes, and #18 core_accuracy_gates are emitted"
+        ]
+      },
+      "notes": "Internal fixture pass; TaskCache, WMI native decode, Defender/Firewall policy correlation, and WER dump/CAB linkage remain required."
+    },
+    {
+      "id": "core-forensics-019-browser-storage-fixture",
+      "name": "#19 Browser storage fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [19],
+      "evidence_paths": [
+        "docs/validation/core-forensics-016-020-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Browser storage inventory preserves profile attribution, cache/session/extension/sync/cookie stores, legal warning, and #19 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; full cache/session/schema decoding and audited secret handling remain required."
+    },
+    {
+      "id": "core-forensics-020-browser-timeline-fixture",
+      "name": "#20 Unified browser timeline fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [20],
+      "evidence_paths": [
+        "docs/validation/core-forensics-016-020-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Unified browser timeline rows preserve timestamps, profile attribution, source indices, limitation disclosure, and #20 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; multi-profile dedupe, Safari parity, deleted history, and version-specific transition validation remain required."
+    }
+  ]
+}

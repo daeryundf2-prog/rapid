@@ -214,6 +214,106 @@
               "cross-browser-timeline-known-answer-corpus-required"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": true,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": true,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": false
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+                  "browser:firefox",
+                  "profile:default-release",
+                  "source_sha256:a500ca837ddabfd418bd3103fb020923eb2d21ca85e4bfa38e2af8159573c99a"
+                ],
+                "gap_id": "#19",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "cache/session schema validation",
+                  "extension ID/source mapping"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "profile/source attribution",
+                  "cache/session schema validation",
+                  "extension ID/source mapping",
+                  "secret/cookie opt-in legal gate",
+                  "deleted/synced content warning"
+                ],
+                "satisfied_checks": [
+                  "profile/source attribution",
+                  "secret/cookie opt-in legal gate",
+                  "deleted/synced content warning"
+                ],
+                "status": "validation-required",
+                "title": "Browser cache/session/extension/sync artifacts"
+              },
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Users/alice/AppData/Roaming/Mozilla/Firefox/Profiles/default-release/places.sqlite",
+                  "browser:firefox",
+                  "profile:default-release",
+                  "source_sha256:a500ca837ddabfd418bd3103fb020923eb2d21ca85e4bfa38e2af8159573c99a"
+                ],
+                "gap_id": "#20",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "download target/source URL linkage",
+                  "multi-profile deduplication"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "timestamp normalization",
+                  "transition semantics",
+                  "download target/source URL linkage",
+                  "multi-profile deduplication",
+                  "Safari scope limitation disclosure"
+                ],
+                "satisfied_checks": [
+                  "timestamp normalization",
+                  "transition semantics",
+                  "Safari scope limitation disclosure"
+                ],
+                "status": "validation-required",
+                "title": "Chrome/Edge/Firefox/Safari unified browser timeline"
+              }
+            ],
             "coverage_status": "parsed",
             "download_count": 0,
             "downloads": [],
@@ -444,6 +544,106 @@
               "cross-browser-timeline-known-answer-corpus-required"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": true,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": true,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": false
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                  "browser:chrome",
+                  "profile:Default",
+                  "source_sha256:779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c"
+                ],
+                "gap_id": "#19",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "cache/session schema validation",
+                  "extension ID/source mapping"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "profile/source attribution",
+                  "cache/session schema validation",
+                  "extension ID/source mapping",
+                  "secret/cookie opt-in legal gate",
+                  "deleted/synced content warning"
+                ],
+                "satisfied_checks": [
+                  "profile/source attribution",
+                  "secret/cookie opt-in legal gate",
+                  "deleted/synced content warning"
+                ],
+                "status": "validation-required",
+                "title": "Browser cache/session/extension/sync artifacts"
+              },
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Users/alice/AppData/Local/Google/Chrome/User Data/Default/History",
+                  "browser:chrome",
+                  "profile:Default",
+                  "source_sha256:779f16740b6777f0df5007d78f4f412772a50aaa4d746ccee92293b94510aa6c"
+                ],
+                "gap_id": "#20",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "multi-profile deduplication"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "timestamp normalization",
+                  "transition semantics",
+                  "download target/source URL linkage",
+                  "multi-profile deduplication",
+                  "Safari scope limitation disclosure"
+                ],
+                "satisfied_checks": [
+                  "timestamp normalization",
+                  "transition semantics",
+                  "download target/source URL linkage",
+                  "Safari scope limitation disclosure"
+                ],
+                "status": "validation-required",
+                "title": "Chrome/Edge/Firefox/Safari unified browser timeline"
+              }
+            ],
             "coverage_status": "parsed",
             "download_count": 1,
             "downloads": [
@@ -752,6 +952,106 @@
               "cross-browser-timeline-known-answer-corpus-required"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": true,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": true,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": false
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+                  "browser:edge",
+                  "profile:Profile 1",
+                  "source_sha256:da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639"
+                ],
+                "gap_id": "#19",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "cache/session schema validation",
+                  "extension ID/source mapping"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "profile/source attribution",
+                  "cache/session schema validation",
+                  "extension ID/source mapping",
+                  "secret/cookie opt-in legal gate",
+                  "deleted/synced content warning"
+                ],
+                "satisfied_checks": [
+                  "profile/source attribution",
+                  "secret/cookie opt-in legal gate",
+                  "deleted/synced content warning"
+                ],
+                "status": "validation-required",
+                "title": "Browser cache/session/extension/sync artifacts"
+              },
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Users/alice/AppData/Local/Microsoft/Edge/User Data/Profile 1/History",
+                  "browser:edge",
+                  "profile:Profile 1",
+                  "source_sha256:da647054cafa048475860030861135cdd6222712c1befd0f4e851677e6533639"
+                ],
+                "gap_id": "#20",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "multi-profile deduplication"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "timestamp normalization",
+                  "transition semantics",
+                  "download target/source URL linkage",
+                  "multi-profile deduplication",
+                  "Safari scope limitation disclosure"
+                ],
+                "satisfied_checks": [
+                  "timestamp normalization",
+                  "transition semantics",
+                  "download target/source URL linkage",
+                  "Safari scope limitation disclosure"
+                ],
+                "status": "validation-required",
+                "title": "Chrome/Edge/Firefox/Safari unified browser timeline"
+              }
+            ],
             "coverage_status": "parsed",
             "download_count": 1,
             "downloads": [
@@ -1526,6 +1826,55 @@
               "validation-check-failed:has-shell-item-idlist"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/Case Notes.lnk",
+                  "source_sha256:9acc17da47c5d23d5d4c6307982fe7726fa5714d1fb26f5ae429d06b0a463f8d"
+                ],
+                "gap_id": "#17",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "drive/network metadata"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "header flag consistency",
+                  "target/working-dir/arguments extraction",
+                  "drive/network metadata",
+                  "tracker GUID validation",
+                  "timestamp/source field provenance"
+                ],
+                "satisfied_checks": [
+                  "header flag consistency",
+                  "target/working-dir/arguments extraction",
+                  "tracker GUID validation",
+                  "timestamp/source field provenance"
+                ],
+                "status": "validation-required",
+                "title": "LNK full metadata parser"
+              }
+            ],
             "description": "",
             "embedded_paths": [
               "C:\\Users\\alice\\Documents\\Case Notes.docx",
@@ -9430,6 +9779,56 @@
               "Trace chains, directory strings, and file information sections are not fully version-validated.",
               "Known-answer corpus validation across malformed, compressed, and cross-version Prefetch files is incomplete."
             ],
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
+                  "source_index:",
+                  "source_sha256:4ed0441ececfe85a462ba5770a37ae31ada11a969d8a3f75ab7fa567ed6c0d5a"
+                ],
+                "gap_id": "#16",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "compressed PF handling"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "SCCA/header validation",
+                  "version-specific section offsets",
+                  "run count and last-run timestamps",
+                  "volume/file metrics",
+                  "compressed PF handling"
+                ],
+                "satisfied_checks": [
+                  "SCCA/header validation",
+                  "version-specific section offsets",
+                  "run count and last-run timestamps",
+                  "volume/file metrics"
+                ],
+                "status": "validation-required",
+                "title": "Prefetch full version parser"
+              }
+            ],
             "coverage_status": "detected",
             "declared_file_size": 512,
             "entry_name": "POWERSHELL.EXE-12345678.pf",
@@ -9635,6 +10034,56 @@
               "Trace chains, directory strings, and file information sections are not fully version-validated.",
               "Known-answer corpus validation across malformed, compressed, and cross-version Prefetch files is incomplete."
             ],
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/Prefetch/POWERSHELL.EXE-12345678.pf",
+                  "source_index:0",
+                  "source_sha256:4ed0441ececfe85a462ba5770a37ae31ada11a969d8a3f75ab7fa567ed6c0d5a"
+                ],
+                "gap_id": "#16",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "compressed PF handling"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "SCCA/header validation",
+                  "version-specific section offsets",
+                  "run count and last-run timestamps",
+                  "volume/file metrics",
+                  "compressed PF handling"
+                ],
+                "satisfied_checks": [
+                  "SCCA/header validation",
+                  "version-specific section offsets",
+                  "run count and last-run timestamps",
+                  "volume/file metrics"
+                ],
+                "status": "validation-required",
+                "title": "Prefetch full version parser"
+              }
+            ],
             "coverage_status": "native-reference-string",
             "evidence_strength": "prefetch-file-reference",
             "executable_hint": "POWERSHELL.EXE",
@@ -9776,6 +10225,56 @@
               "known-answer-system-artifact-corpus-required"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Windows Defender/Support/MPLog-20260426.log",
+                  "family:defender",
+                  "source_sha256:122bb5f0a02d6904c5818a5d7f2da3553f01bdb37d85500fb4c69afe770ad731"
+                ],
+                "gap_id": "#18",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "Task XML/TaskCache correlation",
+                  "WER dump/cab linkage",
+                  "WMI consumer/filter binding validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "event semantics and risk rules",
+                  "Task XML/TaskCache correlation",
+                  "Defender/Firewall field normalization",
+                  "WER dump/cab linkage",
+                  "WMI consumer/filter binding validation"
+                ],
+                "satisfied_checks": [
+                  "event semantics and risk rules",
+                  "Defender/Firewall field normalization"
+                ],
+                "status": "validation-required",
+                "title": "WER/Defender/Firewall/Task Scheduler/WMI deep parser"
+              }
+            ],
             "coverage_status": "defender-mplog-triage",
             "entry_count": 3,
             "forensic_review": {
@@ -9905,6 +10404,56 @@
               "known-answer-system-artifact-corpus-required"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/System32/LogFiles/Firewall/pfirewall.log",
+                  "family:firewall",
+                  "source_sha256:a96274791ced73ab67dd0987a4e08f5f813c1c5b543fda3cc501d163bd462f3e"
+                ],
+                "gap_id": "#18",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "Task XML/TaskCache correlation",
+                  "WER dump/cab linkage",
+                  "WMI consumer/filter binding validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "event semantics and risk rules",
+                  "Task XML/TaskCache correlation",
+                  "Defender/Firewall field normalization",
+                  "WER dump/cab linkage",
+                  "WMI consumer/filter binding validation"
+                ],
+                "satisfied_checks": [
+                  "event semantics and risk rules",
+                  "Defender/Firewall field normalization"
+                ],
+                "status": "validation-required",
+                "title": "WER/Defender/Firewall/Task Scheduler/WMI deep parser"
+              }
+            ],
             "coverage_status": "firewall-w3c-log-normalized",
             "entry_count": 2,
             "forensic_review": {
@@ -10063,6 +10612,56 @@
               "task-history-event-correlation-not-implemented"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/System32/Tasks/Microsoft/Windows/UpdateOrchestrator/SecurityUpdater",
+                  "family:task-scheduler",
+                  "source_sha256:67f0d7c2747654b49140ab0a51f30fcf2ff41d4792b2b60bc77725f32b897f79"
+                ],
+                "gap_id": "#18",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "Task XML/TaskCache correlation",
+                  "Defender/Firewall field normalization",
+                  "WER dump/cab linkage",
+                  "WMI consumer/filter binding validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "event semantics and risk rules",
+                  "Task XML/TaskCache correlation",
+                  "Defender/Firewall field normalization",
+                  "WER dump/cab linkage",
+                  "WMI consumer/filter binding validation"
+                ],
+                "satisfied_checks": [
+                  "event semantics and risk rules"
+                ],
+                "status": "validation-required",
+                "title": "WER/Defender/Firewall/Task Scheduler/WMI deep parser"
+              }
+            ],
             "coverage_status": "task-xml-normalized",
             "evidence_strength": "persistence-configuration",
             "executable_name": "powershell.exe",
@@ -10246,6 +10845,55 @@
               "wer-cab-metadata-validation-not-implemented"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/ProgramData/Microsoft/Windows/WER/ReportArchive/AppCrash_powershell.exe_123/Report.wer",
+                  "family:wer",
+                  "source_sha256:83260608bb0ab69fd0500bc550a6d55a26881c92c36dd12f3b35cd13f2c01b36"
+                ],
+                "gap_id": "#18",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "event semantics and risk rules",
+                  "Task XML/TaskCache correlation",
+                  "Defender/Firewall field normalization",
+                  "WER dump/cab linkage",
+                  "WMI consumer/filter binding validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "event semantics and risk rules",
+                  "Task XML/TaskCache correlation",
+                  "Defender/Firewall field normalization",
+                  "WER dump/cab linkage",
+                  "WMI consumer/filter binding validation"
+                ],
+                "satisfied_checks": [],
+                "status": "validation-required",
+                "title": "WER/Defender/Firewall/Task Scheduler/WMI deep parser"
+              }
+            ],
             "coverage_status": "wer-key-value-normalized",
             "event_time": "2026-04-26T01:04:05+00:00",
             "event_type": "APPCRASH",
@@ -10420,6 +11068,55 @@
               "known-answer-system-artifact-corpus-required"
             ],
             "commercial_grade_ready": false,
+            "core_accuracy_gates": [
+              {
+                "accuracy_controls": {
+                  "cross_tool_diff_required": true,
+                  "hash_required": true,
+                  "known_answer_required": true,
+                  "legal_or_authority_gate_required": false,
+                  "offset_or_record_id_required": true,
+                  "secret_redaction_required": false,
+                  "source_provenance_required": true,
+                  "timezone_or_timestamp_semantics_required": true
+                },
+                "commercial_grade_ready": false,
+                "default_reportability": "validation-required",
+                "evidence_refs": [
+                  "source_path:<ROOT>/Windows/System32/wbem/Repository/OBJECTS.DATA",
+                  "family:wmi",
+                  "source_sha256:460fe33f8af0c81663b71e4c639af092c35bcc4b79c00e4574b1ea2a21741148"
+                ],
+                "gap_id": "#18",
+                "minimum_evidence": [
+                  "source file or export hash",
+                  "tool/parser version and command",
+                  "expected-answer manifest",
+                  "observed RapidTriage output",
+                  "record-level or row-level diff",
+                  "reviewer sign-off and limitation note"
+                ],
+                "missing_required_checks": [
+                  "event semantics and risk rules",
+                  "Task XML/TaskCache correlation",
+                  "Defender/Firewall field normalization",
+                  "WER dump/cab linkage",
+                  "WMI consumer/filter binding validation"
+                ],
+                "next_validation_step": "Attach known-answer corpus output, cross-tool diff, and reviewer sign-off before report-grade claims.",
+                "profile_version": "core-forensics-accuracy-v1",
+                "required_checks": [
+                  "event semantics and risk rules",
+                  "Task XML/TaskCache correlation",
+                  "Defender/Firewall field normalization",
+                  "WER dump/cab linkage",
+                  "WMI consumer/filter binding validation"
+                ],
+                "satisfied_checks": [],
+                "status": "validation-required",
+                "title": "WER/Defender/Firewall/Task Scheduler/WMI deep parser"
+              }
+            ],
             "coverage_status": "bounded-string-pivot",
             "entry_name": "OBJECTS.DATA",
             "extracted_string_count": 1,

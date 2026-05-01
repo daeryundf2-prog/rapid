@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
 from urllib.parse import parse_qs, unquote_plus, urlparse
 
+from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import (
     build_forensic_review,
@@ -317,6 +318,25 @@ def build_browser_artifacts(
         "browser_storage_inventory": storage_inventory,
         "unified_timeline": unified_timeline,
         "browser_validation_checks": validation_checks,
+        "core_accuracy_gates": browser_core_accuracy_gates(
+            {
+                "source_path": str(source_path.resolve()),
+                "source_hashes": source_hashes,
+                "source_profile": build_source_profile_metadata(
+                    user=user,
+                    browser=browser,
+                    profile=profile,
+                    source_path=source_path,
+                ),
+                "history_rows": history_rows,
+                "download_rows": download_rows,
+                "storage_inventory": storage_inventory,
+                "unified_timeline": unified_timeline,
+                "browser": browser,
+                "profile": profile,
+                "validation_checks": validation_checks,
+            }
+        ),
         "browser_validation_matrix": browser_validation_matrix(validation_checks),
         "browser_report_grade_assessment": report_grade,
         "browser_native_capabilities": dict(BROWSER_NATIVE_CAPABILITIES),
@@ -600,6 +620,22 @@ def build_browser_storage_inventory_record(
                 "sample_file_hashes_present": any(row.get("sample_files") for row in storage_inventory),
                 "requires_scope_review": sensitive_count > 0,
             },
+            "core_accuracy_gates": browser_core_accuracy_gates(
+                {
+                    "source_path": str(profile_dir.resolve()),
+                    "source_profile": {
+                        "user": user,
+                        "browser": browser,
+                        "profile": profile,
+                        "profile_dir": str(profile_dir.resolve()),
+                    },
+                    "storage_inventory": storage_inventory,
+                    "browser": browser,
+                    "profile": profile,
+                    "validation_checks": validation_context,
+                    "secret_validation_checks": secret_validation_checks,
+                }
+            ),
             "secret_handling_validation_checks": secret_validation_checks,
             "browser_secret_handling_assessment": browser_secret_handling_assessment(secret_validation_checks),
             "secret_handling_forensic_review": build_forensic_review(
@@ -738,6 +774,51 @@ def browser_report_grade_assessment(checks: Mapping[str, object]) -> Dict[str, o
             "Correlate unified browser timeline rows with filesystem, downloads, Zone.Identifier, EVTX, and cloud/app exports.",
         ],
     }
+
+
+def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:
+    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    storage_inventory = [
+        item for item in details.get("storage_inventory") or [] if isinstance(item, Mapping)
+    ]
+    timeline = [item for item in details.get("unified_timeline") or [] if isinstance(item, Mapping)]
+    downloads = [item for item in details.get("download_rows") or [] if isinstance(item, Mapping)]
+    source_profile = details.get("source_profile") if isinstance(details.get("source_profile"), Mapping) else {}
+    evidence_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"browser:{details.get('browser', '')}",
+        f"profile:{details.get('profile', '')}",
+    ]
+    if hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+
+    item19: list[str] = []
+    if source_profile or details.get("browser") or details.get("profile"):
+        item19.append("profile/source attribution")
+    if storage_inventory:
+        item19.append("cache/session schema validation")
+    if any(str(row.get("storage_type") or "") == "extension" or "extension" in str(row.get("storage_name") or "") for row in storage_inventory):
+        item19.append("extension ID/source mapping")
+    if details.get("secret_validation_checks") or checks.get("sensitive_storage_inventory_present") is not None:
+        item19.append("secret/cookie opt-in legal gate")
+    if any(str(row.get("storage_type") or "") in {"sync", "session"} for row in storage_inventory) or not BROWSER_NATIVE_CAPABILITIES["cross_browser_deleted_session_recovery"]:
+        item19.append("deleted/synced content warning")
+
+    item20: list[str] = []
+    if timeline:
+        item20.append("timestamp normalization")
+    if any(str(row.get("transition") or "") for row in timeline) or checks.get("visit_transition_metadata_present"):
+        item20.append("transition semantics")
+    if downloads and any(row.get("target_path") and (row.get("source_url") or row.get("tab_url")) for row in downloads):
+        item20.append("download target/source URL linkage")
+    if not BROWSER_NATIVE_CAPABILITIES["safari_windows_profile_support"]:
+        item20.append("Safari scope limitation disclosure")
+
+    return [
+        build_accuracy_gate(19, satisfied_checks=item19, evidence_refs=evidence_refs),
+        build_accuracy_gate(20, satisfied_checks=item20, evidence_refs=evidence_refs),
+    ]
 
 
 def browser_secret_handling_validation_checks(sensitive_count: int) -> Dict[str, object]:
