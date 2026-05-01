@@ -444,6 +444,17 @@ def build_record(
                 validation_checks=validation_checks,
             ),
             "mobile_report_grade_assessment": report_grade,
+            "commercial_uplift_evidence": mobile_commercial_uplift_evidence(
+                artifact_type=artifact_type,
+                source_tool=source_tool,
+                source_format=source_format,
+                source_index=source_index,
+                source_hashes=source_hashes,
+                gap_ids=gap_ids,
+                validation_checks=validation_checks,
+                report_grade=report_grade,
+                details=detail_payload,
+            ),
             "mobile_native_capabilities": mobile_native_capabilities(artifact_type),
             "core_accuracy_gates": core_accuracy_gates,
             "forensic_review": build_mobile_forensic_review(
@@ -1664,6 +1675,80 @@ def mobile_validation_matrix(
             "severity": "critical",
         },
     ]
+
+
+def mobile_commercial_uplift_evidence(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    gap_ids: list[str],
+    validation_checks: Mapping[str, object],
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    matrix = mobile_validation_matrix(
+        artifact_type=artifact_type,
+        source_tool=source_tool,
+        validation_checks=validation_checks,
+    )
+    item_numbers = sorted(
+        {
+            int(gap_id.lstrip("#"))
+            for gap_id in gap_ids
+            if gap_id.startswith("#") and gap_id.lstrip("#").isdigit() and 26 <= int(gap_id.lstrip("#")) <= 30
+        }
+    )
+    if not item_numbers:
+        item_numbers = [26]
+    objectives = {
+        26: "Expose vendor mobile export import evidence, source hashes, normalized row identity, and vendor-setting blockers.",
+        27: "Expose iOS backup Manifest/plist evidence, domain/file mapping, and protected/encrypted backup blockers.",
+        28: "Expose iOS keychain inventory evidence with redaction, authority gate, and no-secret-reveal blockers.",
+        29: "Expose Android backup/app-data evidence with package attribution and encrypted-store/schema blockers.",
+        30: "Expose Android APK/app package evidence with manifest, permission, DEX/native inventory, and signature-analysis blockers.",
+    }
+    source_refs = [
+        f"source_tool:{source_tool}",
+        f"source_format:{source_format}",
+        f"source_index:{source_index}",
+        f"source_sha256:{source_hashes.get('sha256', '')}",
+        f"artifact_type:{artifact_type}",
+    ]
+    for key in ("service", "package", "domain", "relative_path", "database_name", "plist_name"):
+        value = optional_text(details.get(key))
+        if value:
+            source_refs.append(f"{key}:{value}")
+    return {
+        "batch_id": "commercial-uplift-026-030",
+        "item_numbers": item_numbers,
+        "implementation_track": "mobile-and-app-import-validation",
+        "objective": " ".join(objectives[number] for number in item_numbers if number in objectives),
+        "source_refs": source_refs,
+        "passed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+        ],
+        "failed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+        ],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "max_rows_per_source": MAX_ROWS_PER_SOURCE,
+            "max_ios_backup_files": MAX_IOS_BACKUP_FILES,
+            "max_sqlite_tables": MAX_SQLITE_TABLES,
+            "max_chat_db_sample_rows": MAX_CHAT_DB_SAMPLE_ROWS,
+            "source_index": source_index,
+            "vendor_export_settings_verified": bool(validation_checks.get("vendor_export_settings_verified")),
+            "original_acquisition_hash_verified": bool(validation_checks.get("original_acquisition_hash_verified")),
+            "protected_values_redacted_by_default": not bool(validation_checks.get("secrets_extracted")),
+            "known_answer_mobile_corpus_required": True,
+        },
+        "next_internal_step": "Add vendor schema/version mappers, iOS protected-data validation, Android backup payload decoding, and mobile known-answer FP/FN corpora.",
+        "external_evidence_required": True,
+    }
 
 
 def mobile_core_accuracy_gates(

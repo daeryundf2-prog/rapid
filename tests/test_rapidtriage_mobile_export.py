@@ -73,6 +73,12 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("duplicate/deleted semantics", message_gate["satisfied_checks"])
             self.assertIn("source hash and acquisition linkage", message_gate["satisfied_checks"])
             self.assertIn("schema version compatibility warning", message_gate["satisfied_checks"])
+            message_uplift = message["details"]["commercial_uplift_evidence"]
+            self.assertEqual(message_uplift["batch_id"], "commercial-uplift-026-030")
+            self.assertEqual(message_uplift["item_numbers"], [26])
+            self.assertIn("source-hash-present", message_uplift["passed_validation_matrix_ids"])
+            self.assertIn("vendor-settings-verified", message_uplift["failed_validation_matrix_ids"])
+            self.assertEqual(message_uplift["large_data_controls"]["max_rows_per_source"], 50000)
 
             chat_messages = [
                 artifact
@@ -188,6 +194,10 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("encrypted backup authority gate", ios_gate["satisfied_checks"])
             self.assertIn("app database schema detection", ios_gate["satisfied_checks"])
             self.assertIn("deleted-record limitation warning", ios_gate["satisfied_checks"])
+            ios_uplift = ios_file["details"]["commercial_uplift_evidence"]
+            self.assertEqual(ios_uplift["item_numbers"], [27])
+            self.assertIn("protected-data-boundary", ios_uplift["passed_validation_matrix_ids"])
+            self.assertIn("known-answer-mobile-validation", ios_uplift["failed_validation_matrix_ids"])
 
             ios_metadata = next(
                 artifact
@@ -213,6 +223,10 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("authority gate before reveal/decrypt", keychain_gate["satisfied_checks"])
             self.assertIn("record count/table inventory", keychain_gate["satisfied_checks"])
             self.assertIn("audit log for any controlled reveal", keychain_gate["satisfied_checks"])
+            keychain_uplift = keychain["details"]["commercial_uplift_evidence"]
+            self.assertEqual(keychain_uplift["item_numbers"], [28])
+            self.assertTrue(keychain_uplift["large_data_controls"]["protected_values_redacted_by_default"])
+            self.assertIn("protected-data-boundary", keychain_uplift["passed_validation_matrix_ids"])
 
             chat_db = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-chat-database")
             self.assertEqual(chat_db["details"]["service"], "WhatsApp")

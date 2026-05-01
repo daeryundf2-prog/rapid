@@ -152,6 +152,7 @@ def build_apk_record(path: Path) -> ArtifactRecord:
         ),
     )
     details.setdefault("core_accuracy_gates", android_core_accuracy_gates(30, details))
+    details["commercial_uplift_evidence"] = android_commercial_uplift_evidence(details, gap_ids=[30])
     return ArtifactRecord(
         provider=AndroidApkProvider.name,
         artifact_type="android-apk",
@@ -395,6 +396,7 @@ def build_android_app_data_record(path: Path, package: str) -> ArtifactRecord:
             {
                 "valid_zip": True,
                 "manifest_decoded": False,
+                "package_inferred_from_path": True,
                 "source_hash_present": True,
                 "app_specific_database_decoded": False,
                 "commercial_validation_corpus": False,
@@ -425,6 +427,7 @@ def build_android_app_data_record(path: Path, package: str) -> ArtifactRecord:
         *android_core_accuracy_gates(29, details),
         *android_core_accuracy_gates(30, details),
     ]
+    details["commercial_uplift_evidence"] = android_commercial_uplift_evidence(details, gap_ids=[29, 30])
     return ArtifactRecord(
         provider=AndroidApkProvider.name,
         artifact_type="android-app-data",
@@ -562,6 +565,48 @@ def android_validation_matrix(checks: dict[str, object]) -> list[dict[str, objec
             "severity": "critical",
         },
     ]
+
+
+def android_commercial_uplift_evidence(details: dict[str, object], *, gap_ids: list[int]) -> dict[str, object]:
+    checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
+    matrix = details.get("android_validation_matrix")
+    if not isinstance(matrix, list):
+        matrix = android_validation_matrix(checks)
+    hashes = details.get("hashes") if isinstance(details.get("hashes"), dict) else {}
+    objectives = {
+        29: "Expose Android backup/app-data package attribution, source hashing, category risk flags, and encrypted-store/app-schema blockers.",
+        30: "Expose Android APK package metadata, permission/component inventory, DEX/native string pivots, and signature/binary-manifest blockers.",
+    }
+    return {
+        "batch_id": "commercial-uplift-026-030",
+        "item_numbers": sorted(gap_ids),
+        "implementation_track": "android-app-and-backup-validation",
+        "objective": " ".join(objectives[number] for number in sorted(gap_ids) if number in objectives),
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"source_format:{details.get('source_format', '')}",
+            f"package:{details.get('package', '')}",
+            f"source_sha256:{hashes.get('sha256', '')}",
+        ],
+        "passed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, dict) and item.get("passed")
+        ],
+        "failed_validation_matrix_ids": [
+            str(item.get("id")) for item in matrix if isinstance(item, dict) and not item.get("passed")
+        ],
+        "commercial_blockers": list(ANDROID_REPORT_GRADE_BLOCKERS),
+        "large_data_controls": {
+            "apk_string_scan_limit": APK_STRING_SCAN_LIMIT,
+            "max_app_data_files": MAX_APP_DATA_FILES,
+            "source_size": int(details.get("source_size") or 0),
+            "dex_count": int(details.get("dex_count") or 0),
+            "native_library_count": int(details.get("native_library_count") or 0),
+            "secret_values_extracted": bool(checks.get("secret_values_extracted")),
+            "known_answer_android_corpus_required": True,
+        },
+        "next_internal_step": "Add binary AndroidManifest decoding, signature-chain verification, app-specific schema decoders, and Android known-answer validation.",
+        "external_evidence_required": True,
+    }
 
 
 def android_report_grade_assessment(gap_ids: list[str]) -> dict[str, object]:

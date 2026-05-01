@@ -69,6 +69,12 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertIn("signature chain validation", apk_gate["satisfied_checks"])
             self.assertIn("DEX/native string pivot bounds", apk_gate["satisfied_checks"])
             self.assertIn("app-data schema and secret-handling warnings", apk_gate["satisfied_checks"])
+            apk_uplift = details["commercial_uplift_evidence"]
+            self.assertEqual(apk_uplift["batch_id"], "commercial-uplift-026-030")
+            self.assertEqual(apk_uplift["item_numbers"], [30])
+            self.assertIn("source-readable", apk_uplift["passed_validation_matrix_ids"])
+            self.assertIn("signature-and-binary-manifest", apk_uplift["failed_validation_matrix_ids"])
+            self.assertEqual(apk_uplift["large_data_controls"]["apk_string_scan_limit"], 1024 * 1024)
 
             app_data = next(item for item in payload["artifacts"] if item["artifact_type"] == "android-app-data")
             self.assertEqual(app_data["details"]["package"], "com.example.spy")
@@ -88,6 +94,11 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertIn("encrypted-store limitation", app_data_gates["#29"]["satisfied_checks"])
             self.assertIn("app-specific schema version tracking", app_data_gates["#29"]["satisfied_checks"])
             self.assertIn("app-data schema and secret-handling warnings", app_data_gates["#30"]["satisfied_checks"])
+            app_data_uplift = app_data["details"]["commercial_uplift_evidence"]
+            self.assertEqual(app_data_uplift["item_numbers"], [29, 30])
+            self.assertIn("manifest-or-package-context", app_data_uplift["passed_validation_matrix_ids"])
+            self.assertIn("app-data-report-grade", app_data_uplift["failed_validation_matrix_ids"])
+            self.assertFalse(app_data_uplift["large_data_controls"]["secret_values_extracted"])
 
 
 def write_apk_fixture(path: Path) -> None:
