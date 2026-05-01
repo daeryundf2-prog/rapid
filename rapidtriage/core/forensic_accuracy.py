@@ -848,6 +848,146 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "near-duplicate limitation warning",
         ),
     },
+    {
+        "number": 61,
+        "title": "Fuzzy search/stemming/regex proximity search",
+        "surface": "search mode/options, exact/fuzzy/regex/stem matching, proximity summaries, hit pointers, and verification warnings",
+        "corpus": "search fixtures with typos, suffix variants, regex patterns, proximity windows, and false-positive terms",
+        "oracle": "hand-labeled query-hit manifest, regex engine expectations, and source-row verification checklist",
+        "required_checks": (
+            "query mode and options recorded",
+            "fuzzy/stemming/regex matching available",
+            "proximity metadata preserved",
+            "matched hit source pointers",
+            "source verification limitation warning",
+        ),
+    },
+    {
+        "number": 62,
+        "title": "Saved keyword pack library",
+        "surface": "built-in packs, custom JSON packs, keyword counts, pack provenance, and validation blockers",
+        "corpus": "keyword-pack fixtures with built-in names, custom JSON lists, duplicate terms, and case search replay",
+        "oracle": "expected keyword expansion manifest and saved-search/replay review notes",
+        "required_checks": (
+            "built-in pack inventory",
+            "custom JSON pack support",
+            "deduplicated keyword expansion",
+            "pack provenance recorded",
+            "case-specific validation warning",
+        ),
+    },
+    {
+        "number": 63,
+        "title": "IOC/TI enrichment plugin",
+        "surface": "URL/domain/IP/hash pivots, local rules, offline TI feeds, feed provenance, and local-only warnings",
+        "corpus": "indicator fixtures with URLs, domains, IPs, hashes, local rule hits, and JSON/CSV/TXT TI feeds",
+        "oracle": "hand-labeled IOC set, local rule expected matches, and feed provenance manifest",
+        "required_checks": (
+            "indicator extraction and source links",
+            "local rule match preservation",
+            "offline feed provenance",
+            "match mode recorded",
+            "local-only/no-external-call warning",
+        ),
+    },
+    {
+        "number": 64,
+        "title": "Report citation manager",
+        "surface": "citation IDs, review/source citation pairs, source references, report-use hints, and export counts",
+        "corpus": "Case DB report fixtures with reviewed files, artifacts, searches, source references, and missing-source edge cases",
+        "oracle": "expected citation index manifest and reviewer report citation checklist",
+        "required_checks": (
+            "review citation IDs",
+            "source-record citation IDs",
+            "source reference preserved",
+            "citation count summary",
+            "report-use verification warning",
+        ),
+    },
+    {
+        "number": 65,
+        "title": "Evidence selection/version history",
+        "surface": "review history rows, changed fields, actors, timestamps, previous/current states, and report inclusion",
+        "corpus": "Case DB fixtures with status changes, include-in-report changes, batch review, and export replay",
+        "oracle": "expected review history manifest, audit trail, and analyst sign-off checklist",
+        "required_checks": (
+            "versioned review history rows",
+            "changed fields captured",
+            "previous/current state captured",
+            "report inclusion history",
+            "multi-user/signing limitation warning",
+        ),
+    },
+    {
+        "number": 66,
+        "title": "100k/1M/10M record benchmark",
+        "surface": "benchmark metrics, p50/p95 search latency, records/sec, memory, scale matrix, and hardware blockers",
+        "corpus": "synthetic and real benchmark runs at 100k, 1M, and 10M records with preserved run summaries",
+        "oracle": "benchmark JSON/Markdown, hardware profile, dependency versions, and threshold comparison sheet",
+        "required_checks": (
+            "scale matrix emitted",
+            "ingest/search metrics captured",
+            "memory/output size captured",
+            "run summary linked",
+            "hardware-scale limitation warning",
+        ),
+    },
+    {
+        "number": 67,
+        "title": "1TB-10TB evidence stress test",
+        "surface": "stress scenarios, wall-clock estimates, resource caps, failure thresholds, runbook, and evidence requirements",
+        "corpus": "large-evidence stress runs or runbooks for 1TB, 5TB, and 10TB cases",
+        "oracle": "hardware run logs, resource telemetry, checkpoint output, crash logs, and independent reproduction notes",
+        "required_checks": (
+            "TB-scale scenarios emitted",
+            "resource caps specified",
+            "failure thresholds specified",
+            "required evidence bundle listed",
+            "real-hardware validation warning",
+        ),
+    },
+    {
+        "number": 68,
+        "title": "Incremental indexing",
+        "surface": "input fingerprints, changed-source detection, resume safety, bounded file scan metadata, and reuse warnings",
+        "corpus": "run fixtures with unchanged inputs, changed mtimes/sizes, truncated fingerprints, and resume attempts",
+        "oracle": "expected fingerprint/reuse manifest and repeated-run output comparison",
+        "required_checks": (
+            "input fingerprint emitted",
+            "path/size/mtime metadata captured",
+            "changed-source reuse disabled",
+            "truncation disclosure",
+            "per-file reindex limitation warning",
+        ),
+    },
+    {
+        "number": 69,
+        "title": "Background job queue",
+        "surface": "queued/running/completed/failed/canceled statuses, persisted state, steps, cancellation flags, and retry support",
+        "corpus": "job-store fixtures with queued, failed, canceled, retried, imported, and completed runs",
+        "oracle": "expected job state JSON, step transition log, and web/API workflow assertions",
+        "required_checks": (
+            "job status persisted",
+            "step progress recorded",
+            "state-file persistence",
+            "cancel/retry state recorded",
+            "local-threadpool limitation warning",
+        ),
+    },
+    {
+        "number": 70,
+        "title": "Stage checkpoint/resume hardening",
+        "surface": "stage checkpoints, output paths/sizes, reused flags, resume effective state, and failed-stage limitations",
+        "corpus": "run fixtures with fresh runs, resume runs, changed fingerprints, and partial/missing stage outputs",
+        "oracle": "expected checkpoint manifest and resumed-run output comparison",
+        "required_checks": (
+            "stage checkpoints emitted",
+            "output path and size captured",
+            "reused flag captured",
+            "resume status summarized",
+            "partial-stage limitation warning",
+        ),
+    },
 )
 
 
@@ -856,11 +996,11 @@ def build_core_forensics_accuracy_profiles() -> dict[str, object]:
     return {
         "version": CORE_FORENSIC_ACCURACY_VERSION,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "scope": "#1-#60 validation and accuracy reinforcement",
+        "scope": "#1-#70 validation and accuracy reinforcement",
         "profile_count": len(profiles),
         "commercial_gap_ids": [f"#{item['number']}" for item in profiles],
         "status": "accuracy-profiles-ready",
-        "release_gate": "Each #1-#60 parser claim must attach pass/fail evidence against its profile before report-grade wording.",
+        "release_gate": "Each #1-#70 parser claim must attach pass/fail evidence against its profile before report-grade wording.",
         "profiles": profiles,
     }
 
@@ -905,10 +1045,10 @@ def build_accuracy_profile(item: Mapping[str, object]) -> dict[str, object]:
             "hash_required": True,
             "timezone_or_timestamp_semantics_required": number in {
                 1, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 20, 22, 23, 24, 26, 27, 29, 31, 32,
-                33, 34, 35, 36, 37, 38, 39, 40, 43, 44, 45, 49, 51, 55, 57, 58, 59,
+                33, 34, 35, 36, 37, 38, 39, 40, 43, 44, 45, 49, 51, 55, 57, 58, 59, 64, 65, 66, 67,
             },
-            "secret_redaction_required": number in {19, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 40, 41, 42},
-            "legal_or_authority_gate_required": number in {19, 22, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38, 39, 40, 41, 42},
+            "secret_redaction_required": number in {19, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 40, 41, 42, 63},
+            "legal_or_authority_gate_required": number in {19, 22, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38, 39, 40, 41, 42, 63, 64, 65},
             "cross_tool_diff_required": True,
             "known_answer_required": True,
         },
@@ -977,4 +1117,4 @@ def accuracy_profile_for_item(number: int) -> dict[str, object]:
     for item in CORE_FORENSIC_ACCURACY_ITEMS:
         if int(item["number"]) == number:
             return build_accuracy_profile(item)
-    raise KeyError(f"unknown #1-#60 forensic accuracy item: {number}")
+    raise KeyError(f"unknown #1-#70 forensic accuracy item: {number}")

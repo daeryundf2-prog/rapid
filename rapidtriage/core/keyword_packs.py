@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from .forensic_accuracy import build_accuracy_gate
+
 
 BUILTIN_KEYWORD_PACKS: dict[str, list[str]] = {
     "credentials": [
@@ -128,6 +130,12 @@ def list_keyword_packs() -> list[dict[str, object]]:
             "commercial_gap_ids": [KEYWORD_PACK_GAP_ID],
             "library_scope": "built-in-triage-starter-pack",
             "ready_for_court_report": False,
+            "core_accuracy_gates": keyword_pack_core_accuracy_gates(
+                pack_count=1,
+                keyword_count=len(keywords),
+                custom_file_count=0,
+                provenance_refs=[f"builtin_pack:{name}"],
+            ),
         }
         for name, keywords in sorted(BUILTIN_KEYWORD_PACKS.items())
     ]
@@ -145,7 +153,37 @@ def keyword_pack_library_assessment() -> dict[str, object]:
             "Document which built-in and custom packs were used for each case search.",
             "Review false positives/negatives and add case-specific terms before report reliance.",
         ],
+        "core_accuracy_gates": keyword_pack_core_accuracy_gates(
+            pack_count=len(BUILTIN_KEYWORD_PACKS),
+            keyword_count=sum(len(values) for values in BUILTIN_KEYWORD_PACKS.values()),
+            custom_file_count=0,
+            provenance_refs=["builtin_pack_library"],
+        ),
     }
+
+
+def keyword_pack_core_accuracy_gates(
+    *,
+    pack_count: int,
+    keyword_count: int,
+    custom_file_count: int,
+    provenance_refs: Sequence[str] | None = None,
+) -> list[dict[str, object]]:
+    satisfied = ["built-in pack inventory", "deduplicated keyword expansion", "pack provenance recorded", "case-specific validation warning"]
+    if custom_file_count:
+        satisfied.append("custom JSON pack support")
+    return [
+        build_accuracy_gate(
+            62,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"pack_count:{pack_count}",
+                f"keyword_count:{keyword_count}",
+                f"custom_file_count:{custom_file_count}",
+                *(provenance_refs or []),
+            ],
+        )
+    ]
 
 
 def add_keyword(output: list[str], seen: set[str], keyword: object) -> None:

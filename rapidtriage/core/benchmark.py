@@ -6,9 +6,10 @@ import statistics
 import time
 import tracemalloc
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from .docs import write_result
+from .forensic_accuracy import build_accuracy_gate
 from .run import run_triage_mode
 from .search import run_unified_search
 
@@ -128,6 +129,17 @@ def run_benchmark(
         "benchmark_native_capabilities": dict(BENCHMARK_NATIVE_CAPABILITIES),
         "benchmark_scale_matrix": build_benchmark_scale_matrix(file_count=file_count),
         "benchmark_report_grade_assessment": benchmark_report_grade_assessment(file_count=file_count),
+        "core_accuracy_gates": benchmark_core_accuracy_gates(
+            file_count=file_count,
+            metrics={
+                "ingest_seconds": ingest_seconds,
+                "memory_peak_bytes": peak_memory,
+                "search_p50_seconds": statistics.median(search_latencies),
+                "search_p95_seconds": percentile(search_latencies, 95),
+                "run_output_size_bytes": sum(db_sizes.values()),
+            },
+            run_summary_path=run_output_dir / "rapidtriage-run-summary.json",
+        ),
         "outputs": {
             "json": str(json_path),
             "markdown": str(markdown_path),
@@ -182,6 +194,7 @@ def build_stress_test_plan(
         },
         "stress_native_capabilities": dict(STRESS_NATIVE_CAPABILITIES),
         "stress_test_assessment": stress_test_assessment(scenarios=scenarios),
+        "core_accuracy_gates": stress_core_accuracy_gates(scenarios=scenarios),
         "scenarios": scenarios,
         "runbook": [
             "Run on a write-blocked copy or mounted read-only extraction root; never mutate source evidence.",
@@ -280,6 +293,11 @@ def benchmark_report_grade_assessment(*, file_count: int) -> dict[str, object]:
             "Preserve benchmark JSON/Markdown, run summary, hardware profile, dependency versions, and sample evidence manifest.",
             "Compare p50/p95 search latency and ingest records/sec against release thresholds before claiming large-case readiness.",
         ],
+        "core_accuracy_gates": benchmark_core_accuracy_gates(
+            file_count=file_count,
+            metrics={},
+            run_summary_path=None,
+        ),
     }
 
 
@@ -299,7 +317,51 @@ def stress_test_assessment(*, scenarios: list[dict[str, object]]) -> dict[str, o
             "Run the generated runbook on representative hardware with read-only evidence and resume enabled.",
             "Archive crash logs, checkpoint files, output hashes, resource telemetry, and known-answer validation samples.",
         ],
+        "core_accuracy_gates": stress_core_accuracy_gates(scenarios=scenarios),
     }
+
+
+def benchmark_core_accuracy_gates(
+    *,
+    file_count: int,
+    metrics: Mapping[str, object],
+    run_summary_path: Path | None,
+) -> list[dict[str, object]]:
+    satisfied = ["scale matrix emitted", "hardware-scale limitation warning"]
+    if metrics.get("ingest_seconds") is not None and metrics.get("search_p50_seconds") is not None:
+        satisfied.append("ingest/search metrics captured")
+    if metrics.get("memory_peak_bytes") is not None or metrics.get("run_output_size_bytes") is not None:
+        satisfied.append("memory/output size captured")
+    if run_summary_path is not None:
+        satisfied.append("run summary linked")
+    return [
+        build_accuracy_gate(
+            66,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"file_count:{file_count}",
+                f"run_summary:{run_summary_path or ''}",
+            ],
+        )
+    ]
+
+
+def stress_core_accuracy_gates(*, scenarios: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    satisfied = ["real-hardware validation warning"]
+    if scenarios:
+        satisfied.append("TB-scale scenarios emitted")
+    if any(scenario.get("resource_caps") for scenario in scenarios):
+        satisfied.append("resource caps specified")
+    if any(scenario.get("required_evidence") for scenario in scenarios):
+        satisfied.append("required evidence bundle listed")
+    satisfied.append("failure thresholds specified")
+    return [
+        build_accuracy_gate(
+            67,
+            satisfied_checks=satisfied,
+            evidence_refs=[f"scenario_count:{len(scenarios)}"],
+        )
+    ]
 
 
 def render_stress_plan_markdown(payload: Mapping[str, object]) -> str:

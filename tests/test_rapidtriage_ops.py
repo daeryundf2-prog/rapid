@@ -113,6 +113,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("search_p50_seconds", payload["metrics"])
             self.assertIn("#66", payload["summary"]["commercial_gap_ids"])
             self.assertIn("#66", payload["benchmark_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(payload["core_accuracy_gates"][0]["gap_id"], "#66")
+            self.assertIn("ingest/search metrics captured", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertFalse(payload["benchmark_native_capabilities"]["continuous_10m_record_gate"])
             self.assertEqual([row["label"] for row in payload["benchmark_scale_matrix"]], ["100k", "1M", "10M"])
 
@@ -148,6 +150,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("parser_crash_rate_percent", payload["failure_thresholds"])
             self.assertIn("#67", payload["summary"]["commercial_gap_ids"])
             self.assertIn("#67", payload["stress_test_assessment"]["commercial_gap_ids"])
+            self.assertEqual(payload["core_accuracy_gates"][0]["gap_id"], "#67")
+            self.assertIn("TB-scale scenarios emitted", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("#67", payload["scenarios"][0]["commercial_gap_ids"])
             self.assertFalse(payload["stress_native_capabilities"]["actual_1tb_10tb_execution"])
 
@@ -618,8 +622,11 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn(canceled.status, {"queued", "running", "canceled", "failed"})
             self.assertTrue(canceled.cancellation_requested)
             self.assertIn("#69", canceled.to_dict()["job_queue_assessment"]["commercial_gap_ids"])
+            self.assertEqual(canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["gap_id"], "#69")
+            self.assertIn("step progress recorded", canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("#80", canceled.to_dict()["cancellation_retry_assessment"]["commercial_gap_ids"])
             self.assertTrue(all("#69" in step["commercial_gap_ids"] for step in canceled.to_dict()["steps"]))
+            self.assertTrue(all(step["core_accuracy_gates"][0]["gap_id"] == "#69" for step in canceled.to_dict()["steps"]))
             self.assertTrue(all("#80" in step["operational_gap_ids"] for step in canceled.to_dict()["steps"]))
             store._executor.shutdown(wait=True)
 

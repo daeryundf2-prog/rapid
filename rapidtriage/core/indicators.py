@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import urlparse
 
+from .forensic_accuracy import build_accuracy_gate
 from .rules import RuleSet
 
 URL_RE = re.compile(r"https?://[^\s\]\[\)\(\}\{\"'<>]+", re.IGNORECASE)
@@ -105,6 +106,7 @@ def build_indicator_summary(
         "ti_feed_sources": ti_feed_sources,
         "indicator_native_capabilities": dict(INDICATOR_NATIVE_CAPABILITIES),
         "ti_enrichment_assessment": ti_enrichment_assessment(ti_feed_sources=ti_feed_sources),
+        "core_accuracy_gates": ioc_ti_core_accuracy_gates(indicators=indicators, ti_feed_sources=ti_feed_sources),
         "indicators": indicators,
     }
 
@@ -372,7 +374,35 @@ def ti_enrichment_assessment(*, ti_feed_sources: Sequence[Mapping[str, object]])
             "Preserve local TI feed files with name/version/path and explain why they were trusted.",
             "Treat enrichment as a triage label until corroborated by source evidence, timestamps, and network context.",
         ],
+        "core_accuracy_gates": ioc_ti_core_accuracy_gates(indicators=[], ti_feed_sources=ti_feed_sources),
     }
+
+
+def ioc_ti_core_accuracy_gates(
+    *,
+    indicators: Sequence[Mapping[str, object]],
+    ti_feed_sources: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    satisfied = ["local-only/no-external-call warning"]
+    if any(item.get("sources") for item in indicators):
+        satisfied.append("indicator extraction and source links")
+    if any(item.get("matched_rules") for item in indicators):
+        satisfied.append("local rule match preservation")
+    if ti_feed_sources:
+        satisfied.append("offline feed provenance")
+    if any(isinstance(item.get("ti_enrichment"), Mapping) and item["ti_enrichment"].get("matched_on") for item in indicators):
+        satisfied.append("match mode recorded")
+    return [
+        build_accuracy_gate(
+            63,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"indicator_count:{len(indicators)}",
+                f"ti_feed_count:{len(ti_feed_sources)}",
+                f"matched_rule_count:{sum(1 for item in indicators if item.get('matched_rules'))}",
+            ],
+        )
+    ]
 
 
 def normalize_feed_type(value: str) -> str:

@@ -29,6 +29,7 @@ from .docs import build_manifest, run_docs_search, write_result
 from .e01 import E01ExtractionError, E01ExtractionResult, extract_e01_to_directory, is_e01_path
 from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, SUPPORTED_DOC_KINDS, run_extract
 from .files import run_files_scan
+from .forensic_accuracy import build_accuracy_gate
 from .indicators import build_indicator_summary
 from .input_root import InputRoot, derive_child_input_root, resolve_input_root
 from .reporting import build_run_report_context, render_run_markdown_report
@@ -261,6 +262,19 @@ def run_triage_mode(
     if resume and previous_fingerprint and previous_fingerprint.get("fingerprint") != current_fingerprint.get("fingerprint"):
         effective_resume = False
         resume_disabled_reason = "input fingerprint changed; rebuilding stage outputs"
+        current_fingerprint["core_accuracy_gates"] = incremental_indexing_core_accuracy_gates(
+            scanned_files=int(current_fingerprint.get("summary", {}).get("scanned_file_count", 0))
+            if isinstance(current_fingerprint.get("summary"), Mapping)
+            else 0,
+            max_files=int(current_fingerprint.get("summary", {}).get("max_files", 0))
+            if isinstance(current_fingerprint.get("summary"), Mapping)
+            else 0,
+            truncated=bool(current_fingerprint.get("summary", {}).get("truncated", False))
+            if isinstance(current_fingerprint.get("summary"), Mapping)
+            else False,
+            fingerprint=str(current_fingerprint.get("fingerprint") or ""),
+            reuse_disabled=True,
+        )
     write_result(current_fingerprint, fingerprint_path)
 
     reused_outputs: set[str] = set()
@@ -827,6 +841,13 @@ def build_run_input_fingerprint(root: Path, *, max_files: int = 5000) -> Dict[st
             max_files=max_files,
             truncated=truncated,
         ),
+        "core_accuracy_gates": incremental_indexing_core_accuracy_gates(
+            scanned_files=scanned_files,
+            max_files=max_files,
+            truncated=truncated,
+            fingerprint=hasher.hexdigest(),
+            reuse_disabled=False,
+        ),
     }
 
 
@@ -841,6 +862,16 @@ def record_run_checkpoint(records: list[dict[str, object]], stage: str, path: Pa
             "reused": reused,
             "recorded_at": dt.datetime.now().isoformat(),
             "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
+            "core_accuracy_gates": checkpoint_resume_core_accuracy_gates(
+                checkpoints=[{
+                    "stage": stage,
+                    "output": str(path),
+                    "size_bytes": path.stat().st_size if path.is_file() else None,
+                    "reused": reused,
+                }],
+                resume_requested=False,
+                resume_effective=False,
+            ),
         }
     )
 
@@ -878,6 +909,11 @@ def write_run_checkpoints(
             resume_effective=resume_effective,
             checkpoints=checkpoints,
         ),
+        "core_accuracy_gates": checkpoint_resume_core_accuracy_gates(
+            checkpoints=checkpoints,
+            resume_requested=resume_requested,
+            resume_effective=resume_effective,
+        ),
         "checkpoints": [dict(item) for item in checkpoints],
     }
     write_result(payload, path)
@@ -901,6 +937,13 @@ def incremental_indexing_assessment(*, scanned_files: int, max_files: int, trunc
             "Preserve rapidtriage-run-fingerprint.json with resumed run outputs.",
             "Rebuild outputs when the fingerprint changes or when bounded fingerprint truncation is unacceptable.",
         ],
+        "core_accuracy_gates": incremental_indexing_core_accuracy_gates(
+            scanned_files=scanned_files,
+            max_files=max_files,
+            truncated=truncated,
+            fingerprint="assessment",
+            reuse_disabled=False,
+        ),
     }
 
 
@@ -926,7 +969,67 @@ def checkpoint_resume_assessment(
             "Review each checkpoint status, output path, size, and reused flag before relying on resumed results.",
             "Keep checkpoint and fingerprint files together with the run summary for reproducibility.",
         ],
+        "core_accuracy_gates": checkpoint_resume_core_accuracy_gates(
+            checkpoints=checkpoints,
+            resume_requested=resume_requested,
+            resume_effective=resume_effective,
+        ),
     }
+
+
+def incremental_indexing_core_accuracy_gates(
+    *,
+    scanned_files: int,
+    max_files: int,
+    truncated: bool,
+    fingerprint: str,
+    reuse_disabled: bool,
+) -> list[dict[str, object]]:
+    satisfied = ["input fingerprint emitted", "path/size/mtime metadata captured", "per-file reindex limitation warning"]
+    if reuse_disabled:
+        satisfied.append("changed-source reuse disabled")
+    if truncated or max_files:
+        satisfied.append("truncation disclosure")
+    return [
+        build_accuracy_gate(
+            68,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"fingerprint:{fingerprint}",
+                f"scanned_file_count:{scanned_files}",
+                f"max_files:{max_files}",
+                f"truncated:{truncated}",
+            ],
+        )
+    ]
+
+
+def checkpoint_resume_core_accuracy_gates(
+    *,
+    checkpoints: Sequence[Mapping[str, object]],
+    resume_requested: bool,
+    resume_effective: bool,
+) -> list[dict[str, object]]:
+    satisfied = ["partial-stage limitation warning"]
+    if checkpoints:
+        satisfied.append("stage checkpoints emitted")
+    if any(item.get("output") and item.get("size_bytes") is not None for item in checkpoints):
+        satisfied.append("output path and size captured")
+    if any("reused" in item for item in checkpoints):
+        satisfied.append("reused flag captured")
+    if resume_requested or resume_effective or checkpoints:
+        satisfied.append("resume status summarized")
+    return [
+        build_accuracy_gate(
+            70,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"checkpoint_count:{len(checkpoints)}",
+                f"resume_requested:{resume_requested}",
+                f"resume_effective:{resume_effective}",
+            ],
+        )
+    ]
 
 
 def prepare_run_input_root(

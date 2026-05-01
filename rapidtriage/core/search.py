@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, Mapping, Sequence
 from .analysis import build_search_analysis
 from .docs import build_preview, extract_text
 from .files import CATEGORY_RULES
+from .forensic_accuracy import build_accuracy_gate
 
 IMAGE_EXTS = set(CATEGORY_RULES["images"]["extensions"])
 SEARCH_FEATURE_GAP_ID = "#61"
@@ -121,6 +122,7 @@ def run_unified_search(
         },
         "search_native_capabilities": dict(SEARCH_NATIVE_CAPABILITIES),
         "search_report_grade_assessment": search_report_grade_assessment(),
+        "core_accuracy_gates": search_core_accuracy_gates(matches=matches, options=search_options),
     }
     if include_analysis:
         payload["analysis"] = build_search_analysis(matches, normalized)
@@ -568,6 +570,32 @@ def search_report_grade_assessment() -> dict[str, object]:
             "Open the source viewer and verify the row, offset, hash, and parser limitations before report inclusion.",
         ],
     }
+
+
+def search_core_accuracy_gates(
+    *,
+    matches: Sequence[Mapping[str, object]],
+    options: Mapping[str, object],
+) -> list[dict[str, object]]:
+    satisfied = ["query mode and options recorded", "source verification limitation warning"]
+    mode = normalize_search_mode(str(options.get("search_mode") or "exact"))
+    if mode in {"exact", "fuzzy", "regex"} and SEARCH_NATIVE_CAPABILITIES["fuzzy_levenshtein_search"]:
+        satisfied.append("fuzzy/stemming/regex matching available")
+    if int(options.get("proximity_window") or 0) > 0:
+        satisfied.append("proximity metadata preserved")
+    if any(match.get("pointer") for match in matches):
+        satisfied.append("matched hit source pointers")
+    return [
+        build_accuracy_gate(
+            61,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"search_mode:{mode}",
+                f"match_count:{len(matches)}",
+                f"proximity_window:{int(options.get('proximity_window') or 0)}",
+            ],
+        )
+    ]
 
 
 def proximity_summary(text: str, keywords: Sequence[str], *, window: int) -> dict[str, object]:

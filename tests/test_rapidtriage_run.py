@@ -238,10 +238,15 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertGreaterEqual(checkpoints["summary"]["reused_count"], 5)
             self.assertIn("#70", checkpoints["summary"]["commercial_gap_ids"])
             self.assertIn("#70", checkpoints["checkpoint_resume_assessment"]["commercial_gap_ids"])
+            self.assertEqual(checkpoints["core_accuracy_gates"][0]["gap_id"], "#70")
+            self.assertIn("stage checkpoints emitted", checkpoints["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("#70", checkpoints["checkpoints"][0]["commercial_gap_ids"])
+            self.assertEqual(checkpoints["checkpoints"][0]["core_accuracy_gates"][0]["gap_id"], "#70")
             fingerprint = json.loads((output_dir / "rapidtriage-run-fingerprint.json").read_text(encoding="utf-8"))
             self.assertIn("#68", fingerprint["summary"]["commercial_gap_ids"])
             self.assertIn("#68", fingerprint["incremental_indexing_assessment"]["commercial_gap_ids"])
+            self.assertEqual(fingerprint["core_accuracy_gates"][0]["gap_id"], "#68")
+            self.assertIn("input fingerprint emitted", fingerprint["core_accuracy_gates"][0]["satisfied_checks"])
 
             step_statuses = {step["name"]: step["status"] for step in summary_payload["steps"]}
             self.assertEqual(step_statuses["docs"], "reused")

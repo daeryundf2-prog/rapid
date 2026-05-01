@@ -2656,6 +2656,7 @@ def load_review_history(
                 "current": parse_json_object(row["current_json"]),
                 "commercial_gap_ids": ["#65"],
                 "history_status": "immutable-version-row",
+                "core_accuracy_gates": evidence_selection_core_accuracy_gates(history_rows=[dict(row)]),
             }
         )
     return history
@@ -2687,6 +2688,7 @@ def build_report_citation_index(items: Sequence[Mapping[str, object]]) -> list[d
                 "source_reference": item.get("source_reference") or {},
                 "commercial_gap_ids": ["#64"],
                 "report_use": "cite-source-record-with-review-decision",
+                "core_accuracy_gates": citation_manager_core_accuracy_gates(citation_count=1, has_source_reference=bool(item.get("source_reference"))),
             }
     return [citations[key] for key in sorted(citations)]
 
@@ -2706,6 +2708,10 @@ def build_report_citation_manager(citation_index: Sequence[Mapping[str, object]]
             "Confirm every report item has both a review citation and source-record citation.",
             "Preserve the exported citation index with the report and source hash manifest.",
         ],
+        "core_accuracy_gates": citation_manager_core_accuracy_gates(
+            citation_count=len(citation_index),
+            has_source_reference=any(bool(item.get("source_reference")) for item in citation_index),
+        ),
     }
 
 
@@ -2726,7 +2732,51 @@ def build_evidence_selection_version_history(items: Sequence[Mapping[str, object
             "Review version rows for status, verification, tags, assignee, priority, and include-in-report changes.",
             "Export the Case DB report JSON with the final report so selection history remains reproducible.",
         ],
+        "core_accuracy_gates": evidence_selection_core_accuracy_gates(history_rows=[
+            history
+            for item in items
+            if isinstance(item.get("review_history"), list)
+            for history in item.get("review_history", [])
+            if isinstance(history, Mapping)
+        ]),
     }
+
+
+def citation_manager_core_accuracy_gates(*, citation_count: int, has_source_reference: bool) -> list[dict[str, object]]:
+    satisfied = ["citation count summary", "report-use verification warning"]
+    if citation_count:
+        satisfied.extend(["review citation IDs", "source-record citation IDs"])
+    if has_source_reference:
+        satisfied.append("source reference preserved")
+    return [
+        build_accuracy_gate(
+            64,
+            satisfied_checks=satisfied,
+            evidence_refs=[f"citation_count:{citation_count}", f"has_source_reference:{has_source_reference}"],
+        )
+    ]
+
+
+def evidence_selection_core_accuracy_gates(*, history_rows: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    satisfied = ["multi-user/signing limitation warning"]
+    if history_rows:
+        satisfied.append("versioned review history rows")
+    if any(item.get("changed_fields") or item.get("changed_fields_json") for item in history_rows):
+        satisfied.append("changed fields captured")
+    if any(item.get("previous") is not None or item.get("previous_json") for item in history_rows):
+        satisfied.append("previous/current state captured")
+    if any(
+        "include_in_report" in json.dumps(item, ensure_ascii=False, sort_keys=True)
+        for item in history_rows
+    ):
+        satisfied.append("report inclusion history")
+    return [
+        build_accuracy_gate(
+            65,
+            satisfied_checks=satisfied,
+            evidence_refs=[f"review_history_count:{len(history_rows)}"],
+        )
+    ]
 
 
 def build_custody_workflow(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:

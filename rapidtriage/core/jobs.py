@@ -8,8 +8,9 @@ import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Mapping
+from typing import Dict, List, Mapping, Sequence
 
+from .forensic_accuracy import build_accuracy_gate
 from .rules import RuleConfigError, load_rule_set
 from .run import RunModeError, run_triage_mode
 
@@ -415,6 +416,12 @@ def default_job_steps() -> List[Dict[str, object]]:
             "message": "",
             "commercial_gap_ids": [BACKGROUND_JOB_GAP_ID],
             "operational_gap_ids": [BACKGROUND_JOB_GAP_ID, LONG_RUNNING_JOB_GAP_ID],
+            "core_accuracy_gates": job_queue_core_accuracy_gates(
+                status="pending",
+                steps=[],
+                state_persisted=False,
+                cancellation_requested=False,
+            ),
         }
         for name in JOB_STEP_NAMES
     ]
@@ -435,6 +442,12 @@ def update_step(steps: List[Dict[str, object]], name: str, status: str, *, messa
                     "message": "",
                     "commercial_gap_ids": [BACKGROUND_JOB_GAP_ID],
                     "operational_gap_ids": [BACKGROUND_JOB_GAP_ID, LONG_RUNNING_JOB_GAP_ID],
+                    "core_accuracy_gates": job_queue_core_accuracy_gates(
+                        status="pending",
+                        steps=output,
+                        state_persisted=False,
+                        cancellation_requested=False,
+                    ),
                 }
             )
     timestamp = now_iso()
@@ -448,6 +461,12 @@ def update_step(steps: List[Dict[str, object]], name: str, status: str, *, messa
         step["message"] = message
         step["commercial_gap_ids"] = [BACKGROUND_JOB_GAP_ID]
         step["operational_gap_ids"] = [BACKGROUND_JOB_GAP_ID, LONG_RUNNING_JOB_GAP_ID]
+        step["core_accuracy_gates"] = job_queue_core_accuracy_gates(
+            status=status,
+            steps=output,
+            state_persisted=False,
+            cancellation_requested=False,
+        )
         if status == "running" and not step.get("started_at"):
             step["started_at"] = timestamp
         if status in {"completed", "failed", "skipped", "canceled"}:
@@ -477,7 +496,42 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
             "job-queue-is-local-process-threadpool-not-distributed-worker-system",
             "per-parser-progress-percent-and-resource-telemetry-remain-limited",
         ],
+        "core_accuracy_gates": job_queue_core_accuracy_gates(
+            status=job.status,
+            steps=job.steps,
+            state_persisted=True,
+            cancellation_requested=job.cancellation_requested,
+        ),
     }
+
+
+def job_queue_core_accuracy_gates(
+    *,
+    status: str,
+    steps: Sequence[Mapping[str, object]],
+    state_persisted: bool,
+    cancellation_requested: bool,
+) -> list[dict[str, object]]:
+    satisfied = ["local-threadpool limitation warning"]
+    if status:
+        satisfied.append("job status persisted")
+    if steps:
+        satisfied.append("step progress recorded")
+    if state_persisted:
+        satisfied.append("state-file persistence")
+    if cancellation_requested or status in {"failed", "canceled"}:
+        satisfied.append("cancel/retry state recorded")
+    return [
+        build_accuracy_gate(
+            69,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"job_status:{status}",
+                f"step_count:{len(steps)}",
+                f"cancellation_requested:{cancellation_requested}",
+            ],
+        )
+    ]
 
 
 def cancellation_retry_assessment(job: RunJob) -> Dict[str, object]:

@@ -156,6 +156,13 @@
       "type": "object",
       "additionalProperties": true
     },
+    "core_accuracy_gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
     "indicators": {
       "type": "array",
       "items": {

@@ -1,0 +1,98 @@
+{
+  "schema": "rapidtriage-fixture-evidence-v1",
+  "scope": "#61-#70 internal fixture validation",
+  "status": "pass",
+  "generated_for": "RapidTriage commercial-readiness internal validated maturity gate",
+  "evidence": [
+    {
+      "item": 61,
+      "title": "Fuzzy search/stemming/regex proximity search",
+      "test_files": ["tests/test_rapidtriage_search_analysis.py"],
+      "assertions": [
+        "Search output preserves query mode/options, fuzzy/stem/regex behavior, proximity metadata, source pointers, verification warnings, and #61 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Large multilingual query relevance corpus and UI query-builder validation."]
+    },
+    {
+      "item": 62,
+      "title": "Saved keyword pack library",
+      "test_files": ["tests/test_rapidtriage_api.py", "tests/test_rapidtriage_search_analysis.py"],
+      "assertions": [
+        "Keyword-pack API and resolver preserve built-in inventory, deduplicated expansion, pack provenance, custom JSON support, and #62 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Signed pack library, per-case editing UI, and release-reviewed pack versions."]
+    },
+    {
+      "item": 63,
+      "title": "IOC/TI enrichment plugin",
+      "test_files": ["tests/test_rapidtriage_indicators.py"],
+      "assertions": [
+        "Indicator summaries preserve source links, local rules, offline feed provenance, matched_on mode, local-only warning, and #63 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Signed feeds, STIX/TAXII import, confidence decay, and feed trust workflow."]
+    },
+    {
+      "item": 64,
+      "title": "Report citation manager",
+      "test_files": ["tests/test_rapidtriage_case_db.py"],
+      "assertions": [
+        "Case DB report exports preserve citation IDs, source references, citation counts, report-use warnings, and #64 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Exhibit numbering UI, jurisdiction templates, and full source-hash completeness validation."]
+    },
+    {
+      "item": 65,
+      "title": "Evidence selection/version history",
+      "test_files": ["tests/test_rapidtriage_case_db.py"],
+      "assertions": [
+        "Review history preserves version rows, changed fields, previous/current state, include-in-report changes, and #65 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Multi-user signed history, conflict handling, and database-level append-only enforcement."]
+    },
+    {
+      "item": 66,
+      "title": "100k/1M/10M record benchmark",
+      "test_files": ["tests/test_rapidtriage_ops.py"],
+      "assertions": [
+        "Benchmark output preserves scale matrix, ingest/search metrics, memory/output size, run-summary link, and #66 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Published 100k/1M/10M hardware runs and release thresholds."]
+    },
+    {
+      "item": 67,
+      "title": "1TB-10TB evidence stress test",
+      "test_files": ["tests/test_rapidtriage_ops.py"],
+      "assertions": [
+        "Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, and #67 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Actual 1TB-10TB hardware runs, bottleneck logs, and independent reproduction."]
+    },
+    {
+      "item": 68,
+      "title": "Incremental indexing",
+      "test_files": ["tests/test_rapidtriage_run.py"],
+      "assertions": [
+        "Run fingerprint output preserves path/size/mtime metadata, truncation disclosure, reuse safety, and #68 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Per-file content-hash incremental reindexing and large-case validation."]
+    },
+    {
+      "item": 69,
+      "title": "Background job queue",
+      "test_files": ["tests/test_rapidtriage_ops.py"],
+      "assertions": [
+        "Job payloads preserve job status, step progress, state-file persistence assessment, cancel/retry state, and #69 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Distributed workers, parser-level progress percentages, and cancellation validation under load."]
+    },
+    {
+      "item": 70,
+      "title": "Stage checkpoint/resume hardening",
+      "test_files": ["tests/test_rapidtriage_run.py"],
+      "assertions": [
+        "Run checkpoint output preserves stage outputs, sizes, reused flags, resume state, partial-stage warnings, and #70 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Mid-parser checkpointing, failed-stage resume, and long-running case replay validation."]
+    }
+  ]
+}

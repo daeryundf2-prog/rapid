@@ -210,8 +210,8 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `safety.resume`, `safety.resume_effective`, `safety.resume_disabled_reason`, and `safety.reused_outputs` describe whether stage output reuse was requested, allowed, and applied.
 - `resource_caps` records bounded extraction/fingerprint/preview settings, and `safety.artifact_scheduler` records the bounded parallel artifact scheduler strategy.
 - `rapidtriage-run-fingerprint.json` stores a bounded source tree fingerprint with scanned file count, total size, latest mtime, max files, and truncation status.
-- `rapidtriage-run-fingerprint.json` stores #68 bounded path/size/mtime fingerprint metadata, truncation status, and incremental-indexing validation guidance.
-- `rapidtriage-run-checkpoints.json` stores #70 per-stage output paths, existence, size, reused flag, status counts, resume assessment, and the input fingerprint used for resume decisions.
+- `rapidtriage-run-fingerprint.json` stores #68 bounded path/size/mtime fingerprint metadata, truncation status, incremental-indexing validation guidance, and #68 `core_accuracy_gates`.
+- `rapidtriage-run-checkpoints.json` stores #70 per-stage output paths, existence, size, reused flag, status counts, resume assessment, the input fingerprint used for resume decisions, and #70 `core_accuracy_gates`.
 - Run `processing` now includes #71 parser-crash isolation, #72 memory-cap enforcement, and #75 parallel parser scheduler assessments. Isolated parser failures are written as parser-specific artifact JSON with `parser_errors` instead of silently dropping the stage.
 - Validation packages include #81 known-answer manifest status, #82 parser fixture corpus coverage, #83 parser false-positive/false-negative notes, #84 independent validation report hash metadata, and #85 validation package/hash-manifest assessment fields.
 - Case DB report exports include #86 custody workflow, #87 acquisition hash workflow, #88 export-time audit hash chain, #89 deterministic report reproducibility hash, and #90 source provenance metadata on each selected report item.
@@ -234,7 +234,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
   - `ocr`
   - `analysis` unless `--no-analysis` is used
 - Each match includes `source`, `kind`, `path`, `title`, `matched_keywords`, `preview`, `pointer`, `metadata`, and `search_match`.
-- `options.search_mode` is `exact`, `fuzzy`, or `regex`; `search_match` records #61 matching mode, fuzzy distance where applicable, proximity-window result when requested, and validation-required status.
+- `options.search_mode` is `exact`, `fuzzy`, or `regex`; `search_match` records #61 matching mode, fuzzy distance where applicable, proximity-window result when requested, and validation-required status. Top-level `core_accuracy_gates` records #61 query-mode, matching, proximity, pointer, and source-verification checks.
 - `analysis.clusters` groups repeated hits by source, kind, extension, folder, and keyword, with representative match indices, #46 status, and review hints so large searches can be triaged before opening every row.
 - `analysis.entities` extracts bounded pattern/field-based people, account, email, phone, URL, domain, IPv4, and hash pivots linked back to match indices with #47 status.
 - `analysis.graph` emits capped nodes and edges for match-path-keyword-entity relationships for the web relationship view with #48 graph limitations.
@@ -288,6 +288,11 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `duckdb_parquet_query` is either `queried` with p50/p95 query timing or `skipped` with an install hint when DuckDB/Parquet evidence is unavailable.
 - `commercial_readiness.ready_for_1m_10m_claim` must remain `false` for synthetic-only runs; release verification checks this disclosure to prevent overclaiming.
 
+### `benchmark` And `stress-plan`
+
+- `benchmark` outputs include #66 scale matrix rows, ingest/search metrics, memory/output sizes, run-summary links, report-grade assessment, and #66 `core_accuracy_gates`.
+- `stress-plan` outputs include #67 TB-scale scenarios, resource caps, failure thresholds, required evidence bundles, real-hardware validation warnings, and #67 `core_accuracy_gates`.
+
 ### `columnar-convert`
 
 - Output: machine-readable stdout and `OUTPUT.parquet.conversion.json`.
@@ -327,15 +332,15 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - Supported indicator types are `url`, `domain`, `ip`, `md5`, `sha1`, and `sha256`.
 - Source rows keep the originating run output, output path, JSON pointer, and path/artifact/event context where available.
 - When `--rules` is provided, matching local IOC rules are emitted as `matched_rules`; no external threat-intelligence API is contacted by default.
-- When `--ti-feed` is provided, matching local feed rows are emitted as #63 `ti_enrichment` with `severity`, `classification`, `source`, `note`, feed provenance, validation status, and local-only assessment. `summary.enriched_indicator_count` counts enriched IOCs.
+- When `--ti-feed` is provided, matching local feed rows are emitted as #63 `ti_enrichment` with `severity`, `classification`, `source`, `note`, feed provenance, validation status, and local-only assessment. `summary.enriched_indicator_count` counts enriched IOCs, and top-level `core_accuracy_gates` records #63 extraction, rule, feed, match-mode, and no-external-call checks.
 
 ### `case-db-report`
 
 - Output: `case-db-report` JSON from `rapidtriage case-db-report`.
 - Top-level keys include `command`, `generated_at`, `database`, `case`, `options`, `summary`, `citation_index`, and `items`.
-- `citation_index` links #64 review decision citations to source-record citations with target type/id, title, path, source-reference metadata, and report-use hints where available.
+- `citation_index` links #64 review decision citations to source-record citations with target type/id, title, path, source-reference metadata, report-use hints, and citation `core_accuracy_gates` where available.
 - Each item includes `review_citation_id`, `target_citation_id`, `review`, `review_history`, `source_reference`, `review_priority`, #64/#65 gap metadata, and the underlying source metadata.
-- `review_history` is ordered by version and records #65 changed fields, actor, timestamp, previous state, and current state for report-inclusion and review decision traceability.
+- `review_history` is ordered by version and records #65 changed fields, actor, timestamp, previous state, current state, and evidence-selection `core_accuracy_gates` for report-inclusion and review decision traceability.
 
 ### `submission-manifest`
 

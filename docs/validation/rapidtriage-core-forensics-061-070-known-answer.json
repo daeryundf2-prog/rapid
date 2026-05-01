@@ -1,0 +1,117 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #61-#70 internal fixture validation",
+  "status": "pass",
+  "datasets": [
+    {
+      "id": "core-forensics-061-advanced-search-fixture",
+      "name": "#61 advanced search fixture assertions",
+      "source": "tests.test_rapidtriage_search_analysis.RapidTriageSearchAnalysisTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [61],
+      "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_search_analysis.py"],
+      "expected": {"required_assertions": ["Search output preserves query mode/options, fuzzy/stem/regex support, proximity metadata, hit pointers, verification warnings, and #61 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; broad relevance/false-positive corpus remains commercial blocker."
+    },
+    {
+      "id": "core-forensics-062-keyword-pack-fixture",
+      "name": "#62 keyword pack fixture assertions",
+      "source": "tests.test_rapidtriage_api.RapidTriageApiTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [62],
+      "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_api.py", "tests/test_rapidtriage_search_analysis.py"],
+      "expected": {"required_assertions": ["Keyword-pack outputs preserve built-in inventory, custom JSON support, deduplicated expansion, pack provenance, case-specific warnings, and #62 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; signed pack library and per-case editing UI remain blockers."
+    },
+    {
+      "id": "core-forensics-063-ioc-ti-fixture",
+      "name": "#63 IOC/TI fixture assertions",
+      "source": "tests.test_rapidtriage_indicators.RapidTriageIndicatorTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [63],
+      "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_indicators.py"],
+      "expected": {"required_assertions": ["Indicator output preserves source links, local rule matches, offline feed provenance, match mode, local-only warning, and #63 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; signed/STIX/TAXII feed validation remains blocker."
+    },
+    {
+      "id": "core-forensics-064-citation-fixture",
+      "name": "#64 citation manager fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDatabaseTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [64],
+      "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
+      "expected": {"required_assertions": ["Case DB report export preserves review/source citation IDs, source references, citation counts, report-use warnings, and #64 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; exhibit numbering and jurisdiction-specific packaging remain blockers."
+    },
+    {
+      "id": "core-forensics-065-evidence-history-fixture",
+      "name": "#65 evidence history fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDatabaseTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [65],
+      "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
+      "expected": {"required_assertions": ["Review history preserves version rows, changed fields, previous/current state, report inclusion changes, multi-user warning, and #65 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; signed multi-user append-only enforcement remains blocker."
+    },
+    {
+      "id": "core-forensics-066-benchmark-fixture",
+      "name": "#66 benchmark fixture assertions",
+      "source": "tests.test_rapidtriage_ops.RapidTriageOpsTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [66],
+      "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
+      "expected": {"required_assertions": ["Benchmark output preserves scale matrix, ingest/search metrics, memory/output size, run-summary link, hardware-scale warning, and #66 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; published hardware matrix remains required."
+    },
+    {
+      "id": "core-forensics-067-stress-fixture",
+      "name": "#67 stress-plan fixture assertions",
+      "source": "tests.test_rapidtriage_ops.RapidTriageOpsTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [67],
+      "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
+      "expected": {"required_assertions": ["Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, real-hardware warning, and #67 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; actual 1TB-10TB hardware runs remain required."
+    },
+    {
+      "id": "core-forensics-068-incremental-fixture",
+      "name": "#68 incremental indexing fixture assertions",
+      "source": "tests.test_rapidtriage_run.RapidTriageRunTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [68],
+      "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
+      "expected": {"required_assertions": ["Run fingerprint output preserves fingerprint, path/size/mtime metadata, changed-source reuse behavior, truncation disclosure, limitation warning, and #68 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; content-hash incremental reindexing remains blocker."
+    },
+    {
+      "id": "core-forensics-069-job-queue-fixture",
+      "name": "#69 background job queue fixture assertions",
+      "source": "tests.test_rapidtriage_ops.RapidTriageOpsTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [69],
+      "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
+      "expected": {"required_assertions": ["Job payloads preserve status, step progress, state persistence, cancel/retry state, local-threadpool limitation, and #69 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; distributed workers and parser-level progress telemetry remain blockers."
+    },
+    {
+      "id": "core-forensics-070-checkpoint-fixture",
+      "name": "#70 checkpoint/resume fixture assertions",
+      "source": "tests.test_rapidtriage_run.RapidTriageRunTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [70],
+      "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
+      "expected": {"required_assertions": ["Run checkpoint output preserves stage checkpoints, output path/size, reused flags, resume summary, partial-stage warning, and #70 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; mid-parser checkpointing and failed-stage resume remain blockers."
+    }
+  ]
+}
