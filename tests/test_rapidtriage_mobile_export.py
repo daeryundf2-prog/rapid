@@ -118,6 +118,12 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("schema/app version and BigBang compatibility tracking", kakao_gate["satisfied_checks"])
             self.assertIn("encrypted/deleted limitation warning", kakao_gate["satisfied_checks"])
             self.assertIn("source hash and legal provenance", kakao_gate["satisfied_checks"])
+            kakao_uplift = kakao["details"]["chat_app_commercial_uplift_evidence"]
+            self.assertEqual(kakao_uplift["batch_id"], "commercial-uplift-031-035")
+            self.assertEqual(kakao_uplift["item_numbers"], [31])
+            self.assertIn("service-profile-known", kakao_uplift["passed_issue_matrix_ids"])
+            self.assertIn("kakaotalk-post-2025-08-bigbang", kakao_uplift["failed_issue_matrix_ids"])
+            self.assertFalse(kakao_uplift["large_data_controls"]["encrypted_store_decryption"])
             facebook = next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Facebook Messenger")
             self.assertEqual(facebook["details"]["chat_app_forensic_review"]["gap_id"], "#35")
             self.assertIn(
@@ -131,6 +137,9 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("WhatsApp service/profile detection", whatsapp_gate["satisfied_checks"])
             self.assertIn("chat/contact/media normalization", whatsapp_gate["satisfied_checks"])
             self.assertIn("crypt backup authority workflow warning", whatsapp_gate["satisfied_checks"])
+            whatsapp_uplift = whatsapp["details"]["chat_app_commercial_uplift_evidence"]
+            self.assertEqual(whatsapp_uplift["item_numbers"], [32])
+            self.assertIn("encrypted-store-authority", whatsapp_uplift["failed_issue_matrix_ids"])
             self.assertIn(
                 "#33",
                 next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Telegram")["details"][
@@ -142,6 +151,7 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("Telegram service/profile detection", telegram_gate["satisfied_checks"])
             self.assertIn("chat/user/media attribution", telegram_gate["satisfied_checks"])
             self.assertIn("encrypted local store warning", telegram_gate["satisfied_checks"])
+            self.assertEqual(telegram["details"]["chat_app_commercial_uplift_evidence"]["item_numbers"], [33])
             self.assertIn(
                 "#34",
                 next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Signal")["details"][
@@ -153,6 +163,7 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("Signal service/profile detection", signal_gate["satisfied_checks"])
             self.assertIn("thread/recipient/message inventory", signal_gate["satisfied_checks"])
             self.assertIn("SQLCipher/key authority gate", signal_gate["satisfied_checks"])
+            self.assertEqual(signal["details"]["chat_app_commercial_uplift_evidence"]["item_numbers"], [34])
             self.assertTrue(
                 all(
                     "#35" in next(
@@ -166,6 +177,9 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("extended service/profile detection", line_gate["satisfied_checks"])
             self.assertIn("message/media/reaction normalization", line_gate["satisfied_checks"])
             self.assertIn("schema/app version registry", line_gate["satisfied_checks"])
+            line_uplift = line["details"]["chat_app_commercial_uplift_evidence"]
+            self.assertEqual(line_uplift["item_numbers"], [35])
+            self.assertIn("schema-version-known-answer", line_uplift["failed_issue_matrix_ids"])
 
             app = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-app")
             self.assertEqual(app["details"]["source_tool"], "graykey")

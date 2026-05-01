@@ -464,7 +464,14 @@ def build_record(
                 report_grade=report_grade,
                 details=detail_payload,
             ),
-            **chat_app_review_payload(artifact_type, detail_payload),
+            **chat_app_review_payload(
+                artifact_type,
+                detail_payload,
+                source_tool=source_tool,
+                source_format=source_format,
+                source_index=source_index,
+                source_hashes=source_hashes,
+            ),
             "legal_warning": "Use only with authorized mobile exports. Correlate with original acquisition logs and hashes before testimony.",
             **detail_payload,
         },
@@ -2035,7 +2042,15 @@ def build_mobile_forensic_review(
     )
 
 
-def chat_app_review_payload(artifact_type: str, details: Mapping[str, object]) -> dict[str, object]:
+def chat_app_review_payload(
+    artifact_type: str,
+    details: Mapping[str, object],
+    *,
+    source_tool: str = "",
+    source_format: str = "",
+    source_index: int = 0,
+    source_hashes: Mapping[str, str] | None = None,
+) -> dict[str, object]:
     service = optional_text(details.get("service"))
     if artifact_type == "mobile-message" and service not in CHAT_APP_GAP_IDS:
         return {}
@@ -2043,6 +2058,7 @@ def chat_app_review_payload(artifact_type: str, details: Mapping[str, object]) -
         return {}
     gap_ids = chat_app_gap_ids(service)
     report_grade = chat_app_report_grade_assessment(service)
+    hashes = source_hashes or {}
     return {
         "chat_app_forensic_review": build_forensic_review(
             gap_id=gap_ids[0] if gap_ids else "#31",
@@ -2061,7 +2077,17 @@ def chat_app_review_payload(artifact_type: str, details: Mapping[str, object]) -
                 "Service-specific encrypted stores, deleted rows, attachment recovery, and sync semantics remain validation-gated.",
                 "Use original acquisition/export logs, app version, timezone, and account ownership before reporting message conclusions.",
             ],
-        )
+        ),
+        "chat_app_commercial_uplift_evidence": chat_app_commercial_uplift_evidence(
+            artifact_type=artifact_type,
+            service=service,
+            source_tool=source_tool,
+            source_format=source_format,
+            source_index=source_index,
+            source_hashes=hashes,
+            details=details,
+            report_grade=report_grade,
+        ),
     }
 
 
@@ -2106,6 +2132,75 @@ def chat_app_blockers(service: str) -> list[str]:
         "App-specific encrypted stores, deleted records, schema-version drift, and attachment recovery are not fully validated.",
         "Original device/acquisition hashes, export settings, app version, timezone, and account ownership must be independently verified.",
     ]
+
+
+def chat_app_commercial_uplift_evidence(
+    *,
+    artifact_type: str,
+    service: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    details: Mapping[str, object],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    gap_ids = chat_app_gap_ids(service)
+    item_numbers = sorted(
+        int(gap_id.lstrip("#"))
+        for gap_id in gap_ids
+        if gap_id.startswith("#") and gap_id.lstrip("#").isdigit()
+    )
+    issue_matrix = [
+        item for item in details.get("chat_app_issue_matrix") or [] if isinstance(item, Mapping)
+    ]
+    table_summaries = details.get("table_summaries") if isinstance(details.get("table_summaries"), list) else []
+    objectives = {
+        31: "Expose KakaoTalk export/database evidence, BigBang compatibility state, and schema/encryption/deleted-record blockers.",
+        32: "Expose WhatsApp export/database evidence, msgstore/contact/media pivots, and crypt/deleted-row blockers.",
+        33: "Expose Telegram export/database evidence, account/cache/media attribution, and encrypted local-store blockers.",
+        34: "Expose Signal export/database evidence, thread/recipient inventory, and SQLCipher/key authority blockers.",
+        35: "Expose extended messenger export evidence, service profile coverage, media/reaction pivots, and schema/ephemeral blockers.",
+    }
+    source_refs = [
+        f"source_tool:{source_tool}",
+        f"source_format:{source_format}",
+        f"source_index:{source_index}",
+        f"source_sha256:{source_hashes.get('sha256', '')}",
+        f"artifact_type:{artifact_type}",
+        f"service:{service or 'unknown'}",
+    ]
+    for key in ("conversation_id", "message_id", "database_name", "schema_version", "app_version"):
+        value = optional_text(details.get(key))
+        if value:
+            source_refs.append(f"{key}:{value}")
+    return {
+        "batch_id": "commercial-uplift-031-035",
+        "item_numbers": item_numbers,
+        "implementation_track": "messenger-service-parser-validation",
+        "objective": " ".join(objectives[number] for number in item_numbers if number in objectives),
+        "source_refs": source_refs,
+        "passed_issue_matrix_ids": [
+            str(item.get("id")) for item in issue_matrix if item.get("passed")
+        ],
+        "failed_issue_matrix_ids": [
+            str(item.get("id")) for item in issue_matrix if not item.get("passed")
+        ],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or chat_app_blockers(service)),
+        "large_data_controls": {
+            "max_sqlite_tables": MAX_SQLITE_TABLES,
+            "max_chat_db_sample_rows": MAX_CHAT_DB_SAMPLE_ROWS,
+            "table_summary_count": len(table_summaries),
+            "known_service_profile": service in CHAT_APP_GAP_IDS,
+            "service_specific_native_database_decode": False,
+            "encrypted_store_decryption": False,
+            "deleted_record_recovery": False,
+            "known_answer_service_corpus_required": True,
+        },
+        "next_internal_step": "Add service/version-specific schema mappers, encrypted-store authority workflows, attachment recovery checks, and known-answer corpora for each messenger.",
+        "external_evidence_required": True,
+    }
 
 
 def chat_app_gap_ids(service: str) -> list[str]:
