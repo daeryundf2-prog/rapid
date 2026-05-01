@@ -378,6 +378,16 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
             "execution_validation_matrix": execution_validation_matrix(hive_validation_checks),
             "execution_report_grade_assessment": hive_report_grade,
             "core_accuracy_gates": hive_core_accuracy_gates,
+            "commercial_uplift_evidence": execution_commercial_uplift_evidence(
+                "amcache-hive",
+                {
+                    "source_path": str(path.resolve()),
+                    "source_hashes": source_hashes,
+                    "source_format": "amcache-hive",
+                    "execution_validation_matrix": execution_validation_matrix(hive_validation_checks),
+                    "execution_report_grade_assessment": hive_report_grade,
+                },
+            ),
             "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
             "validation_guidance": "Native Amcache.hve string pivots identify program/hash candidates only; validate install/execution timestamps with a dedicated Amcache parser.",
             "commercial_grade_ready": False,
@@ -1768,7 +1778,7 @@ def execution_commercial_uplift_evidence(artifact_type: str, details: Mapping[st
             else ESE_SCAN_READ_SIZE if artifact_type.startswith("srum-") else 0,
             "row_level_native_decode_required_for_commercial_claims": artifact_type.startswith("srum-"),
             "native_binary_layout_required_for_commercial_claims": artifact_type in {"shimcache-entry", "bam-entry"},
-            "schema_version_matrix_required": artifact_type in {"amcache-entry", "shimcache-entry"},
+            "schema_version_matrix_required": artifact_type in {"amcache-entry", "amcache-hive", "shimcache-entry"},
         },
         "next_internal_step": (
             "Add native binary/schema row decoding plus cross-tool known-answer diffs before removing "
@@ -1885,7 +1895,7 @@ def execution_report_grade_assessment(
 
 
 def execution_gap_ids(artifact_type: str) -> list[str]:
-    if artifact_type == "amcache-entry":
+    if artifact_type in {"amcache-entry", "amcache-hive"}:
         return ["#7"]
     if artifact_type == "shimcache-entry":
         return ["#8"]

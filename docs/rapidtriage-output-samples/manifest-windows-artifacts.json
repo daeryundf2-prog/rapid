@@ -1226,6 +1226,55 @@
               "validation-check-failed:requires-external-validation"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "application-id-hash-to-application-name-map-not-bundled",
+                "destlist-account-metadata-not-fully-decoded",
+                "destlist-deleted-entry-recovery-not-implemented",
+                "destlist-os-version-specific-field-validation-required",
+                "destlist-stream-not-present-or-unrecoverable",
+                "recent-files-validation-required",
+                "validation-check-failed:destlist-candidate-decoding-available",
+                "validation-check-failed:destlist-report-grade",
+                "validation-check-failed:has-destlist-stream",
+                "validation-check-failed:is-ole-compound",
+                "validation-check-failed:ole-streams-recovered",
+                "validation-check-failed:requires-external-validation"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "is-ole-compound",
+                "ole-streams-recovered",
+                "has-destlist-stream",
+                "destlist-candidate-decoding-available",
+                "destlist-report-grade",
+                "requires-external-validation"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                14
+              ],
+              "large_data_controls": {
+                "bounded_ole_stream_inventory": true,
+                "deleted_entry_recovery_required_for_commercial_claims": true,
+                "destination_count": 1,
+                "destlist_parse_status": "not-ole",
+                "ole_stream_count": 0
+              },
+              "next_internal_step": "Finish OS-version DestList field validation, deleted-entry recovery, and AppID mapping corpus checks.",
+              "objective": "Expose JumpList DestList validation, OLE/LNK provenance, deleted-entry blockers, and AppID gaps.",
+              "passed_validation_matrix_ids": [
+                "embedded-lnk-destinations-recovered"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/5f7b5f1e01b83767.automaticDestinations-ms",
+                "source_sha256:ae143e19a1ddda24e8396b307d423f857ba63cbfcf31cbb4537c1e36d0c22eee",
+                "artifact_type:jumplist-automatic",
+                "app_id_hash:5f7b5f1e01b83767"
+              ]
+            },
             "container_hint": "custom-binary",
             "core_accuracy_gates": [
               {
@@ -1529,6 +1578,55 @@
               "validation-check-failed:requires-external-validation"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "application-id-hash-to-application-name-map-not-bundled",
+                "destlist-account-metadata-not-fully-decoded",
+                "destlist-deleted-entry-recovery-not-implemented",
+                "destlist-os-version-specific-field-validation-required",
+                "destlist-stream-not-present-or-unrecoverable",
+                "recent-files-validation-required",
+                "validation-check-failed:destlist-candidate-decoding-available",
+                "validation-check-failed:destlist-report-grade",
+                "validation-check-failed:has-destlist-stream",
+                "validation-check-failed:is-ole-compound",
+                "validation-check-failed:ole-streams-recovered",
+                "validation-check-failed:requires-external-validation"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "is-ole-compound",
+                "ole-streams-recovered",
+                "has-destlist-stream",
+                "destlist-candidate-decoding-available",
+                "destlist-report-grade",
+                "requires-external-validation"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                14
+              ],
+              "large_data_controls": {
+                "bounded_ole_stream_inventory": true,
+                "deleted_entry_recovery_required_for_commercial_claims": true,
+                "destination_count": 1,
+                "destlist_parse_status": "not-ole",
+                "ole_stream_count": 0
+              },
+              "next_internal_step": "Finish OS-version DestList field validation, deleted-entry recovery, and AppID mapping corpus checks.",
+              "objective": "Expose JumpList DestList validation, OLE/LNK provenance, deleted-entry blockers, and AppID gaps.",
+              "passed_validation_matrix_ids": [
+                "embedded-lnk-destinations-recovered"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/Users/alice/AppData/Roaming/Microsoft/Windows/Recent/CustomDestinations/9b9cdc69c1c24e2b.customDestinations-ms",
+                "source_sha256:c04f2f402446ea24335c08475374b0167bc59f82017cb8c64ef9cf95f2eb382d",
+                "artifact_type:jumplist-custom",
+                "app_id_hash:9b9cdc69c1c24e2b"
+              ]
+            },
             "container_hint": "custom-binary",
             "core_accuracy_gates": [
               {
@@ -2129,6 +2227,58 @@
               "validation-check-failed:row-level-decoding-available"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-006-010",
+              "commercial_blockers": [
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "large-known-answer-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:native-table-catalog-decoding-available",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "row-level-decoding-available",
+                "native-table-catalog-decoding-available",
+                "requires-srum-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                10
+              ],
+              "large_data_controls": {
+                "bounded_native_string_scan_bytes": 8388608,
+                "native_binary_layout_required_for_commercial_claims": false,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "schema_version_matrix_required": false
+              },
+              "next_internal_step": "Add native binary/schema row decoding plus cross-tool known-answer diffs before removing #7-#10 commercial blockers.",
+              "objective": "Expose execution-artifact validation evidence, commercial blockers, and large-data limits on each #7-#10 row.",
+              "passed_validation_matrix_ids": [
+                "ese-header-readable",
+                "ese-signature-valid",
+                "native-srudb-page-size-plausible",
+                "native-srudb-file-size-page-aligned",
+                "has-path-pivots",
+                "has-url-pivots",
+                "has-native-srum-table-candidates",
+                "has-native-srum-row-candidates"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/Windows/System32/sru/SRUDB.dat",
+                "source_index:0",
+                "source_sha256:fba689278af9583bb1c19b42000438c9006d37e09a63251ef444a4221949b734",
+                "source_format:ese-srum"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -5796,6 +5946,60 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "ese-catalog-decoded",
+                "row-level-decoding-available",
+                "timestamps-decoded-from-native-rows",
+                "deleted-state-decoded-from-native-rows",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 1,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 16384
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "ese-header-readable",
+                "ese-signature-valid",
+                "has-path-pivots",
+                "has-url-pivots",
+                "has-content-candidates",
+                "has-table-family-candidates",
+                "has-native-row-candidates",
+                "ese-page-map-built",
+                "page-level-marker-correlation-available"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-file"
+              ]
+            },
             "content_candidates": [
               "rapid forensic case notes"
             ],
@@ -6290,6 +6494,56 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "ese-catalog-decoded",
+                "row-level-decoding-available",
+                "timestamps-decoded-from-native-rows",
+                "deleted-state-decoded-from-native-rows",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 0,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 0
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "ese-signature-valid",
+                "ese-page-map-built",
+                "page-level-marker-correlation-available",
+                "has-path-or-url",
+                "has-content-snippet"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:0",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-page-candidate"
+              ]
+            },
             "content_candidates": [
               "rapid forensic case notes"
             ],
@@ -6592,6 +6846,48 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:has-path-or-url",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "has-path-or-url",
+                "row-level-decoding-available",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 0,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 0
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "has-candidate-value"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:2",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-pivot"
+              ]
+            },
             "content_snippet": "rapid forensic case notes",
             "core_accuracy_gates": [
               {
@@ -6783,6 +7079,47 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "row-level-decoding-available",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 0,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 0
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "has-candidate-value",
+                "has-path-or-url"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:0",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-pivot"
+              ]
+            },
             "content_snippet": "C:\\Users\\alice\\Documents\\Case Notes.docx",
             "core_accuracy_gates": [
               {
@@ -6974,6 +7311,47 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "row-level-decoding-available",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 0,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 0
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "has-candidate-value",
+                "has-path-or-url"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:3",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-pivot"
+              ]
+            },
             "content_snippet": "https://example.com/search-hit",
             "core_accuracy_gates": [
               {
@@ -7166,6 +7544,47 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "row-level-decoding-available",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 0,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 0
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "has-candidate-value",
+                "has-path-or-url"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:1",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-pivot"
+              ]
+            },
             "content_snippet": "https://example.com/search-hit",
             "core_accuracy_gates": [
               {
@@ -7366,6 +7785,55 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:has-file-name",
+                "validation-check-failed:has-source-path-or-url",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "has-source-path-or-url",
+                "has-file-name",
+                "row-level-decoding-available",
+                "timestamps-decoded-from-native-rows",
+                "deleted-state-decoded-from-native-rows",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 0,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 0
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "has-content-snippet",
+                "has-table-family-candidates"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:2",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-row-candidate"
+              ]
+            },
             "content_snippet": "rapid forensic case notes",
             "core_accuracy_gates": [
               {
@@ -7611,6 +8079,53 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "row-level-decoding-available",
+                "timestamps-decoded-from-native-rows",
+                "deleted-state-decoded-from-native-rows",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 0,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 0
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "has-source-path-or-url",
+                "has-file-name",
+                "has-content-snippet",
+                "has-table-family-candidates"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:0",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-row-candidate"
+              ]
+            },
             "content_snippet": "rapid forensic case notes",
             "core_accuracy_gates": [
               {
@@ -7860,6 +8375,54 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:has-file-name",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "has-file-name",
+                "row-level-decoding-available",
+                "timestamps-decoded-from-native-rows",
+                "deleted-state-decoded-from-native-rows",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 0,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 0
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "has-source-path-or-url",
+                "has-content-snippet",
+                "has-table-family-candidates"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:1",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-row-candidate"
+              ]
+            },
             "content_snippet": "rapid forensic case notes",
             "core_accuracy_gates": [
               {
@@ -8142,6 +8705,52 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "ese-catalog-decoded",
+                "row-level-decoding-available",
+                "timestamps-decoded-from-native-rows",
+                "deleted-state-decoded-from-native-rows",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 0,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 0
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "ese-signature-valid"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:0",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-table-candidate"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -8399,6 +9008,52 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "ese-catalog-decoded",
+                "row-level-decoding-available",
+                "timestamps-decoded-from-native-rows",
+                "deleted-state-decoded-from-native-rows",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 0,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 0
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "ese-signature-valid"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:1",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-table-candidate"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -8656,6 +9311,52 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "ese-catalog-decoded",
+                "row-level-decoding-available",
+                "timestamps-decoded-from-native-rows",
+                "deleted-state-decoded-from-native-rows",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 0,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 0
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "ese-signature-valid"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:2",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-table-candidate"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -8914,6 +9615,52 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "ese-catalog-decoded",
+                "row-level-decoding-available",
+                "timestamps-decoded-from-native-rows",
+                "deleted-state-decoded-from-native-rows",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 0,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 0
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "ese-signature-valid"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:3",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-table-candidate"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {
@@ -9170,6 +9917,52 @@
               "windows-search-validation-required"
             ],
             "commercial_grade_ready": false,
+            "commercial_uplift_evidence": {
+              "batch_id": "commercial-uplift-011-015",
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "external_evidence_required": true,
+              "failed_validation_matrix_ids": [
+                "ese-catalog-decoded",
+                "row-level-decoding-available",
+                "timestamps-decoded-from-native-rows",
+                "deleted-state-decoded-from-native-rows",
+                "requires-windows-search-parser"
+              ],
+              "implementation_track": "native-parser-depth",
+              "item_numbers": [
+                11
+              ],
+              "large_data_controls": {
+                "bounded_page_map": true,
+                "deleted_state_decode_required_for_commercial_claims": true,
+                "page_count_scanned": 0,
+                "row_level_native_decode_required_for_commercial_claims": true,
+                "string_scan_bytes": 0
+              },
+              "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
+              "objective": "Expose Windows.edb ESE/Search validation evidence, row limits, and commercial blockers on native candidates.",
+              "passed_validation_matrix_ids": [
+                "ese-signature-valid"
+              ],
+              "report_grade_status": "validation-required",
+              "source_refs": [
+                "source_path:<ROOT>/ProgramData/Microsoft/Search/Data/Applications/Windows/Windows.edb",
+                "source_index:4",
+                "source_sha256:c2bfcaaa710b7e106d947789d62355b2b8159ad68e24a10fb6f1f43a5e65a91b",
+                "artifact_type:windows-search-edb-table-candidate"
+              ]
+            },
             "core_accuracy_gates": [
               {
                 "accuracy_controls": {

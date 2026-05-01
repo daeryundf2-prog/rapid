@@ -1030,6 +1030,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 "not-implemented-string-pivot-only",
             )
             self.assertEqual(native_amcache_hive["details"]["amcache_schema_profile"]["current_decode_level"], "native-string-pivot-only")
+            native_hive_uplift = native_amcache_hive["details"]["commercial_uplift_evidence"]
+            self.assertEqual(native_hive_uplift["batch_id"], "commercial-uplift-006-010")
+            self.assertEqual(native_hive_uplift["item_numbers"], [7])
+            self.assertIn("has-path-candidates", native_hive_uplift["passed_validation_matrix_ids"])
+            self.assertTrue(native_hive_uplift["large_data_controls"]["schema_version_matrix_required"])
             self.assertEqual(bam["details"]["user_sid"], "S-1-5-21-1000")
             self.assertEqual(bam["details"]["timestamp"], "2024-04-01T06:07:08+00:00")
             self.assertEqual(bam["details"]["timestamp_source"], "bam_value_filetime")
