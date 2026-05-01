@@ -516,6 +516,16 @@ def build_ai_conversation_record(
                 "has_orphans": bool(transcript["orphan_question_count"] or transcript["orphan_answer_count"]),
                 "service_side_export_validated": False,
             },
+            "core_accuracy_gates": ai_transcript_core_accuracy_gates(
+                {
+                    "source_path": str(profile_dir.resolve()),
+                    "browser": browser,
+                    "profile": profile,
+                    "conversation_rows": conversation_rows,
+                    "transcript": transcript,
+                    "source_summary": source_summary,
+                }
+            ),
             "conversation_candidates": conversation_rows,
             "transcript_pairs": transcript["pairs"],
             "privacy_legal_warning": BROWSER_PRIVACY_WARNING,
@@ -819,6 +829,31 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
         build_accuracy_gate(19, satisfied_checks=item19, evidence_refs=evidence_refs),
         build_accuracy_gate(20, satisfied_checks=item20, evidence_refs=evidence_refs),
     ]
+
+
+def ai_transcript_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:
+    rows = [item for item in details.get("conversation_rows") or [] if isinstance(item, Mapping)]
+    transcript = details.get("transcript") if isinstance(details.get("transcript"), Mapping) else {}
+    source_summary = details.get("source_summary") if isinstance(details.get("source_summary"), Mapping) else {}
+    evidence_refs = [
+        f"source_path:{details.get('source_path', '')}",
+        f"browser:{details.get('browser', '')}",
+        f"profile:{details.get('profile', '')}",
+    ]
+    for source_hash in list(source_summary.get("source_sha256s") or [])[:3]:
+        evidence_refs.append(f"source_sha256:{source_hash}")
+
+    satisfied: list[str] = []
+    if count_field(rows, "ai_service"):
+        satisfied.append("service/schema version detection")
+    if transcript.get("pair_count") or transcript.get("pairing_confidence_summary"):
+        satisfied.append("question/answer pairing confidence")
+    if "orphan_question_count" in transcript and "orphan_answer_count" in transcript:
+        satisfied.append("orphan prompt/answer tracking")
+    if rows and all(row.get("source_path") and row.get("source_sha256") for row in rows):
+        satisfied.append("source offset/storage provenance")
+    satisfied.append("privacy and completeness warnings")
+    return [build_accuracy_gate(21, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
 def browser_secret_handling_validation_checks(sensitive_count: int) -> Dict[str, object]:

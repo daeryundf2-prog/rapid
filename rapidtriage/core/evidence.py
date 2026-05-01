@@ -14,6 +14,7 @@ from .e01 import (
     E01_REQUIRED_TOOLS,
     collect_tool_preflight,
     describe_source_integrity,
+    image_core_accuracy_gates,
     image_report_grade_assessment,
     missing_e01_tools,
 )
@@ -54,6 +55,7 @@ class EvidenceAdapterResult:
     limitations: list[str] | None = None
     fallback_guidance: list[str] | None = None
     safety_notes: list[str] | None = None
+    core_accuracy_gates: list[dict[str, object]] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -120,6 +122,8 @@ class EwfAdapter:
         supported = source.suffix.lower() in self.supported_suffixes
         ready = supported and not missing
         report_grade = image_report_grade_assessment("#22", E01_REPORT_GRADE_BLOCKERS)
+        source_integrity = describe_source_integrity(source) if source.is_file() else None
+        tool_preflight = collect_tool_preflight(E01_REQUIRED_TOOLS) if supported else None
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -146,8 +150,8 @@ class EwfAdapter:
             ),
             warnings=[] if ready else ["Direct E01/Ex01 extraction is disabled until required tools are present."],
             external_validation_required=True,
-            source_integrity=describe_source_integrity(source) if source.is_file() else None,
-            tool_preflight=collect_tool_preflight(E01_REQUIRED_TOOLS) if supported else None,
+            source_integrity=source_integrity,
+            tool_preflight=tool_preflight,
             commercial_grade_ready=False,
             commercial_gap_ids=["#22"],
             report_grade_assessment=report_grade,
@@ -180,6 +184,19 @@ class EwfAdapter:
                 "Preserve libewf/Sleuth Kit or vendor export logs with the RapidTriage run outputs.",
             ],
             safety_notes=["RapidTriage never writes to the source image; extraction writes only under the selected output directory."],
+            core_accuracy_gates=image_core_accuracy_gates(
+                22,
+                {
+                    "source_path": str(source),
+                    "source_integrity": source_integrity,
+                    "tool_preflight": tool_preflight or [],
+                    "partition_table": [],
+                    "partition_start_sector": None,
+                    "command_history": [],
+                    "warnings": [] if ready else ["Direct E01/Ex01 extraction is disabled until required tools are present."],
+                    "limitations": E01_REPORT_GRADE_BLOCKERS,
+                },
+            ),
         )
 
 
@@ -200,6 +217,11 @@ class RawImageAdapter:
                 "encrypted-volume-unlock-workflow-not-implemented",
             ],
         )
+        source_integrity = {
+            "parts": [describe_source_integrity(path) for path in split_parts],
+            "split_part_count": len(split_parts),
+        } if split_parts else (describe_source_integrity(source) if source.is_file() else None)
+        tool_preflight = collect_tool_preflight(RAW_IMAGE_REQUIRED_TOOLS) if supported else None
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -226,13 +248,8 @@ class RawImageAdapter:
             ),
             warnings=[] if ready else ["Direct raw/split extraction is disabled until Sleuth Kit tools are present."],
             external_validation_required=True,
-            source_integrity={
-                "parts": [describe_source_integrity(path) for path in split_parts],
-                "split_part_count": len(split_parts),
-            }
-            if split_parts
-            else (describe_source_integrity(source) if source.is_file() else None),
-            tool_preflight=collect_tool_preflight(RAW_IMAGE_REQUIRED_TOOLS) if supported else None,
+            source_integrity=source_integrity,
+            tool_preflight=tool_preflight,
             commercial_grade_ready=False,
             commercial_gap_ids=["#23"],
             report_grade_assessment=report_grade,
@@ -265,6 +282,23 @@ class RawImageAdapter:
                 "Preserve partition offsets, tool versions, and full acquisition hashes in the case record.",
             ],
             safety_notes=["Direct recovery reads source segments and writes recovered files under the output directory only."],
+            core_accuracy_gates=image_core_accuracy_gates(
+                23,
+                {
+                    "source_path": str(source),
+                    "source_integrity": (source_integrity or {}).get("parts", []) if isinstance(source_integrity, dict) and "parts" in source_integrity else source_integrity,
+                    "tool_preflight": tool_preflight or [],
+                    "partition_table": [],
+                    "split_part_warnings": [],
+                    "command_history": [],
+                    "warnings": [] if ready else ["Direct raw/split extraction is disabled until Sleuth Kit tools are present."],
+                    "native_capabilities": {"encrypted_volume_unlock_workflow": False},
+                    "limitations": [
+                        "native-partition-filesystem-parser-not-implemented",
+                        "encrypted-volume-unlock-workflow-not-implemented",
+                    ],
+                },
+            ),
         )
 
 
@@ -375,6 +409,21 @@ class VirtualDiskAdapter:
                     "Export or mount with XenCenter/XCP-ng/xe, preserve the export log and hashes, then scan the produced disk or folder.",
                 ],
                 safety_notes=["Do not boot or modify the VM; use read-only export/mount workflows where possible."],
+                core_accuracy_gates=image_core_accuracy_gates(
+                    24,
+                    {
+                        "source_path": str(source),
+                        "source_integrity": describe_source_integrity(source) if source.is_file() else None,
+                        "detected_format": "xva",
+                        "warnings": ["Direct XVA extraction is not implemented; preserve the export/conversion log for reporting."],
+                        "native_capabilities": {
+                            "snapshot_chain_validation": False,
+                            "differencing_disk_resolution": False,
+                            "xva_direct_extraction": False,
+                        },
+                        "limitations": ["xva-direct-extraction-not-implemented"],
+                    },
+                ),
             )
         missing = missing_virtual_disk_tools(source.suffix.lower())
         ready = supported and not missing
@@ -387,6 +436,8 @@ class VirtualDiskAdapter:
                 "large-virtual-disk-known-answer-corpus-required",
             ],
         )
+        source_integrity = describe_source_integrity(source) if source.is_file() else None
+        tool_preflight = collect_tool_preflight(VIRTUAL_DISK_REQUIRED_TOOLS) if supported else None
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -410,8 +461,8 @@ class VirtualDiskAdapter:
             ),
             warnings=[] if ready else ["Direct virtual disk extraction is disabled until required tooling is present."],
             external_validation_required=True,
-            source_integrity=describe_source_integrity(source) if source.is_file() else None,
-            tool_preflight=collect_tool_preflight(VIRTUAL_DISK_REQUIRED_TOOLS) if supported else None,
+            source_integrity=source_integrity,
+            tool_preflight=tool_preflight,
             commercial_grade_ready=False,
             commercial_gap_ids=["#24"],
             report_grade_assessment=report_grade,
@@ -442,6 +493,25 @@ class VirtualDiskAdapter:
             ],
             fallback_guidance=virtual_disk_next_actions(source.suffix.lower()),
             safety_notes=["RapidTriage reads the source disk and writes a converted raw image only under the selected output directory."],
+            core_accuracy_gates=image_core_accuracy_gates(
+                24,
+                {
+                    "source_path": str(source),
+                    "source_integrity": source_integrity,
+                    "tool_preflight": tool_preflight or [],
+                    "command_history": [],
+                    "warnings": [] if ready else ["Direct virtual disk extraction is disabled until required tooling is present."],
+                    "native_capabilities": {
+                        "snapshot_chain_validation": False,
+                        "differencing_disk_resolution": False,
+                        "xva_direct_extraction": False,
+                    },
+                    "limitations": [
+                        "snapshot-chain-validation-not-implemented",
+                        "differencing-disk-resolution-not-implemented",
+                    ],
+                },
+            ),
         )
 
 
@@ -460,6 +530,7 @@ class ForensicContainerAdapter:
                 "vendor-export-log-required",
             ],
         )
+        source_integrity = describe_source_integrity(source) if source.is_file() else None
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -482,7 +553,7 @@ class ForensicContainerAdapter:
             ],
             warnings=[f"Direct {suffix.upper()} container parsing is not implemented yet."],
             external_validation_required=True,
-            source_integrity=describe_source_integrity(source) if source.is_file() else None,
+            source_integrity=source_integrity,
             commercial_grade_ready=False,
             commercial_gap_ids=["#25"],
             report_grade_assessment=report_grade,
@@ -512,6 +583,27 @@ class ForensicContainerAdapter:
                 "Hash the original container and exported payload, preserve vendor logs, then scan the exported folder.",
             ],
             safety_notes=["Treat vendor export output as derived evidence and retain the original container unchanged."],
+            core_accuracy_gates=image_core_accuracy_gates(
+                25,
+                {
+                    "source_path": str(source),
+                    "source_integrity": source_integrity,
+                    "detected_format": suffix or "forensic-container",
+                    "scan_strategy": "vendor-export-first",
+                    "fallback_guidance": [
+                        f"Export or mount the {suffix.upper()} with the acquisition/vendor tool in a read-only workflow.",
+                        "Hash the original container and exported payload, preserve vendor logs, then scan the exported folder.",
+                    ],
+                    "native_capabilities": {
+                        "deleted_entry_recovery": False,
+                    },
+                    "warnings": [f"Direct {suffix.upper()} container parsing is not implemented yet."],
+                    "limitations": [
+                        "proprietary-container-direct-parser-not-implemented",
+                        "embedded-metadata-compression-deleted-entry-validation-required",
+                    ],
+                },
+            ),
         )
 
 

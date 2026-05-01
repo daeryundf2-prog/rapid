@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 from .audit import compute_sha256
+from .forensic_accuracy import build_accuracy_gate
 
 E01_REQUIRED_TOOLS = ("ewfmount", "mmls", "tsk_recover")
 E01_SUFFIXES = (".e01", ".ex01")
@@ -77,6 +78,19 @@ class E01ExtractionResult:
                 partition_table=bool(self.partition_table),
                 command_history=bool(self.command_history),
                 native_complete=False,
+            ),
+            "core_accuracy_gates": image_core_accuracy_gates(
+                22,
+                {
+                    "source_path": str(self.source_path),
+                    "source_integrity": self.source_integrity,
+                    "tool_preflight": list(self.tool_preflight),
+                    "partition_table": list(self.partition_table),
+                    "partition_start_sector": self.partition_start_sector,
+                    "command_history": list(self.command_history),
+                    "warnings": list(self.warnings),
+                    "limitations": E01_REPORT_GRADE_BLOCKERS,
+                },
             ),
             "image_report_grade_assessment": image_report_grade_assessment("#22", E01_REPORT_GRADE_BLOCKERS),
             "native_capabilities": dict(E01_NATIVE_CAPABILITIES),
@@ -314,6 +328,82 @@ def image_report_grade_assessment(gap_id: str, blockers: Sequence[str]) -> dict[
             "Validate extracted filesystem contents against a trusted forensic tool before report-grade conclusions.",
         ],
     }
+
+
+def image_core_accuracy_gates(number: int, details: dict[str, object]) -> list[dict[str, object]]:
+    source_integrity = details.get("source_integrity")
+    if isinstance(source_integrity, dict):
+        source_hashes = [str(source_integrity.get("sha256") or "")]
+        source_parts = [source_integrity]
+    elif isinstance(source_integrity, list):
+        source_parts = [item for item in source_integrity if isinstance(item, dict)]
+        source_hashes = [str(item.get("sha256") or "") for item in source_parts]
+    else:
+        source_parts = []
+        source_hashes = []
+    tool_preflight = [item for item in details.get("tool_preflight") or [] if isinstance(item, dict)]
+    command_history = [item for item in details.get("command_history") or [] if isinstance(item, dict)]
+    partition_table = [item for item in details.get("partition_table") or [] if isinstance(item, dict)]
+    warnings = [str(item) for item in details.get("warnings") or [] if str(item)]
+    limitations = [str(item) for item in details.get("limitations") or [] if str(item)]
+    native_capabilities = details.get("native_capabilities") if isinstance(details.get("native_capabilities"), dict) else {}
+
+    evidence_refs = [f"source_path:{details.get('source_path', '')}"]
+    for value in source_hashes[:5]:
+        if value and value != "None":
+            evidence_refs.append(f"source_sha256:{value}")
+    if details.get("converted_raw_integrity") and isinstance(details["converted_raw_integrity"], dict):
+        converted_hash = details["converted_raw_integrity"].get("sha256")
+        if converted_hash:
+            evidence_refs.append(f"converted_raw_sha256:{converted_hash}")
+
+    satisfied: list[str] = []
+    if number == 22:
+        if source_parts:
+            satisfied.append("source hash and segment integrity")
+        if tool_preflight or command_history:
+            satisfied.append("tool version/command capture")
+        if details.get("partition_start_sector") is not None or any(item.get("selected_for_recovery") for item in partition_table):
+            satisfied.append("partition offset correctness")
+        if command_history or details.get("read_only_source") or details.get("safety"):
+            satisfied.append("read-only extraction provenance")
+        if warnings or limitations:
+            satisfied.append("corrupt/encrypted limitation reporting")
+    elif number == 23:
+        if source_parts or details.get("split_part_warnings") is not None:
+            satisfied.append("split-set order and gap validation")
+        if partition_table or details.get("partition_start_sector") is not None:
+            satisfied.append("partition table parsing")
+        if command_history or details.get("recovery_mode"):
+            satisfied.append("filesystem extraction audit")
+        if any("tsk_recover" in " ".join(map(str, row.get("command", []))) and "-e" in row.get("command", []) for row in command_history):
+            satisfied.append("deleted-file recovery expectations")
+        if warnings or limitations or not native_capabilities.get("encrypted_volume_unlock_workflow", True):
+            satisfied.append("encrypted volume limitation warning")
+    elif number == 24:
+        if any(str(item.get("tool") or "") == "qemu-img" for item in tool_preflight) or any("qemu-img" in " ".join(map(str, row.get("command", []))) for row in command_history):
+            satisfied.append("qemu-img version/command capture")
+        if not native_capabilities.get("snapshot_chain_validation", True) or not native_capabilities.get("differencing_disk_resolution", True):
+            satisfied.append("snapshot/differencing-chain detection")
+        if details.get("converted_raw_integrity") or details.get("converted_raw_path"):
+            satisfied.append("converted raw hash/provenance")
+        if partition_table or details.get("raw_extraction") or details.get("nested_raw_extraction"):
+            satisfied.append("nested partition extraction")
+        if warnings or limitations or not native_capabilities.get("xva_direct_extraction", True):
+            satisfied.append("unsupported/encrypted VM warning")
+    elif number == 25:
+        if details.get("detected_format") or details.get("container_type"):
+            satisfied.append("container type detection")
+        if source_parts:
+            satisfied.append("source integrity capture")
+        if details.get("scan_strategy") or details.get("fallback_guidance") or details.get("native_vs_export_workflow"):
+            satisfied.append("native-vs-export workflow disclosure")
+        if not native_capabilities.get("deleted_entry_recovery", True) or limitations:
+            satisfied.append("metadata/deleted-entry validation")
+        if warnings or limitations:
+            satisfied.append("encrypted/compressed limitation warning")
+
+    return [build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
 def collect_tool_preflight(

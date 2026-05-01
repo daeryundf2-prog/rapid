@@ -1,0 +1,101 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #21-#25 internal fixture validation",
+  "status": "pass",
+  "datasets": [
+    {
+      "id": "core-forensics-021-ai-transcript-fixture",
+      "name": "#21 AI transcript fixture assertions",
+      "source": "tests.windows_artifact_fixtures.build_windows_artifact_fixture",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [21],
+      "evidence_paths": [
+        "docs/validation/core-forensics-021-025-fixture-evidence.json",
+        "tests/windows_artifact_fixtures.py",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "AI browser storage transcript candidates preserve Q/A pairing, orphan counts, source hashes, storage provenance, and #21 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; service-side export validation and schema-version corpus remain commercial-grade evidence."
+    },
+    {
+      "id": "core-forensics-022-e01-fixture",
+      "name": "#22 E01/Ex01 workflow fixture assertions",
+      "source": "tests.test_rapidtriage_e01 fake libewf/Sleuth Kit workflow",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [22],
+      "evidence_paths": [
+        "docs/validation/core-forensics-021-025-fixture-evidence.json",
+        "tests/test_rapidtriage_evidence.py",
+        "tests/test_rapidtriage_e01.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "E01 adapter and extraction metadata preserve source integrity, tool/command evidence, partition offset, read-only recovery, limitations, and #22 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; real E01/Ex01 corpora, corrupt/encrypted images, and independent libewf/Sleuth Kit matrix remain required."
+    },
+    {
+      "id": "core-forensics-023-raw-split-fixture",
+      "name": "#23 RAW/split image fixture assertions",
+      "source": "tests.test_rapidtriage_e01 fake Sleuth Kit workflow",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [23],
+      "evidence_paths": [
+        "docs/validation/core-forensics-021-025-fixture-evidence.json",
+        "tests/test_rapidtriage_evidence.py",
+        "tests/test_rapidtriage_e01.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "RAW/split adapter and extraction metadata preserve split ordering/gap checks, partition parsing, tsk_recover audit, deleted-file expectations, encrypted warnings, and #23 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; large damaged split-set and filesystem known-answer validation remain required."
+    },
+    {
+      "id": "core-forensics-024-virtual-disk-fixture",
+      "name": "#24 Virtual disk fixture assertions",
+      "source": "tests.test_rapidtriage_e01 fake qemu-img/Sleuth Kit workflow",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [24],
+      "evidence_paths": [
+        "docs/validation/core-forensics-021-025-fixture-evidence.json",
+        "tests/test_rapidtriage_evidence.py",
+        "tests/test_rapidtriage_e01.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Virtual disk adapter and extraction metadata preserve qemu-img evidence, converted raw hash/provenance, nested extraction, VM limitations, and #24 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; snapshot/differencing chains, hypervisor metadata, and large VM-disk corpus remain required."
+    },
+    {
+      "id": "core-forensics-025-container-fixture",
+      "name": "#25 AD1/L01/Lx01/AFF/AFF4 fixture assertions",
+      "source": "tests.test_rapidtriage_evidence adapter detection fixtures",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [25],
+      "evidence_paths": [
+        "docs/validation/core-forensics-021-025-fixture-evidence.json",
+        "tests/test_rapidtriage_evidence.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Forensic container detection preserves type, source integrity, export-first disclosure, metadata/deleted blockers, encrypted/compressed warnings, and #25 core_accuracy_gates"
+        ]
+      },
+      "notes": "Internal fixture pass; native proprietary container parsing and vendor export known-answer validation remain required."
+    }
+  ]
+}

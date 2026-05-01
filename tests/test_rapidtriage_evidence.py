@@ -47,6 +47,11 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["forensic_review"]["gap_id"], "#22")
             self.assertFalse(result["forensic_review"]["report_grade_ready"])
             self.assertFalse(result["native_capabilities"]["native_e01_ex01_parser"])
+            e01_gate = result["core_accuracy_gates"][0]
+            self.assertEqual(e01_gate["gap_id"], "#22")
+            self.assertIn("source hash and segment integrity", e01_gate["satisfied_checks"])
+            self.assertIn("tool version/command capture", e01_gate["satisfied_checks"])
+            self.assertIn("corrupt/encrypted limitation reporting", e01_gate["satisfied_checks"])
             self.assertTrue(result["limitations"])
             self.assertTrue(result["fallback_guidance"])
 
@@ -69,6 +74,10 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["forensic_review"]["gap_id"], "#23")
             self.assertFalse(result["native_capabilities"]["native_partition_filesystem_parser"])
             self.assertEqual(result["source_integrity"]["split_part_count"], 1)
+            raw_gate = result["core_accuracy_gates"][0]
+            self.assertEqual(raw_gate["gap_id"], "#23")
+            self.assertIn("split-set order and gap validation", raw_gate["satisfied_checks"])
+            self.assertIn("encrypted volume limitation warning", raw_gate["satisfied_checks"])
 
     def test_identifies_archive_image_as_direct_extract_when_tool_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -104,6 +113,11 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["forensic_review"]["gap_id"], "#24")
             self.assertFalse(result["native_capabilities"]["snapshot_chain_validation"])
             self.assertEqual(result["source_integrity"]["hash_status"], "computed")
+            vm_gate = result["core_accuracy_gates"][0]
+            self.assertEqual(vm_gate["gap_id"], "#24")
+            self.assertIn("qemu-img version/command capture", vm_gate["satisfied_checks"])
+            self.assertIn("snapshot/differencing-chain detection", vm_gate["satisfied_checks"])
+            self.assertIn("unsupported/encrypted VM warning", vm_gate["satisfied_checks"])
 
     def test_identifies_xva_as_export_first_virtual_disk(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -124,6 +138,10 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["forensic_review"]["gap_id"], "#24")
             self.assertFalse(result["native_capabilities"]["xva_direct_extraction"])
             self.assertEqual(result["source_integrity"]["hash_status"], "computed")
+            xva_gate = result["core_accuracy_gates"][0]
+            self.assertEqual(xva_gate["gap_id"], "#24")
+            self.assertIn("snapshot/differencing-chain detection", xva_gate["satisfied_checks"])
+            self.assertIn("unsupported/encrypted VM warning", xva_gate["satisfied_checks"])
             self.assertTrue(result["fallback_guidance"])
 
     def test_identifies_common_image_formats_as_planned_adapters(self) -> None:
@@ -154,6 +172,13 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 self.assertEqual(result["forensic_review"]["gap_id"], "#25")
                 self.assertFalse(result["native_capabilities"]["direct_ad1_l01_lx01_aff_aff4_parser"])
                 self.assertEqual(result["source_integrity"]["hash_status"], "computed")
+                container_gate = result["core_accuracy_gates"][0]
+                self.assertEqual(container_gate["gap_id"], "#25")
+                self.assertIn("container type detection", container_gate["satisfied_checks"])
+                self.assertIn("source integrity capture", container_gate["satisfied_checks"])
+                self.assertIn("native-vs-export workflow disclosure", container_gate["satisfied_checks"])
+                self.assertIn("metadata/deleted-entry validation", container_gate["satisfied_checks"])
+                self.assertIn("encrypted/compressed limitation warning", container_gate["satisfied_checks"])
                 self.assertTrue(result["limitations"])
 
     def test_unknown_format_is_not_supported(self) -> None:

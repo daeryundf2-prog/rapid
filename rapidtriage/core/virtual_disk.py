@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 from .disk_image import DiskImageExtractionResult, extract_raw_image_to_directory, missing_raw_image_tools
-from .e01 import collect_tool_preflight, command_record, describe_source_integrity, image_report_grade_assessment, image_validation_matrix
+from .e01 import collect_tool_preflight, command_record, describe_source_integrity, image_core_accuracy_gates, image_report_grade_assessment, image_validation_matrix
 
 
 VIRTUAL_DISK_SUFFIXES = (".vhd", ".vhdx", ".vmdk", ".vdi", ".xva", ".qcow", ".qcow2")
@@ -82,6 +82,22 @@ class VirtualDiskExtractionResult:
                 partition_table=bool(self.raw_result.partition_table),
                 command_history=bool(self.command_history) and bool(self.raw_result.command_history),
                 native_complete=False,
+            ),
+            "core_accuracy_gates": image_core_accuracy_gates(
+                24,
+                {
+                    "source_path": str(self.source_path),
+                    "source_integrity": self.source_integrity,
+                    "converted_raw_path": str(self.converted_raw_path),
+                    "converted_raw_integrity": self.converted_raw_integrity,
+                    "tool_preflight": list(self.tool_preflight),
+                    "partition_table": list(self.raw_result.partition_table),
+                    "command_history": [*list(self.command_history), *list(self.raw_result.command_history)],
+                    "raw_extraction": self.raw_result.to_dict(),
+                    "warnings": list(self.warnings),
+                    "native_capabilities": dict(VIRTUAL_DISK_NATIVE_CAPABILITIES),
+                    "limitations": VIRTUAL_DISK_REPORT_GRADE_BLOCKERS,
+                },
             ),
             "image_report_grade_assessment": image_report_grade_assessment("#24", VIRTUAL_DISK_REPORT_GRADE_BLOCKERS),
             "native_capabilities": dict(VIRTUAL_DISK_NATIVE_CAPABILITIES),

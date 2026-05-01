@@ -96,6 +96,10 @@ DOS Partition Table
             self.assertTrue(metadata["tool_preflight"])
             self.assertTrue(metadata["partition_table"][0]["selected_for_recovery"])
             self.assertEqual(metadata["command_history"][-1]["purpose"], "read-only-filesystem-recovery")
+            e01_gate = metadata["core_accuracy_gates"][0]
+            self.assertEqual(e01_gate["gap_id"], "#22")
+            self.assertIn("partition offset correctness", e01_gate["satisfied_checks"])
+            self.assertIn("read-only extraction provenance", e01_gate["satisfied_checks"])
 
     def test_raw_split_image_discovery_sorts_numeric_segments(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -178,6 +182,11 @@ DOS Partition Table
             self.assertFalse(metadata["native_capabilities"]["native_partition_filesystem_parser"])
             self.assertEqual(metadata["source_integrity"][0]["hash_status"], "computed")
             self.assertEqual(metadata["partition_table"][0]["selected_for_recovery"], True)
+            raw_gate = metadata["core_accuracy_gates"][0]
+            self.assertEqual(raw_gate["gap_id"], "#23")
+            self.assertIn("partition table parsing", raw_gate["satisfied_checks"])
+            self.assertIn("filesystem extraction audit", raw_gate["satisfied_checks"])
+            self.assertIn("deleted-file recovery expectations", raw_gate["satisfied_checks"])
 
     def test_extract_raw_image_falls_back_to_whole_image_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -281,6 +290,10 @@ DOS Partition Table
             self.assertFalse(metadata["native_capabilities"]["snapshot_chain_validation"])
             self.assertEqual(metadata["source_integrity"]["hash_status"], "computed")
             self.assertEqual(metadata["converted_raw_integrity"]["hash_status"], "computed")
+            vm_gate = metadata["core_accuracy_gates"][0]
+            self.assertEqual(vm_gate["gap_id"], "#24")
+            self.assertIn("converted raw hash/provenance", vm_gate["satisfied_checks"])
+            self.assertIn("nested partition extraction", vm_gate["satisfied_checks"])
 
     def test_run_triage_accepts_e01_image_and_analyzes_extracted_filesystem(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
