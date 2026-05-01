@@ -1,0 +1,98 @@
+{
+  "schema": "rapidtriage-fixture-evidence-v1",
+  "scope": "#81-#90 internal fixture validation",
+  "status": "pass",
+  "generated_for": "RapidTriage commercial-readiness internal validated maturity gate",
+  "evidence": [
+    {
+      "item": 81,
+      "title": "NIST CFReDS/CFTT based known-answer tests",
+      "test_files": ["tests/test_rapidtriage_ops.py", "tests/test_rapidtriage_core_forensics_accuracy.py"],
+      "assertions": [
+        "Validation output preserves known-answer manifest ingestion, dataset status counts, evidence path checks, public corpus guidance, report-grade release gate, and #81 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Real CFReDS/CFTT corpus runs for each report-grade parser claim."]
+    },
+    {
+      "item": 82,
+      "title": "Parser-specific fixture corpus",
+      "test_files": ["tests/test_rapidtriage_ops.py"],
+      "assertions": [
+        "Validation output inventories parser areas, fixture/test counts, expected edge cases, coverage status, release gate, and #82 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Broader malformed, deleted, native, and versioned corpus coverage."]
+    },
+    {
+      "item": 83,
+      "title": "Parser-specific false positive/false negative documentation",
+      "test_files": ["tests/test_rapidtriage_ops.py"],
+      "assertions": [
+        "Parser-family FP/FN notes preserve false-positive risks, false-negative risks, validation-required guidance, parser scope, quantification warning, and #83 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Quantified false-positive/false-negative rates by corpus and parser version."]
+    },
+    {
+      "item": 84,
+      "title": "Independent validation report",
+      "test_files": ["tests/test_rapidtriage_ops.py", "tests/test_rapidtriage_final_roadmap.py"],
+      "assertions": [
+        "Validation output preserves independent report status, required signoffs, minimum sections, optional report hash/size, not-attached blocker, and #84 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Actual independent signed validation report for the release."]
+    },
+    {
+      "item": 85,
+      "title": "Tool validation package automation",
+      "test_files": ["tests/test_rapidtriage_ops.py"],
+      "assertions": [
+        "Validation package outputs preserve JSON, Markdown, artifact hash manifest, known-answer/fixture sections, limitation warnings, and #85 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Operator-attached test logs, release evidence, and independent review."]
+    },
+    {
+      "item": 86,
+      "title": "Chain-of-custody full workflow",
+      "test_files": ["tests/test_rapidtriage_case_db.py"],
+      "assertions": [
+        "Case DB report exports preserve evidence-source inventory, custody events, citation IDs, source status/hash fields, acquisition metadata limitations, and #86 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Signed custody handoff forms and acquisition-device/write-blocker metadata."]
+    },
+    {
+      "item": 87,
+      "title": "Evidence acquisition hash workflow",
+      "test_files": ["tests/test_rapidtriage_case_db.py"],
+      "assertions": [
+        "Case DB report exports preserve evidence-source hashes, hash records, algorithms, calculation timestamps, missing-hash warnings, and #87 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Whole-device acquisition hash workflow and operator metadata."]
+    },
+    {
+      "item": 88,
+      "title": "Analyst action immutable audit log",
+      "test_files": ["tests/test_rapidtriage_case_db.py"],
+      "assertions": [
+        "Case DB report exports preserve audit events, previous/event hash chain, actor/action/target/time fields, head hash, notarization warning, and #88 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Database-level append-only enforcement and external notarization/signing."]
+    },
+    {
+      "item": 89,
+      "title": "Report reproducibility",
+      "test_files": ["tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_ops.py"],
+      "assertions": [
+        "Report exports preserve stable payload hash, deterministic sorting, item/citation counts, volatile-field disclosure, replay warnings, and #89 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Cross-platform same-input byte-level replay tests."]
+    },
+    {
+      "item": 90,
+      "title": "Report item source provenance completeness",
+      "test_files": ["tests/test_rapidtriage_case_db.py"],
+      "assertions": [
+        "Report items preserve source path, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, and #90 core_accuracy_gates."
+      ],
+      "remaining_external_validation": ["Completeness validation across every parser and final report template."]
+    }
+  ]
+}

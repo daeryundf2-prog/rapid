@@ -1128,6 +1128,146 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "partial output cleanup limitation warning",
         ),
     },
+    {
+        "number": 81,
+        "title": "NIST CFReDS/CFTT based known-answer tests",
+        "surface": "known-answer manifest ingestion, dataset status counts, evidence-path checks, public corpus guidance, and release gates",
+        "corpus": "NIST-style known-answer manifests with pass/open/fail datasets, expected assertions, observed outputs, and evidence paths",
+        "oracle": "known-answer manifest, public corpus reference, observed RapidTriage output, and reviewer sign-off",
+        "required_checks": (
+            "known-answer manifest ingested",
+            "dataset status counts recorded",
+            "evidence path existence checked",
+            "public corpus guidance emitted",
+            "report-grade release gate recorded",
+        ),
+    },
+    {
+        "number": 82,
+        "title": "Parser-specific fixture corpus",
+        "surface": "parser fixture areas, fixture/test counts, expected edge cases, coverage status, and release gates",
+        "corpus": "repo fixture/test inventory for Windows, browser, mobile, cloud, email, memory, media, and OCR parser families",
+        "oracle": "fixture inventory, test-file coverage matrix, expected edge-case list, and release gate checklist",
+        "required_checks": (
+            "parser areas inventoried",
+            "fixture/test counts recorded",
+            "expected edge cases listed",
+            "coverage status summarized",
+            "release gate for parser changes recorded",
+        ),
+    },
+    {
+        "number": 83,
+        "title": "Parser false positive/false negative documentation",
+        "surface": "parser-family FP/FN risk notes, validation-required wording, and limitation disclosure",
+        "corpus": "parser-family limitation notes covering native Windows, browser/AI, mobile/cloud/email/media, and memory evidence",
+        "oracle": "reviewed FP/FN risk register and parser-family validation checklist",
+        "required_checks": (
+            "false positive risks documented",
+            "false negative risks documented",
+            "validation-required guidance recorded",
+            "parser family scope recorded",
+            "quantification limitation warning",
+        ),
+    },
+    {
+        "number": 84,
+        "title": "Independent validation report",
+        "surface": "external report path, hash, size, required signoffs, minimum sections, and not-attached blocker",
+        "corpus": "independent reviewer report attachments with scope, datasets, tool version, known-answer table, FP/FN notes, and legal review",
+        "oracle": "signed independent validation report, hash manifest, and release-owner signoff",
+        "required_checks": (
+            "independent report status recorded",
+            "report hash captured when attached",
+            "required signoffs listed",
+            "minimum report sections listed",
+            "not-attached blocker recorded",
+        ),
+    },
+    {
+        "number": 85,
+        "title": "Tool validation package automation",
+        "surface": "validation JSON/Markdown/artifact manifest, output hashes, known-answer sections, fixture corpus, and limitations",
+        "corpus": "release validation package outputs with JSON, Markdown, hash manifest, known-answer manifest, fixture corpus, FP/FN notes, and tool versions",
+        "oracle": "validation package hash manifest, generated report, command log, and release checklist",
+        "required_checks": (
+            "validation JSON output generated",
+            "validation Markdown output generated",
+            "artifact hash manifest generated",
+            "known-answer/fixture sections included",
+            "package generation limitation warning",
+        ),
+    },
+    {
+        "number": 86,
+        "title": "Chain-of-custody full workflow",
+        "surface": "evidence sources, custody events, citation IDs, status, source hashes, and acquisition limitations",
+        "corpus": "Case DB fixtures with evidence sources, audit events, review exports, and report-linked custody records",
+        "oracle": "custody event manifest, evidence-source hash manifest, and examiner handoff checklist",
+        "required_checks": (
+            "evidence source inventory",
+            "custody event inventory",
+            "citation IDs preserved",
+            "source status/hash fields preserved",
+            "acquisition metadata limitation warning",
+        ),
+    },
+    {
+        "number": 87,
+        "title": "Evidence acquisition hash workflow",
+        "surface": "evidence-source hashes, hash records, algorithms, calculation times, and missing-hash warnings",
+        "corpus": "Case DB fixtures with evidence-source MD5/SHA1/SHA256 values, hash_record rows, and report exports",
+        "oracle": "hash manifest, source file hash comparison, and acquisition metadata checklist",
+        "required_checks": (
+            "evidence-source hashes exported",
+            "hash records exported",
+            "hash algorithms preserved",
+            "calculation timestamps preserved",
+            "missing hash limitation warning",
+        ),
+    },
+    {
+        "number": 88,
+        "title": "Analyst action immutable audit log",
+        "surface": "audit events, previous/event hash chain, actor/action/target/time fields, and notarization caveat",
+        "corpus": "Case DB audit fixtures with review, import, export, and hash actions plus deterministic export replay",
+        "oracle": "audit hash-chain manifest, append-only policy review, and external signing/notarization evidence",
+        "required_checks": (
+            "audit events exported",
+            "previous/event hash chain generated",
+            "actor/action/target/time fields preserved",
+            "head hash recorded",
+            "external notarization limitation warning",
+        ),
+    },
+    {
+        "number": 89,
+        "title": "Report reproducibility",
+        "surface": "stable payload hash, deterministic sorting, item/citation counts, volatile field disclosure, and replay caveats",
+        "corpus": "Case DB report export fixtures replayed with identical source rows and deterministic citation ordering",
+        "oracle": "same-input same-output hash comparison, deterministic sort checklist, and cross-platform replay notes",
+        "required_checks": (
+            "stable payload hash generated",
+            "deterministic sorting documented",
+            "item/citation counts recorded",
+            "volatile fields disclosed",
+            "cross-platform replay limitation warning",
+        ),
+    },
+    {
+        "number": 90,
+        "title": "Report item source provenance completeness",
+        "surface": "source path, hashes, parser/version/confidence, offsets/source index, review status, reportability, and evidence strength",
+        "corpus": "Case DB report fixtures with reviewed files, documents, artifacts, search hits, and source_reference metadata",
+        "oracle": "report provenance checklist, source hash manifest, parser version inventory, and reviewer signoff",
+        "required_checks": (
+            "source path preserved",
+            "source or record hashes preserved",
+            "parser/version/confidence preserved",
+            "offset or source index preserved when available",
+            "review/reportability fields preserved",
+        ),
+    },
 )
 
 
@@ -1136,11 +1276,11 @@ def build_core_forensics_accuracy_profiles() -> dict[str, object]:
     return {
         "version": CORE_FORENSIC_ACCURACY_VERSION,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "scope": "#1-#80 validation and accuracy reinforcement",
+        "scope": "#1-#90 validation and accuracy reinforcement",
         "profile_count": len(profiles),
         "commercial_gap_ids": [f"#{item['number']}" for item in profiles],
         "status": "accuracy-profiles-ready",
-        "release_gate": "Each #1-#80 parser claim must attach pass/fail evidence against its profile before report-grade wording.",
+        "release_gate": "Each #1-#90 parser claim must attach pass/fail evidence against its profile before report-grade wording.",
         "profiles": profiles,
     }
 
@@ -1186,9 +1326,10 @@ def build_accuracy_profile(item: Mapping[str, object]) -> dict[str, object]:
             "timezone_or_timestamp_semantics_required": number in {
                 1, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 20, 22, 23, 24, 26, 27, 29, 31, 32,
                 33, 34, 35, 36, 37, 38, 39, 40, 43, 44, 45, 49, 51, 55, 57, 58, 59, 64, 65, 66, 67,
+                86, 88, 89, 90,
             },
             "secret_redaction_required": number in {19, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 40, 41, 42, 63},
-            "legal_or_authority_gate_required": number in {19, 22, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38, 39, 40, 41, 42, 63, 64, 65},
+            "legal_or_authority_gate_required": number in {19, 22, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38, 39, 40, 41, 42, 63, 64, 65, 81, 84, 85, 86, 87, 88, 89, 90},
             "cross_tool_diff_required": True,
             "known_answer_required": True,
         },
@@ -1257,4 +1398,4 @@ def accuracy_profile_for_item(number: int) -> dict[str, object]:
     for item in CORE_FORENSIC_ACCURACY_ITEMS:
         if int(item["number"]) == number:
             return build_accuracy_profile(item)
-    raise KeyError(f"unknown #1-#80 forensic accuracy item: {number}")
+    raise KeyError(f"unknown #1-#90 forensic accuracy item: {number}")

@@ -2852,6 +2852,10 @@ def build_custody_workflow(connection: sqlite3.Connection, case_id: str) -> dict
         },
         "evidence_sources": evidence_sources,
         "custody_events": custody_events,
+        "core_accuracy_gates": custody_workflow_core_accuracy_gates(
+            evidence_sources=evidence_sources,
+            custody_events=custody_events,
+        ),
         "limitations": [
             "This is a Case DB custody export; acquisition device/write-blocker metadata must be recorded separately when available.",
             "Original evidence images are not copied into report exports.",
@@ -2919,6 +2923,7 @@ def build_acquisition_hash_workflow(connection: sqlite3.Connection, case_id: str
             "commercial_gap_ids": [ACQUISITION_HASH_GAP_ID],
         },
         "hashes": hashes,
+        "core_accuracy_gates": acquisition_hash_core_accuracy_gates(hashes=hashes),
         "limitations": [
             "Folder evidence hashes describe imported files/outputs when available; whole-device acquisition hashes require acquisition metadata.",
             "Missing hashes should be resolved before court exhibit export.",
@@ -2967,6 +2972,7 @@ def build_audit_integrity_chain(connection: sqlite3.Connection, case_id: str) ->
             "commercial_gap_ids": [IMMUTABLE_AUDIT_GAP_ID],
         },
         "events": events,
+        "core_accuracy_gates": immutable_audit_core_accuracy_gates(events=events, head_hash=previous_hash),
         "limitations": [
             "This hash chain is generated at export time from Case DB audit rows; external notarization/signing is still required for full immutability.",
         ],
@@ -2989,6 +2995,11 @@ def build_report_reproducibility_manifest(
         "citation_count": len(citation_index),
         "deterministic_sort": "review include flag, updated_at, id; citation index sorted by citation_id",
         "volatile_fields": ["generated_at", "database path", "case updated_at"],
+        "core_accuracy_gates": report_reproducibility_core_accuracy_gates(
+            stable_hash=stable_payload_sha256(stable_payload),
+            item_count=len(items),
+            citation_count=len(citation_index),
+        ),
     }
 
 
@@ -3331,7 +3342,151 @@ def build_report_item_provenance(
         "verification_status": str(review.get("verification_status") or ""),
         "reportability": str(source_reference.get("reportability") or metadata.get("reportability") or ""),
         "evidence_strength": str(source_reference.get("evidence_strength") or metadata.get("evidence_strength") or ""),
+        "core_accuracy_gates": report_item_provenance_core_accuracy_gates(
+            source_path=str(source_reference.get("path") or enriched.get("path") or ""),
+            hashes=hashes,
+            record_hashes=record_hashes,
+            parser=str(source_reference.get("parser") or metadata.get("parser") or ""),
+            parser_version=str(source_reference.get("parser_version") or metadata.get("parser_version") or ""),
+            parser_confidence=source_reference.get("parser_confidence") or metadata.get("parser_confidence"),
+            record_offset=source_reference.get("record_offset"),
+            source_index=source_reference.get("source_index"),
+            review_status=str(review.get("status") or ""),
+            reportability=str(source_reference.get("reportability") or metadata.get("reportability") or ""),
+        ),
     }
+
+
+def custody_workflow_core_accuracy_gates(
+    *,
+    evidence_sources: Sequence[Mapping[str, object]],
+    custody_events: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    satisfied = ["acquisition metadata limitation warning"]
+    if evidence_sources:
+        satisfied.append("evidence source inventory")
+    if custody_events:
+        satisfied.append("custody event inventory")
+    if any(item.get("citation_id") for item in [*evidence_sources, *custody_events]):
+        satisfied.append("citation IDs preserved")
+    if any(item.get("status") or item.get("sha256") for item in evidence_sources):
+        satisfied.append("source status/hash fields preserved")
+    return [
+        build_accuracy_gate(
+            86,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"evidence_source_count:{len(evidence_sources)}",
+                f"custody_event_count:{len(custody_events)}",
+            ],
+        )
+    ]
+
+
+def acquisition_hash_core_accuracy_gates(*, hashes: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    satisfied = ["missing hash limitation warning"]
+    if any(item.get("target_type") == "evidence_source" for item in hashes):
+        satisfied.append("evidence-source hashes exported")
+    if hashes:
+        satisfied.append("hash records exported")
+    if any(isinstance(item.get("hashes"), Mapping) and item.get("hashes") for item in hashes):
+        satisfied.append("hash algorithms preserved")
+    if any(item.get("calculated_at") for item in hashes):
+        satisfied.append("calculation timestamps preserved")
+    return [
+        build_accuracy_gate(
+            87,
+            satisfied_checks=satisfied,
+            evidence_refs=[f"hash_count:{len(hashes)}"],
+        )
+    ]
+
+
+def immutable_audit_core_accuracy_gates(
+    *,
+    events: Sequence[Mapping[str, object]],
+    head_hash: str,
+) -> list[dict[str, object]]:
+    satisfied = ["external notarization limitation warning"]
+    if events:
+        satisfied.append("audit events exported")
+    if all(item.get("event_hash") is not None and "previous_event_hash" in item for item in events):
+        satisfied.append("previous/event hash chain generated")
+    if all(item.get("actor") is not None and item.get("action") and item.get("target_type") is not None and item.get("timestamp") for item in events):
+        satisfied.append("actor/action/target/time fields preserved")
+    if head_hash:
+        satisfied.append("head hash recorded")
+    return [
+        build_accuracy_gate(
+            88,
+            satisfied_checks=satisfied,
+            evidence_refs=[f"event_count:{len(events)}", f"head_hash:{head_hash}"],
+        )
+    ]
+
+
+def report_reproducibility_core_accuracy_gates(
+    *,
+    stable_hash: str,
+    item_count: int,
+    citation_count: int,
+) -> list[dict[str, object]]:
+    return [
+        build_accuracy_gate(
+            89,
+            satisfied_checks=[
+                "stable payload hash generated",
+                "deterministic sorting documented",
+                "item/citation counts recorded",
+                "volatile fields disclosed",
+                "cross-platform replay limitation warning",
+            ],
+            evidence_refs=[
+                f"stable_payload_sha256:{stable_hash}",
+                f"stable_item_count:{item_count}",
+                f"citation_count:{citation_count}",
+            ],
+        )
+    ]
+
+
+def report_item_provenance_core_accuracy_gates(
+    *,
+    source_path: str,
+    hashes: Mapping[str, object],
+    record_hashes: Mapping[str, object],
+    parser: str,
+    parser_version: str,
+    parser_confidence: object,
+    record_offset: object,
+    source_index: object,
+    review_status: str,
+    reportability: str,
+) -> list[dict[str, object]]:
+    satisfied = []
+    if source_path:
+        satisfied.append("source path preserved")
+    if hashes or record_hashes:
+        satisfied.append("source or record hashes preserved")
+    if parser or parser_version or parser_confidence:
+        satisfied.append("parser/version/confidence preserved")
+    if record_offset is not None or source_index is not None:
+        satisfied.append("offset or source index preserved when available")
+    if review_status or reportability:
+        satisfied.append("review/reportability fields preserved")
+    return [
+        build_accuracy_gate(
+            90,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"source_path:{source_path}",
+                f"has_hashes:{bool(hashes or record_hashes)}",
+                f"parser:{parser}",
+                f"review_status:{review_status}",
+                f"reportability:{reportability}",
+            ],
+        )
+    ]
 
 
 def stable_payload_sha256(payload: Mapping[str, object] | Sequence[Mapping[str, object]]) -> str:

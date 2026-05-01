@@ -1,0 +1,117 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #81-#90 internal fixture validation",
+  "status": "pass",
+  "datasets": [
+    {
+      "id": "core-forensics-081-known-answer-fixture",
+      "name": "#81 known-answer validation fixture assertions",
+      "source": "tests.test_rapidtriage_ops.RapidTriageOpsTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [81],
+      "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py", "tests/test_rapidtriage_core_forensics_accuracy.py"],
+      "expected": {"required_assertions": ["Validation output preserves manifest ingestion, dataset counts, evidence-path checks, public corpus guidance, release gate, and #81 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; public CFReDS/CFTT corpus execution remains blocker."
+    },
+    {
+      "id": "core-forensics-082-fixture-corpus",
+      "name": "#82 parser fixture corpus assertions",
+      "source": "tests.test_rapidtriage_ops.RapidTriageOpsTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [82],
+      "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
+      "expected": {"required_assertions": ["Parser fixture corpus output preserves parser areas, fixture/test counts, expected edge cases, coverage status, release gate, and #82 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; broader malformed/deleted/versioned corpus remains blocker."
+    },
+    {
+      "id": "core-forensics-083-fp-fn-notes",
+      "name": "#83 FP/FN notes assertions",
+      "source": "tests.test_rapidtriage_ops.RapidTriageOpsTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [83],
+      "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
+      "expected": {"required_assertions": ["Parser FP/FN notes preserve false-positive risks, false-negative risks, validation-required guidance, parser scope, quantification warning, and #83 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; quantified FP/FN rates remain blocker."
+    },
+    {
+      "id": "core-forensics-084-independent-validation",
+      "name": "#84 independent validation report assertions",
+      "source": "tests.test_rapidtriage_ops.RapidTriageOpsTests; tests.test_rapidtriage_final_roadmap.RapidTriageFinalRoadmapTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [84],
+      "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py", "tests/test_rapidtriage_final_roadmap.py"],
+      "expected": {"required_assertions": ["Independent validation report output preserves status, required signoffs, minimum sections, optional report hash/size, not-attached blocker, and #84 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; actual third-party signed validation remains operator-owned."
+    },
+    {
+      "id": "core-forensics-085-validation-package",
+      "name": "#85 validation package assertions",
+      "source": "tests.test_rapidtriage_ops.RapidTriageOpsTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [85],
+      "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
+      "expected": {"required_assertions": ["Validation package outputs preserve JSON, Markdown, artifact hash manifest, known-answer/fixture sections, package limitation warning, and #85 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; attached release test logs and independent review remain blockers."
+    },
+    {
+      "id": "core-forensics-086-custody-workflow",
+      "name": "#86 chain-of-custody fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDbTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [86],
+      "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
+      "expected": {"required_assertions": ["Case DB report export preserves evidence-source inventory, custody events, citation IDs, source status/hash fields, acquisition metadata warning, and #86 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; signed handoff/acquisition metadata remains blocker."
+    },
+    {
+      "id": "core-forensics-087-acquisition-hash",
+      "name": "#87 acquisition hash fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDbTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [87],
+      "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
+      "expected": {"required_assertions": ["Case DB report export preserves evidence-source hashes, hash records, algorithms, calculation timestamps, missing-hash warning, and #87 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; whole-device acquisition hash metadata remains blocker."
+    },
+    {
+      "id": "core-forensics-088-immutable-audit",
+      "name": "#88 immutable audit fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDbTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [88],
+      "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
+      "expected": {"required_assertions": ["Case DB report export preserves audit events, previous/event hash chain, actor/action/target/time fields, head hash, notarization warning, and #88 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; DB-level append-only enforcement and external notarization remain blockers."
+    },
+    {
+      "id": "core-forensics-089-reproducibility",
+      "name": "#89 report reproducibility fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDbTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [89],
+      "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_ops.py"],
+      "expected": {"required_assertions": ["Report export preserves stable payload hash, deterministic sorting, item/citation counts, volatile-field disclosure, replay warning, and #89 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; cross-platform same-input replay validation remains blocker."
+    },
+    {
+      "id": "core-forensics-090-provenance",
+      "name": "#90 source provenance fixture assertions",
+      "source": "tests.test_rapidtriage_case_db.RapidTriageCaseDbTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [90],
+      "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
+      "expected": {"required_assertions": ["Report items preserve source paths, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, and #90 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; completeness validation across every parser remains blocker."
+    }
+  ]
+}

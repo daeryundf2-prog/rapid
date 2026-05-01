@@ -13,7 +13,7 @@ from .audit import compute_sha256
 from .commercial_readiness import build_commercial_readiness_report
 from .docs import write_result
 from .enterprise import build_enterprise_policy
-from .forensic_accuracy import build_core_forensics_accuracy_profiles, build_core_forensics_known_answer_template
+from .forensic_accuracy import build_accuracy_gate, build_core_forensics_accuracy_profiles, build_core_forensics_known_answer_template
 
 
 VALIDATION_JSON_NAME = "rapidtriage-validation-package.json"
@@ -309,6 +309,13 @@ def build_known_answer_validation(manifest_path: Path | None = None) -> dict[str
         manifest_status = "all-passed"
     elif datasets:
         manifest_status = "loaded-with-open-results"
+    satisfied = ["public corpus guidance emitted", "report-grade release gate recorded"]
+    if manifest_path is not None:
+        satisfied.append("known-answer manifest ingested")
+    if status_counts:
+        satisfied.append("dataset status counts recorded")
+    if datasets:
+        satisfied.append("evidence path existence checked")
     return {
         "status": manifest_status,
         "commercial_gap_ids": [KNOWN_ANSWER_TEST_GAP_ID],
@@ -331,6 +338,17 @@ def build_known_answer_validation(manifest_path: Path | None = None) -> dict[str
         ],
         "release_gate": "known-answer manifest should be attached for any parser claimed report-grade",
         "ready_for_court_report": manifest_status == "all-passed",
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                81,
+                satisfied_checks=satisfied,
+                evidence_refs=[
+                    f"manifest_attached:{manifest_path is not None}",
+                    f"dataset_count:{len(datasets)}",
+                    f"status:{manifest_status}",
+                ],
+            )
+        ],
         "blockers": [
             "known-answer-manifest-not-attached" if manifest_path is None else "review-open-known-answer-results",
             "public-corpus-coverage-must-match-claimed-parser-scope",
@@ -346,6 +364,24 @@ def build_validation_package_assessment(output_dir: Path) -> dict[str, object]:
         "output_dir": str(output_dir),
         "outputs": [VALIDATION_JSON_NAME, VALIDATION_MARKDOWN_NAME, VALIDATION_ARTIFACTS_NAME],
         "ready_for_court_report": False,
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                85,
+                satisfied_checks=[
+                    "validation JSON output generated",
+                    "validation Markdown output generated",
+                    "artifact hash manifest generated",
+                    "known-answer/fixture sections included",
+                    "package generation limitation warning",
+                ],
+                evidence_refs=[
+                    f"output_dir:{output_dir}",
+                    VALIDATION_JSON_NAME,
+                    VALIDATION_MARKDOWN_NAME,
+                    VALIDATION_ARTIFACTS_NAME,
+                ],
+            )
+        ],
         "supports": [
             "known-answer-manifest-ingest",
             "parser-fixture-corpus-inventory",
@@ -398,6 +434,13 @@ def build_parser_fixture_corpus(fixture_root: Path) -> dict[str, object]:
             }
         )
     covered = sum(1 for row in rows if row["fixture_backed"])
+    satisfied = [
+        "parser areas inventoried",
+        "fixture/test counts recorded",
+        "expected edge cases listed",
+        "coverage status summarized",
+        "release gate for parser changes recorded",
+    ]
     return {
         "fixture_root": str(fixture_root),
         "parser_area_count": len(rows),
@@ -405,6 +448,17 @@ def build_parser_fixture_corpus(fixture_root: Path) -> dict[str, object]:
         "coverage_status": "fixture-backed-baseline" if covered == len(rows) else "fixture-gaps-present",
         "commercial_gap_ids": [PARSER_FIXTURE_CORPUS_GAP_ID],
         "ready_for_court_report": covered == len(rows),
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                82,
+                satisfied_checks=satisfied,
+                evidence_refs=[
+                    f"parser_area_count:{len(rows)}",
+                    f"fixture_backed_count:{covered}",
+                    f"fixture_root:{fixture_root}",
+                ],
+            )
+        ],
         "areas": rows,
     }
 
@@ -415,6 +469,19 @@ def build_parser_false_positive_false_negative_notes() -> list[dict[str, object]
         row = dict(item)
         row["commercial_gap_ids"] = [PARSER_FP_FN_GAP_ID]
         row["ready_for_court_report"] = False
+        row["core_accuracy_gates"] = [
+            build_accuracy_gate(
+                83,
+                satisfied_checks=[
+                    "false positive risks documented",
+                    "false negative risks documented",
+                    "validation-required guidance recorded",
+                    "parser family scope recorded",
+                    "quantification limitation warning",
+                ],
+                evidence_refs=[f"parser:{row.get('parser', '')}"],
+            )
+        ]
         rows.append(row)
     return rows
 
@@ -435,6 +502,18 @@ def build_independent_validation_report(report_path: Path | None = None) -> dict
                 "legal/report wording review",
             ],
             "ready_for_court_report": False,
+            "core_accuracy_gates": [
+                build_accuracy_gate(
+                    84,
+                    satisfied_checks=[
+                        "independent report status recorded",
+                        "required signoffs listed",
+                        "minimum report sections listed",
+                        "not-attached blocker recorded",
+                    ],
+                    evidence_refs=["status:not-attached"],
+                )
+            ],
         }
     resolved = report_path.expanduser().resolve()
     if not resolved.is_file():
@@ -454,6 +533,19 @@ def build_independent_validation_report(report_path: Path | None = None) -> dict
             "legal/report wording review",
         ],
         "ready_for_court_report": True,
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                84,
+                satisfied_checks=[
+                    "independent report status recorded",
+                    "report hash captured when attached",
+                    "required signoffs listed",
+                    "minimum report sections listed",
+                    "not-attached blocker recorded",
+                ],
+                evidence_refs=[f"report_path:{resolved}", f"sha256:{compute_sha256(resolved)}"],
+            )
+        ],
     }
 
 
@@ -475,6 +567,19 @@ def build_validation_artifact_manifest(output_dir: Path, paths: tuple[Path, ...]
         "commercial_gap_ids": [VALIDATION_PACKAGE_GAP_ID],
         "artifact_count": len(artifacts),
         "artifacts": artifacts,
+        "core_accuracy_gates": [
+            build_accuracy_gate(
+                85,
+                satisfied_checks=[
+                    "validation JSON output generated",
+                    "validation Markdown output generated",
+                    "artifact hash manifest generated",
+                    "known-answer/fixture sections included",
+                    "package generation limitation warning",
+                ],
+                evidence_refs=[f"artifact_count:{len(artifacts)}", f"output_dir:{output_dir}"],
+            )
+        ],
         "tamper_note": "Recompute SHA256 values before release publication; this manifest covers the validation package outputs.",
     }
 
@@ -848,7 +953,7 @@ def build_required_documents() -> list[dict[str, str]]:
         {"path": "docs/rapidtriage-parser-coverage.md", "purpose": "Implemented artifact and extension coverage."},
         {
             "path": "docs/rapidtriage-core-forensics-accuracy-profiles.md",
-            "purpose": "#1-#80 parser accuracy profile gates and pass/fail evidence requirements.",
+            "purpose": "#1-#90 parser accuracy profile gates and pass/fail evidence requirements.",
         },
         {
             "path": "docs/rapidtriage-core-forensics-001-005-validation.md",
@@ -893,6 +998,10 @@ def build_required_documents() -> list[dict[str, str]]:
         {
             "path": "docs/rapidtriage-core-forensics-071-080-validation.md",
             "purpose": "#71-#80 internal fixture validation manifest and commercial-readiness attachment workflow.",
+        },
+        {
+            "path": "docs/rapidtriage-core-forensics-081-090-validation.md",
+            "purpose": "#81-#90 internal fixture validation manifest and commercial-readiness attachment workflow.",
         },
         {"path": "docs/rapidtriage-release-checklist.md", "purpose": "Repeatable release verification checklist."},
         {"path": "docs/rapidtriage-release-notes-template.md", "purpose": "Release communication template."},
@@ -993,7 +1102,7 @@ def render_validation_markdown(payload: Mapping[str, object]) -> str:
                 if isinstance(item, Mapping):
                     lines.append(f"- `{item.get('id', '')}` ({item.get('source', '')}): status `{item.get('status', '')}`")
 
-    lines.extend(["", "## #1-#80 Core Forensics Accuracy Profiles", ""])
+    lines.extend(["", "## #1-#90 Core Forensics Accuracy Profiles", ""])
     if accuracy_profiles:
         lines.append(f"- Version: `{accuracy_profiles.get('version', '')}`")
         lines.append(f"- Profile count: `{accuracy_profiles.get('profile_count', 0)}`")
