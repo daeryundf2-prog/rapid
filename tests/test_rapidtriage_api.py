@@ -230,6 +230,12 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("#52", preview_payload["compare_workflow"]["commercial_gap_ids"])
             self.assertEqual(preview_payload["review_workflow"]["core_accuracy_gates"][0]["gap_id"], "#51")
             self.assertEqual(preview_payload["compare_workflow"]["core_accuracy_gates"][0]["gap_id"], "#52")
+            self.assertEqual(preview_payload["review_workflow"]["commercial_uplift_evidence"]["item_numbers"], [51])
+            self.assertIn(
+                "review status fields persisted",
+                preview_payload["review_workflow"]["commercial_uplift_evidence"]["passed_validation_check_ids"],
+            )
+            self.assertEqual(preview_payload["compare_workflow"]["commercial_uplift_evidence"]["item_numbers"], [52])
             self.assertEqual(
                 {action["id"] for action in preview_payload["viewer_actions"]},
                 {"download", "hash", "search-current-file", "pin-compare", "save-review"},
@@ -278,6 +284,10 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("schema-sql", sqlite_preview["sqlite"]["review_features"])
             self.assertIn("#54", sqlite_preview["sqlite"]["sqlite_viewer_assessment"]["commercial_gap_ids"])
             self.assertEqual(sqlite_preview["sqlite"]["core_accuracy_gates"][0]["gap_id"], "#54")
+            sqlite_uplift = sqlite_preview["sqlite"]["commercial_uplift_evidence"]
+            self.assertEqual(sqlite_uplift["item_numbers"], [54])
+            self.assertIn("read-only SQLite open", sqlite_uplift["passed_validation_check_ids"])
+            self.assertFalse(sqlite_uplift["large_data_controls"]["deleted_row_recovery"])
             self.assertIn("read-only SQLite open", sqlite_preview["sqlite"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("#74", sqlite_preview["sqlite"]["sqlite_fts_optimization_assessment"]["commercial_gap_ids"])
             self.assertIn("#74", sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["commercial_gap_ids"])
@@ -318,6 +328,10 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(eml_preview["email"]["threads"][0]["message_count"], 1)
             self.assertIn("#55", eml_preview["email"]["email_conversation_viewer_assessment"]["commercial_gap_ids"])
             self.assertEqual(eml_preview["email"]["core_accuracy_gates"][0]["gap_id"], "#55")
+            eml_uplift = eml_preview["email"]["commercial_uplift_evidence"]
+            self.assertEqual(eml_uplift["item_numbers"], [55])
+            self.assertIn("thread grouping", eml_uplift["passed_validation_check_ids"])
+            self.assertFalse(eml_uplift["large_data_controls"]["native_pst_ost_msg"])
             self.assertEqual(eml_preview["email"]["conversation_view"]["thread_count"], 1)
             self.assertEqual(
                 eml_preview["email"]["conversation_view"]["threads"][0]["message_order"][0]["subject"],
@@ -333,6 +347,10 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(len(binary_preview["hex"]["preview_sha256"]), 64)
             self.assertIn("#53", binary_preview["hex"]["hex_viewer_assessment"]["commercial_gap_ids"])
             self.assertEqual(binary_preview["hex"]["core_accuracy_gates"][0]["gap_id"], "#53")
+            hex_uplift = binary_preview["hex"]["commercial_uplift_evidence"]
+            self.assertEqual(hex_uplift["item_numbers"], [53])
+            self.assertIn("bounded hex rows", hex_uplift["passed_validation_check_ids"])
+            self.assertFalse(hex_uplift["large_data_controls"]["export_range_citation"])
             self.assertTrue(binary_preview["hex"]["offset_navigation"]["supports_keyword_byte_hits"])
             binary_search_response = client.get(
                 f"/api/runs/{run_id}/source-search",

@@ -595,6 +595,11 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(review_gate["gap_id"], "#51")
             self.assertIn("review status fields persisted", review_gate["satisfied_checks"])
             self.assertIn("verification status captured", review_gate["satisfied_checks"])
+            review_uplift = review["review_workflow"]["commercial_uplift_evidence"]
+            self.assertEqual(review_uplift["batch_id"], "commercial-uplift-051-055")
+            self.assertEqual(review_uplift["item_numbers"], [51])
+            self.assertIn("review status fields persisted", review_uplift["passed_validation_check_ids"])
+            self.assertFalse(review_uplift["large_data_controls"]["role_based_case_server"])
             self.assertFalse(review["review_workflow"]["ready_for_court_report"])
 
             filtered = database.search_case(
@@ -741,6 +746,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(batch["updated_count"], len(targets))
             self.assertIn("#51", batch["marks"][0]["review_workflow"]["commercial_gap_ids"])
             self.assertEqual(batch["marks"][0]["review_workflow"]["core_accuracy_gates"][0]["gap_id"], "#51")
+            self.assertEqual(batch["marks"][0]["review_workflow"]["commercial_uplift_evidence"]["item_numbers"], [51])
             self.assertIn("#65", batch["marks"][0]["evidence_selection_versioning"]["commercial_gap_ids"])
             self.assertTrue(batch["marks"][0]["review_workflow"]["assignment_present"])
             self.assertGreaterEqual(reviewed["summary"]["match_count"], max(0, len(targets) - 1))

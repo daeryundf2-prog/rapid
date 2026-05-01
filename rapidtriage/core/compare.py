@@ -86,6 +86,8 @@ def compare_paths(
         "left": left_record,
         "right": right_record,
     }
+    report_grade = compare_report_grade_assessment(mode="pair")
+    core_accuracy_gates = compare_core_accuracy_gates(results=[result], mode="pair")
     return {
         "command": "compare",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -110,8 +112,16 @@ def compare_paths(
             "commercial_grade_ready": False,
         },
         "compare_native_capabilities": dict(COMPARE_NATIVE_CAPABILITIES),
-        "compare_report_grade_assessment": compare_report_grade_assessment(mode="pair"),
-        "core_accuracy_gates": compare_core_accuracy_gates(results=[result], mode="pair"),
+        "compare_report_grade_assessment": report_grade,
+        "core_accuracy_gates": core_accuracy_gates,
+        "commercial_uplift_evidence": compare_commercial_uplift_evidence(
+            results=[result],
+            mode="pair",
+            report_grade=report_grade,
+            core_accuracy_gates=core_accuracy_gates,
+            max_text_bytes=max_text_bytes,
+            diff_context=diff_context,
+        ),
         "results": [result],
     }
 
@@ -161,6 +171,8 @@ def compare_many_paths(
         if diff.get("included"):
             text_diff_count += 1
         input_records.append(result["right"])
+    report_grade = compare_report_grade_assessment(mode="multi")
+    core_accuracy_gates = compare_core_accuracy_gates(results=comparisons, mode="multi")
     return {
         "command": "compare",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -188,8 +200,16 @@ def compare_many_paths(
             "commercial_grade_ready": False,
         },
         "compare_native_capabilities": dict(COMPARE_NATIVE_CAPABILITIES),
-        "compare_report_grade_assessment": compare_report_grade_assessment(mode="multi"),
-        "core_accuracy_gates": compare_core_accuracy_gates(results=comparisons, mode="multi"),
+        "compare_report_grade_assessment": report_grade,
+        "core_accuracy_gates": core_accuracy_gates,
+        "commercial_uplift_evidence": compare_commercial_uplift_evidence(
+            results=comparisons,
+            mode="multi",
+            report_grade=report_grade,
+            core_accuracy_gates=core_accuracy_gates,
+            max_text_bytes=max_text_bytes,
+            diff_context=diff_context,
+        ),
         "results": comparisons,
     }
 
@@ -228,6 +248,50 @@ def compare_report_grade_assessment(*, mode: str) -> dict[str, object]:
             "Confirm why the compared files were selected and record reviewer status before report inclusion.",
             "Use artifact-specific viewers/parsers for binary, image, SQLite, and mailbox semantic differences.",
         ],
+    }
+
+
+def compare_commercial_uplift_evidence(
+    *,
+    results: Sequence[Mapping[str, object]],
+    mode: str,
+    report_grade: Mapping[str, object],
+    core_accuracy_gates: Sequence[Mapping[str, object]],
+    max_text_bytes: int,
+    diff_context: int,
+) -> dict[str, object]:
+    passed = []
+    for gate in core_accuracy_gates:
+        if gate.get("gap_id") == COMPARE_GAP_ID:
+            passed.extend(str(item) for item in gate.get("satisfied_checks") or [])
+    failed = [
+        "binary-structure-aware-diff",
+        "image-visual-diff",
+        "sqlite-table-aware-diff",
+        "persistent-compare-notes",
+    ]
+    return {
+        "batch_id": "commercial-uplift-051-055",
+        "item_numbers": [52],
+        "implementation_track": "multi-evidence-compare-gate",
+        "source_refs": [
+            f"mode:{mode}",
+            f"result_count:{len(results)}",
+            *[f"comparison_id:{result.get('comparison_id', '')}" for result in results[:5]],
+        ],
+        "passed_validation_check_ids": sorted(set(passed)),
+        "failed_validation_check_ids": failed,
+        "commercial_blockers": list(report_grade.get("blockers") or []),
+        "large_data_controls": {
+            "max_text_bytes": max_text_bytes,
+            "diff_context": diff_context,
+            "result_count": len(results),
+            "a_b_c_baseline_compare": mode == "multi",
+            "bounded_text_diff": True,
+            "binary_structure_aware_diff": False,
+            "timeline_aware_compare": False,
+        },
+        "reporting_status": "implemented-baseline-validation-required",
     }
 
 

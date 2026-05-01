@@ -3878,30 +3878,61 @@ def review_workflow_assessment(*, assignee: str, priority: str, due_at: str) -> 
     ]
     if assignee or priority:
         satisfied.append("assignment and priority captured")
+    blockers = [
+        "local-single-database-review-workflow-until-role-based-server-is-enabled",
+        "review-status-does-not-replace-source-verification-and-parser-validation",
+    ]
+    core_accuracy_gates = [
+        build_accuracy_gate(
+            51,
+            satisfied_checks=satisfied,
+            evidence_refs=[
+                f"assignee:{assignee}",
+                f"priority:{priority}",
+                f"due_at:{due_at}",
+                "case_db:review_mark",
+                "case_db:review_mark_history",
+            ],
+        )
+    ]
     return {
         "commercial_gap_ids": ["#51"],
         "status": "implemented-baseline-validation-required",
         "assignment_present": bool(assignee),
         "priority": priority,
         "due_at": due_at,
-        "core_accuracy_gates": [
-            build_accuracy_gate(
-                51,
-                satisfied_checks=satisfied,
-                evidence_refs=[
-                    f"assignee:{assignee}",
-                    f"priority:{priority}",
-                    f"due_at:{due_at}",
-                    "case_db:review_mark",
-                    "case_db:review_mark_history",
-                ],
-            )
-        ],
+        "core_accuracy_gates": core_accuracy_gates,
+        "commercial_uplift_evidence": {
+            "batch_id": "commercial-uplift-051-055",
+            "item_numbers": [51],
+            "implementation_track": "case-db-reviewer-assignment-status-workflow",
+            "source_refs": [
+                f"assignee:{assignee}",
+                f"priority:{priority}",
+                f"due_at:{due_at}",
+                "case_db:review_mark",
+                "case_db:review_mark_history",
+            ],
+            "passed_validation_check_ids": sorted(set(satisfied)),
+            "failed_validation_check_ids": [
+                "role-based-assignment-queue",
+                "sla-dashboard",
+                "notification-workflow",
+                "multi-user-conflict-resolution",
+            ],
+            "commercial_blockers": blockers,
+            "large_data_controls": {
+                "local_case_db_review_mark": True,
+                "assignment_present": bool(assignee),
+                "priority_normalized": bool(priority),
+                "due_date_recorded": bool(due_at),
+                "audit_history_linked": True,
+                "role_based_case_server": False,
+            },
+            "reporting_status": "implemented-baseline-validation-required",
+        },
         "ready_for_court_report": False,
-        "blockers": [
-            "local-single-database-review-workflow-until-role-based-server-is-enabled",
-            "review-status-does-not-replace-source-verification-and-parser-validation",
-        ],
+        "blockers": blockers,
         "supported_fields": [
             "status",
             "verification_status",

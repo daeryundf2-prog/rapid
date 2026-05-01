@@ -1441,6 +1441,17 @@ def source_review_workflow_metadata() -> dict[str, object]:
         "report inclusion state captured",
         "history/audit limitation warning",
     ]
+    blockers = [
+        "single-user-local-workflow-until-role-based-case-server-is-enabled",
+        "review-decisions-still-require-source-hash-and-parser-limitation-verification",
+    ]
+    core_accuracy_gates = [
+        build_accuracy_gate(
+            51,
+            satisfied_checks=satisfied,
+            evidence_refs=["source-preview:review_workflow", "case-db:review_mark", "case-db:review_mark_history"],
+        )
+    ]
     return {
         "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["review"]],
         "status": "implemented-baseline-validation-required",
@@ -1455,43 +1466,91 @@ def source_review_workflow_metadata() -> dict[str, object]:
             "immutable-history",
         ],
         "ready_for_court_report": False,
-        "core_accuracy_gates": [
-            build_accuracy_gate(
-                51,
-                satisfied_checks=satisfied,
-                evidence_refs=["source-preview:review_workflow", "case-db:review_mark", "case-db:review_mark_history"],
-            )
-        ],
-        "blockers": [
-            "single-user-local-workflow-until-role-based-case-server-is-enabled",
-            "review-decisions-still-require-source-hash-and-parser-limitation-verification",
-        ],
+        "core_accuracy_gates": core_accuracy_gates,
+        "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
+            item_number=51,
+            component="reviewer-assignment-status-workflow",
+            core_accuracy_gates=core_accuracy_gates,
+            blockers=blockers,
+            source_refs=["source-preview:review_workflow", "case-db:review_mark", "case-db:review_mark_history"],
+            controls={
+                "single_user_local_workflow": True,
+                "assignment_fields_present": True,
+                "audit_history_linked": True,
+                "role_based_queue_enabled": False,
+                "notification_sla_enabled": False,
+            },
+        ),
+        "blockers": blockers,
     }
 
 
 def source_compare_workflow_metadata() -> dict[str, object]:
+    blockers = [
+        "binary-structure-aware-diff-not-implemented",
+        "visual-diff-and-table-aware-diff-require-dedicated-viewers",
+    ]
+    core_accuracy_gates = [
+        build_accuracy_gate(
+            52,
+            satisfied_checks=[
+                "A/B/C baseline compare",
+                "hash comparison",
+                "bounded text diff",
+                "status counts",
+                "specialized diff limitation warning",
+            ],
+            evidence_refs=["source-preview:compare_workflow", "command:compare"],
+        )
+    ]
     return {
         "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["compare"]],
         "status": "implemented-baseline-validation-required",
         "supports": ["a-b-compare", "a-b-c-baseline-compare", "hash-compare", "bounded-text-diff", "report-pivot"],
         "ready_for_court_report": False,
-        "core_accuracy_gates": [
-            build_accuracy_gate(
-                52,
-                satisfied_checks=[
-                    "A/B/C baseline compare",
-                    "hash comparison",
-                    "bounded text diff",
-                    "status counts",
-                    "specialized diff limitation warning",
-                ],
-                evidence_refs=["source-preview:compare_workflow", "command:compare"],
-            )
-        ],
-        "blockers": [
-            "binary-structure-aware-diff-not-implemented",
-            "visual-diff-and-table-aware-diff-require-dedicated-viewers",
-        ],
+        "core_accuracy_gates": core_accuracy_gates,
+        "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
+            item_number=52,
+            component="source-preview-compare-workflow",
+            core_accuracy_gates=core_accuracy_gates,
+            blockers=blockers,
+            source_refs=["source-preview:compare_workflow", "command:compare"],
+            controls={
+                "max_pinned_items": 3,
+                "a_b_c_baseline_compare": True,
+                "bounded_text_diff": True,
+                "persistent_compare_notes": False,
+                "binary_structure_aware_diff": False,
+            },
+        ),
+        "blockers": blockers,
+    }
+
+
+def viewer_workflow_commercial_uplift_evidence(
+    *,
+    item_number: int,
+    component: str,
+    core_accuracy_gates: Sequence[Mapping[str, object]],
+    blockers: Sequence[str],
+    source_refs: Sequence[str],
+    controls: Mapping[str, object],
+) -> dict[str, object]:
+    gap_id = f"#{item_number}"
+    passed = []
+    for gate in core_accuracy_gates:
+        if gate.get("gap_id") == gap_id:
+            passed.extend(str(item) for item in gate.get("satisfied_checks") or [])
+    return {
+        "batch_id": "commercial-uplift-051-055",
+        "item_numbers": [item_number],
+        "implementation_track": component,
+        "source_refs": list(source_refs),
+        "passed_validation_check_ids": sorted(set(passed)),
+        "failed_validation_check_ids": list(blockers),
+        "commercial_blockers": list(blockers),
+        "large_data_controls": dict(controls),
+        "reporting_status": "implemented-baseline-validation-required",
     }
 
 
@@ -1632,6 +1691,30 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
                 source_path=source_path,
                 database_metadata=database_metadata,
                 tables=previews,
+            ),
+            "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
+                item_number=54,
+                component="sqlite-table-specialized-viewer",
+                core_accuracy_gates=sqlite_viewer_core_accuracy_gates(
+                    source_path=source_path,
+                    database_metadata=database_metadata,
+                    tables=previews,
+                ),
+                blockers=[
+                    "table-specific-pagination-ui-not-implemented",
+                    "where-builder-ui-not-implemented",
+                    "deleted-row-and-wal-recovery-not-implemented-in-viewer",
+                    "export-selected-rows-workflow-not-implemented",
+                ],
+                source_refs=[f"source_path:{source_path}", f"table_count:{len(tables)}"],
+                controls={
+                    "table_limit": SQLITE_PREVIEW_TABLE_LIMIT,
+                    "row_limit": SQLITE_PREVIEW_ROW_LIMIT,
+                    "column_limit": SQLITE_PREVIEW_COLUMN_LIMIT,
+                    "opened_readonly": True,
+                    "deleted_row_recovery": False,
+                    "where_builder_ui": False,
+                },
             ),
             "sqlite_fts_optimization_assessment": source_viewer_component_assessment(
                 VIEWER_WORKFLOW_GAP_IDS["sqlite_performance"],
@@ -1844,6 +1927,30 @@ def build_email_preview(source_path: Path, suffix: str) -> Dict[str, object]:
                 messages=summaries,
                 conversation=conversation,
             ),
+            "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
+                item_number=55,
+                component="email-conversation-viewer",
+                core_accuracy_gates=email_viewer_core_accuracy_gates(
+                    source_path=source_path,
+                    messages=summaries,
+                    conversation=conversation,
+                ),
+                blockers=[
+                    "native-pst-ost-msg-conversation-view-not-implemented",
+                    "deleted-mailbox-item-recovery-not-implemented",
+                    "attachment-extraction-and-citation-export-not-complete",
+                    "message-id-graph-validation-required",
+                ],
+                source_refs=[f"source_path:{source_path}", f"message_count:{len(summaries)}", f"thread_count:{len(threads)}"],
+                controls={
+                    "message_limit": EMAIL_PREVIEW_MESSAGE_LIMIT,
+                    "body_preview_chars": EMAIL_BODY_PREVIEW_CHARS,
+                    "thread_count": len(threads),
+                    "header_threading": True,
+                    "native_pst_ost_msg": False,
+                    "attachment_extraction": False,
+                },
+            ),
         },
     }
 
@@ -1919,6 +2026,31 @@ def build_hex_preview(source_path: Path) -> Dict[str, object]:
                 rows=rows,
                 preview_hashes=preview_hashes,
                 truncated=len(data) > HEX_PREVIEW_MAX_BYTES,
+            ),
+            "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
+                item_number=53,
+                component="raw-source-hex-viewer",
+                core_accuracy_gates=hex_viewer_core_accuracy_gates(
+                    source_path=source_path,
+                    rows=rows,
+                    preview_hashes=preview_hashes,
+                    truncated=len(data) > HEX_PREVIEW_MAX_BYTES,
+                ),
+                blockers=[
+                    "interactive-jump-to-offset-ui-not-implemented",
+                    "copy-safe-byte-selection-ui-not-implemented",
+                    "exported-hex-range-citation-package-not-implemented",
+                    "sector-partition-aware-navigation-not-implemented",
+                ],
+                source_refs=[f"source_path:{source_path}", f"preview_sha256:{preview_hashes['sha256']}"],
+                controls={
+                    "max_hex_preview_bytes": HEX_PREVIEW_MAX_BYTES,
+                    "row_width": HEX_PREVIEW_ROW_WIDTH,
+                    "row_count": len(rows),
+                    "supports_keyword_byte_hits": True,
+                    "full_file_inline_hash": False,
+                    "export_range_citation": False,
+                },
             ),
         },
     }

@@ -91,6 +91,10 @@
         "additionalProperties": true
       }
     },
+    "commercial_uplift_evidence": {
+      "type": "object",
+      "additionalProperties": true
+    },
     "results": {
       "type": "array",
       "items": {
