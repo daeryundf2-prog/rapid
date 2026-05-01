@@ -285,6 +285,18 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("app/service schema version registry", correlation_gates["#45"]["satisfied_checks"])
             self.assertIn("source app/version attribution", correlation_gates["#45"]["satisfied_checks"])
             self.assertIn("release-gate limitation disclosure", correlation_gates["#45"]["satisfied_checks"])
+            correlation_uplift = messenger_summary["details"]["mobile_correlation_commercial_uplift_evidence"]
+            self.assertEqual(correlation_uplift["batch_id"], "commercial-uplift-041-045")
+            self.assertEqual(correlation_uplift["item_numbers"], [43, 44, 45])
+            self.assertIn("media_message_links_built", correlation_uplift["passed_validation_check_ids"])
+            self.assertIn("unified_contact_call_sms_view_built", correlation_uplift["passed_validation_check_ids"])
+            self.assertIn("schema_version_registry_built", correlation_uplift["passed_validation_check_ids"])
+            self.assertIn(
+                "correlation_validated_against_known_answer",
+                correlation_uplift["failed_validation_check_ids"],
+            )
+            self.assertFalse(correlation_uplift["large_data_controls"]["device_wide_timeline_ready"])
+            self.assertTrue(correlation_uplift["large_data_controls"]["known_answer_correlation_required"])
 
             source_rows = [artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-export-source"]
             self.assertGreaterEqual(len(source_rows), 4)

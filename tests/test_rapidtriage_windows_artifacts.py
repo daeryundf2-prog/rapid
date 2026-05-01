@@ -193,6 +193,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("strict legal warning", storage_gates["#42"]["satisfied_checks"])
             self.assertIn("opt-in reveal workflow warning", storage_gates["#42"]["satisfied_checks"])
             self.assertIn("audit and scope review requirement", storage_gates["#42"]["satisfied_checks"])
+            secret_uplift = storage_inventory["details"]["secret_handling_commercial_uplift_evidence"]
+            self.assertEqual(secret_uplift["batch_id"], "commercial-uplift-041-045")
+            self.assertEqual(secret_uplift["item_numbers"], [42])
+            self.assertIn("raw-secret-values-redacted", secret_uplift["passed_control_ids"])
+            self.assertIn("strict_legal_warning_present", secret_uplift["passed_control_ids"])
+            self.assertTrue(secret_uplift["large_data_controls"]["secret_values_redacted_by_default"])
+            self.assertFalse(secret_uplift["large_data_controls"]["dpapi_keychain_integration"])
             storage_uplift = storage_inventory["details"]["commercial_uplift_evidence"]
             self.assertEqual(storage_uplift["batch_id"], "commercial-uplift-016-020")
             self.assertEqual(storage_uplift["item_numbers"], [19, 20])

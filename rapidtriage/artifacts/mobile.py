@@ -920,6 +920,17 @@ def build_mobile_correlation_summary(rows: list[Mapping[str, object]]) -> dict[s
     message_media_links = build_message_media_links(message_rows, media_rows)
     unified_actor_view = build_unified_contact_call_sms_view(message_rows, contact_rows, call_rows)
     schema_version_registry = build_schema_version_registry([*message_rows, *app_rows])
+    validation_checks = {
+        "message_media_correlation_available": bool(message_rows and media_rows),
+        "media_message_links_built": bool(message_media_links),
+        "contact_message_correlation_available": bool(contact_rows and message_rows),
+        "call_message_correlation_available": bool(call_rows and message_rows),
+        "unified_contact_call_sms_view_built": bool(unified_actor_view),
+        "app_specific_schema_versions_tracked": bool(schema_versions),
+        "schema_version_registry_built": bool(schema_version_registry),
+        "schema_version_registry_known_answer_validated": False,
+        "correlation_validated_against_known_answer": False,
+    }
     return {
         "event_type": "mobile-correlation-summary",
         "timestamp": "",
@@ -939,19 +950,21 @@ def build_mobile_correlation_summary(rows: list[Mapping[str, object]]) -> dict[s
         "unified_contact_call_sms_view": unified_actor_view,
         "unified_contact_call_sms_view_count": len(unified_actor_view),
         "timeline_correlation_ready": bool(message_rows or media_rows or call_rows),
-        "validation_checks": {
-            "message_media_correlation_available": bool(message_rows and media_rows),
-            "media_message_links_built": bool(message_media_links),
-            "contact_message_correlation_available": bool(contact_rows and message_rows),
-            "call_message_correlation_available": bool(call_rows and message_rows),
-            "unified_contact_call_sms_view_built": bool(unified_actor_view),
-            "app_specific_schema_versions_tracked": bool(schema_versions),
-            "schema_version_registry_built": bool(schema_version_registry),
-            "schema_version_registry_known_answer_validated": False,
-            "correlation_validated_against_known_answer": False,
-        },
+        "validation_checks": validation_checks,
         "commercial_gap_ids": ["#43", "#44", "#45"],
         "mobile_correlation_report_grade_assessment": mobile_correlation_report_grade_assessment(),
+        "mobile_correlation_commercial_uplift_evidence": mobile_correlation_commercial_uplift_evidence(
+            message_count=len(message_rows),
+            media_count=len(media_rows),
+            contact_count=len(contact_rows),
+            call_count=len(call_rows),
+            services=services,
+            participant_count=len(participants),
+            message_media_link_count=len(message_media_links),
+            unified_actor_count=len(unified_actor_view),
+            schema_version_count=len(schema_version_registry),
+            validation_checks=validation_checks,
+        ),
         "forensic_review": mobile_correlation_forensic_review(
             message_count=len(message_rows),
             media_count=len(media_rows),
@@ -1209,6 +1222,58 @@ def mobile_correlation_forensic_review(
             "Known-answer validation is required for attachment resolution, contact identity merging, and schema-version semantics.",
         ],
     )
+
+
+def mobile_correlation_commercial_uplift_evidence(
+    *,
+    message_count: int,
+    media_count: int,
+    contact_count: int,
+    call_count: int,
+    services: list[str],
+    participant_count: int,
+    message_media_link_count: int,
+    unified_actor_count: int,
+    schema_version_count: int,
+    validation_checks: Mapping[str, object],
+) -> dict[str, object]:
+    report_grade = mobile_correlation_report_grade_assessment()
+    passed_validation_check_ids = [
+        str(check_id)
+        for check_id, passed in validation_checks.items()
+        if passed and not str(check_id).endswith("_known_answer_validated")
+    ]
+    failed_validation_check_ids = [
+        str(check_id)
+        for check_id, passed in validation_checks.items()
+        if not passed and str(check_id).endswith("_known_answer_validated")
+    ]
+    if not validation_checks.get("correlation_validated_against_known_answer"):
+        failed_validation_check_ids.append("correlation_validated_against_known_answer")
+    return {
+        "batch_id": "commercial-uplift-041-045",
+        "item_numbers": [43, 44, 45],
+        "implementation_track": "mobile-correlation-schema-gate",
+        "source_refs": [f"service:{service}" for service in services[:20]],
+        "passed_validation_check_ids": sorted(set(passed_validation_check_ids)),
+        "failed_validation_check_ids": sorted(set(failed_validation_check_ids)),
+        "commercial_blockers": list(report_grade["blockers"]),
+        "large_data_controls": {
+            "max_rows_per_source": MAX_ROWS_PER_SOURCE,
+            "max_chat_db_sample_rows": MAX_CHAT_DB_SAMPLE_ROWS,
+            "message_count": message_count,
+            "media_count": media_count,
+            "contact_count": contact_count,
+            "call_count": call_count,
+            "participant_count": participant_count,
+            "message_media_link_count": message_media_link_count,
+            "unified_actor_count": unified_actor_count,
+            "schema_version_count": schema_version_count,
+            "device_wide_timeline_ready": False,
+            "known_answer_correlation_required": True,
+        },
+        "reporting_status": "candidate-correlation-validation-required",
+    }
 
 
 def collect_ios_backup_metadata(path: Path) -> Iterable[ArtifactRecord]:

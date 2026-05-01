@@ -695,6 +695,18 @@ def build_browser_storage_inventory_record(
             ),
             "secret_handling_validation_checks": secret_validation_checks,
             "browser_secret_handling_assessment": browser_secret_handling_assessment(secret_validation_checks),
+            "secret_handling_commercial_uplift_evidence": browser_secret_commercial_uplift_evidence(
+                {
+                    "source_path": str(profile_dir.resolve()),
+                    "browser": browser,
+                    "profile": profile,
+                    "inventory_count": len(storage_inventory),
+                    "sensitive_inventory_count": sensitive_count,
+                    "storage_inventory": storage_inventory,
+                    "secret_handling_validation_checks": secret_validation_checks,
+                    "browser_secret_handling_assessment": browser_secret_handling_assessment(secret_validation_checks),
+                }
+            ),
             "secret_handling_forensic_review": build_forensic_review(
                 gap_id="#42",
                 artifact_goal="Browser password/cookie/session artifact handling with strict legal warning and no secret reveal",
@@ -1047,6 +1059,62 @@ def browser_secret_handling_assessment(checks: Mapping[str, object]) -> Dict[str
             "Use this inventory to identify candidate stores, then document legal authority before any external credential review.",
             "Validate password/cookie/session interpretation with browser-version and OS-keychain known-answer fixtures.",
         ],
+    }
+
+
+def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[str, object]:
+    checks = details.get("secret_handling_validation_checks")
+    if not isinstance(checks, Mapping):
+        checks = {}
+    assessment = details.get("browser_secret_handling_assessment")
+    if not isinstance(assessment, Mapping):
+        assessment = {}
+    storage_inventory = details.get("storage_inventory")
+    if not isinstance(storage_inventory, list):
+        storage_inventory = []
+    passed_control_ids: List[str] = []
+    failed_control_ids: List[str] = []
+    if not checks.get("raw_secret_values_extracted"):
+        passed_control_ids.append("raw-secret-values-redacted")
+    else:
+        failed_control_ids.append("raw-secret-values-redacted")
+    for check_id, control_id in (
+        ("cookie_values_decrypted", "cookie-values-not-decrypted"),
+        ("password_values_decrypted", "password-values-not-decrypted"),
+        ("session_tokens_extracted", "session-tokens-not-extracted"),
+    ):
+        if not checks.get(check_id):
+            passed_control_ids.append(control_id)
+        else:
+            failed_control_ids.append(control_id)
+    for check_id in ("strict_legal_warning_present", "scope_review_required", "inventory_only_mode"):
+        if checks.get(check_id):
+            passed_control_ids.append(str(check_id))
+        else:
+            failed_control_ids.append(str(check_id))
+    return {
+        "batch_id": "commercial-uplift-041-045",
+        "item_numbers": [42],
+        "implementation_track": "browser-secret-legal-gate",
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"browser:{details.get('browser', '')}",
+            f"profile:{details.get('profile', '')}",
+        ],
+        "passed_control_ids": passed_control_ids,
+        "failed_control_ids": failed_control_ids,
+        "commercial_blockers": list(assessment.get("blockers") or []),
+        "large_data_controls": {
+            "max_browser_inventory_files": MAX_BROWSER_INVENTORY_FILES,
+            "max_browser_inventory_sample_files": MAX_BROWSER_INVENTORY_SAMPLE_FILES,
+            "storage_inventory_count": int(details.get("inventory_count") or len(storage_inventory)),
+            "sensitive_inventory_count": int(details.get("sensitive_inventory_count") or 0),
+            "secret_values_redacted_by_default": not bool(checks.get("raw_secret_values_extracted")),
+            "raw_secret_values_extracted": bool(checks.get("raw_secret_values_extracted")),
+            "requires_scope_review": bool(checks.get("scope_review_required")),
+            "dpapi_keychain_integration": False,
+        },
+        "reporting_status": "inventory-only-validation-required",
     }
 
 
