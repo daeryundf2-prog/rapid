@@ -235,6 +235,23 @@ def build_message_record(
         },
         "email_validation_matrix": email_validation_matrix(source_format, {"headers_parsed": True, "body_present": bool(body_preview)}),
         "email_report_grade_assessment": email_report_grade_assessment(source_format),
+        "commercial_uplift_evidence": email_commercial_uplift_evidence(
+            source_format=source_format,
+            source_hashes=source_hashes,
+            details={
+                "source_path": str(path.resolve()),
+                "source_index": source_index,
+                "message_id": header_value(message, "Message-ID"),
+                "subject": header_value(message, "Subject"),
+                "attachment_count": len(attachments),
+                "validation_checks": {
+                    "headers_parsed": True,
+                    "body_present": bool(body_preview),
+                    "attachment_metadata_only": True,
+                    "commercial_parser_validated": False,
+                },
+            },
+        ),
         "email_native_capabilities": dict(EMAIL_NATIVE_CAPABILITIES),
         "email_format_profile": email_format_profile(source_format),
         "email_issue_matrix": email_issue_matrix(source_format),
@@ -299,6 +316,17 @@ def build_mailbox_record(
         "validation_checks": validation_checks,
         "email_validation_matrix": email_validation_matrix(source_format, validation_checks),
         "email_report_grade_assessment": email_report_grade_assessment(source_format),
+        "commercial_uplift_evidence": email_commercial_uplift_evidence(
+            source_format=source_format,
+            source_hashes=source_hashes,
+            details={
+                "source_path": str(path.resolve()),
+                "mailbox_name": path.name,
+                "message_count": message_count,
+                "validation_checks": validation_checks,
+                **(extra_details or {}),
+            },
+        ),
         "email_native_capabilities": dict(EMAIL_NATIVE_CAPABILITIES),
         "email_format_profile": email_format_profile(source_format),
         "email_issue_matrix": email_issue_matrix(source_format),
@@ -489,6 +517,46 @@ def email_report_grade_assessment(source_format: str) -> dict[str, object]:
             "Validate PST/OST/MSG content with a dedicated mailbox parser before report-grade conclusions.",
             "Review privilege/scope, threading, duplicate handling, and attachment extraction against known-answer mailboxes.",
         ],
+    }
+
+
+def email_commercial_uplift_evidence(
+    *,
+    source_format: str,
+    source_hashes: dict[str, str],
+    details: dict[str, object],
+) -> dict[str, object]:
+    validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
+    matrix = email_validation_matrix(source_format, validation)
+    issue_matrix = email_issue_matrix(source_format)
+    return {
+        "batch_id": "commercial-uplift-036-040",
+        "item_numbers": [36],
+        "implementation_track": "email-mailbox-parser-validation",
+        "objective": "Expose email/PST/OST/MBOX parsing evidence, mailbox bounds, and report-grade blockers without claiming native MAPI parity.",
+        "source_refs": [
+            f"source_path:{details.get('source_path', '')}",
+            f"source_format:{source_format}",
+            f"source_sha256:{source_hashes.get('sha256', '')}",
+            f"source_index:{details.get('source_index', '')}",
+            f"mailbox_name:{details.get('mailbox_name', '')}",
+        ],
+        "passed_validation_matrix_ids": [str(item.get("id")) for item in matrix if item.get("passed")],
+        "failed_validation_matrix_ids": [str(item.get("id")) for item in matrix if not item.get("passed")],
+        "passed_issue_matrix_ids": [str(item.get("id")) for item in issue_matrix if item.get("passed")],
+        "failed_issue_matrix_ids": [str(item.get("id")) for item in issue_matrix if not item.get("passed")],
+        "commercial_blockers": email_blockers(source_format),
+        "large_data_controls": {
+            "max_mbox_messages": MAX_MBOX_MESSAGES,
+            "container_scan_limit": CONTAINER_SCAN_LIMIT,
+            "max_container_candidates": MAX_CONTAINER_CANDIDATES,
+            "message_count": int(details.get("message_count") or 0),
+            "attachment_count": int(details.get("attachment_count") or 0),
+            "native_pst_ost_msg_object_decode": False,
+            "broad_mailbox_known_answer_corpus_required": True,
+        },
+        "next_internal_step": "Add libpff/native MAPI object decoding, folder/deleted item recovery, attachment hashing, and mailbox known-answer corpus validation.",
+        "external_evidence_required": True,
     }
 
 

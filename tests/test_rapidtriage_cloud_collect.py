@@ -53,6 +53,11 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertEqual(payload["summary"]["collected_count"], 1)
                 self.assertIn("#40", payload["cloud_api_report_grade_assessment"]["commercial_gap_ids"])
                 self.assertEqual(payload["forensic_review"]["gap_id"], "#40")
+                api_uplift = payload["commercial_uplift_evidence"]
+                self.assertEqual(api_uplift["batch_id"], "commercial-uplift-036-040")
+                self.assertEqual(api_uplift["item_numbers"], [40])
+                self.assertIn("manifest-validated", api_uplift["passed_validation_matrix_ids"])
+                self.assertIn("provider-oauth-scope-capture", api_uplift["failed_validation_matrix_ids"])
                 api_gate = payload["core_accuracy_gates"][0]
                 self.assertEqual(api_gate["gap_id"], "#40")
                 self.assertIn("manifest request validation", api_gate["satisfied_checks"])
@@ -63,6 +68,10 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertIn("#41", payload["credential_handling"]["commercial_gap_ids"])
                 self.assertIn("#41", payload["credential_handling"]["credential_security_assessment"]["commercial_gap_ids"])
                 self.assertEqual(payload["credential_handling"]["forensic_review"]["gap_id"], "#41")
+                credential_uplift = payload["credential_handling"]["commercial_uplift_evidence"]
+                self.assertEqual(credential_uplift["item_numbers"], [41])
+                self.assertIn("tokens_not_written", credential_uplift["passed_validation_check_ids"])
+                self.assertIn("secure_token_vault", credential_uplift["failed_validation_check_ids"])
                 credential_gate = payload["credential_handling"]["core_accuracy_gates"][0]
                 self.assertEqual(credential_gate["gap_id"], "#41")
                 self.assertIn("token value redaction", credential_gate["satisfied_checks"])

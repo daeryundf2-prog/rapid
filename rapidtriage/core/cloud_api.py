@@ -146,6 +146,11 @@ def run_cloud_api_collection(
         credential_handling=credential_handling,
         requests=collected,
     )
+    credential_handling["commercial_uplift_evidence"] = cloud_credential_commercial_uplift_evidence(
+        manifest_path=manifest_path,
+        credential_handling=credential_handling,
+        requests=collected,
+    )
     api_report_grade = cloud_api_report_grade_assessment()
     payload = {
         "command": "cloud-collect",
@@ -162,6 +167,14 @@ def run_cloud_api_collection(
         "commercial_gap_ids": ["#40"],
         "cloud_api_validation_matrix": cloud_api_validation_matrix(summary, credential_handling),
         "cloud_api_report_grade_assessment": api_report_grade,
+        "commercial_uplift_evidence": cloud_api_commercial_uplift_evidence(
+            manifest_path=manifest_path,
+            output_dir=output_dir,
+            summary=summary,
+            credential_handling=credential_handling,
+            requests=collected,
+            report_grade=api_report_grade,
+        ),
         "cloud_api_native_capabilities": dict(CLOUD_API_NATIVE_CAPABILITIES),
         "core_accuracy_gates": cloud_api_core_accuracy_gates(
             manifest_path=manifest_path,
@@ -412,6 +425,98 @@ def cloud_api_report_grade_assessment() -> dict[str, object]:
             "Capture account authorization, provider scopes, consent/legal-hold context, and API version metadata.",
             "Validate collected JSON against provider-native export views before report-grade use.",
         ],
+    }
+
+
+def cloud_api_commercial_uplift_evidence(
+    *,
+    manifest_path: Path,
+    output_dir: Path,
+    summary: Mapping[str, object],
+    credential_handling: Mapping[str, object],
+    requests: list[dict[str, object]],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    matrix = cloud_api_validation_matrix(summary, credential_handling)
+    return {
+        "batch_id": "commercial-uplift-036-040",
+        "item_numbers": [40],
+        "implementation_track": "cloud-api-acquisition-workflow",
+        "objective": "Expose cloud API collection manifest validation, credential redaction, response hash provenance, and provider OAuth/scope blockers.",
+        "source_refs": [
+            f"manifest_path:{manifest_path.resolve()}",
+            f"manifest_sha256:{compute_sha256(manifest_path)}",
+            f"output_dir:{output_dir.resolve()}",
+            *[f"response_sha256:{request.get('response_sha256')}" for request in requests[:5] if request.get("response_sha256")],
+        ],
+        "passed_validation_matrix_ids": [str(item.get("id")) for item in matrix if item.get("passed")],
+        "failed_validation_matrix_ids": [str(item.get("id")) for item in matrix if not item.get("passed")],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or CLOUD_API_REPORT_GRADE_BLOCKERS),
+        "large_data_controls": {
+            "timeout_seconds": DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
+            "max_response_bytes": DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES,
+            "request_count": int(summary.get("request_count") or 0),
+            "collected_count": int(summary.get("collected_count") or 0),
+            "dry_run": bool(summary.get("dry_run")),
+            "provider_specific_oauth_flow": False,
+            "incremental_delta_collection": False,
+            "known_answer_cloud_api_corpus_required": True,
+        },
+        "next_internal_step": "Add provider OAuth/device flow, scope capture, pagination/backoff manifests, delta collection, and provider API known-answer validation.",
+        "external_evidence_required": True,
+    }
+
+
+def cloud_credential_commercial_uplift_evidence(
+    *,
+    manifest_path: Path,
+    credential_handling: Mapping[str, object],
+    requests: list[dict[str, object]],
+) -> dict[str, object]:
+    assessment = cloud_credential_security_assessment(credential_handling)
+    request_sensitive_headers = [
+        header
+        for request in requests
+        for header in (
+            request.get("credential_handling", {}).get("sensitive_header_names", [])
+            if isinstance(request.get("credential_handling"), Mapping)
+            else []
+        )
+    ]
+    return {
+        "batch_id": "commercial-uplift-041-045",
+        "item_numbers": [41],
+        "implementation_track": "cloud-credential-handling",
+        "objective": "Expose token redaction, storage boundary, scope/audit blockers, and legal authority requirements.",
+        "source_refs": [
+            f"manifest_path:{manifest_path.resolve()}",
+            f"manifest_sha256:{compute_sha256(manifest_path)}",
+            f"credential_storage:{credential_handling.get('credential_storage', '')}",
+            f"bearer_token_env:{credential_handling.get('bearer_token_env', '')}",
+        ],
+        "passed_validation_check_ids": [
+            "headers_redacted",
+            "tokens_not_written",
+        ]
+        if credential_handling.get("headers_redacted") and not credential_handling.get("tokens_written_to_output")
+        else [],
+        "failed_validation_check_ids": [
+            "provider_oauth_consent_record",
+            "provider_scope_inventory",
+            "secure_token_vault",
+            "token_rotation_audit",
+        ],
+        "request_sensitive_header_names": sorted(set(str(item) for item in request_sensitive_headers)),
+        "commercial_blockers": list(assessment.get("blockers") or CLOUD_CREDENTIAL_SECURITY_BLOCKERS),
+        "large_data_controls": {
+            "tokens_written_to_output": bool(credential_handling.get("tokens_written_to_output")),
+            "headers_redacted": bool(credential_handling.get("headers_redacted")),
+            "secure_token_vault_integrated": bool(credential_handling.get("secure_token_vault_integrated")),
+            "token_rotation_audit_present": bool(credential_handling.get("token_rotation_audit_present")),
+        },
+        "next_internal_step": "Integrate OS/enterprise token vault, OAuth scope capture, consent evidence, and token rotation/revocation audit.",
+        "external_evidence_required": True,
     }
 
 

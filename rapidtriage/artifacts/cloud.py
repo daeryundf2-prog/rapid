@@ -200,6 +200,19 @@ def build_record(
             "cloud_family": family,
             "cloud_validation_matrix": cloud_validation_matrix(validation_checks),
             "cloud_report_grade_assessment": report_grade,
+            "commercial_uplift_evidence": cloud_commercial_uplift_evidence(
+                gap_ids=gap_ids,
+                family=family,
+                service=service,
+                artifact_type=artifact_type,
+                source_index=source_index,
+                source_hashes=source_hashes,
+                validation_checks=validation_checks,
+                issue_matrix=cloud_issue_matrix(family, artifact_type),
+                report_grade=report_grade,
+                details=detail_payload,
+                source_path=str(path.resolve()),
+            ),
             "cloud_native_capabilities": dict(CLOUD_NATIVE_CAPABILITIES),
             "cloud_provider_profile": cloud_provider_profile(family, service),
             "cloud_issue_matrix": cloud_issue_matrix(family, artifact_type),
@@ -543,6 +556,67 @@ def cloud_report_grade_assessment(gap_ids: list[str], family: str, service: str)
             "Preserve provider export/API scope, account ownership proof, timestamps/timezone notes, and original export hashes.",
             "Validate key mail/file/message/audit rows against provider-native views or known-answer exports before testimony.",
         ],
+    }
+
+
+def cloud_commercial_uplift_evidence(
+    *,
+    gap_ids: list[str],
+    family: str,
+    service: str,
+    artifact_type: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    validation_checks: Mapping[str, object],
+    issue_matrix: list[dict[str, object]],
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+    source_path: str,
+) -> dict[str, object]:
+    matrix = cloud_validation_matrix(validation_checks)
+    item_numbers = sorted(
+        int(gap_id.lstrip("#"))
+        for gap_id in gap_ids
+        if gap_id.startswith("#") and gap_id.lstrip("#").isdigit()
+    )
+    objectives = {
+        37: "Expose Google Takeout/Gmail/Drive/Activity export evidence and selected-products/export-scope blockers.",
+        38: "Expose iCloud account/file/photo export evidence and ADP/shared-album/container blockers.",
+        39: "Expose Microsoft 365/Teams/OneDrive/SharePoint export evidence and eDiscovery/permissions/retention blockers.",
+    }
+    source_refs = [
+        f"source_path:{source_path}",
+        f"source_index:{source_index}",
+        f"source_sha256:{source_hashes.get('sha256', '')}",
+        f"family:{family}",
+        f"service:{service}",
+        f"artifact_type:{artifact_type}",
+    ]
+    for key in ("subject", "file_name", "chat_id", "operation", "account_email", "message_id", "file_id"):
+        value = optional_text(details.get(key))
+        if value:
+            source_refs.append(f"{key}:{value}")
+    return {
+        "batch_id": "commercial-uplift-036-040",
+        "item_numbers": item_numbers,
+        "implementation_track": "cloud-export-provider-validation",
+        "objective": " ".join(objectives[number] for number in item_numbers if number in objectives),
+        "source_refs": source_refs,
+        "passed_validation_matrix_ids": [str(item.get("id")) for item in matrix if item.get("passed")],
+        "failed_validation_matrix_ids": [str(item.get("id")) for item in matrix if not item.get("passed")],
+        "passed_issue_matrix_ids": [str(item.get("id")) for item in issue_matrix if item.get("passed")],
+        "failed_issue_matrix_ids": [str(item.get("id")) for item in issue_matrix if not item.get("passed")],
+        "report_grade_status": str(report_grade.get("status") or ""),
+        "commercial_blockers": list(report_grade.get("blockers") or CLOUD_REPORT_GRADE_BLOCKERS),
+        "large_data_controls": {
+            "provider_export_scope_verified": bool(validation_checks.get("provider_scope_verified")),
+            "original_export_hash_verified": bool(validation_checks.get("original_export_hash_verified")),
+            "deleted_cloud_object_recovery": False,
+            "tenant_permission_graph_complete": False,
+            "known_answer_cloud_corpus_required": True,
+        },
+        "next_internal_step": "Add provider-specific export manifests, sidecar merge validation, sharing/retention graph capture, and provider known-answer corpora.",
+        "external_evidence_required": True,
     }
 
 

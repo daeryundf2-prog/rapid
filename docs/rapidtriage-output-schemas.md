@@ -417,7 +417,7 @@ Email artifact rows:
   - `email-message`
   - `email-mailbox`
 
-Current email rows carry `parser`, `parser_version`, `source_path`, `source_format`, `source_hashes`, message IDs, thread parent IDs, subject/from/to/cc/date headers, body previews and hashes, attachment filename/content-type/size/hash metadata, mailbox candidate strings/email/subject pivots for PST/OST/MSG, `email_format_profile`, `email_issue_matrix`, `validation_checks`, `commercial_grade_ready=false`, `commercial_grade_blockers`, legal warnings, and risk flags. EML, EMLX, MBOX, and Maildir rows are parsed as triage messages; PST/OST/MSG rows are inventory candidates only, not full native mailbox decoding.
+Current email rows carry `parser`, `parser_version`, `source_path`, `source_format`, `source_hashes`, message IDs, thread parent IDs, subject/from/to/cc/date headers, body previews and hashes, attachment filename/content-type/size/hash metadata, mailbox candidate strings/email/subject pivots for PST/OST/MSG, `email_format_profile`, `email_issue_matrix`, `validation_checks`, `commercial_uplift_evidence`, `commercial_grade_ready=false`, `commercial_grade_blockers`, legal warnings, and risk flags. EML, EMLX, MBOX, and Maildir rows are parsed as triage messages; PST/OST/MSG rows are inventory candidates only, not full native mailbox decoding.
 
 Media image collector rows:
 

@@ -66,12 +66,20 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("Gmail/Drive/Activity/Location normalization", google_gate["satisfied_checks"])
             self.assertIn("source hash and export-scope warning", google_gate["satisfied_checks"])
             self.assertIn("provider schema/timezone warning", google_gate["satisfied_checks"])
+            mail_uplift = mail["details"]["commercial_uplift_evidence"]
+            self.assertEqual(mail_uplift["batch_id"], "commercial-uplift-036-040")
+            self.assertEqual(mail_uplift["item_numbers"], [37])
+            self.assertIn("source-hash-present", mail_uplift["passed_validation_matrix_ids"])
+            self.assertIn("provider-scope-verified", mail_uplift["failed_validation_matrix_ids"])
 
             apple_gate = account["details"]["core_accuracy_gates"][0]
             self.assertEqual(apple_gate["gap_id"], "#38")
             self.assertIn("Apple/iCloud service profile detection", apple_gate["satisfied_checks"])
             self.assertIn("account/file/photo metadata normalization", apple_gate["satisfied_checks"])
             self.assertIn("ADP/shared-album limitation warning", apple_gate["satisfied_checks"])
+            account_uplift = account["details"]["commercial_uplift_evidence"]
+            self.assertEqual(account_uplift["item_numbers"], [38])
+            self.assertIn("icloud-copy-limitations", account_uplift["failed_issue_matrix_ids"])
 
             cloud_file = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "cloud-file")
             self.assertEqual(cloud_file["details"]["service"], "microsoft-onedrive")
@@ -84,6 +92,9 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("Microsoft 365 service profile detection", microsoft_file_gate["satisfied_checks"])
             self.assertIn("mail/file/message/audit normalization", microsoft_file_gate["satisfied_checks"])
             self.assertIn("source hash and eDiscovery/export warning", microsoft_file_gate["satisfied_checks"])
+            file_uplift = cloud_file["details"]["commercial_uplift_evidence"]
+            self.assertEqual(file_uplift["item_numbers"], [39])
+            self.assertIn("retention-hold-and-deleted-state", file_uplift["failed_issue_matrix_ids"])
 
             message = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "cloud-message")
             self.assertEqual(message["details"]["service"], "microsoft-teams")

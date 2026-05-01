@@ -50,6 +50,11 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             self.assertIn("PST/OST native limitation warning", eml_gate["satisfied_checks"])
             self.assertIn("threading/dedup validation warning", eml_gate["satisfied_checks"])
             self.assertIn("legal privilege boundary", eml_gate["satisfied_checks"])
+            eml_uplift = eml["details"]["commercial_uplift_evidence"]
+            self.assertEqual(eml_uplift["batch_id"], "commercial-uplift-036-040")
+            self.assertEqual(eml_uplift["item_numbers"], [36])
+            self.assertIn("source-hash-and-basic-parse", eml_uplift["passed_validation_matrix_ids"])
+            self.assertIn("thread-dedup-validation", eml_uplift["failed_validation_matrix_ids"])
 
             emlx = next(artifact for artifact in messages if artifact["details"]["source_format"] == "emlx")
             self.assertEqual(emlx["details"]["email_format_profile"]["family"], "apple-mail-message")
@@ -68,6 +73,9 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             pst_gate = pst["details"]["core_accuracy_gates"][0]
             self.assertEqual(pst_gate["gap_id"], "#36")
             self.assertIn("PST/OST native limitation warning", pst_gate["satisfied_checks"])
+            pst_uplift = pst["details"]["commercial_uplift_evidence"]
+            self.assertIn("native-container-object-decode", pst_uplift["failed_validation_matrix_ids"])
+            self.assertEqual(pst_uplift["large_data_controls"]["container_scan_limit"], 16 * 1024 * 1024)
 
 
 def write_email_fixture(root: Path) -> None:
