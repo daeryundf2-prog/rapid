@@ -23,3 +23,25 @@ rapidtriage commercial-readiness \
 ```
 
 Boundary: this evidence is enough to satisfy the internal `validated` maturity gate for the implemented fixture claims. It is not commercial-grade proof by itself. External EVTX/Registry known-answer corpora, trusted-tool record/cell-level diffs, transaction-log replay validation, and independent reviewer sign-off remain blockers for AXIOM/WISDOM-class wording.
+
+## Cross-Tool Diff Bridge
+
+For real corpus validation, compare RapidTriage output with trusted tool exports and map passing comparisons to the relevant backlog items:
+
+```bash
+rapidtriage cross-tool-validate \
+  --rapid-output ./case-run/artifacts/eventlog.json \
+  --reference-output evtxecmd=./reference/EvtxECmd-Security.csv \
+  --backlog-item 1 \
+  --backlog-item 2 \
+  --backlog-item 3 \
+  --min-overlap 0.95 \
+  --output ./validation-001-005/evtx-cross-tool.json \
+  --json
+
+rapidtriage commercial-readiness \
+  --validation-package ./validation-001-005/evtx-cross-tool.json \
+  --json
+```
+
+The cross-tool report now emits a `datasets` section compatible with `commercial-readiness`. A passing report can satisfy the `validated` gate for mapped items only when the JSON report exists and the overlap threshold is met. It still does not satisfy `commercial_grade`; reviewer sign-off, corpus scope, external tool versions/commands, source hashes, and Registry transaction-log/deleted-cell validation must remain attached.

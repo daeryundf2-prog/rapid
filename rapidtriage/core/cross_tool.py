@@ -16,6 +16,22 @@ KEY_FIELDS = (
     "record_id",
     "RecordNumber",
     "record_number",
+    "event_id",
+    "EventID",
+    "provider_name",
+    "Provider",
+    "channel",
+    "Channel",
+    "key_path",
+    "KeyPath",
+    "registry_path",
+    "RegistryPath",
+    "value_name",
+    "ValueName",
+    "cell_offset",
+    "CellOffset",
+    "source_offset",
+    "SourceOffset",
     "path",
     "Path",
     "source_path",
@@ -38,6 +54,7 @@ def build_cross_tool_validation_report(
     reference_outputs: Mapping[str, Path],
     output: Path | None = None,
     min_overlap: float = 0.8,
+    backlog_items: Iterable[int] | None = None,
 ) -> dict[str, object]:
     if not reference_outputs:
         raise CrossToolValidationError("at least one --reference-output NAME=PATH is required")
@@ -53,6 +70,7 @@ def build_cross_tool_validation_report(
         compare_datasets(rapid_dataset, dataset, min_overlap=min_overlap)
         for dataset in reference_datasets.values()
     ]
+    mapped_items = list(dict.fromkeys(int(item) for item in (backlog_items or [])))
     status = "pass"
     if any(item["status"] == "failed" for item in comparisons):
         status = "failed"
@@ -65,9 +83,25 @@ def build_cross_tool_validation_report(
         "min_overlap": min_overlap,
         "rapid_output": rapid_dataset,
         "reference_outputs": list(reference_datasets.values()),
+        "backlog_items": mapped_items,
         "comparisons": comparisons,
+        "cross_tool_validation_assessment": cross_tool_validation_assessment(
+            status=status,
+            comparisons=comparisons,
+            backlog_items=mapped_items,
+            output=output,
+        ),
         "operator_guidance": build_operator_guidance(comparisons),
     }
+    if mapped_items:
+        payload["datasets"] = build_validation_datasets(
+            status=status,
+            backlog_items=mapped_items,
+            comparisons=comparisons,
+            output=output,
+            rapid_output=rapid_output,
+            reference_outputs=reference_outputs,
+        )
     if output is not None:
         write_result(payload, output.expanduser().resolve())
         payload["output"] = str(output.expanduser().resolve())
@@ -151,6 +185,7 @@ def flatten_mapping(value: Mapping[str, object], *, prefix: str = "") -> dict[st
 
 def candidate_keys(row: Mapping[str, object]) -> list[str]:
     keys: list[str] = []
+    keys.extend(composite_candidate_keys(row))
     for field in KEY_FIELDS:
         value = value_for_key(row, field)
         if value is not None and str(value).strip():
@@ -160,6 +195,39 @@ def candidate_keys(row: Mapping[str, object]) -> list[str]:
         if joined:
             keys.append(normalize_key(joined))
     return keys
+
+
+def composite_candidate_keys(row: Mapping[str, object]) -> list[str]:
+    composites: list[str] = []
+    event_record_id = first_value(row, ("event_record_id", "EventRecordID", "record_id", "RecordNumber", "record_number"))
+    event_id = first_value(row, ("event_id", "EventID"))
+    provider = first_value(row, ("provider_name", "Provider"))
+    channel = first_value(row, ("channel", "Channel"))
+    if event_record_id is not None:
+        composites.append(normalize_key(f"evtx-record:{event_record_id}"))
+    if event_record_id is not None and channel is not None:
+        composites.append(normalize_key(f"evtx-record:{channel}:{event_record_id}"))
+    if event_id is not None and provider is not None:
+        composites.append(normalize_key(f"evtx-event:{provider}:{event_id}"))
+
+    key_path = first_value(row, ("key_path", "KeyPath", "registry_path", "RegistryPath", "path", "Path"))
+    value_name = first_value(row, ("value_name", "ValueName"))
+    cell_offset = first_value(row, ("cell_offset", "CellOffset", "source_offset", "SourceOffset"))
+    if key_path is not None:
+        composites.append(normalize_key(f"registry-key:{key_path}"))
+    if key_path is not None and value_name is not None:
+        composites.append(normalize_key(f"registry-value:{key_path}:{value_name}"))
+    if cell_offset is not None:
+        composites.append(normalize_key(f"registry-cell:{cell_offset}"))
+    return composites
+
+
+def first_value(row: Mapping[str, object], fields: Iterable[str]) -> object | None:
+    for field in fields:
+        value = value_for_key(row, field)
+        if value is not None and str(value).strip():
+            return value
+    return None
 
 
 def compare_datasets(
@@ -205,6 +273,69 @@ def build_operator_guidance(comparisons: list[Mapping[str, object]]) -> list[str
         "Low overlap can indicate parser loss, schema mismatch, wrong evidence root, or incompatible external-tool export settings.",
         "Attach this report with parser version, external tool version, and source evidence hash when validating high-value artifacts.",
     ]
+
+
+def build_validation_datasets(
+    *,
+    status: str,
+    backlog_items: list[int],
+    comparisons: list[Mapping[str, object]],
+    output: Path | None,
+    rapid_output: Path,
+    reference_outputs: Mapping[str, Path],
+) -> list[dict[str, object]]:
+    evidence_paths = [str(output.expanduser().resolve())] if output is not None else [
+        str(rapid_output.expanduser().resolve()),
+        *[str(path.expanduser().resolve()) for path in reference_outputs.values()],
+    ]
+    reference_names = [str(item.get("reference_name") or "") for item in comparisons]
+    return [
+        {
+            "id": f"cross-tool-items-{'-'.join(str(item) for item in backlog_items)}",
+            "name": "Cross-tool validation for RapidTriage core forensic parser claims",
+            "source": ", ".join(name for name in reference_names if name),
+            "corpus_family": "core-forensics-cross-tool",
+            "status": "pass" if status == "pass" else "fail",
+            "backlog_items": backlog_items,
+            "evidence_paths": evidence_paths,
+            "evidence_paths_present": True,
+            "expected": {
+                "backlog_items": backlog_items,
+                "required_assertions": [
+                    "RapidTriage output and trusted reference output share record/cell keys above the configured overlap threshold.",
+                    "Missing reference keys are bounded in missing_in_rapid_sample for reviewer triage.",
+                    "Reference tool names, row counts, key counts, and overlap ratio are preserved.",
+                ],
+                "reference_tools": reference_names,
+                "minimum_overlap": min(
+                    [float(item.get("overlap_ratio") or 0.0) for item in comparisons] or [0.0]
+                ),
+            },
+            "notes": "Cross-tool validation evidence. Passing overlap can satisfy the validated gate, but commercial-grade still requires corpus scope review and independent sign-off.",
+        }
+    ]
+
+
+def cross_tool_validation_assessment(
+    *,
+    status: str,
+    comparisons: list[Mapping[str, object]],
+    backlog_items: list[int],
+    output: Path | None,
+) -> dict[str, object]:
+    return {
+        "status": status,
+        "backlog_items": backlog_items,
+        "comparison_count": len(comparisons),
+        "output": str(output.expanduser().resolve()) if output is not None else "",
+        "ready_for_validated_gate": bool(backlog_items) and status == "pass" and output is not None,
+        "ready_for_commercial_grade": False,
+        "commercial_grade_blockers": [
+            "corpus-scope-and-source-hash-review-required",
+            "independent-reviewer-signoff-required",
+            "external-tool-version-and-command-capture-required",
+        ],
+    }
 
 
 def infer_format(path: Path) -> str:

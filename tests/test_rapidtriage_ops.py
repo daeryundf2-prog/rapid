@@ -551,6 +551,69 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertLess(comparison["overlap_ratio"], 0.9)
             self.assertIn("1003", comparison["missing_in_rapid_sample"])
 
+    def test_cross_tool_validate_can_emit_readiness_validation_dataset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid.json"
+            reference = root / "evtxecmd.csv"
+            output = root / "cross-tool.json"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {"details": {"event_record_id": 1001, "event_id": 4624, "provider_name": "Security"}},
+                            {"details": {"event_record_id": 1002, "event_id": 4625, "provider_name": "Security"}},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "EventRecordID,EventID,Provider\n1001,4624,Security\n1002,4625,Security\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"evtxecmd={reference}",
+                        "--backlog-item",
+                        "1",
+                        "--backlog-item",
+                        "2",
+                        "--min-overlap",
+                        "1.0",
+                        "--output",
+                        str(output),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            self.assertEqual(payload["backlog_items"], [1, 2])
+            self.assertTrue(payload["cross_tool_validation_assessment"]["ready_for_validated_gate"])
+            self.assertFalse(payload["cross_tool_validation_assessment"]["ready_for_commercial_grade"])
+            self.assertEqual(payload["datasets"][0]["status"], "pass")
+            self.assertEqual(payload["datasets"][0]["backlog_items"], [1, 2])
+            self.assertEqual(payload["datasets"][0]["evidence_paths"], [str(output.resolve())])
+
+            readiness_stdout = io.StringIO()
+            with contextlib.redirect_stdout(readiness_stdout):
+                readiness_exit = main(["commercial-readiness", "--validation-package", str(output), "--json"])
+
+            self.assertEqual(readiness_exit, 0)
+            readiness = json.loads(readiness_stdout.getvalue())
+            self.assertEqual(readiness["validation_evidence_summary"]["mapped_item_numbers"], [1, 2])
+            item_one = next(item for item in readiness["all_items"] if item["number"] == 1)
+            self.assertTrue(item_one["maturity_gates"]["validated"]["passed"])
+
     def test_confidence_explainability_and_reproducibility_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

@@ -1166,6 +1166,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="External tool output as NAME=PATH; repeat for EvtxECmd, RECmd, MFTECmd, PECmd, Plaso, etc.",
     )
     cross_tool.add_argument("--min-overlap", type=float, default=0.8, help="Minimum reference-key overlap ratio")
+    cross_tool.add_argument(
+        "--backlog-item",
+        action="append",
+        type=int,
+        help="Commercial-readiness backlog item number satisfied by a passing comparison; repeat for #1-#5 evidence",
+    )
     cross_tool.add_argument("--output", help="Optional JSON report path")
     cross_tool.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
@@ -2306,6 +2312,7 @@ def main(argv=None) -> int:
                 reference_outputs=references,
                 output=Path(args.output).expanduser().resolve() if args.output else None,
                 min_overlap=args.min_overlap,
+                backlog_items=args.backlog_item or [],
             )
         except (CrossToolValidationError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             parser.error(str(exc))
