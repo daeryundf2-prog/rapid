@@ -1,0 +1,187 @@
+{
+  "schema": "rapidtriage-known-answer-manifest-v1",
+  "name": "RapidTriage core forensics #41-#50 internal fixture validation",
+  "status": "pass",
+  "datasets": [
+    {
+      "id": "core-forensics-041-cloud-credential-fixture",
+      "name": "#41 cloud credential handling fixture assertions",
+      "source": "tests.test_rapidtriage_cloud_collect.RapidTriageCloudCollectTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [41],
+      "evidence_paths": [
+        "docs/validation/core-forensics-041-050-fixture-evidence.json",
+        "tests/test_rapidtriage_cloud_collect.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Cloud collection preserves token redaction, environment/vault boundary metadata, scope/consent warnings, rotation audit warnings, legal warning, and #41 core_accuracy_gates."
+        ]
+      },
+      "notes": "Internal fixture pass; enterprise vault, OAuth consent records, and provider audit evidence remain external blockers."
+    },
+    {
+      "id": "core-forensics-042-browser-secret-fixture",
+      "name": "#42 browser secret handling fixture assertions",
+      "source": "tests.test_rapidtriage_windows_artifacts.RapidTriageWindowsArtifactsTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [42],
+      "evidence_paths": [
+        "docs/validation/core-forensics-041-050-fixture-evidence.json",
+        "tests/test_rapidtriage_windows_artifacts.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Browser storage inventory preserves sensitive artifact inventory, secret redaction, strict legal warning, opt-in reveal warning, audit/scope review requirement, and #42 core_accuracy_gates."
+        ]
+      },
+      "notes": "Internal fixture pass; lawful DPAPI/keychain reveal workflows and browser-version corpora remain validation-gated."
+    },
+    {
+      "id": "core-forensics-043-mobile-correlation-fixture",
+      "name": "#43 mobile media/message correlation fixture assertions",
+      "source": "tests.test_rapidtriage_mobile_export.RapidTriageMobileExportTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [43],
+      "evidence_paths": [
+        "docs/validation/core-forensics-041-050-fixture-evidence.json",
+        "tests/test_rapidtriage_mobile_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Mobile correlation summary preserves message-media links, row counts, service attribution, timeline readiness, known-answer warning, and #43 core_accuracy_gates."
+        ]
+      },
+      "notes": "Internal fixture pass; device-wide timeline and vendor diff validation remain required."
+    },
+    {
+      "id": "core-forensics-044-mobile-unified-view-fixture",
+      "name": "#44 contact/call/SMS unified view fixture assertions",
+      "source": "tests.test_rapidtriage_mobile_export.RapidTriageMobileExportTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [44],
+      "evidence_paths": [
+        "docs/validation/core-forensics-041-050-fixture-evidence.json",
+        "tests/test_rapidtriage_mobile_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Mobile correlation summary preserves contact/call/SMS actor merge, source row links, participant attribution, dedupe/export-scope warnings, and #44 core_accuracy_gates."
+        ]
+      },
+      "notes": "Internal fixture pass; analyst-verified identity resolution and grouped mobile UI remain future work."
+    },
+    {
+      "id": "core-forensics-045-mobile-schema-fixture",
+      "name": "#45 app schema version registry fixture assertions",
+      "source": "tests.test_rapidtriage_mobile_export.RapidTriageMobileExportTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [45],
+      "evidence_paths": [
+        "docs/validation/core-forensics-041-050-fixture-evidence.json",
+        "tests/test_rapidtriage_mobile_export.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Mobile correlation summary preserves app/service schema registry, source app/version attribution, schema compatibility warnings, migration warnings, release-gate disclosure, and #45 core_accuracy_gates."
+        ]
+      },
+      "notes": "Internal fixture pass; per-app schema migration fixture matrix remains required for commercial-grade claims."
+    },
+    {
+      "id": "core-forensics-046-clustering-fixture",
+      "name": "#46 large-result clustering fixture assertions",
+      "source": "tests.test_rapidtriage_search_analysis.RapidTriageSearchAnalysisTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [46],
+      "evidence_paths": [
+        "docs/validation/core-forensics-041-050-fixture-evidence.json",
+        "tests/test_rapidtriage_search_analysis.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Search analysis preserves bounded clusters, representative match links, source/keyword grouping, truncation disclosure, review-state warning, and #46 core_accuracy_gates."
+        ]
+      },
+      "notes": "Internal fixture pass; persistent review state and large-case near-duplicate clustering remain blockers."
+    },
+    {
+      "id": "core-forensics-047-entity-view-fixture",
+      "name": "#47 entity view fixture assertions",
+      "source": "tests.test_rapidtriage_search_analysis.RapidTriageSearchAnalysisTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [47],
+      "evidence_paths": [
+        "docs/validation/core-forensics-041-050-fixture-evidence.json",
+        "tests/test_rapidtriage_search_analysis.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Search analysis preserves entity extraction, source/path references, match links, risk flags, merge/split warning, and #47 core_accuracy_gates."
+        ]
+      },
+      "notes": "Internal fixture pass; false-positive tuning and analyst-verified merge/split workflow remain required."
+    },
+    {
+      "id": "core-forensics-048-graph-view-fixture",
+      "name": "#48 relationship graph fixture assertions",
+      "source": "tests.test_rapidtriage_search_analysis.RapidTriageSearchAnalysisTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [48],
+      "evidence_paths": [
+        "docs/validation/core-forensics-041-050-fixture-evidence.json",
+        "tests/test_rapidtriage_search_analysis.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Search analysis preserves graph nodes, relationship edges, source citation references, paging/truncation disclosure, causal-proof warning, and #48 core_accuracy_gates."
+        ]
+      },
+      "notes": "Internal fixture pass; scalable interactive graph UI and saved layouts remain future work."
+    },
+    {
+      "id": "core-forensics-049-timeline-fixture",
+      "name": "#49 unified timeline correlation fixture assertions",
+      "source": "tests.test_rapidtriage_search_analysis.RapidTriageSearchAnalysisTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [49],
+      "evidence_paths": [
+        "docs/validation/core-forensics-041-050-fixture-evidence.json",
+        "tests/test_rapidtriage_search_analysis.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Search analysis preserves timestamp extraction, UTC normalization, source match anchors, date buckets, timezone/skew warning, and #49 core_accuracy_gates."
+        ]
+      },
+      "notes": "Internal fixture pass; full Case DB timeline join and clock/timezone corpus validation remain required."
+    },
+    {
+      "id": "core-forensics-050-workbook-fixture",
+      "name": "#50 incident hypothesis/workbook fixture assertions",
+      "source": "tests.test_rapidtriage_search_analysis.RapidTriageSearchAnalysisTests",
+      "corpus_family": "core-forensics",
+      "status": "pass",
+      "backlog_items": [50],
+      "evidence_paths": [
+        "docs/validation/core-forensics-041-050-fixture-evidence.json",
+        "tests/test_rapidtriage_search_analysis.py"
+      ],
+      "expected": {
+        "required_assertions": [
+          "Search analysis preserves draft hypotheses, evidence cluster links, review questions/tasks, report-readiness flags, persistence/versioning warning, and #50 core_accuracy_gates."
+        ]
+      },
+      "notes": "Internal fixture pass; editable persistent workbook, evidence attachments, reviewer assignment, and report section export remain blockers."
+    }
+  ]
+}

@@ -795,6 +795,11 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
     timeline = [item for item in details.get("unified_timeline") or [] if isinstance(item, Mapping)]
     downloads = [item for item in details.get("download_rows") or [] if isinstance(item, Mapping)]
     source_profile = details.get("source_profile") if isinstance(details.get("source_profile"), Mapping) else {}
+    secret_checks = (
+        details.get("secret_validation_checks")
+        if isinstance(details.get("secret_validation_checks"), Mapping)
+        else {}
+    )
     evidence_refs = [
         f"source_path:{details.get('source_path', '')}",
         f"browser:{details.get('browser', '')}",
@@ -825,10 +830,24 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
     if not BROWSER_NATIVE_CAPABILITIES["safari_windows_profile_support"]:
         item20.append("Safari scope limitation disclosure")
 
-    return [
+    gates = [
         build_accuracy_gate(19, satisfied_checks=item19, evidence_refs=evidence_refs),
         build_accuracy_gate(20, satisfied_checks=item20, evidence_refs=evidence_refs),
     ]
+    if storage_inventory or secret_checks:
+        item42: list[str] = []
+        if storage_inventory or checks.get("sensitive_storage_inventory_present") is not None:
+            item42.append("sensitive artifact inventory")
+        if secret_checks.get("inventory_only_mode") and not secret_checks.get("raw_secret_values_extracted"):
+            item42.append("secret values redacted by default")
+        if secret_checks.get("strict_legal_warning_present") or BROWSER_SECRET_HANDLING_WARNING:
+            item42.append("strict legal warning")
+        if not BROWSER_NATIVE_CAPABILITIES["password_cookie_session_secret_extraction"]:
+            item42.append("opt-in reveal workflow warning")
+        if secret_checks.get("scope_review_required") is not None:
+            item42.append("audit and scope review requirement")
+        gates.append(build_accuracy_gate(42, satisfied_checks=item42, evidence_refs=evidence_refs))
+    return gates
 
 
 def ai_transcript_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:

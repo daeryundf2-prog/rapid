@@ -246,6 +246,17 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertFalse(
                 messenger_summary["details"]["validation_checks"]["correlation_validated_against_known_answer"]
             )
+            correlation_gates = {gate["gap_id"]: gate for gate in messenger_summary["details"]["core_accuracy_gates"]}
+            self.assertIn("message-media linkage built", correlation_gates["#43"]["satisfied_checks"])
+            self.assertIn("message/contact/call/media counts preserved", correlation_gates["#43"]["satisfied_checks"])
+            self.assertIn("timeline correlation readiness", correlation_gates["#43"]["satisfied_checks"])
+            self.assertIn("known-answer limitation warning", correlation_gates["#43"]["satisfied_checks"])
+            self.assertIn("contact/call/SMS actor merge", correlation_gates["#44"]["satisfied_checks"])
+            self.assertIn("participant attribution", correlation_gates["#44"]["satisfied_checks"])
+            self.assertIn("export-scope limitation warning", correlation_gates["#44"]["satisfied_checks"])
+            self.assertIn("app/service schema version registry", correlation_gates["#45"]["satisfied_checks"])
+            self.assertIn("source app/version attribution", correlation_gates["#45"]["satisfied_checks"])
+            self.assertIn("release-gate limitation disclosure", correlation_gates["#45"]["satisfied_checks"])
 
             source_rows = [artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-export-source"]
             self.assertGreaterEqual(len(source_rows), 4)

@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 from urllib.parse import urlparse
 
+from .forensic_accuracy import build_accuracy_gate
+
 
 ENTITY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("email", re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)),
@@ -91,6 +93,14 @@ def build_search_analysis(
         entities=entities["entities"],
         timeline_events=timeline["events"],
     )
+    core_accuracy_gates = analysis_core_accuracy_gates(
+        matches=normalized_matches,
+        clusters=clusters,
+        entities=entities,
+        graph=graph,
+        timeline=timeline,
+        workbook=workbook,
+    )
     return {
         "summary": {
             "match_count": len(normalized_matches),
@@ -111,6 +121,7 @@ def build_search_analysis(
         "timeline": timeline,
         "deduplication": deduplication,
         "workbook": workbook,
+        "core_accuracy_gates": core_accuracy_gates,
         "analysis_native_capabilities": dict(ANALYSIS_NATIVE_CAPABILITIES),
         "analysis_report_grade_assessment": analysis_report_grade_assessment(),
         "limitations": [
@@ -119,6 +130,104 @@ def build_search_analysis(
             "Graph output is capped to keep web and CLI review responsive on large cases.",
         ],
     }
+
+
+def analysis_core_accuracy_gates(
+    *,
+    matches: Sequence[Mapping[str, object]],
+    clusters: Mapping[str, object],
+    entities: Mapping[str, object],
+    graph: Mapping[str, object],
+    timeline: Mapping[str, object],
+    workbook: Mapping[str, object],
+) -> list[dict[str, object]]:
+    evidence_refs = [
+        f"match_count:{len(matches)}",
+        f"cluster_count:{clusters.get('summary', {}).get('cluster_count', 0) if isinstance(clusters.get('summary'), Mapping) else 0}",
+        f"entity_count:{entities.get('summary', {}).get('entity_count', 0) if isinstance(entities.get('summary'), Mapping) else 0}",
+        f"graph_nodes:{graph.get('summary', {}).get('node_count', 0) if isinstance(graph.get('summary'), Mapping) else 0}",
+        f"timeline_events:{timeline.get('summary', {}).get('event_count', 0) if isinstance(timeline.get('summary'), Mapping) else 0}",
+        f"workbook_hypotheses:{workbook.get('summary', {}).get('hypothesis_count', 0) if isinstance(workbook.get('summary'), Mapping) else 0}",
+    ]
+    cluster_summary = clusters.get("summary") if isinstance(clusters.get("summary"), Mapping) else {}
+    entity_summary = entities.get("summary") if isinstance(entities.get("summary"), Mapping) else {}
+    graph_summary = graph.get("summary") if isinstance(graph.get("summary"), Mapping) else {}
+    timeline_summary = timeline.get("summary") if isinstance(timeline.get("summary"), Mapping) else {}
+    workbook_summary = workbook.get("summary") if isinstance(workbook.get("summary"), Mapping) else {}
+    cluster_rows = clusters.get("clusters") if isinstance(clusters.get("clusters"), list) else []
+    entity_rows = entities.get("entities") if isinstance(entities.get("entities"), list) else []
+    graph_nodes = graph.get("nodes") if isinstance(graph.get("nodes"), list) else []
+    graph_edges = graph.get("edges") if isinstance(graph.get("edges"), list) else []
+    timeline_events = timeline.get("events") if isinstance(timeline.get("events"), list) else []
+    hypotheses = workbook.get("hypotheses") if isinstance(workbook.get("hypotheses"), list) else []
+
+    item46: list[str] = []
+    if cluster_summary.get("cluster_count") is not None:
+        item46.append("bounded cluster generation")
+    if any(isinstance(row, Mapping) and row.get("match_indices") for row in cluster_rows):
+        item46.append("representative match links")
+    if any(isinstance(row, Mapping) and row.get("sources") for row in cluster_rows):
+        item46.append("source and keyword grouping")
+    if "truncated" in cluster_summary:
+        item46.append("truncation disclosure")
+    if not ANALYSIS_NATIVE_CAPABILITIES["ml_semantic_clustering"]:
+        item46.append("review-state limitation warning")
+
+    item47: list[str] = []
+    if entity_summary.get("type_counts"):
+        item47.append("entity extraction across supported types")
+    if any(isinstance(row, Mapping) and (row.get("sources") or row.get("paths")) for row in entity_rows):
+        item47.append("source and path references")
+    if any(isinstance(row, Mapping) and row.get("match_indices") for row in entity_rows):
+        item47.append("match reference links")
+    if any(isinstance(row, Mapping) and row.get("risk_flags") for row in entity_rows):
+        item47.append("risk flag assignment")
+    if not ANALYSIS_NATIVE_CAPABILITIES["analyst_verified_entity_resolution"]:
+        item47.append("merge/split limitation warning")
+
+    item48: list[str] = []
+    node_types = {str(row.get("type")) for row in graph_nodes if isinstance(row, Mapping)}
+    if node_types & {"match", "path", "keyword", "email", "url", "domain", "ipv4", "hash", "phone", "account", "person"}:
+        item48.append("match/path/keyword/entity nodes")
+    if graph_edges:
+        item48.append("relationship edges built")
+    if matches:
+        item48.append("source citation references")
+    if "truncated" in graph_summary:
+        item48.append("graph paging/truncation disclosure")
+    if not ANALYSIS_NATIVE_CAPABILITIES["court_ready_graph_layout"]:
+        item48.append("causal-proof limitation warning")
+
+    item49: list[str] = []
+    if timeline_events:
+        item49.append("timestamp extraction")
+    if all("+" in str(event.get("timestamp", "")) for event in timeline_events if isinstance(event, Mapping)):
+        item49.append("UTC normalization")
+    if any(isinstance(event, Mapping) and "match_index" in event for event in timeline_events):
+        item49.append("source match anchors")
+    if timeline.get("date_buckets") is not None:
+        item49.append("date bucket generation")
+    item49.append("timezone/skew limitation warning")
+
+    item50: list[str] = []
+    if hypotheses:
+        item50.append("draft hypotheses generated")
+    if any(isinstance(row, Mapping) and row.get("evidence_cluster_ids") is not None for row in hypotheses):
+        item50.append("evidence cluster links")
+    if workbook.get("review_questions") and workbook.get("next_actions"):
+        item50.append("review tasks and questions")
+    if any(isinstance(row, Mapping) and row.get("ready_for_report") is False for row in hypotheses):
+        item50.append("report-readiness flag")
+    if not ANALYSIS_NATIVE_CAPABILITIES["full_case_reindex"]:
+        item50.append("persistence/versioning limitation warning")
+
+    return [
+        build_accuracy_gate(46, satisfied_checks=item46, evidence_refs=evidence_refs),
+        build_accuracy_gate(47, satisfied_checks=item47, evidence_refs=evidence_refs),
+        build_accuracy_gate(48, satisfied_checks=item48, evidence_refs=evidence_refs),
+        build_accuracy_gate(49, satisfied_checks=item49, evidence_refs=evidence_refs),
+        build_accuracy_gate(50, satisfied_checks=item50, evidence_refs=evidence_refs),
+    ]
 
 
 def build_result_clusters(

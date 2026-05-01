@@ -241,6 +241,7 @@ The sample JSON uses a few placeholders so the examples stay stable across machi
 - `analysis.timeline` extracts timestamp anchors from matched metadata and sorts them for quick chronological correlation with #49 validation warnings.
 - `analysis.deduplication` emits #60 duplicate groups with fingerprints, representative previews, match indices, paths, source lists, duplicate/unique counts, candidate duplicate-resolution status, and report-grade validation blockers.
 - `analysis.workbook` creates draft hypotheses, review questions, and next actions with #50 status; it is a triage aid and must be verified against source rows and hashes.
+- `analysis.core_accuracy_gates` emits #46~#50 gate objects showing which required clustering, entity, graph, timeline, and workbook checks are satisfied and which remain validation-required.
 
 ### `source-preview` API
 

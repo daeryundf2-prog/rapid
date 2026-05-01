@@ -176,6 +176,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             storage_gates = {gate["gap_id"]: gate for gate in storage_inventory["details"]["core_accuracy_gates"]}
             self.assertIn("extension ID/source mapping", storage_gates["#19"]["satisfied_checks"])
             self.assertIn("deleted/synced content warning", storage_gates["#19"]["satisfied_checks"])
+            self.assertIn("sensitive artifact inventory", storage_gates["#42"]["satisfied_checks"])
+            self.assertIn("secret values redacted by default", storage_gates["#42"]["satisfied_checks"])
+            self.assertIn("strict legal warning", storage_gates["#42"]["satisfied_checks"])
+            self.assertIn("opt-in reveal workflow warning", storage_gates["#42"]["satisfied_checks"])
+            self.assertIn("audit and scope review requirement", storage_gates["#42"]["satisfied_checks"])
             inventory_types = {row["storage_type"] for row in storage_inventory["details"]["storage_inventory"]}
             self.assertIn("cache", inventory_types)
             self.assertIn("cookie", inventory_types)

@@ -1,0 +1,118 @@
+{
+  "schema": "rapidtriage-fixture-evidence-v1",
+  "scope": "#41-#50 internal fixture validation",
+  "status": "pass",
+  "generated_for": "RapidTriage commercial-readiness internal validated maturity gate",
+  "evidence": [
+    {
+      "item": 41,
+      "title": "Cloud token/credential secure handling",
+      "test_files": ["tests/test_rapidtriage_cloud_collect.py"],
+      "assertions": [
+        "Cloud collection redacts credential-bearing headers, never writes token values, records environment-variable storage boundaries, and emits #41 core_accuracy_gates."
+      ],
+      "remaining_external_validation": [
+        "Provider OAuth consent capture, secure enterprise vault integration, token rotation/revocation evidence, and signed legal authority records."
+      ]
+    },
+    {
+      "item": 42,
+      "title": "Browser password/cookie/session artifact handling with strict legal warning",
+      "test_files": ["tests/test_rapidtriage_windows_artifacts.py"],
+      "assertions": [
+        "Browser storage inventory identifies sensitive stores, keeps secret values redacted, records strict legal warnings, and emits #42 core_accuracy_gates."
+      ],
+      "remaining_external_validation": [
+        "DPAPI/keychain/browser-version known-answer fixtures and audited opt-in reveal workflow."
+      ]
+    },
+    {
+      "item": 43,
+      "title": "Mobile app media/message timeline correlation",
+      "test_files": ["tests/test_rapidtriage_mobile_export.py"],
+      "assertions": [
+        "Mobile correlation summary preserves message/media/contact/call counts, candidate media-message links, service attribution, timeline readiness, and #43 core_accuracy_gates."
+      ],
+      "remaining_external_validation": [
+        "Device-wide timeline joins, timezone validation, attachment recovery, and vendor-tool diff corpus."
+      ]
+    },
+    {
+      "item": 44,
+      "title": "Contact/call/SMS unified mobile view",
+      "test_files": ["tests/test_rapidtriage_mobile_export.py"],
+      "assertions": [
+        "Mobile correlation summary builds unified contact/call/SMS actor pivots with source links, participants, export-scope warnings, and #44 core_accuracy_gates."
+      ],
+      "remaining_external_validation": [
+        "Identity dedupe, merge/split workflow, and cross-app known-answer actor validation."
+      ]
+    },
+    {
+      "item": 45,
+      "title": "App-specific known schema version management",
+      "test_files": ["tests/test_rapidtriage_mobile_export.py"],
+      "assertions": [
+        "Mobile correlation summary records app/service schema versions, schema registry entries, compatibility warnings, and #45 core_accuracy_gates."
+      ],
+      "remaining_external_validation": [
+        "Per-app schema compatibility matrix, migration fixtures, and release-gated schema support policy."
+      ]
+    },
+    {
+      "item": 46,
+      "title": "Large-result clustering",
+      "test_files": ["tests/test_rapidtriage_search_analysis.py"],
+      "assertions": [
+        "Search analysis emits bounded clusters with representative match links, source/keyword grouping, truncation disclosure, and #46 core_accuracy_gates."
+      ],
+      "remaining_external_validation": [
+        "Large-case cluster review state persistence, near-duplicate media/text clustering, and performance validation."
+      ]
+    },
+    {
+      "item": 47,
+      "title": "Entity view for people/accounts/email/phone/IP/domain",
+      "test_files": ["tests/test_rapidtriage_search_analysis.py"],
+      "assertions": [
+        "Search analysis extracts supported entity pivots with source/path references, match links, risk flags, merge/split warnings, and #47 core_accuracy_gates."
+      ],
+      "remaining_external_validation": [
+        "False-positive tuning, analyst-verified merge/split workflow, and full-case first/last seen validation."
+      ]
+    },
+    {
+      "item": 48,
+      "title": "Graph view for account-file-URL-time relationships",
+      "test_files": ["tests/test_rapidtriage_search_analysis.py"],
+      "assertions": [
+        "Search analysis emits bounded relationship graph nodes/edges, source citation references, graph truncation disclosure, and #48 core_accuracy_gates."
+      ],
+      "remaining_external_validation": [
+        "Interactive scalable graph UI, saved layouts, server-side graph paging, and source-row citation review."
+      ]
+    },
+    {
+      "item": 49,
+      "title": "Unified timeline correlation",
+      "test_files": ["tests/test_rapidtriage_search_analysis.py"],
+      "assertions": [
+        "Search analysis extracts timestamp anchors, normalizes UTC timestamps, generates date buckets, preserves source match anchors, and emits #49 core_accuracy_gates."
+      ],
+      "remaining_external_validation": [
+        "Full Case DB timeline join, timezone/skew validation, review annotations, and cursor-paged large timeline tests."
+      ]
+    },
+    {
+      "item": 50,
+      "title": "Incident hypothesis/workbook feature",
+      "test_files": ["tests/test_rapidtriage_search_analysis.py"],
+      "assertions": [
+        "Search analysis generates draft hypotheses with cluster evidence links, review questions/tasks, report-readiness flags, persistence warnings, and #50 core_accuracy_gates."
+      ],
+      "remaining_external_validation": [
+        "Editable persistent workbook, evidence attachment workflow, reviewer assignment, report section export, and version history."
+      ]
+    }
+  ]
+}

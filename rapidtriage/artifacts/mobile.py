@@ -413,6 +413,14 @@ def build_record(
             source_hashes=source_hashes,
             details=detail_payload,
         ),
+        *mobile_correlation_core_accuracy_gates(
+            artifact_type=artifact_type,
+            source_tool=source_tool,
+            source_format=source_format,
+            source_index=source_index,
+            source_hashes=source_hashes,
+            details=detail_payload,
+        ),
     ]
     return ArtifactRecord(
         provider=MobileExportProvider.name,
@@ -1727,6 +1735,69 @@ def mobile_core_accuracy_gates(
         gates.append(build_accuracy_gate(28, satisfied_checks=satisfied, evidence_refs=evidence_refs))
 
     return gates
+
+
+def mobile_correlation_core_accuracy_gates(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    details: Mapping[str, object],
+) -> list[dict[str, object]]:
+    if artifact_type != "mobile-correlation-summary":
+        return []
+    validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    evidence_refs = [
+        f"source_tool:{source_tool}",
+        f"source_format:{source_format}",
+        f"source_index:{source_index}",
+        f"message_count:{details.get('message_count', 0)}",
+        f"media_count:{details.get('media_count', 0)}",
+        f"contact_count:{details.get('contact_count', 0)}",
+        f"call_count:{details.get('call_count', 0)}",
+    ]
+    if source_hashes.get("sha256"):
+        evidence_refs.append(f"source_sha256:{source_hashes['sha256']}")
+
+    item43: list[str] = []
+    if validation.get("media_message_links_built") or details.get("message_media_links") is not None:
+        item43.append("message-media linkage built")
+    if any(int(details.get(key) or 0) >= 0 for key in ("message_count", "media_count", "contact_count", "call_count")):
+        item43.append("message/contact/call/media counts preserved")
+    if details.get("services") is not None:
+        item43.append("service attribution")
+    if details.get("timeline_correlation_ready") is not None:
+        item43.append("timeline correlation readiness")
+    if not validation.get("correlation_validated_against_known_answer", False):
+        item43.append("known-answer limitation warning")
+
+    item44: list[str] = []
+    if validation.get("unified_contact_call_sms_view_built") or details.get("unified_contact_call_sms_view") is not None:
+        item44.append("contact/call/SMS actor merge")
+    if details.get("message_media_links") is not None or details.get("unified_contact_call_sms_view") is not None:
+        item44.append("source row links preserved")
+    if details.get("participants") is not None:
+        item44.append("participant attribution")
+    item44.append("dedupe/entity limitation warning")
+    item44.append("export-scope limitation warning")
+
+    item45: list[str] = []
+    if validation.get("schema_version_registry_built") or details.get("schema_version_registry") is not None:
+        item45.append("app/service schema version registry")
+    if details.get("services") is not None or details.get("schema_versions") is not None:
+        item45.append("source app/version attribution")
+    item45.append("schema compatibility warning")
+    if not validation.get("schema_version_registry_known_answer_validated", False):
+        item45.append("migration fixture warning")
+    item45.append("release-gate limitation disclosure")
+
+    return [
+        build_accuracy_gate(43, satisfied_checks=item43, evidence_refs=evidence_refs),
+        build_accuracy_gate(44, satisfied_checks=item44, evidence_refs=evidence_refs),
+        build_accuracy_gate(45, satisfied_checks=item45, evidence_refs=evidence_refs),
+    ]
 
 
 def chat_app_core_accuracy_gates(

@@ -141,6 +141,11 @@ def run_cloud_api_collection(
             "Provider OAuth consent, scopes, rotation, revocation, and legal authority must be recorded for report-grade use.",
         ],
     )
+    credential_handling["core_accuracy_gates"] = cloud_credential_core_accuracy_gates(
+        manifest_path=manifest_path,
+        credential_handling=credential_handling,
+        requests=collected,
+    )
     api_report_grade = cloud_api_report_grade_assessment()
     payload = {
         "command": "cloud-collect",
@@ -440,6 +445,37 @@ def cloud_api_core_accuracy_gates(
     if credential_handling.get("legal_warning") and not CLOUD_API_NATIVE_CAPABILITIES["provider_specific_oauth_flow"]:
         satisfied.append("provider OAuth/scope/legal warning")
     return [build_accuracy_gate(40, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
+
+
+def cloud_credential_core_accuracy_gates(
+    *,
+    manifest_path: Path,
+    credential_handling: Mapping[str, object],
+    requests: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    evidence_refs = [
+        f"manifest_path:{manifest_path.resolve()}",
+        f"manifest_sha256:{compute_sha256(manifest_path)}",
+        f"credential_storage:{credential_handling.get('credential_storage', '')}",
+        f"bearer_token_env:{credential_handling.get('bearer_token_env', '')}",
+    ]
+    for request in requests[:5]:
+        handling = request.get("credential_handling") if isinstance(request.get("credential_handling"), Mapping) else {}
+        if handling.get("sensitive_header_names"):
+            evidence_refs.append(f"sensitive_headers:{','.join(str(item) for item in handling['sensitive_header_names'])}")
+
+    satisfied: list[str] = []
+    if bool(credential_handling.get("headers_redacted")) and not bool(credential_handling.get("tokens_written_to_output")):
+        satisfied.append("token value redaction")
+    if credential_handling.get("credential_storage") in {"environment-variable-only", "vault"}:
+        satisfied.append("environment or vault storage boundary")
+    if credential_handling.get("scope_capture_status") == "not-captured" or credential_handling.get("legal_warning"):
+        satisfied.append("scope and consent capture warning")
+    if not bool(credential_handling.get("token_rotation_audit_present")):
+        satisfied.append("rotation and revocation audit warning")
+    if credential_handling.get("legal_warning") or credential_handling.get("audit_required"):
+        satisfied.append("legal authority warning")
+    return [build_accuracy_gate(41, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
 def cloud_api_forensic_review(

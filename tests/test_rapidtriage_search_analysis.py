@@ -77,6 +77,17 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertFalse(analysis["analysis_native_capabilities"]["full_case_reindex"])
         self.assertTrue(analysis["analysis_native_capabilities"]["search_hit_deduplication"])
         self.assertIn("#46", analysis["analysis_report_grade_assessment"]["commercial_gap_ids"])
+        analysis_gates = {gate["gap_id"]: gate for gate in analysis["core_accuracy_gates"]}
+        self.assertIn("bounded cluster generation", analysis_gates["#46"]["satisfied_checks"])
+        self.assertIn("representative match links", analysis_gates["#46"]["satisfied_checks"])
+        self.assertIn("entity extraction across supported types", analysis_gates["#47"]["satisfied_checks"])
+        self.assertIn("match reference links", analysis_gates["#47"]["satisfied_checks"])
+        self.assertIn("relationship edges built", analysis_gates["#48"]["satisfied_checks"])
+        self.assertIn("causal-proof limitation warning", analysis_gates["#48"]["satisfied_checks"])
+        self.assertIn("timestamp extraction", analysis_gates["#49"]["satisfied_checks"])
+        self.assertIn("UTC normalization", analysis_gates["#49"]["satisfied_checks"])
+        self.assertIn("draft hypotheses generated", analysis_gates["#50"]["satisfied_checks"])
+        self.assertIn("persistence/versioning limitation warning", analysis_gates["#50"]["satisfied_checks"])
 
         clusters = analysis["clusters"]["clusters"]
         self.assertTrue(any(cluster["family"] == "keyword" and cluster["value"] == "password" for cluster in clusters))

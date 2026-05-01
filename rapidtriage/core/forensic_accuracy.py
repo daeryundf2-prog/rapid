@@ -568,6 +568,146 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "provider OAuth/scope/legal warning",
         ),
     },
+    {
+        "number": 41,
+        "title": "Cloud token/credential secure handling",
+        "surface": "cloud API tokens, request headers, storage boundary, scope/consent metadata, and audit warnings",
+        "corpus": "authorized cloud collection manifests with bearer/API-key headers, scope metadata, redaction checks, and rotation/revocation evidence",
+        "oracle": "provider OAuth consent records, native audit logs, redacted request manifests, and reviewer-signed authorization metadata",
+        "required_checks": (
+            "token value redaction",
+            "environment or vault storage boundary",
+            "scope and consent capture warning",
+            "rotation and revocation audit warning",
+            "legal authority warning",
+        ),
+    },
+    {
+        "number": 42,
+        "title": "Browser password/cookie/session artifact handling with strict legal warning",
+        "surface": "browser credential stores, cookies, session tokens, keychain/DPAPI boundaries, and redacted inventory",
+        "corpus": "Chrome/Edge/Firefox/Safari profiles with password, cookie, and session stores across OS keychain states",
+        "oracle": "browser-native store inventory, OS keychain/DPAPI validation fixtures, and legal authority/audit records",
+        "required_checks": (
+            "sensitive artifact inventory",
+            "secret values redacted by default",
+            "strict legal warning",
+            "opt-in reveal workflow warning",
+            "audit and scope review requirement",
+        ),
+    },
+    {
+        "number": 43,
+        "title": "Mobile app media/message timeline correlation",
+        "surface": "mobile messages, media attachments, calls, contacts, app rows, source export scope, and timeline-ready links",
+        "corpus": "vendor mobile exports with known chat/media/contact/call relationships and schema/timezone variants",
+        "oracle": "vendor tool timeline, native app export, hand-labeled message-media links, and acquisition hash manifest",
+        "required_checks": (
+            "message-media linkage built",
+            "message/contact/call/media counts preserved",
+            "service attribution",
+            "timeline correlation readiness",
+            "known-answer limitation warning",
+        ),
+    },
+    {
+        "number": 44,
+        "title": "Contact/call/SMS unified mobile view",
+        "surface": "contacts, calls, SMS/messages, participants, actor pivots, and grouped mobile review rows",
+        "corpus": "mobile exports with overlapping contacts, calls, SMS, chat participants, duplicate identities, and deleted rows",
+        "oracle": "vendor mobile report, native phone export, and hand-labeled actor/contact/call/SMS assertions",
+        "required_checks": (
+            "contact/call/SMS actor merge",
+            "source row links preserved",
+            "participant attribution",
+            "dedupe/entity limitation warning",
+            "export-scope limitation warning",
+        ),
+    },
+    {
+        "number": 45,
+        "title": "App-specific known schema version management",
+        "surface": "app names, package IDs, app/export/schema versions, table inventories, and compatibility matrices",
+        "corpus": "versioned app exports/databases across messenger, mobile OS, and vendor-export schema changes",
+        "oracle": "native app schema documentation, vendor export version metadata, and migration fixture expected outputs",
+        "required_checks": (
+            "app/service schema version registry",
+            "source app/version attribution",
+            "schema compatibility warning",
+            "migration fixture warning",
+            "release-gate limitation disclosure",
+        ),
+    },
+    {
+        "number": 46,
+        "title": "Large-result clustering",
+        "surface": "search result clusters by source, artifact kind, extension, folder, keyword, and representative hits",
+        "corpus": "large search-result fixtures with repeated documents, OCR hits, web/log rows, and noise clusters",
+        "oracle": "hand-labeled cluster membership, reviewer triage outcomes, and performance/cursor validation logs",
+        "required_checks": (
+            "bounded cluster generation",
+            "representative match links",
+            "source and keyword grouping",
+            "truncation disclosure",
+            "review-state limitation warning",
+        ),
+    },
+    {
+        "number": 47,
+        "title": "Entity view for people/accounts/email/phone/IP/domain",
+        "surface": "normalized entity pivots, source counts, match references, risk flags, and merge/split limitations",
+        "corpus": "search fixtures with emails, URLs/domains, public IPs, hashes, phone numbers, people, and account hints",
+        "oracle": "hand-labeled entity set, false-positive list, and analyst-reviewed merge/split decisions",
+        "required_checks": (
+            "entity extraction across supported types",
+            "source and path references",
+            "match reference links",
+            "risk flag assignment",
+            "merge/split limitation warning",
+        ),
+    },
+    {
+        "number": 48,
+        "title": "Graph view for account-file-URL-time relationships",
+        "surface": "bounded graph nodes/edges connecting matches, paths, keywords, entities, URLs, and source citations",
+        "corpus": "search fixtures with known account-file-URL relationships, graph truncation boundaries, and source citations",
+        "oracle": "hand-labeled relationship graph and source-row citation review",
+        "required_checks": (
+            "match/path/keyword/entity nodes",
+            "relationship edges built",
+            "source citation references",
+            "graph paging/truncation disclosure",
+            "causal-proof limitation warning",
+        ),
+    },
+    {
+        "number": 49,
+        "title": "Unified timeline correlation",
+        "surface": "timestamp extraction, UTC normalization, date buckets, timeline events, and source match anchors",
+        "corpus": "multi-source search fixtures with filesystem, browser, event log, mobile, cloud, and timezone edge cases",
+        "oracle": "hand-labeled chronological order, source timestamp semantics, and timezone/skew validation notes",
+        "required_checks": (
+            "timestamp extraction",
+            "UTC normalization",
+            "source match anchors",
+            "date bucket generation",
+            "timezone/skew limitation warning",
+        ),
+    },
+    {
+        "number": 50,
+        "title": "Incident hypothesis/workbook feature",
+        "surface": "draft hypotheses, evidence cluster links, review tasks, questions, next actions, and report-readiness flags",
+        "corpus": "case-search fixtures with credential, web/AI, execution, and network/cloud investigation scenarios",
+        "oracle": "analyst workbook rubric, hand-labeled hypothesis/evidence attachments, and report section review",
+        "required_checks": (
+            "draft hypotheses generated",
+            "evidence cluster links",
+            "review tasks and questions",
+            "report-readiness flag",
+            "persistence/versioning limitation warning",
+        ),
+    },
 )
 
 
@@ -576,11 +716,11 @@ def build_core_forensics_accuracy_profiles() -> dict[str, object]:
     return {
         "version": CORE_FORENSIC_ACCURACY_VERSION,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "scope": "#1-#40 validation and accuracy reinforcement",
+        "scope": "#1-#50 validation and accuracy reinforcement",
         "profile_count": len(profiles),
         "commercial_gap_ids": [f"#{item['number']}" for item in profiles],
         "status": "accuracy-profiles-ready",
-        "release_gate": "Each #1-#40 parser claim must attach pass/fail evidence against its profile before report-grade wording.",
+        "release_gate": "Each #1-#50 parser claim must attach pass/fail evidence against its profile before report-grade wording.",
         "profiles": profiles,
     }
 
@@ -625,10 +765,10 @@ def build_accuracy_profile(item: Mapping[str, object]) -> dict[str, object]:
             "hash_required": True,
             "timezone_or_timestamp_semantics_required": number in {
                 1, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 20, 22, 23, 24, 26, 27, 29, 31, 32,
-                33, 34, 35, 36, 37, 38, 39, 40,
+                33, 34, 35, 36, 37, 38, 39, 40, 43, 44, 45, 49,
             },
-            "secret_redaction_required": number in {19, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 40},
-            "legal_or_authority_gate_required": number in {19, 22, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38, 39, 40},
+            "secret_redaction_required": number in {19, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 40, 41, 42},
+            "legal_or_authority_gate_required": number in {19, 22, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38, 39, 40, 41, 42},
             "cross_tool_diff_required": True,
             "known_answer_required": True,
         },
@@ -697,4 +837,4 @@ def accuracy_profile_for_item(number: int) -> dict[str, object]:
     for item in CORE_FORENSIC_ACCURACY_ITEMS:
         if int(item["number"]) == number:
             return build_accuracy_profile(item)
-    raise KeyError(f"unknown #1-#40 forensic accuracy item: {number}")
+    raise KeyError(f"unknown #1-#50 forensic accuracy item: {number}")
