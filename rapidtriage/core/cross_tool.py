@@ -11,6 +11,8 @@ from .docs import write_result
 
 
 MAX_ROWS_PER_TOOL = 100_000
+MAX_RECORD_FIELD_DIFF_ROWS = 5_000
+MAX_FIELD_MISMATCH_SAMPLES = 50
 KEY_FIELDS = (
     "event_record_id",
     "EventRecordID",
@@ -43,6 +45,14 @@ KEY_FIELDS = (
     "SHA256",
     "hash",
 )
+EVTX_FIELD_ALIASES = {
+    "event_record_id": ("event_record_id", "EventRecordID", "record_id", "RecordNumber", "record_number"),
+    "event_id": ("event_id", "EventID"),
+    "provider_name": ("provider_name", "Provider", "ProviderName"),
+    "channel": ("channel", "Channel"),
+    "computer": ("computer", "Computer"),
+    "event_created_at": ("event_created_at", "TimeCreated", "timestamp", "Timestamp", "DateTime"),
+}
 
 
 class CrossToolValidationError(ValueError):
@@ -149,6 +159,7 @@ def load_tool_dataset(name: str, path: Path) -> dict[str, object]:
         "key_count": len(keys),
         "keys": keys[:5000],
         "sample_rows": rows[:5],
+        "record_field_index": record_field_index(rows),
     }
 
 
@@ -275,6 +286,9 @@ def compare_datasets(
         status = "failed"
     elif abs(row_count_delta) > max(int(reference_dataset.get("row_count", 0)) * 0.25, 10):
         status = "warning"
+    field_comparison = compare_record_fields(rapid_dataset, reference_dataset)
+    if field_comparison["mismatch_count"] or field_comparison["missing_common_field_count"]:
+        status = "failed"
     return {
         "reference_name": reference_dataset.get("name", ""),
         "status": status,
@@ -287,7 +301,91 @@ def compare_datasets(
         "overlap_ratio": overlap_ratio,
         "missing_in_rapid_sample": missing_in_rapid[:50],
         "only_in_rapid_sample": only_in_rapid[:50],
+        "record_field_comparison": field_comparison,
         "release_gate": "review-required" if status != "pass" else "comparison-passed",
+    }
+
+
+def record_field_index(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
+    for row in rows[:MAX_RECORD_FIELD_DIFF_ROWS]:
+        record_id = first_value(row, EVTX_FIELD_ALIASES["event_record_id"])
+        if record_id is None:
+            continue
+        channel = first_value(row, EVTX_FIELD_ALIASES["channel"])
+        key = normalize_key(f"evtx-record:{channel}:{record_id}" if channel is not None else f"evtx-record:{record_id}")
+        fields: dict[str, str] = {}
+        for canonical, aliases in EVTX_FIELD_ALIASES.items():
+            value = first_value(row, aliases)
+            if value is not None and str(value).strip():
+                fields[canonical] = normalize_field_value(value)
+        if fields:
+            index[key] = fields
+    return index
+
+
+def compare_record_fields(
+    rapid_dataset: Mapping[str, object],
+    reference_dataset: Mapping[str, object],
+) -> dict[str, object]:
+    rapid_index = rapid_dataset.get("record_field_index") if isinstance(rapid_dataset.get("record_field_index"), Mapping) else {}
+    reference_index = (
+        reference_dataset.get("record_field_index")
+        if isinstance(reference_dataset.get("record_field_index"), Mapping)
+        else {}
+    )
+    common_keys = sorted(set(rapid_index) & set(reference_index))
+    compared_field_count = 0
+    mismatch_count = 0
+    missing_common_field_count = 0
+    mismatch_samples: list[dict[str, object]] = []
+    for key in common_keys[:MAX_RECORD_FIELD_DIFF_ROWS]:
+        rapid_fields = rapid_index.get(key) if isinstance(rapid_index.get(key), Mapping) else {}
+        reference_fields = reference_index.get(key) if isinstance(reference_index.get(key), Mapping) else {}
+        field_names = sorted(set(rapid_fields) | set(reference_fields))
+        for field_name in field_names:
+            rapid_value = str(rapid_fields.get(field_name) or "")
+            reference_value = str(reference_fields.get(field_name) or "")
+            if not rapid_value or not reference_value:
+                missing_common_field_count += 1
+                if len(mismatch_samples) < MAX_FIELD_MISMATCH_SAMPLES:
+                    mismatch_samples.append(
+                        {
+                            "record_key": key,
+                            "field": field_name,
+                            "rapid_value": rapid_value,
+                            "reference_value": reference_value,
+                            "status": "missing-field",
+                        }
+                    )
+                continue
+            compared_field_count += 1
+            if rapid_value != reference_value:
+                mismatch_count += 1
+                if len(mismatch_samples) < MAX_FIELD_MISMATCH_SAMPLES:
+                    mismatch_samples.append(
+                        {
+                            "record_key": key,
+                            "field": field_name,
+                            "rapid_value": rapid_value,
+                            "reference_value": reference_value,
+                            "status": "mismatch",
+                        }
+                    )
+    match_count = max(compared_field_count - mismatch_count, 0)
+    field_match_ratio = round(match_count / compared_field_count, 4) if compared_field_count else 0.0
+    return {
+        "mode": "evtx-record-field-diff",
+        "rapid_indexed_record_count": len(rapid_index),
+        "reference_indexed_record_count": len(reference_index),
+        "common_record_count": len(common_keys),
+        "compared_field_count": compared_field_count,
+        "field_match_count": match_count,
+        "mismatch_count": mismatch_count,
+        "missing_common_field_count": missing_common_field_count,
+        "field_match_ratio": field_match_ratio,
+        "mismatch_samples": mismatch_samples,
+        "truncated": len(common_keys) > MAX_RECORD_FIELD_DIFF_ROWS,
     }
 
 
@@ -481,3 +579,10 @@ def value_for_key(row: Mapping[str, object], wanted: str) -> object | None:
 
 def normalize_key(value: object) -> str:
     return str(value).strip().replace("\\", "/").lower()
+
+
+def normalize_field_value(value: object) -> str:
+    text = str(value).strip()
+    if text.endswith(".0") and text[:-2].isdigit():
+        text = text[:-2]
+    return text.replace("\\", "/").lower()

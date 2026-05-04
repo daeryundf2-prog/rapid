@@ -594,7 +594,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                         "--backlog-item",
                         "2",
                         "--min-overlap",
-                        "1.0",
+                        "0.5",
                         "--source-evidence",
                         str(source),
                         "--tool-version",
@@ -617,6 +617,11 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["backlog_items"], [1, 2])
             self.assertTrue(payload["cross_tool_validation_assessment"]["ready_for_validated_gate"])
             self.assertTrue(payload["cross_tool_validation_assessment"]["ready_for_commercial_grade"])
+            field_comparison = payload["comparisons"][0]["record_field_comparison"]
+            self.assertEqual(field_comparison["mode"], "evtx-record-field-diff")
+            self.assertEqual(field_comparison["common_record_count"], 2)
+            self.assertEqual(field_comparison["mismatch_count"], 0)
+            self.assertGreaterEqual(field_comparison["compared_field_count"], 6)
             self.assertEqual(len(payload["rapid_output"]["file_integrity"]["sha256"]), 64)
             self.assertEqual(len(payload["reference_outputs"][0]["file_integrity"]["sha256"]), 64)
             self.assertEqual(len(payload["source_evidence_integrity"][0]["sha256"]), 64)
@@ -648,6 +653,62 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(readiness["validation_evidence_summary"]["mapped_item_numbers"], [1, 2])
             item_one = next(item for item in readiness["all_items"] if item["number"] == 1)
             self.assertTrue(item_one["maturity_gates"]["validated"]["passed"])
+
+    def test_cross_tool_validate_fails_on_evtx_record_field_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-eventlog.json"
+            reference = root / "evtxecmd.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "details": {
+                                    "event_record_id": 1001,
+                                    "event_id": 4624,
+                                    "provider_name": "Microsoft-Windows-Security-Auditing",
+                                    "channel": "Security",
+                                }
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "EventRecordID,EventID,Provider,Channel\n"
+                "1001,4625,Microsoft-Windows-Security-Auditing,Security\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"evtxecmd={reference}",
+                        "--min-overlap",
+                        "1.0",
+                        "--backlog-item",
+                        "1",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            comparison = payload["comparisons"][0]
+            self.assertEqual(comparison["status"], "failed")
+            self.assertGreaterEqual(comparison["overlap_ratio"], 0.5)
+            field_comparison = comparison["record_field_comparison"]
+            self.assertEqual(field_comparison["common_record_count"], 1)
+            self.assertEqual(field_comparison["mismatch_count"], 1)
+            self.assertEqual(field_comparison["mismatch_samples"][0]["field"], "event_id")
+            self.assertFalse(payload["cross_tool_validation_assessment"]["ready_for_validated_gate"])
 
     def test_confidence_explainability_and_reproducibility_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
