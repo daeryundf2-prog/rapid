@@ -192,6 +192,15 @@ def analysis_commercial_uplift_evidence(
             f"timeline_events:{timeline_summary.get('event_count', 0)}",
             f"hypotheses:{workbook_summary.get('hypothesis_count', 0)}",
         ],
+        "reportability_decision": analysis_reportability_decision(
+            report_grade=report_grade,
+            failed_by_item=failed_by_item,
+            cluster_summary=cluster_summary,
+            entity_summary=entity_summary,
+            graph_summary=graph_summary,
+            timeline_summary=timeline_summary,
+            workbook_summary=workbook_summary,
+        ),
         "passed_validation_check_ids_by_item": passed_by_item,
         "failed_validation_check_ids_by_item": failed_by_item,
         "commercial_blockers": list(report_grade.get("blockers") or []),
@@ -211,6 +220,45 @@ def analysis_commercial_uplift_evidence(
             "full_case_reindex": False,
         },
         "reporting_status": "triage-only-validation-required",
+    }
+
+
+def analysis_reportability_decision(
+    *,
+    report_grade: Mapping[str, object],
+    failed_by_item: Mapping[str, Sequence[str]],
+    cluster_summary: Mapping[str, object],
+    entity_summary: Mapping[str, object],
+    graph_summary: Mapping[str, object],
+    timeline_summary: Mapping[str, object],
+    workbook_summary: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = {str(item) for item in report_grade.get("blockers", []) if str(item)}
+    for item_id, checks in failed_by_item.items():
+        blockers.update(f"{item_id}:{check}" for check in checks)
+    if not ANALYSIS_NATIVE_CAPABILITIES["full_case_reindex"]:
+        blockers.add("full-case-reindex-not-available")
+    if not ANALYSIS_NATIVE_CAPABILITIES["analyst_verified_entity_resolution"]:
+        blockers.add("analyst-verified-entity-resolution-not-available")
+    return {
+        "profile_version": "search-analysis-reportability-decision-v1",
+        "commercial_gap_ids": ["#46", "#47", "#48", "#49", "#50"],
+        "decision": "do-not-report-search-analysis-as-reviewed-findings",
+        "allowed_use": "bounded-search-analysis-triage-pivot",
+        "blockers": sorted(blockers),
+        "ready_for_court_report": False,
+        "review_output_counts": {
+            "clusters": int(cluster_summary.get("cluster_count") or 0),
+            "entities": int(entity_summary.get("entity_count") or 0),
+            "graph_edges": int(graph_summary.get("edge_count") or 0),
+            "timeline_events": int(timeline_summary.get("event_count") or 0),
+            "hypotheses": int(workbook_summary.get("hypothesis_count") or 0),
+        },
+        "required_before_report": [
+            "persist analyst review state for clusters, entity merge/split decisions, graph layouts, and workbook hypotheses",
+            "validate graph and timeline joins against full-case indexed source rows with timezone and parser-confidence evidence",
+            "attach report citations to verified source rows before promoting any draft hypothesis to a finding",
+        ],
     }
 
 

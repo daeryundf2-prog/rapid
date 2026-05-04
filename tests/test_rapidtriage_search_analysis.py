@@ -99,6 +99,23 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("timestamp extraction", analysis_uplift["passed_validation_check_ids_by_item"]["#49"])
         self.assertIn("draft hypotheses generated", analysis_uplift["passed_validation_check_ids_by_item"]["#50"])
         self.assertIn("persistent-cluster-review-state", analysis_uplift["failed_validation_check_ids_by_item"]["#46"])
+        self.assertEqual(
+            analysis_uplift["reportability_decision"]["decision"],
+            "do-not-report-search-analysis-as-reviewed-findings",
+        )
+        self.assertEqual(
+            analysis_uplift["reportability_decision"]["allowed_use"],
+            "bounded-search-analysis-triage-pivot",
+        )
+        self.assertIn(
+            "#48:server-side-graph-paging",
+            analysis_uplift["reportability_decision"]["blockers"],
+        )
+        self.assertIn(
+            "full-case-reindex-not-available",
+            analysis_uplift["reportability_decision"]["blockers"],
+        )
+        self.assertEqual(analysis_uplift["reportability_decision"]["review_output_counts"]["hypotheses"], 4)
         self.assertFalse(analysis_uplift["large_data_controls"]["persistent_review_state"])
         self.assertFalse(analysis_uplift["large_data_controls"]["full_case_reindex"])
 

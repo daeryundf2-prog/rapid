@@ -33,6 +33,8 @@ rapidtriage commercial-readiness \
 
 The #41 through #45 rows now emit explicit reportability decisions so internal triage output cannot be mistaken for commercial-grade proof. #41 is limited to `redacted-credential-handling-triage-pivot` until OAuth consent, provider scope inventory, secure token vault, and rotation audit evidence exists. #42 is limited to `browser-secret-store-inventory-triage-pivot` until lawful reveal authority, DPAPI/keychain/browser-version validation, and reveal audit logging exist. #43 through #45 are limited to `mobile-correlation-and-schema-triage-pivot` until device-wide timeline/timezone/attachment recovery, identity merge/split, and schema migration/release matrix evidence is attached.
 
+The #46 through #50 rows also emit reportability decisions. Their allowed use is `bounded-search-analysis-triage-pivot`, not a reviewed finding. Clusters, entities, graph edges, timeline events, and workbook hypotheses are blocked from report-ready claims until analyst review state, entity merge/split decisions, full-case graph/timeline joins, timezone/parser-confidence validation, and source-row citations are attached.
+
 ## Interpretation
 
 Passing this manifest promotes #41 through #50 to the internal `validated` maturity stage only. These rows remain `commercial_grade_ready=false` until broader corpus, cross-tool diff, independent validation, and operator-controlled legal evidence are attached.

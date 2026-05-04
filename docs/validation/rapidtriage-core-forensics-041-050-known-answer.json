@@ -111,7 +111,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves bounded clusters, representative match links, source/keyword grouping, truncation disclosure, review-state warning, and #46 core_accuracy_gates."
+          "Search analysis preserves bounded clusters, representative match links, source/keyword grouping, truncation disclosure, review-state warning, and #46 core_accuracy_gates.",
+          "Search analysis reportability decisions block reviewed-cluster claims until persistent review state and near-duplicate text/media validation exists."
         ]
       },
       "notes": "Internal fixture pass; persistent review state and large-case near-duplicate clustering remain blockers."
@@ -129,7 +130,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves entity extraction, source/path references, match links, risk flags, merge/split warning, and #47 core_accuracy_gates."
+          "Search analysis preserves entity extraction, source/path references, match links, risk flags, merge/split warning, and #47 core_accuracy_gates.",
+          "Search analysis reportability decisions block identity-resolved entity claims until analyst merge/split and false-positive validation exists."
         ]
       },
       "notes": "Internal fixture pass; false-positive tuning and analyst-verified merge/split workflow remain required."
@@ -147,7 +149,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves graph nodes, relationship edges, source citation references, paging/truncation disclosure, causal-proof warning, and #48 core_accuracy_gates."
+          "Search analysis preserves graph nodes, relationship edges, source citation references, paging/truncation disclosure, causal-proof warning, and #48 core_accuracy_gates.",
+          "Search analysis reportability decisions block causal graph claims until server-side graph paging, saved layouts, and source-row review exists."
         ]
       },
       "notes": "Internal fixture pass; scalable interactive graph UI and saved layouts remain future work."
@@ -165,7 +168,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves timestamp extraction, UTC normalization, source match anchors, date buckets, timezone/skew warning, and #49 core_accuracy_gates."
+          "Search analysis preserves timestamp extraction, UTC normalization, source match anchors, date buckets, timezone/skew warning, and #49 core_accuracy_gates.",
+          "Search analysis reportability decisions block full timeline claims until full-case joins, timezone/skew validation, and cursor-paged timeline evidence exists."
         ]
       },
       "notes": "Internal fixture pass; full Case DB timeline join and clock/timezone corpus validation remain required."
@@ -183,7 +187,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves draft hypotheses, evidence cluster links, review questions/tasks, report-readiness flags, persistence/versioning warning, and #50 core_accuracy_gates."
+          "Search analysis preserves draft hypotheses, evidence cluster links, review questions/tasks, report-readiness flags, persistence/versioning warning, and #50 core_accuracy_gates.",
+          "Search analysis reportability decisions block workbook findings until editable persistence, evidence attachments, reviewer assignment, and version history exists."
         ]
       },
       "notes": "Internal fixture pass; editable persistent workbook, evidence attachments, reviewer assignment, and report section export remain blockers."
