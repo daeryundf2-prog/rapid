@@ -79,6 +79,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "parent-key confirmation",
             "data-type and data-length plausibility",
             "allocator-state evidence",
+            "trusted deleted-cell offset diff pass",
             "reportability blocked until independent confirmation",
         ),
     },

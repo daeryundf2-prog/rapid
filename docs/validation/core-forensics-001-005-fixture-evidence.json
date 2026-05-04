@@ -77,7 +77,8 @@
       "number": 5,
       "title": "Registry deleted key/value recovery",
       "assertions": [
-        "registry-key-recovery-candidate and registry-value-recovery-candidate rows preserve positive-size free-cell evidence, parent-key confirmation, data plausibility, allocator evidence, reportability blocking, and #5 core_accuracy_gates."
+        "registry-key-recovery-candidate and registry-value-recovery-candidate rows preserve positive-size free-cell evidence, parent-key confirmation, data plausibility, allocator evidence, reportability blocking, and #5 core_accuracy_gates.",
+        "build_registry_deleted_cell_diff compares deleted/free registry candidates with a hand-labeled or trusted parser oracle by cell offset, candidate class, name, data preview hash, and parent key path."
       ],
       "blockers_kept": [
         "full allocator-state testimony validation",

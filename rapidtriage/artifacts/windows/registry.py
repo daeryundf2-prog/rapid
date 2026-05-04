@@ -86,6 +86,7 @@ REGISTRY_REPORT_GRADE_BLOCKERS = [
     "registry-key-tree-cross-tool-diff-required",
     "transaction-log-replay-not-implemented",
     "full-binary-value-decoding-not-implemented",
+    "registry-deleted-cell-cross-tool-diff-required",
     "deleted-cell-known-answer-corpus-validation-required",
     "registry-security-descriptor-decoding-not-implemented",
 ]
@@ -1072,6 +1073,11 @@ def registry_core_accuracy_gates(
         gates.append(build_accuracy_gate(4, satisfied_checks=item4_checks, evidence_refs=evidence_refs))
     if "#5" in gap_ids:
         item5_checks: list[str] = []
+        deleted_cell_diff = (
+            details.get("registry_deleted_cell_diff")
+            if isinstance(details.get("registry_deleted_cell_diff"), Mapping)
+            else {}
+        )
         if details.get("positive_size_free_cell") or "deleted-value-cell" in matrix_ids or "deleted-key-cell" in matrix_ids:
             item5_checks.append("positive-size free-cell validation")
         if details.get("parent_key_confidence") == "key-value-list" or "parent-key-link" in matrix_ids:
@@ -1086,6 +1092,8 @@ def registry_core_accuracy_gates(
             item5_checks.append("transaction-log context disclosure")
         if details.get("recovery_profile"):
             item5_checks.append("reportability blocked until independent confirmation")
+        if deleted_cell_diff.get("status") == "pass":
+            item5_checks.append("trusted deleted-cell offset diff pass")
         gates.append(build_accuracy_gate(5, satisfied_checks=item5_checks, evidence_refs=evidence_refs))
     return gates
 
@@ -1118,6 +1126,11 @@ def registry_commercial_uplift_evidence(
     key_tree_diff = (
         details.get("registry_key_tree_diff")
         if isinstance(details.get("registry_key_tree_diff"), Mapping)
+        else {}
+    )
+    deleted_cell_diff = (
+        details.get("registry_deleted_cell_diff")
+        if isinstance(details.get("registry_deleted_cell_diff"), Mapping)
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
@@ -1158,6 +1171,15 @@ def registry_commercial_uplift_evidence(
             "missing_in_trusted_count": int(key_tree_diff.get("missing_in_trusted_count") or 0),
             "extra_in_trusted_count": int(key_tree_diff.get("extra_in_trusted_count") or 0),
             "commercial_grade_evidence": bool(key_tree_diff.get("commercial_grade_evidence")),
+        },
+        "deleted_cell_diff": {
+            "status": str(deleted_cell_diff.get("status") or "not-attached"),
+            "oracle": str(deleted_cell_diff.get("oracle") or ""),
+            "matched_count": int(deleted_cell_diff.get("matched_count") or 0),
+            "mismatch_count": int(deleted_cell_diff.get("mismatch_count") or 0),
+            "missing_in_oracle_count": int(deleted_cell_diff.get("missing_in_oracle_count") or 0),
+            "extra_in_oracle_count": int(deleted_cell_diff.get("extra_in_oracle_count") or 0),
+            "commercial_grade_evidence": bool(deleted_cell_diff.get("commercial_grade_evidence")),
         },
         "report_grade_status": str(report_grade.get("status") or ""),
         "commercial_blockers": list(report_grade.get("blockers") or []),
@@ -1290,6 +1312,80 @@ def build_registry_key_tree_diff(
     }
 
 
+def build_registry_deleted_cell_diff(
+    rapid_candidates: Sequence[Mapping[str, object]],
+    oracle_candidates: Sequence[Mapping[str, object]],
+    *,
+    oracle: str,
+) -> dict[str, object]:
+    """Compare deleted/free registry cell candidates with a labeled corpus or second parser."""
+
+    oracle_name = str(oracle or "").strip()
+    rapid_by_offset = {
+        key: normalized
+        for candidate in rapid_candidates
+        for key, normalized in [_normalize_registry_deleted_cell_candidate(candidate)]
+        if key
+    }
+    oracle_by_offset = {
+        key: normalized
+        for candidate in oracle_candidates
+        for key, normalized in [_normalize_registry_deleted_cell_candidate(candidate)]
+        if key
+    }
+    missing_in_oracle = sorted(key for key in rapid_by_offset if key not in oracle_by_offset)
+    extra_in_oracle = sorted(key for key in oracle_by_offset if key not in rapid_by_offset)
+    mismatches: list[dict[str, object]] = []
+    matched_count = 0
+    for key in sorted(set(rapid_by_offset) & set(oracle_by_offset)):
+        rapid = rapid_by_offset[key]
+        oracle_row = oracle_by_offset[key]
+        field_diffs = []
+        for field in ("candidate_class", "name", "data_preview_sha256", "parent_key_path"):
+            left = rapid.get(field, "")
+            right = oracle_row.get(field, "")
+            if left or right:
+                if left != right:
+                    field_diffs.append({"field": field, "rapid": left, "oracle": right})
+        if field_diffs:
+            mismatches.append({"cell_offset": key, "field_diffs": field_diffs})
+        else:
+            matched_count += 1
+
+    status = "pass"
+    if not oracle_name or not rapid_by_offset or not oracle_by_offset:
+        status = "not-enough-evidence"
+    elif missing_in_oracle or extra_in_oracle or mismatches:
+        status = "diffs-present"
+    recognized_oracle = bool(re.search(r"(hand|labeled|oracle|regripper|registry|recmd|python)", oracle_name, re.I))
+    return {
+        "profile_version": "registry-deleted-cell-diff-v1",
+        "oracle": oracle_name,
+        "oracle_recognized": recognized_oracle,
+        "compare_fields": ["cell_offset", "candidate_class", "name", "data_preview_sha256", "parent_key_path"],
+        "rapid_candidate_count": len(rapid_by_offset),
+        "oracle_candidate_count": len(oracle_by_offset),
+        "matched_count": matched_count,
+        "mismatch_count": len(mismatches),
+        "missing_in_oracle_count": len(missing_in_oracle),
+        "extra_in_oracle_count": len(extra_in_oracle),
+        "status": status,
+        "commercial_grade_evidence": status == "pass" and recognized_oracle,
+        "missing_in_oracle": missing_in_oracle[:100],
+        "extra_in_oracle": extra_in_oracle[:100],
+        "mismatches": mismatches[:100],
+        "reportability_decision": {
+            "decision": "deleted-cell-diff-passed" if status == "pass" else "do-not-report-deleted-cell-as-fact",
+            "allowed_use": (
+                "support report-grade deleted-cell assertions with attached transaction-log/reviewer evidence"
+                if status == "pass" and recognized_oracle
+                else "triage-only deleted-cell pivot until offset oracle diff is clean"
+            ),
+            "blockers": [] if status == "pass" and recognized_oracle else ["registry-deleted-cell-cross-tool-diff-required"],
+        },
+    }
+
+
 def _normalize_registry_key_tree_node(node: Mapping[str, object]) -> tuple[str, dict[str, str]]:
     key_path = str(node.get("key_path") or node.get("path") or node.get("key") or "").strip()
     if not key_path:
@@ -1307,6 +1403,41 @@ def _normalize_registry_key_tree_node(node: Mapping[str, object]) -> tuple[str, 
         "last_written_at": str(node.get("last_written_at") or node.get("last_write_time") or ""),
         "root_reachable": str(bool(node.get("root_reachable", True))).lower(),
     }
+
+
+def _normalize_registry_deleted_cell_candidate(candidate: Mapping[str, object]) -> tuple[str, dict[str, str]]:
+    offset = str(candidate.get("cell_offset") or candidate.get("offset") or candidate.get("byte_offset") or "").strip()
+    if not offset:
+        return "", {}
+    key = _normalize_registry_numeric_string(offset)
+    data_preview = str(candidate.get("decoded_data_preview") or candidate.get("data_preview") or "")
+    candidate_class = str(
+        candidate.get("candidate_class")
+        or candidate.get("candidate_kind")
+        or candidate.get("cell_kind")
+        or ""
+    )
+    return key, {
+        "cell_offset": key,
+        "candidate_class": candidate_class,
+        "name": str(candidate.get("name") or candidate.get("value_name") or ""),
+        "data_preview_sha256": hashlib.sha256(data_preview.encode("utf-8", errors="replace")).hexdigest()
+        if data_preview
+        else "",
+        "parent_key_path": normalize_registry_key_path(
+            str(candidate.get("parent_key_path_candidate") or candidate.get("parent_key_path") or "")
+        ),
+    }
+
+
+def _normalize_registry_numeric_string(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        return text
 
 
 def normalize_registry_key_path(key_path: str) -> str:

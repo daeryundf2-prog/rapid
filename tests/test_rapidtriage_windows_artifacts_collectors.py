@@ -16,7 +16,11 @@ from rapidtriage.artifacts.windows.eventlog import (
     native_evtx_core_accuracy_gates,
     native_evtx_promoted_fields,
 )
-from rapidtriage.artifacts.windows.registry import build_registry_key_tree_diff, collect_registry_hive
+from rapidtriage.artifacts.windows.registry import (
+    build_registry_deleted_cell_diff,
+    build_registry_key_tree_diff,
+    collect_registry_hive,
+)
 from rapidtriage.artifacts.windows.shellbags import WindowsShellbagsProvider
 from rapidtriage.cli import main
 from tests.windows_artifact_fixtures import build_minimal_registry_hive, build_minimal_shellbags_registry_hive
@@ -538,7 +542,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("allocator reportability context", value_gate["satisfied_checks"])
             self.assertIn("transaction-log context disclosure", value_gate["satisfied_checks"])
             self.assertIn("reportability blocked until independent confirmation", value_gate["satisfied_checks"])
-            self.assertEqual(value_gate["missing_required_checks"], [])
+            self.assertEqual(value_gate["missing_required_checks"], ["trusted deleted-cell offset diff pass"])
             self.assertIn("expected-answer manifest", value_gate["minimum_evidence"])
             self.assertFalse(value_gate["commercial_grade_ready"])
             value_uplift = value_recovery.details["commercial_uplift_evidence"]
@@ -554,6 +558,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 value_uplift["recovery_reportability_decision"]["allowed_use"],
                 "triage-pivot-only",
             )
+            self.assertEqual(value_uplift["deleted_cell_diff"]["status"], "not-attached")
             self.assertTrue(value_uplift["external_evidence_required"])
             key_recovery = next(
                 record
@@ -615,6 +620,45 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertFalse(diff["commercial_grade_evidence"])
         self.assertEqual(diff["mismatch_count"], 1)
         self.assertIn("registry-key-tree-cross-tool-diff-required", diff["reportability_decision"]["blockers"])
+
+    def test_registry_deleted_cell_diff_compares_offset_class_and_data(self) -> None:
+        rapid = [
+            {
+                "cell_offset": "0x3000",
+                "candidate_class": "deleted-value-cell",
+                "name": "SecurityUpdater",
+                "decoded_data_preview": "1",
+                "parent_key_path_candidate": r"HKCU\Software\Run",
+            }
+        ]
+        oracle = [
+            {
+                "offset": 12288,
+                "candidate_class": "deleted-value-cell",
+                "value_name": "SecurityUpdater",
+                "data_preview": "1",
+                "parent_key_path": r"HKEY_CURRENT_USER\Software\Run",
+            }
+        ]
+
+        diff = build_registry_deleted_cell_diff(rapid, oracle, oracle="hand-labeled deleted registry fixture")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["oracle_recognized"])
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertEqual(diff["reportability_decision"]["decision"], "deleted-cell-diff-passed")
+
+    def test_registry_deleted_cell_diff_blocks_offset_or_data_mismatch(self) -> None:
+        rapid = [{"cell_offset": 12288, "candidate_class": "deleted-value-cell", "decoded_data_preview": "1"}]
+        oracle = [{"cell_offset": 12288, "candidate_class": "deleted-value-cell", "decoded_data_preview": "2"}]
+
+        diff = build_registry_deleted_cell_diff(rapid, oracle, oracle="Registry Explorer deleted-cell review")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertIn("registry-deleted-cell-cross-tool-diff-required", diff["reportability_decision"]["blockers"])
 
     def test_manifest_collects_browser_and_recent_file_artifacts_from_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

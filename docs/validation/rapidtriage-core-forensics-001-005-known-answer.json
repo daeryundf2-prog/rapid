@@ -96,10 +96,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "deleted/free key and value candidates preserve allocator evidence, parent confirmation, data plausibility, transaction-log context, and explicit do-not-report-as-fact reportability blocking"
+          "deleted/free key and value candidates preserve allocator evidence, parent confirmation, data plausibility, trusted deleted-cell diff gating, transaction-log context, and explicit do-not-report-as-fact reportability blocking"
         ]
       },
-      "notes": "Internal fixture pass; independent deleted-cell validation and transaction-log replay remain required."
+      "notes": "Internal fixture pass; independent deleted-cell offset/data diff validation and transaction-log replay remain required."
     }
   ]
 }
