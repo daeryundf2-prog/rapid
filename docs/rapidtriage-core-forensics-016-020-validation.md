@@ -20,6 +20,8 @@ rapidtriage commercial-readiness \
 
 Passing this package means internal `implemented + usable + validated` maturity only. Commercial-grade claims still require trusted-tool diffs, broader OS/browser corpora, malformed/deleted/compressed cases, independent sign-off, and large-case repeatability evidence.
 
+The #16~#20 rows now carry reportability decisions in commercial-uplift evidence. Prefetch remains an execution triage pivot until PECmd/known-answer diffs and file-metrics/volume validation exist. LNK remains a shortcut target/metadata pivot until Shell Item, LinkInfo, tracker, and property-store semantics are validated. Windows system artifacts remain triage pivots until TaskCache, WMI, Defender, Firewall, and WER correlations are complete. Browser storage and timeline rows remain browser triage pivots with secrets redacted by default until cache/session/deleted-history/schema validation and audited legal opt-in handling are attached.
+
 Current external blockers:
 
 - #16: compressed Prefetch, full file metrics, authoritative volume tables, PECmd diff corpus.

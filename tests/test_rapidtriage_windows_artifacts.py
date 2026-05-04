@@ -115,6 +115,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             browser_uplift = chrome["details"]["commercial_uplift_evidence"]
             self.assertEqual(browser_uplift["batch_id"], "commercial-uplift-016-020")
             self.assertEqual(browser_uplift["item_numbers"], [19, 20])
+            self.assertEqual(
+                browser_uplift["reportability_decision"]["allowed_use"],
+                "browser-storage-and-timeline-triage-pivot",
+            )
             self.assertIn("unified-timeline", browser_uplift["passed_validation_matrix_ids"])
             self.assertTrue(browser_uplift["large_data_controls"]["secret_values_redacted_by_default"])
             self.assertEqual(chrome["details"]["unified_timeline_count"], 2)
@@ -251,6 +255,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             lnk_uplift = details["commercial_uplift_evidence"]
             self.assertEqual(lnk_uplift["batch_id"], "commercial-uplift-016-020")
             self.assertEqual(lnk_uplift["item_numbers"], [17])
+            self.assertEqual(
+                lnk_uplift["reportability_decision"]["decision"],
+                "do-not-report-target-context-as-complete",
+            )
             self.assertIn("has-valid-header", lnk_uplift["passed_validation_matrix_ids"])
             self.assertTrue(lnk_uplift["large_data_controls"]["property_store_decode_required_for_commercial_claims"])
             self.assertEqual(len(details["source_hashes"]["sha256"]), 64)
@@ -1566,6 +1574,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             prefetch_uplift = details["commercial_uplift_evidence"]
             self.assertEqual(prefetch_uplift["batch_id"], "commercial-uplift-016-020")
             self.assertEqual(prefetch_uplift["item_numbers"], [16])
+            self.assertEqual(
+                prefetch_uplift["reportability_decision"]["allowed_use"],
+                "prefetch-execution-triage-pivot",
+            )
             self.assertIn("scca-signature", prefetch_uplift["passed_validation_matrix_ids"])
             self.assertTrue(
                 prefetch_uplift["large_data_controls"]["full_file_metrics_decode_required_for_commercial_claims"]
@@ -2003,6 +2015,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             wmi_uplift = wmi[0]["details"]["commercial_uplift_evidence"]
             self.assertEqual(wmi_uplift["batch_id"], "commercial-uplift-016-020")
             self.assertEqual(wmi_uplift["item_numbers"], [18])
+            self.assertEqual(
+                wmi_uplift["reportability_decision"]["allowed_use"],
+                "windows-system-artifact-triage-pivot",
+            )
             self.assertIn("wmi-source-parsed", wmi_uplift["passed_validation_matrix_ids"])
             self.assertTrue(wmi_uplift["large_data_controls"]["native_repository_or_rule_store_decode_required"])
             self.assertIn("wmi-string:commandlineeventconsumer", wmi[0]["details"]["risk_flags"])
@@ -2040,6 +2056,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             task_uplift = task["details"]["commercial_uplift_evidence"]
             self.assertEqual(task_uplift["batch_id"], "commercial-uplift-016-020")
             self.assertEqual(task_uplift["item_numbers"], [18])
+            self.assertEqual(
+                task_uplift["reportability_decision"]["decision"],
+                "do-not-report-system-artifact-as-fully-correlated",
+            )
             self.assertIn("task-exec-action", task_uplift["passed_validation_matrix_ids"])
             self.assertIn("task-report-grade-correlation", task_uplift["failed_validation_matrix_ids"])
             self.assertEqual(len(task["details"]["source_hashes"]["sha256"]), 64)

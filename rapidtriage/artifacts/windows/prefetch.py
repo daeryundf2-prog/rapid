@@ -569,6 +569,7 @@ def prefetch_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    reportability_decision = prefetch_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-016-020",
         "item_numbers": [16],
@@ -587,6 +588,7 @@ def prefetch_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
         ],
         "report_grade_status": str(report_grade.get("status") or ""),
+        "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
             "bounded_prefetch_scan": True,
@@ -597,6 +599,28 @@ def prefetch_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
         },
         "next_internal_step": "Finish file metrics, MFT reference, authoritative volume, compressed PF, and cross-version corpus validation.",
         "external_evidence_required": True,
+    }
+
+
+def prefetch_reportability_decision(
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = set(str(item) for item in report_grade.get("blockers") or [])
+    blockers.add("prefetch-file-metrics-and-volume-table-validation-required")
+    blockers.add("prefetch-cross-tool-execution-correlation-required")
+    return {
+        "profile_version": "prefetch-reportability-decision-v1",
+        "commercial_gap_id": "#16",
+        "decision": "report-only-with-execution-correlation",
+        "allowed_use": "prefetch-execution-triage-pivot",
+        "blockers": sorted(blockers),
+        "required_before_report": [
+            "compressed Prefetch handling validated where applicable",
+            "file metrics and volume tables decoded",
+            "run counts and timestamps diffed against PECmd or known-answer corpus",
+            "execution claim correlated with Amcache, BAM, SRUM, EventLog, MFT, or USN",
+        ],
     }
 
 

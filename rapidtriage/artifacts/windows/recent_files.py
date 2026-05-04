@@ -1039,6 +1039,7 @@ def lnk_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, o
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    reportability_decision = lnk_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-016-020",
         "item_numbers": [17],
@@ -1057,6 +1058,7 @@ def lnk_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, o
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
         ],
         "report_grade_status": str(report_grade.get("status") or ""),
+        "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
             "bounded_extra_data_blocks": True,
@@ -1066,6 +1068,28 @@ def lnk_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, o
         },
         "next_internal_step": "Finish Shell Item property store semantics and tracker/LinkInfo known-answer corpus validation.",
         "external_evidence_required": True,
+    }
+
+
+def lnk_reportability_decision(
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = set(str(item) for item in report_grade.get("blockers") or [])
+    blockers.add("lnk-shell-item-property-store-validation-required")
+    blockers.add("lnk-tracker-and-linkinfo-cross-tool-diff-required")
+    return {
+        "profile_version": "lnk-reportability-decision-v1",
+        "commercial_gap_id": "#17",
+        "decision": "do-not-report-target-context-as-complete",
+        "allowed_use": "shortcut-target-and-metadata-triage-pivot",
+        "blockers": sorted(blockers),
+        "required_before_report": [
+            "Shell Item and property-store semantics validated",
+            "LinkInfo drive/network provider fields decoded and diffed",
+            "Tracker GUID and machine ID semantics verified",
+            "LECmd or known-answer corpus attached for critical shortcuts",
+        ],
     }
 
 

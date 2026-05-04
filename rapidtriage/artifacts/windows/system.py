@@ -817,6 +817,7 @@ def system_commercial_uplift_evidence(artifact_family: str, details: Mapping[str
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    reportability_decision = system_reportability_decision(artifact_family, report_grade, details)
     return {
         "batch_id": "commercial-uplift-016-020",
         "item_numbers": [18],
@@ -835,6 +836,7 @@ def system_commercial_uplift_evidence(artifact_family: str, details: Mapping[str
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
         ],
         "report_grade_status": str(report_grade.get("status") or ""),
+        "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
             "bounded_wmi_scan_bytes": WMI_SCAN_LIMIT if artifact_family == "wmi" else 0,
@@ -844,6 +846,39 @@ def system_commercial_uplift_evidence(artifact_family: str, details: Mapping[str
         },
         "next_internal_step": "Finish TaskCache, Defender/EventLog, Firewall rule-store, WER dump/CAB, and WMI repository correlation validation.",
         "external_evidence_required": True,
+    }
+
+
+def system_reportability_decision(
+    artifact_family: str,
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = set(str(item) for item in report_grade.get("blockers") or [])
+    blockers.add("windows-system-cross-artifact-correlation-required")
+    if artifact_family == "task-scheduler":
+        blockers.add("taskcache-registry-and-eventlog-correlation-required")
+    elif artifact_family == "wmi":
+        blockers.add("wmi-native-consumer-filter-binding-decode-required")
+    elif artifact_family == "firewall":
+        blockers.add("firewall-policy-store-correlation-required")
+    elif artifact_family == "defender":
+        blockers.add("defender-event-policy-and-quarantine-correlation-required")
+    elif artifact_family == "wer":
+        blockers.add("wer-dump-cab-linkage-validation-required")
+    return {
+        "profile_version": "windows-system-reportability-decision-v1",
+        "commercial_gap_id": "#18",
+        "artifact_family": artifact_family,
+        "decision": "do-not-report-system-artifact-as-fully-correlated",
+        "allowed_use": "windows-system-artifact-triage-pivot",
+        "blockers": sorted(blockers),
+        "required_before_report": [
+            "source hashes and parser version captured",
+            "artifact-specific event semantics validated",
+            "registry/event/policy/dump/WMI correlation completed where applicable",
+            "trusted-tool or known-answer diff attached for critical findings",
+        ],
     }
 
 

@@ -865,6 +865,7 @@ def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[st
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    reportability_decision = browser_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-016-020",
         "item_numbers": [19, 20],
@@ -884,6 +885,7 @@ def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[st
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
         ],
         "report_grade_status": str(report_grade.get("status") or ""),
+        "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
             "max_browser_timeline_rows": MAX_BROWSER_TIMELINE_ROWS,
@@ -895,6 +897,29 @@ def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[st
         },
         "next_internal_step": "Finish cache/session schema decoding, deleted-history recovery, Safari parity, and browser-version known-answer validation.",
         "external_evidence_required": True,
+    }
+
+
+def browser_reportability_decision(
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> Dict[str, object]:
+    blockers = set(str(item) for item in report_grade.get("blockers") or [])
+    blockers.add("browser-secret-legal-opt-in-and-audit-required")
+    blockers.add("browser-deleted-history-and-cache-schema-validation-required")
+    return {
+        "profile_version": "browser-reportability-decision-v1",
+        "commercial_gap_ids": ["#19", "#20"],
+        "decision": "do-not-report-browser-storage-or-timeline-as-complete",
+        "allowed_use": "browser-storage-and-timeline-triage-pivot",
+        "blockers": sorted(blockers),
+        "secret_values_redacted_by_default": True,
+        "required_before_report": [
+            "browser-version transition and timestamp semantics validated",
+            "cache/session/extension/sync schemas decoded for the target browser version",
+            "deleted history/session recovery validated or explicitly limited",
+            "secret/cookie/password handling performed only through audited opt-in authority gate",
+        ],
     }
 
 
