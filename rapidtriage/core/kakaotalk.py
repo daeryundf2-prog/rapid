@@ -23,6 +23,9 @@ from .docs import write_result
 from .submission import compute_hashes
 
 KAKAOTALK_DECRYPT_VERSION = "kakaotalk-windows-decrypt-v1"
+MAX_ZIP_MEMBER_BYTES = 50 * 1024 * 1024 * 1024
+MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES = 250 * 1024 * 1024 * 1024
+MAX_ZIP_COMPRESSION_RATIO = 1000
 KAKAOTALK_USERDIR_BRUTEFORCE_VERSION = "kakaotalk-windows-userdir-bruteforce-v1"
 KAKAOTALK_MEMORY_CARVE_VERSION = "kakaotalk-windows-memory-carve-v1"
 KAKAOTALK_KEY_STORE_VERSION = "kakaotalk-windows-key-store-v1"
@@ -860,14 +863,43 @@ def extract_zip_archive_safely(archive: Path, destination: Path) -> Path:
     destination_root = destination.resolve()
     try:
         with zipfile.ZipFile(archive) as zf:
+            total_uncompressed = 0
             for member in zf.infolist():
+                if member.file_size > MAX_ZIP_MEMBER_BYTES:
+                    raise KakaoTalkDecryptError(f"ZIP member is too large: {member.filename}")
+                total_uncompressed += member.file_size
+                if total_uncompressed > MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES:
+                    raise KakaoTalkDecryptError("ZIP archive expands beyond the safe uncompressed size limit")
+                if member.compress_size > 0 and member.file_size / member.compress_size > MAX_ZIP_COMPRESSION_RATIO:
+                    raise KakaoTalkDecryptError(f"ZIP member compression ratio is suspicious: {member.filename}")
+                mode = (member.external_attr >> 16) & 0o170000
+                if mode == 0o120000:
+                    raise KakaoTalkDecryptError(f"ZIP symbolic links are not extracted: {member.filename}")
                 target = (destination_root / member.filename).resolve()
                 if target != destination_root and destination_root not in target.parents:
                     raise KakaoTalkDecryptError(f"Unsafe ZIP member path: {member.filename}")
-                zf.extract(member, destination_root)
+                try:
+                    _ = zf.extract(member, destination_root)
+                except PermissionError as exc:
+                    if _is_ignorable_windows_short_name_alias(member, target):
+                        continue
+                    raise KakaoTalkDecryptError(f"Could not extract ZIP member: {member.filename}") from exc
     except zipfile.BadZipFile as exc:
         raise KakaoTalkDecryptError(f"Invalid ZIP archive: {archive}") from exc
     return destination_root
+
+
+def _is_ignorable_windows_short_name_alias(member: zipfile.ZipInfo, target: Path) -> bool:
+    if member.is_dir() or member.file_size != 0:
+        return False
+    name = Path(member.filename).name
+    if not re.fullmatch(r"[^./\\]{1,6}~\d+", name):
+        return False
+    parent = target.parent
+    if not parent.exists():
+        return False
+    prefix = name.split("~", 1)[0].lower()
+    return any(child.is_dir() and child.name.lower().startswith(prefix) for child in parent.iterdir())
 
 
 def run_kakaotalk_sqlcipher_probe(

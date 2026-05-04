@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -77,21 +79,46 @@ def derive_legacy_key_iv_from_pk(pk_value: str, *, repeat_to_512: bool = True) -
 def decrypt_legacy_pages(encrypted: bytes, *, key_iv: LegacyKeyIv, page_size: int = LEGACY_PAGE_SIZE) -> bytes:
     """Decrypt legacy KakaoTalk EDB bytes page-by-page with AES-CBC."""
 
-    try:
-        from Crypto.Cipher import AES  # type: ignore[import-not-found]
-    except ImportError as exc:  # pragma: no cover - optional dependency guard
-        raise KakaoTalkAlgorithmError("pycryptodome is required: pip install pycryptodome") from exc
     if len(key_iv.key) != 16 or len(key_iv.iv) != 16:
         raise KakaoTalkAlgorithmError("Legacy KakaoTalk key and IV must both be 16 bytes")
     if page_size <= 0 or page_size % LEGACY_BLOCK_SIZE != 0:
         raise KakaoTalkAlgorithmError("Legacy page size must be a positive AES block multiple")
+    try:
+        from Crypto.Cipher import AES  # type: ignore[import-not-found]
+    except ImportError:
+        AES = None  # type: ignore[assignment]
     output = bytearray()
     for offset in range(0, len(encrypted), page_size):
         page = encrypted[offset : offset + page_size]
         if len(page) % LEGACY_BLOCK_SIZE != 0:
             raise KakaoTalkAlgorithmError("Legacy encrypted page is not AES-block aligned")
-        output.extend(AES.new(key_iv.key, AES.MODE_CBC, key_iv.iv).decrypt(page))
+        if AES is not None:
+            output.extend(AES.new(key_iv.key, AES.MODE_CBC, key_iv.iv).decrypt(page))
+        else:
+            output.extend(decrypt_aes_128_cbc_with_openssl(page, key_iv=key_iv))
     return bytes(output)
+
+
+def decrypt_aes_128_cbc_with_openssl(page: bytes, *, key_iv: LegacyKeyIv) -> bytes:
+    openssl = shutil.which("openssl")
+    if openssl is None:
+        raise KakaoTalkAlgorithmError("pycryptodome or openssl is required for legacy KakaoTalk AES-CBC decrypt")
+    command = [
+        openssl,
+        "enc",
+        "-aes-128-cbc",
+        "-d",
+        "-K",
+        key_iv.key.hex(),
+        "-iv",
+        key_iv.iv.hex(),
+        "-nopad",
+    ]
+    result = subprocess.run(command, input=page, capture_output=True, check=False)
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        raise KakaoTalkAlgorithmError(f"openssl legacy AES-CBC decrypt failed: {stderr}")
+    return result.stdout
 
 
 def decrypt_legacy_file(

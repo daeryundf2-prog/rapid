@@ -6,6 +6,7 @@ import csv
 import datetime as dt
 import hashlib
 import json
+import os
 import shutil
 import sqlite3
 import sys
@@ -38,14 +39,17 @@ FORBIDDEN_SECRET_KEYS = {
     "sqlcipher_raw_key_with_salt_hex",
 }
 
+SINGLE_FILE_COPY_LIMIT_BYTES = 512 * 1024 * 1024
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build a redacted PC KakaoTalk data report from an extracted folder or ZIP archive."
+        description="Build a redacted PC KakaoTalk data report from a ZIP, extracted folder, or evidence file."
     )
-    parser.add_argument("source", help="KakaoTalk ZIP or extracted KakaoTalk folder")
+    parser.add_argument("source", help="KakaoTalk ZIP, extracted folder, NTUSER.DAT, DMG, or other evidence file")
     parser.add_argument("--output-dir", required=True, help="Directory for JSON/CSV/XLSX report outputs")
     parser.add_argument("--sqlcipher-bin", default="sqlcipher", help="SQLCipher binary")
+    parser.add_argument("--openssl-bin", default="openssl", help="OpenSSL binary for legacy AES-CBC operations")
     parser.add_argument("--timeout-seconds", type=float, default=5.0)
     parser.add_argument("--max-message-residues", type=int, default=1000)
     parser.add_argument("--keep-opened-sqlite", action="store_true", help="Keep plaintext SQLite exports next to the report")
@@ -79,6 +83,7 @@ def main() -> int:
     opened_dir = output_dir / "opened_sqlite" if args.keep_opened_sqlite else None
     temp_roots: list[tempfile.TemporaryDirectory[str]] = []
     try:
+        source_kind = detect_source_kind(source)
         root = resolve_source_root(source, temp_roots)
         export_dir = opened_dir or Path(tempfile.mkdtemp(prefix="rapidtriage-kakao-opened-"))
         if opened_dir:
@@ -116,6 +121,7 @@ def main() -> int:
                 write_decrypted=True,
                 decrypted_dir=legacy_export_dir,
                 max_messages_per_db=args.max_message_residues,
+                openssl_bin=args.openssl_bin,
                 postpatch_memory_carve=False,
             )
             assert_no_forbidden_secret_keys(legacy_payload)
@@ -143,6 +149,8 @@ def main() -> int:
             messages=messages,
             media=media,
             temporary_extraction=source.is_file() and source.suffix.lower() == ".zip",
+            source_kind=source_kind,
+            input_note=input_note_for_source(source, source_kind),
         )
         xlsx_created = False
         if not args.no_xlsx:
@@ -169,6 +177,7 @@ def main() -> int:
         write_csv(output_dir / "kakaotalk_rooms.csv", rooms)
         write_csv(output_dir / "kakaotalk_messages.csv", messages)
         write_csv(output_dir / "kakaotalk_media.csv", media)
+        write_csv(output_dir / "kakaotalk_database_counts.csv", build_database_count_rows(payload, legacy_payload))
         if not args.keep_opened_sqlite and export_dir.exists():
             shutil.rmtree(export_dir, ignore_errors=True)
         if legacy_export_created and legacy_export_dir and legacy_export_dir.exists():
@@ -181,14 +190,74 @@ def main() -> int:
     return 0
 
 
+def detect_source_kind(source: Path) -> str:
+    if source.is_dir():
+        return "directory"
+    suffix = source.suffix.lower()
+    if suffix == ".zip":
+        return "zip"
+    if source.name.lower() == "ntuser.dat":
+        return "ntuser-dat"
+    if suffix == ".dmg":
+        return "dmg"
+    if suffix:
+        return f"file:{suffix[1:]}"
+    return "file:unknown"
+
+
+def input_note_for_source(source: Path, source_kind: str) -> str:
+    if source_kind == "zip":
+        return "ZIP was safely extracted and analyzed."
+    if source_kind == "directory":
+        return "Folder was analyzed directly."
+    if source_kind == "ntuser-dat":
+        return "Single NTUSER.DAT input was accepted for registry/device clues; add Kakao DB files or a Kakao folder for conversations."
+    if source_kind == "dmg":
+        return "DMG was accepted as an evidence file. On Windows, mount/extract the DMG first and analyze the extracted Kakao folder for conversations."
+    suffix = source.suffix.lower()
+    if suffix in {".alz", ".egg", ".rar", ".7z", ".tar", ".gz"}:
+        return "Archive container was accepted as evidence metadata. Extract it first or provide ZIP/folder input for conversation parsing."
+    if source.is_file():
+        return "Single evidence file was accepted; conversation recovery requires Kakao DB files, registry hives, or an extracted Kakao folder."
+    return ""
+
+
 def resolve_source_root(source: Path, temp_roots: list[tempfile.TemporaryDirectory[str]]) -> Path:
     if source.is_dir():
         return source
-    if not source.is_file() or source.suffix.lower() != ".zip":
-        raise KakaoTalkDecryptError("source must be a KakaoTalk ZIP archive or extracted folder")
-    temp_root = tempfile.TemporaryDirectory(prefix="rapidtriage-kakao-zip-report-")
+    if not source.is_file():
+        raise KakaoTalkDecryptError("source must exist and be a KakaoTalk ZIP, extracted folder, or evidence file")
+    temp_root = tempfile.TemporaryDirectory(prefix="rapidtriage-kakao-source-report-")
     temp_roots.append(temp_root)
-    return extract_zip_archive_safely(source, Path(temp_root.name))
+    root = Path(temp_root.name)
+    if source.suffix.lower() == ".zip":
+        return extract_zip_archive_safely(source, root)
+    stage_single_evidence_file(source, root / source.name)
+    return root
+
+
+def stage_single_evidence_file(source: Path, target: Path) -> None:
+    try:
+        os.link(source, target)
+        return
+    except OSError:
+        pass
+    size = source.stat().st_size
+    if size <= SINGLE_FILE_COPY_LIMIT_BYTES:
+        shutil.copy2(source, target)
+        return
+    manifest = {
+        "source_path": str(source),
+        "source_name": source.name,
+        "source_size": size,
+        "staging": "metadata-only",
+        "reason": "single evidence file exceeded safe copy limit",
+        "copy_limit_bytes": SINGLE_FILE_COPY_LIMIT_BYTES,
+    }
+    (target.parent / "single_evidence_file_manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def build_room_rows(payload: Mapping[str, object]) -> list[dict[str, object]]:
@@ -254,6 +323,70 @@ def build_legacy_message_rows(payload: Mapping[str, object]) -> list[dict[str, o
             )
         )
     return rows
+
+
+def build_database_count_rows(
+    postpatch_payload: Mapping[str, object],
+    legacy_payload: Mapping[str, object] | None,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    legacy_entries = legacy_payload.get("entries", []) if isinstance(legacy_payload, Mapping) else []
+    for entry in legacy_entries or []:
+        if not isinstance(entry, Mapping):
+            continue
+        source_path = str(entry.get("source_path") or "")
+        rows.append(
+            {
+                "analysis_method": "legacy-edb-decrypt",
+                "chat_id": str(entry.get("chat_id") or chat_id_from_name(source_path)),
+                "source_path": source_path,
+                "sqlite_status": str(entry.get("sqlite_status") or ""),
+                "decrypt_status": str(entry.get("decrypt_status") or ""),
+                "message_row_count": entry.get("message_row_count") or 0,
+                "message_preview_count": len(entry.get("message_previews") or []),
+                "decrypted_path": str(entry.get("decrypted_path") or ""),
+                "source_size": entry.get("source_size") or "",
+                "matched_key_derivation": str(entry.get("matched_key_derivation") or ""),
+                "matched_key_source": str(entry.get("matched_key_source") or ""),
+            }
+        )
+    if rows:
+        return rows
+    for match in postpatch_payload.get("matches", []) or []:
+        if not isinstance(match, Mapping):
+            continue
+        export_info = match.get("export")
+        if not isinstance(export_info, Mapping):
+            export_info = {}
+        source_path = str(match.get("source_path") or export_info.get("export_path") or "")
+        rows.append(
+            {
+                "analysis_method": "postpatch-sqlcipher",
+                "chat_id": chat_id_from_name(source_path),
+                "source_path": source_path,
+                "sqlite_status": "opened" if export_info.get("exported") else str(match.get("status") or ""),
+                "decrypt_status": str(match.get("status") or ""),
+                "message_row_count": match.get("message_row_count") or 0,
+                "message_preview_count": len(match.get("message_previews") or []),
+                "decrypted_path": str(export_info.get("export_path") or ""),
+                "source_size": match.get("source_size") or "",
+                "matched_key_derivation": "",
+                "matched_key_source": "",
+            }
+        )
+    return rows
+
+
+def count_database_statuses(payload: Mapping[str, object] | None) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    if not isinstance(payload, Mapping):
+        return counts
+    for entry in payload.get("entries", []) or []:
+        if not isinstance(entry, Mapping):
+            continue
+        status = str(entry.get("sqlite_status") or entry.get("decrypt_status") or "unknown")
+        counts[status] = counts.get(status, 0) + 1
+    return counts
 
 
 def legacy_decrypted_sqlite_paths(payload: Mapping[str, object]) -> list[Path]:
@@ -413,6 +546,8 @@ def build_summary_payload(
     messages: Sequence[Mapping[str, object]],
     media: Sequence[Mapping[str, object]],
     temporary_extraction: bool,
+    source_kind: str,
+    input_note: str,
 ) -> dict[str, object]:
     summary = payload.get("summary", {})
     if not isinstance(summary, Mapping):
@@ -431,26 +566,40 @@ def build_summary_payload(
     message_method_counts = count_rows_by_method(messages)
     room_method_counts = count_rows_by_method(rooms)
     media_method_counts = count_rows_by_method(media)
+    legacy_sqlite_open_count = int(legacy_summary.get("sqlite_open_count") or 0)
+    legacy_raw_message_row_count = int(legacy_summary.get("message_row_count") or 0)
+    chat_database_count = int(summary.get("chat_database_count") or 0)
+    visible_message_count = len(messages)
+    unopened_database_count = max(chat_database_count - legacy_sqlite_open_count, 0) if legacy_payload is not None else 0
     return {
         "source": str(source),
-        "source_type": "zip" if temporary_extraction else "directory",
+        "source_type": source_kind,
+        "input_note": input_note,
         "temporary_extraction": temporary_extraction,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "status": status,
         "analysis_mode": analysis_mode,
         "postpatch_status": summary.get("status", ""),
         "legacy_attempted": legacy_payload is not None,
-        "legacy_sqlite_open_count": legacy_summary.get("sqlite_open_count", 0),
-        "legacy_message_row_count": legacy_summary.get("message_row_count", 0),
+        "legacy_sqlite_open_count": legacy_sqlite_open_count,
+        "legacy_message_row_count": legacy_raw_message_row_count,
+        "legacy_database_status_counts": count_database_statuses(legacy_payload),
+        "unopened_database_count": unopened_database_count,
+        "visible_message_count": visible_message_count,
+        "raw_recovered_message_row_count": legacy_raw_message_row_count,
+        "message_count_note": (
+            "raw_recovered_message_row_count is the total row count in opened DBs; "
+            "visible_message_count/message_count is what this viewer/CSV currently displays."
+        ),
         "postpatch_message_count": message_method_counts.get("postpatch-sqlcipher", 0),
         "legacy_message_count": message_method_counts.get("legacy-edb-decrypt", 0),
         "message_method_counts": message_method_counts,
         "room_method_counts": room_method_counts,
         "media_method_counts": media_method_counts,
-        "chat_database_count": summary.get("chat_database_count", 0),
+        "chat_database_count": chat_database_count,
         "opened_database_count": summary.get("opened_database_count", 0),
         "room_count": len(rooms),
-        "message_count": len(messages),
+        "message_count": visible_message_count,
         "media_attachment_count": len(media),
         "local_media_file_count": summary.get("postpatch_media_local_file_count", 0),
         "local_media_match_count": summary.get("postpatch_media_local_match_count", 0),
@@ -463,6 +612,7 @@ def build_summary_payload(
             "rooms_csv": "kakaotalk_rooms.csv",
             "messages_csv": "kakaotalk_messages.csv",
             "media_csv": "kakaotalk_media.csv",
+            "database_counts_csv": "kakaotalk_database_counts.csv",
             "xlsx": "kakaotalk_report.xlsx",
         },
     }
