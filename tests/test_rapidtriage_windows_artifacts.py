@@ -486,8 +486,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
   <instrumentation>
     <events>
       <provider name="Microsoft-Windows-PowerShell" guid="{a0c1853b-5c40-4b15-8766-3cf1c58f985a}">
+        <templates>
+          <template tid="PowerShellScriptBlockTemplate">
+            <data name="CommandLine" inType="win:UnicodeString" />
+          </template>
+        </templates>
         <events>
-          <event value="4104" message="$(string.PS.4104.message)" />
+          <event value="4104" template="PowerShellScriptBlockTemplate" message="$(string.PS.4104.message)" />
         </events>
       </provider>
     </events>
@@ -495,7 +500,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
   <localization>
     <resources culture="en-US">
       <stringTable>
-        <string id="PS.4104.message" value="Manifest PowerShell script block: {CommandLine}." />
+        <string id="PS.4104.message" value="Manifest PowerShell script block: %1." />
       </stringTable>
     </resources>
   </localization>
@@ -536,6 +541,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(source["source_type"], "windows-event-manifest")
             self.assertEqual(source["locale"], "en-US")
             self.assertEqual(source["message_id"], "$(string.PS.4104.message)")
+            self.assertEqual(source["manifest_template_id"], "PowerShellScriptBlockTemplate")
+            self.assertEqual(source["manifest_template_fields"], ["CommandLine"])
             self.assertEqual(source["extraction_tool"], "rapidtriage-manifest-loader")
             self.assertEqual(len(source["template_sha256"]), 64)
             self.assertFalse(native_evtx["commercial_grade_ready"])

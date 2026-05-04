@@ -724,6 +724,7 @@ def event_message_manifest_entries(path: Path, text: str) -> list[tuple[str, str
         )
         if not provider_name:
             continue
+        manifest_templates = event_manifest_template_fields(provider)
         for event in provider.iter():
             if strip_namespace(event.tag).lower() != "event":
                 continue
@@ -742,6 +743,10 @@ def event_message_manifest_entries(path: Path, text: str) -> list[tuple[str, str
             message = string_table.get(string_id) if string_id else ""
             if not message:
                 message = message_ref
+            template_id = str(event.attrib.get("template") or event.attrib.get("Template") or "")
+            template_fields = manifest_templates.get(template_id, []) if template_id else []
+            if template_fields:
+                message = apply_manifest_insertions(message, template_fields)
             entries.append(
                 (
                     provider_name,
@@ -753,6 +758,8 @@ def event_message_manifest_entries(path: Path, text: str) -> list[tuple[str, str
                         "locale": string_culture.get(string_id, "") if string_id else "",
                         "message_id": message_ref,
                         "resource_id": string_id,
+                        "manifest_template_id": template_id,
+                        "manifest_template_fields": template_fields,
                         "extraction_tool": "rapidtriage-manifest-loader",
                         "catalog_path": str(path.resolve()),
                         "template_sha256": hashlib.sha256(message.encode("utf-8")).hexdigest(),
@@ -767,6 +774,36 @@ def manifest_message_string_id(message_ref: str) -> str:
     if match:
         return match.group(1)
     return ""
+
+
+def event_manifest_template_fields(provider: ET.Element) -> dict[str, list[str]]:
+    templates: dict[str, list[str]] = {}
+    for template in provider.iter():
+        if strip_namespace(template.tag).lower() != "template":
+            continue
+        template_id = str(template.attrib.get("tid") or template.attrib.get("Tid") or template.attrib.get("id") or "")
+        if not template_id:
+            continue
+        fields: list[str] = []
+        for child in template:
+            if strip_namespace(child.tag).lower() not in {"data", "userdata"}:
+                continue
+            name = str(child.attrib.get("name") or child.attrib.get("Name") or "")
+            if name:
+                fields.append(name)
+        if fields:
+            templates[template_id] = fields
+    return templates
+
+
+def apply_manifest_insertions(message: str, fields: Sequence[str]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        index = int(match.group(1)) - 1
+        if 0 <= index < len(fields):
+            return "{" + fields[index] + "}"
+        return match.group(0)
+
+    return re.sub(r"%(\d+)", replace, message)
 
 
 def normalize_provider_catalog_key(value: str) -> str:
@@ -3262,6 +3299,10 @@ def render_event_message(
                     "source_type": str(catalog_entry.get("source_type") or ""),
                     "locale": str(catalog_entry.get("locale") or ""),
                     "message_id": str(catalog_entry.get("message_id") or catalog_entry.get("resource_id") or ""),
+                    "manifest_template_id": str(catalog_entry.get("manifest_template_id") or ""),
+                    "manifest_template_fields": list(catalog_entry.get("manifest_template_fields") or [])
+                    if isinstance(catalog_entry.get("manifest_template_fields"), list)
+                    else [],
                     "extraction_tool": str(catalog_entry.get("extraction_tool") or ""),
                     "template_sha256": str(catalog_entry.get("template_sha256") or ""),
                 },
