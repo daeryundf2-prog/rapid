@@ -300,6 +300,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             jumplist_uplift = automatic["details"]["commercial_uplift_evidence"]
             self.assertEqual(jumplist_uplift["batch_id"], "commercial-uplift-011-015")
             self.assertEqual(jumplist_uplift["item_numbers"], [14])
+            self.assertEqual(
+                jumplist_uplift["reportability_decision"]["decision"],
+                "do-not-report-destlist-semantics-as-final",
+            )
+            self.assertEqual(
+                jumplist_uplift["reportability_decision"]["allowed_use"],
+                "recent-destination-triage-pivot",
+            )
             self.assertIn("has-destlist-stream", jumplist_uplift["passed_validation_matrix_ids"])
             self.assertTrue(
                 jumplist_uplift["large_data_controls"]["deleted_entry_recovery_required_for_commercial_claims"]
@@ -1736,6 +1744,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             mft_uplift = native_mft[0]["details"]["commercial_uplift_evidence"]
             self.assertEqual(mft_uplift["batch_id"], "commercial-uplift-011-015")
             self.assertEqual(mft_uplift["item_numbers"], [12])
+            self.assertEqual(
+                mft_uplift["reportability_decision"]["decision"],
+                "do-not-report-full-path-or-file-content-as-complete",
+            )
+            self.assertEqual(
+                mft_uplift["reportability_decision"]["allowed_use"],
+                "mft-record-structure-and-timestamp-pivot",
+            )
             self.assertIn("sequence-fixup-valid", mft_uplift["passed_validation_matrix_ids"])
             self.assertTrue(
                 mft_uplift["large_data_controls"]["full_volume_or_journal_validation_required_for_commercial_claims"]
@@ -1796,6 +1812,8 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertFalse(native_usn[0]["details"]["ntfs_native_capabilities"]["usn_full_journal_replay"])
             usn_uplift = native_usn[0]["details"]["commercial_uplift_evidence"]
             self.assertEqual(usn_uplift["item_numbers"], [13])
+            self.assertEqual(usn_uplift["reportability_decision"]["decision"], "do-not-report-full-timeline-as-replayed")
+            self.assertEqual(usn_uplift["reportability_decision"]["allowed_use"], "usn-change-record-triage-pivot")
             self.assertIn("record-cursor-progresses", usn_uplift["passed_validation_matrix_ids"])
             self.assertEqual(usn_uplift["large_data_controls"]["record_cursor"], 16)
             self.assertEqual(native_usn[1]["details"]["major_version"], 3)
@@ -1870,6 +1888,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             edb_uplift = edb_files[0]["details"]["commercial_uplift_evidence"]
             self.assertEqual(edb_uplift["batch_id"], "commercial-uplift-011-015")
             self.assertEqual(edb_uplift["item_numbers"], [11])
+            self.assertEqual(
+                edb_uplift["reportability_decision"]["decision"],
+                "do-not-report-native-row-as-decoded-fact",
+            )
+            self.assertEqual(edb_uplift["reportability_decision"]["allowed_use"], "search-index-triage-pivot")
             self.assertIn("ese-signature-valid", edb_uplift["passed_validation_matrix_ids"])
             self.assertTrue(edb_uplift["large_data_controls"]["row_level_native_decode_required_for_commercial_claims"])
             self.assertEqual(
@@ -1918,6 +1941,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("deleted/index-state validation", row_gate["satisfied_checks"])
             row_uplift = row_candidate["details"]["commercial_uplift_evidence"]
             self.assertIn("row-level-decoding-available", row_uplift["failed_validation_matrix_ids"])
+            self.assertEqual(row_uplift["reportability_decision"]["allowed_use"], "search-index-triage-pivot")
             self.assertEqual(summary["details"]["entry_count"], 1)
             self.assertEqual(summary["details"]["inventory_count"], 1)
             self.assertGreaterEqual(summary["details"]["edb_pivot_count"], 2)

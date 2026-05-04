@@ -782,6 +782,7 @@ def ntfs_commercial_uplift_evidence(family: str, details: Mapping[str, object]) 
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
     item_number = 12 if family == "mft" else 13
+    reportability_decision = ntfs_reportability_decision(family, report_grade, details)
     return {
         "batch_id": "commercial-uplift-011-015",
         "item_numbers": [item_number],
@@ -800,6 +801,7 @@ def ntfs_commercial_uplift_evidence(family: str, details: Mapping[str, object]) 
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
         ],
         "report_grade_status": str(report_grade.get("status") or ""),
+        "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
             "bounded_native_scan": True,
@@ -815,6 +817,45 @@ def ntfs_commercial_uplift_evidence(family: str, details: Mapping[str, object]) 
             else "Complete USN full-journal replay, FRN path-cache correlation, and large corpus cursor validation."
         ),
         "external_evidence_required": True,
+    }
+
+
+def ntfs_reportability_decision(
+    family: str,
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = set(str(item) for item in report_grade.get("blockers") or [])
+    if family == "mft":
+        decision = "do-not-report-full-path-or-file-content-as-complete"
+        allowed_use = "mft-record-structure-and-timestamp-pivot"
+        blockers.add("mft-attribute-list-and-nonresident-runlist-validation-required")
+        blockers.add("mft-full-volume-parent-path-diff-required")
+        required = [
+            "attribute-list extension records resolved",
+            "nonresident data runs decoded and independently checked",
+            "parent path reconstruction diffed against full-volume parser",
+            "record offset, sequence number, and source hash preserved in citation",
+        ]
+    else:
+        decision = "do-not-report-full-timeline-as-replayed"
+        allowed_use = "usn-change-record-triage-pivot"
+        blockers.add("usn-frn-path-cache-replay-required")
+        blockers.add("usn-large-journal-pagination-validation-required")
+        required = [
+            "FRN path cache replay completed",
+            "rename/delete ordering validated over the full journal",
+            "large-journal pagination and cursor determinism proven",
+            "record cursor, USN, source hash, and parser version preserved in citation",
+        ]
+    return {
+        "profile_version": "ntfs-reportability-decision-v1",
+        "commercial_gap_id": "#12" if family == "mft" else "#13",
+        "decision": decision,
+        "allowed_use": allowed_use,
+        "blockers": sorted(blockers),
+        "source_location_available": bool(details.get("record_offset") not in (None, "") or details.get("record_cursor") not in (None, "")),
+        "required_before_report": required,
     }
 
 

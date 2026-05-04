@@ -534,6 +534,7 @@ def shellbag_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    reportability_decision = shellbag_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-011-015",
         "item_numbers": [15],
@@ -553,6 +554,7 @@ def shellbag_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
         ],
         "report_grade_status": str(report_grade.get("status") or ""),
+        "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
             "bounded_hive_scan": True,
@@ -563,6 +565,29 @@ def shellbag_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
         },
         "next_internal_step": "Finish Shell Item binary decoding, BagMRU/Bags relationship validation, and transaction-log replay.",
         "external_evidence_required": True,
+    }
+
+
+def shellbag_reportability_decision(
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = set(str(item) for item in report_grade.get("blockers") or [])
+    blockers.add("shellbag-binary-shell-item-decode-required")
+    blockers.add("shellbag-transaction-log-replay-required")
+    return {
+        "profile_version": "shellbag-reportability-decision-v1",
+        "commercial_gap_id": "#15",
+        "decision": "do-not-report-folder-access-as-final",
+        "allowed_use": "folder-view-history-triage-pivot",
+        "blockers": sorted(blockers),
+        "source_location_available": bool(details.get("cell_offset") not in (None, "") or details.get("source_hashes")),
+        "required_before_report": [
+            "binary shell-item payload decoded and validated",
+            "BagMRU/Bags relationship diffed against dedicated parser",
+            "transaction logs replayed or explicit absence documented",
+            "deleted/slack ShellBag candidates validated before testimony",
+        ],
     }
 
 

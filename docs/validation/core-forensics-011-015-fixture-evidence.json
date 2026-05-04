@@ -21,7 +21,8 @@
       "assertions": [
         "windows-search-edb-file rows preserve ESE header/page-map/table-family metadata, source hashes, path/URL/content pivots, and #11 core_accuracy_gates.",
         "windows-search-edb-page-candidate rows preserve page index, page offset, page hash, table marker hits, page-local path/content candidates, and page-level source citation.",
-        "windows-search-edb-row-candidate rows correlate path/content/deleted-state markers and retain validation-required blockers."
+        "windows-search-edb-row-candidate rows correlate path/content/deleted-state markers and retain validation-required blockers.",
+        "Windows.edb reportability decisions keep native rows as search-index triage pivots until ESE row validation is attached."
       ],
       "blockers_kept": [
         "full native ESE catalog/table/row decoding",
@@ -34,7 +35,8 @@
       "title": "$MFT full attribute parser",
       "assertions": [
         "mft-record rows preserve FILE header, USA validation, standard information timestamps, filename parent reference, resident data evidence, source hashes, and #12 core_accuracy_gates.",
-        "mft-file inventory rows preserve bounded native record counts, sequence validation counts, timestamp validation counts, and attribute type counts."
+        "mft-file inventory rows preserve bounded native record counts, sequence validation counts, timestamp validation counts, and attribute type counts.",
+        "$MFT reportability decisions block complete path/content claims until attribute-list, runlist, and full-volume diffs are attached."
       ],
       "blockers_kept": [
         "attribute-list extension record resolution",
@@ -47,7 +49,8 @@
       "title": "$UsnJrnl large-scale timeline parser",
       "assertions": [
         "usn-record rows preserve record-size bounds, cursor progression, v2/v3 identity decoding, reason flags, rename/delete hints, timestamps, source hashes, and #13 core_accuracy_gates.",
-        "usn-journal-file inventory rows preserve scan metadata, next-cursor state, record-version counts, large-record counts, and timestamp ranges."
+        "usn-journal-file inventory rows preserve scan metadata, next-cursor state, record-version counts, large-record counts, and timestamp ranges.",
+        "$UsnJrnl reportability decisions block full timeline replay claims until FRN path-cache and large-journal validation are attached."
       ],
       "blockers_kept": [
         "full FRN path-cache replay",
@@ -60,7 +63,8 @@
       "title": "JumpList DestList deep parser",
       "assertions": [
         "jumplist-automatic rows preserve CFB stream inventory, DestList header/entry candidates, embedded LNK linkage, AppID hash provenance, deleted-entry warning, source hashes, and #14 core_accuracy_gates.",
-        "jumplist_evidence links destination target paths back to stream and DestList candidate metadata."
+        "jumplist_evidence links destination target paths back to stream and DestList candidate metadata.",
+        "JumpList reportability decisions keep DestList semantics as recent-destination triage pivots."
       ],
       "blockers_kept": [
         "OS-version-specific DestList field semantics",
@@ -73,7 +77,8 @@
       "title": "ShellBags native hive parser",
       "assertions": [
         "shellbag-native-candidate rows preserve BagMRU/Bags relationship candidates, bag/node IDs, timestamp source labeling, NTUSER/UsrClass scope, deleted/slack warning, source hashes, and #15 core_accuracy_gates.",
-        "ShellBags native rows keep binary shell-item decode and transaction-log replay blockers explicit."
+        "ShellBags native rows keep binary shell-item decode and transaction-log replay blockers explicit.",
+        "ShellBags reportability decisions block final folder-access wording until shell-item, transaction-log, and deleted/slack validation is attached."
       ],
       "blockers_kept": [
         "full binary shell-item payload decoding",

@@ -1077,6 +1077,7 @@ def jumplist_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    reportability_decision = jumplist_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-011-015",
         "item_numbers": [14],
@@ -1095,6 +1096,7 @@ def jumplist_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
         ],
         "report_grade_status": str(report_grade.get("status") or ""),
+        "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
             "bounded_ole_stream_inventory": True,
@@ -1105,6 +1107,29 @@ def jumplist_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
         },
         "next_internal_step": "Finish OS-version DestList field validation, deleted-entry recovery, and AppID mapping corpus checks.",
         "external_evidence_required": True,
+    }
+
+
+def jumplist_reportability_decision(
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = set(str(item) for item in report_grade.get("blockers") or [])
+    blockers.add("jumplist-destlist-version-semantics-validation-required")
+    blockers.add("jumplist-deleted-entry-recovery-validation-required")
+    return {
+        "profile_version": "jumplist-reportability-decision-v1",
+        "commercial_gap_id": "#14",
+        "decision": "do-not-report-destlist-semantics-as-final",
+        "allowed_use": "recent-destination-triage-pivot",
+        "blockers": sorted(blockers),
+        "source_location_available": bool(details.get("application_id_hash") or details.get("source_hashes")),
+        "required_before_report": [
+            "DestList OS-version field semantics validated",
+            "AppID hash mapping database attached",
+            "deleted entry recovery or explicit limitation documented",
+            "embedded LNK stream and DestList entry cross-tool diff attached",
+        ],
     }
 
 

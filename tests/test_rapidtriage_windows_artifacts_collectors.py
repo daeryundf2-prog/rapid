@@ -200,6 +200,14 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             shellbag_uplift = key_tree.details["commercial_uplift_evidence"]
             self.assertEqual(shellbag_uplift["batch_id"], "commercial-uplift-011-015")
             self.assertEqual(shellbag_uplift["item_numbers"], [15])
+            self.assertEqual(
+                shellbag_uplift["reportability_decision"]["decision"],
+                "do-not-report-folder-access-as-final",
+            )
+            self.assertEqual(
+                shellbag_uplift["reportability_decision"]["allowed_use"],
+                "folder-view-history-triage-pivot",
+            )
             self.assertIn("regf-header-valid", shellbag_uplift["passed_validation_matrix_ids"])
             self.assertIn("binary-shell-item-decoding-available", shellbag_uplift["failed_validation_matrix_ids"])
             self.assertTrue(

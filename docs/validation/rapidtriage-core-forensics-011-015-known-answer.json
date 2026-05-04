@@ -19,7 +19,8 @@
         "required_assertions": [
           "Windows.edb ESE header/page-map/table-family candidates are emitted",
           "path, URL, content, deleted-state marker, and page source citation evidence is preserved",
-          "#11 core_accuracy_gates are present on native Windows.edb rows"
+          "#11 core_accuracy_gates are present on native Windows.edb rows",
+          "Windows.edb reportability decisions block decoded-row facts until ESE row and deleted-state validation is attached"
         ]
       },
       "notes": "Internal fixture pass; esentutl/libesedb/WinSearchDBAnalyzer diffs remain commercial-grade evidence."
@@ -39,7 +40,8 @@
       "expected": {
         "required_assertions": [
           "Native FILE record header, USA validation, filename parent reference, timestamp provenance, and resident data evidence are emitted",
-          "#12 core_accuracy_gates are present on native MFT rows"
+          "#12 core_accuracy_gates are present on native MFT rows",
+          "$MFT reportability decisions block complete path/content claims until attribute-list, runlist, and full-volume diffs are attached"
         ]
       },
       "notes": "Internal fixture pass; MFTECmd/TSK full-volume diff and nonresident/attribute-list corpora remain commercial-grade evidence."
@@ -59,7 +61,8 @@
       "expected": {
         "required_assertions": [
           "USN v2/v3 records, cursor bounds, reason flags, rename/delete hints, and timestamp evidence are emitted",
-          "#13 core_accuracy_gates are present on native USN rows"
+          "#13 core_accuracy_gates are present on native USN rows",
+          "$UsnJrnl reportability decisions block full timeline claims until FRN path-cache replay and large-journal validation are attached"
         ]
       },
       "notes": "Internal fixture pass; large journal replay, FRN path-cache corpus, and pagination stress validation remain commercial-grade evidence."
@@ -79,7 +82,8 @@
       "expected": {
         "required_assertions": [
           "CFB streams, DestList header/entry candidates, embedded LNK linkage, and AppID hash provenance are emitted",
-          "#14 core_accuracy_gates are present on JumpList rows"
+          "#14 core_accuracy_gates are present on JumpList rows",
+          "JumpList reportability decisions block final DestList semantics until version-specific and deleted-entry validation is attached"
         ]
       },
       "notes": "Internal fixture pass; JLECmd/LECmd cross-tool corpus, deleted entries, and AppID mapping validation remain required."
@@ -99,7 +103,8 @@
       "expected": {
         "required_assertions": [
           "Native ShellBags key-tree candidates preserve BagMRU/Bags relationship, bag/node IDs, timestamp source, and user-hive scope",
-          "#15 core_accuracy_gates are present on native ShellBags rows"
+          "#15 core_accuracy_gates are present on native ShellBags rows",
+          "ShellBags reportability decisions block final folder-access claims until shell-item, transaction-log, and deleted/slack validation is attached"
         ]
       },
       "notes": "Internal fixture pass; ShellBagsExplorer/SBECmd diff, binary shell-item decode, transaction log, and deleted/slack validation remain commercial-grade evidence."

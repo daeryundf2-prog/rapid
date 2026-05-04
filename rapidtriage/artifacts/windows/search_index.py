@@ -1097,6 +1097,7 @@ def windows_search_commercial_uplift_evidence(details: Mapping[str, object]) -> 
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
     metadata = details.get("native_candidate_metadata") if isinstance(details.get("native_candidate_metadata"), Mapping) else {}
+    reportability_decision = windows_search_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-011-015",
         "item_numbers": [11],
@@ -1115,6 +1116,7 @@ def windows_search_commercial_uplift_evidence(details: Mapping[str, object]) -> 
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
         ],
         "report_grade_status": str(report_grade.get("status") or ""),
+        "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
             "bounded_page_map": True,
@@ -1125,6 +1127,29 @@ def windows_search_commercial_uplift_evidence(details: Mapping[str, object]) -> 
         },
         "next_internal_step": "Finish native ESE catalog/table/row decoding with Windows Search schema fixtures and cross-tool diffs.",
         "external_evidence_required": True,
+    }
+
+
+def windows_search_reportability_decision(
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = set(str(item) for item in report_grade.get("blockers") or [])
+    blockers.add("windows-edb-native-row-decoder-validation-required")
+    blockers.add("windows-edb-deleted-state-trusted-tool-diff-required")
+    return {
+        "profile_version": "windows-search-reportability-decision-v1",
+        "commercial_gap_id": "#11",
+        "decision": "do-not-report-native-row-as-decoded-fact",
+        "allowed_use": "search-index-triage-pivot",
+        "blockers": sorted(blockers),
+        "source_location_available": bool(details.get("page_offset") not in (None, "") or details.get("source_hashes")),
+        "required_before_report": [
+            "ESE catalog/table/row decoding validated",
+            "row timestamps and property IDs decoded from native tables",
+            "deleted/index state compared against trusted Windows Search parser output",
+            "source hash, page offset, and parser version retained in report citation",
+        ],
     }
 
 

@@ -12,6 +12,8 @@ This package records the current internal fixture validation for #11 through #15
 
 The internal fixtures assert that RapidTriage emits reviewable rows with source hashes, parser versions, row/page/record provenance, `forensic_review`, commercial blockers, and `core_accuracy_gates` for the implemented evidence surfaces.
 
+The #11~#15 rows also emit reportability decisions in their commercial-uplift evidence. Windows.edb native rows remain `search-index-triage-pivot` until ESE catalog/table/row and deleted-state validation exists. `$MFT` rows stay record-structure/timestamp pivots until attribute-list, runlist, and full-volume parent path reconstruction are diffed. `$UsnJrnl` rows stay change-record pivots until full FRN path-cache replay and large-journal cursor validation are complete. JumpList rows stay recent-destination pivots until DestList version semantics, deleted-entry recovery, and AppID mapping are validated. ShellBags rows stay folder-view-history pivots until binary shell item decoding, BagMRU/Bags relationship validation, transaction logs, and deleted/slack validation are attached.
+
 The manifest is:
 
 ```bash
