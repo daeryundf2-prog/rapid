@@ -177,6 +177,7 @@ def collect_registry_hive(path: Path) -> Iterable[ArtifactRecord]:
 
     source_hashes = file_hashes(path)
     metadata = parse_registry_hive_header(header)
+    metadata["transaction_log_evidence"] = registry_transaction_log_evidence(path)
     yield build_registry_hive_record(path, stat_result.st_size, metadata, source_hashes)
 
     strings = extract_utf16le_strings(scan_blob)
@@ -253,6 +254,7 @@ def build_registry_hive_record(
             "evidence_strength": "registry-hive-header" if regf_valid else "registry-hive-candidate",
             "recommended_parsers": ["RECmd", "Registry Explorer", "RegRipper", "Eric Zimmerman's Registry tools"],
             "native_header": dict(metadata),
+            "registry_transaction_log_evidence": dict(metadata.get("transaction_log_evidence") or {}),
             "risk_flags": ["dirty-hive-sequence"] if metadata.get("dirty") else [],
             "risk_score": 30 if metadata.get("dirty") else 0,
             "raw_preview": f"{path.name} regf={regf_valid}",
@@ -484,6 +486,7 @@ def build_registry_key_tree_records(
             missing_value_offsets,
             bool(metadata.get("regf_valid")),
             relationship_profile,
+            metadata.get("transaction_log_evidence") if isinstance(metadata.get("transaction_log_evidence"), Mapping) else {},
         )
         report_grade_assessment = registry_report_grade_assessment(
             validation_matrix,
@@ -532,6 +535,7 @@ def build_registry_key_tree_records(
                 "key_ancestry_cell_offsets": path_evidence["ancestry_cell_offsets"],
                 "key_tree_path_evidence": path_evidence,
                 "registry_key_tree_relationships": relationship_profile,
+                "registry_transaction_log_evidence": dict(metadata.get("transaction_log_evidence") or {}),
                 "root_cell_offset": root_cell_offset,
                 "is_root_key": relationship_profile["is_root_key"],
                 "root_reachable": relationship_profile["root_reachable"],
@@ -2051,6 +2055,59 @@ def registry_key_tree_validation_flags(
     return flags
 
 
+def registry_transaction_log_evidence(path: Path) -> dict[str, object]:
+    candidates = registry_transaction_log_candidates(path)
+    present: list[dict[str, object]] = []
+    missing: list[str] = []
+    seen_present: set[tuple[int, int]] = set()
+    for candidate in candidates:
+        if candidate.is_file():
+            stat = candidate.stat()
+            identity = (stat.st_dev, stat.st_ino)
+            if identity in seen_present:
+                continue
+            seen_present.add(identity)
+            resolved = candidate.resolve()
+            present.append(
+                {
+                    "path": str(resolved),
+                    "name": candidate.name,
+                    "size": stat.st_size,
+                    "hashes": file_hashes(candidate),
+                }
+            )
+        else:
+            missing.append(candidate.name)
+    if present:
+        status = "present-not-replayed"
+    else:
+        status = "absent"
+    return {
+        "profile_version": "registry-transaction-log-evidence-v1",
+        "status": status,
+        "transaction_log_replay_applied": False,
+        "present_count": len(present),
+        "missing_count": len(missing),
+        "present_logs": present,
+        "missing_log_names": missing,
+        "commercial_blocker": "transaction-log-replay-not-implemented",
+        "validation_guidance": (
+            "LOG1/LOG2 presence is recorded so analysts can distinguish absent transaction context from "
+            "present-but-not-replayed transaction logs. Commercial-grade reconstruction still requires replay "
+            "or second-parser diff evidence."
+        ),
+    }
+
+
+def registry_transaction_log_candidates(path: Path) -> list[Path]:
+    return [
+        path.with_name(f"{path.name}.LOG1"),
+        path.with_name(f"{path.name}.LOG2"),
+        path.with_name(f"{path.name}.log1"),
+        path.with_name(f"{path.name}.log2"),
+    ]
+
+
 def registry_key_tree_validation_matrix(
     key_node: Mapping[str, object],
     path_confidence: str,
@@ -2058,8 +2115,10 @@ def registry_key_tree_validation_matrix(
     missing_value_offsets: Sequence[int],
     hive_valid: bool,
     relationship_profile: Mapping[str, object] | None = None,
+    transaction_log_evidence: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     relationship_profile = relationship_profile or {}
+    transaction_log_evidence = transaction_log_evidence or {}
     return [
         {
             "id": "regf-header",
@@ -2116,6 +2175,13 @@ def registry_key_tree_validation_matrix(
             "passed": bool(key_node.get("last_written_at")),
             "severity": "medium",
             "detail": str(key_node.get("last_written_at") or ""),
+        },
+        {
+            "id": "transaction-log-context-recorded",
+            "label": "Transaction-log context recorded",
+            "passed": bool(transaction_log_evidence.get("status")),
+            "severity": "medium",
+            "detail": str(transaction_log_evidence.get("status") or "unknown"),
         },
     ]
 

@@ -219,9 +219,11 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                     ],
                 )
             )
+            (hive_path.parent / "NTUSER.DAT.LOG1").write_bytes(b"registry transaction log fixture")
 
             records = list(collect_registry_hive(hive_path))
 
+            hive_inventory = next(record for record in records if record.artifact_type == "registry-hive")
             key_tree_nodes = [record for record in records if record.artifact_type == "registry-key-tree-node"]
             run_key = next(record for record in key_tree_nodes if record.details["name"] == "Run")
             self.assertEqual(run_key.details["key_path"], "HKEY_CURRENT_USER\\Software\\Run")
@@ -252,12 +254,24 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("#4", run_key.details["registry_report_grade_assessment"]["commercial_gap_ids"])
             self.assertTrue(run_key.details["registry_native_capabilities"]["parent_chain_path_reconstruction"])
             self.assertFalse(run_key.details["registry_native_capabilities"]["transaction_log_replay"])
+            self.assertEqual(
+                hive_inventory.details["registry_transaction_log_evidence"]["status"],
+                "present-not-replayed",
+            )
+            self.assertEqual(run_key.details["registry_transaction_log_evidence"]["present_count"], 1)
+            self.assertFalse(run_key.details["registry_transaction_log_evidence"]["transaction_log_replay_applied"])
+            self.assertEqual(
+                run_key.details["registry_transaction_log_evidence"]["present_logs"][0]["name"],
+                "NTUSER.DAT.LOG1",
+            )
             validation_matrix = {item["id"]: item for item in run_key.details["registry_validation_matrix"]}
             self.assertTrue(validation_matrix["regf-header"]["passed"])
             self.assertTrue(validation_matrix["parent-chain"]["passed"])
             self.assertTrue(validation_matrix["root-reachability"]["passed"])
             self.assertTrue(validation_matrix["child-parent-backlinks"]["passed"])
             self.assertTrue(validation_matrix["value-list-resolution"]["passed"])
+            self.assertTrue(validation_matrix["transaction-log-context-recorded"]["passed"])
+            self.assertEqual(validation_matrix["transaction-log-context-recorded"]["detail"], "present-not-replayed")
             key_gate = run_key.details["core_accuracy_gates"][0]
             self.assertEqual(key_gate["gap_id"], "#4")
             self.assertIn("root-cell reachability", key_gate["satisfied_checks"])
