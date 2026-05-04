@@ -16,7 +16,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "KakaoTalk rows preserve service/profile, message/media pivots, BigBang compatibility, limitation warnings, source hashes, and #31 core_accuracy_gates"
+          "KakaoTalk rows preserve service/profile, message/media pivots, BigBang compatibility, limitation warnings, source hashes, and #31 core_accuracy_gates",
+          "KakaoTalk reportability decisions block decrypted-complete message claims until post-BigBang/schema/encrypted/deleted validation exists"
         ]
       },
       "notes": "Internal fixture pass; post-BigBang KakaoTalk known-answer validation remains required."
@@ -34,7 +35,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "WhatsApp rows preserve service/profile, chat/contact/media pivots, crypt/deleted warnings, source provenance, and #32 core_accuracy_gates"
+          "WhatsApp rows preserve service/profile, chat/contact/media pivots, crypt/deleted warnings, source provenance, and #32 core_accuracy_gates",
+          "WhatsApp reportability decisions block crypt/deleted-complete claims until backup key, database, and deleted-row validation exists"
         ]
       },
       "notes": "Internal fixture pass; crypt backups and deleted rows require external corpus."
@@ -52,7 +54,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Telegram rows preserve service/profile, chat/user/media attribution, cache/account provenance, limitations, and #33 core_accuracy_gates"
+          "Telegram rows preserve service/profile, chat/user/media attribution, cache/account provenance, limitations, and #33 core_accuracy_gates",
+          "Telegram reportability decisions block local-store-complete claims until encrypted store, cache/media, and account attribution validation exists"
         ]
       },
       "notes": "Internal fixture pass; encrypted/local Telegram stores remain validation-gated."
@@ -70,7 +73,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Signal rows preserve service/profile, thread/message inventory, SQLCipher authority gates, attachment/deleted warnings, and #34 core_accuracy_gates"
+          "Signal rows preserve service/profile, thread/message inventory, SQLCipher authority gates, attachment/deleted warnings, and #34 core_accuracy_gates",
+          "Signal reportability decisions block SQLCipher-complete claims until key handling, encrypted backup, attachment, and deleted-row validation exists"
         ]
       },
       "notes": "Internal fixture pass; SQLCipher/key handling remains a separate validated module."
@@ -88,7 +92,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Extended messenger rows preserve service/profile, message/media/reaction normalization, schema registry, limitations, and #35 core_accuracy_gates"
+          "Extended messenger rows preserve service/profile, message/media/reaction normalization, schema registry, limitations, and #35 core_accuracy_gates",
+          "Extended messenger reportability decisions block service-complete claims until service schemas, read-state/reactions, media, and ephemeral/deleted behavior are validated"
         ]
       },
       "notes": "Internal fixture pass; service-specific encrypted stores and ephemeral/deleted evidence need known-answer corpora."

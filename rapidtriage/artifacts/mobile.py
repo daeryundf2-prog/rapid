@@ -2311,18 +2311,25 @@ def chat_app_commercial_uplift_evidence(
         value = optional_text(details.get(key))
         if value:
             source_refs.append(f"{key}:{value}")
+    passed_issue_matrix_ids = [str(item.get("id")) for item in issue_matrix if item.get("passed")]
+    failed_issue_matrix_ids = [str(item.get("id")) for item in issue_matrix if not item.get("passed")]
     return {
         "batch_id": "commercial-uplift-031-035",
         "item_numbers": item_numbers,
         "implementation_track": "messenger-service-parser-validation",
         "objective": " ".join(objectives[number] for number in item_numbers if number in objectives),
+        "reportability_decision": chat_app_reportability_decision(
+            service=service,
+            item_numbers=item_numbers,
+            source_tool=source_tool,
+            artifact_type=artifact_type,
+            failed_issue_matrix_ids=failed_issue_matrix_ids,
+            report_grade=report_grade,
+            details=details,
+        ),
         "source_refs": source_refs,
-        "passed_issue_matrix_ids": [
-            str(item.get("id")) for item in issue_matrix if item.get("passed")
-        ],
-        "failed_issue_matrix_ids": [
-            str(item.get("id")) for item in issue_matrix if not item.get("passed")
-        ],
+        "passed_issue_matrix_ids": passed_issue_matrix_ids,
+        "failed_issue_matrix_ids": failed_issue_matrix_ids,
         "report_grade_status": str(report_grade.get("status") or ""),
         "commercial_blockers": list(report_grade.get("blockers") or chat_app_blockers(service)),
         "large_data_controls": {
@@ -2337,6 +2344,54 @@ def chat_app_commercial_uplift_evidence(
         },
         "next_internal_step": "Add service/version-specific schema mappers, encrypted-store authority workflows, attachment recovery checks, and known-answer corpora for each messenger.",
         "external_evidence_required": True,
+    }
+
+
+def chat_app_reportability_decision(
+    *,
+    service: str,
+    item_numbers: list[int],
+    source_tool: str,
+    artifact_type: str,
+    failed_issue_matrix_ids: list[str],
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = {str(item) for item in report_grade.get("blockers") or chat_app_blockers(service) if str(item)}
+    blockers.update(f"issue:{item}" for item in failed_issue_matrix_ids)
+    if service == "KakaoTalk":
+        compatibility = details.get("kakaotalk_compatibility_assessment")
+        if isinstance(compatibility, Mapping) and not compatibility.get("report_grade_ready"):
+            blockers.update(str(item) for item in compatibility.get("blockers") or [] if str(item))
+    primary = item_numbers[0] if item_numbers else 35
+    decisions = {
+        31: ("do-not-report-kakaotalk-message-content-as-decrypted-complete", "kakaotalk-export-or-inventory-triage-pivot"),
+        32: ("do-not-report-whatsapp-message-content-as-crypt-or-deleted-complete", "whatsapp-export-or-db-inventory-triage-pivot"),
+        33: ("do-not-report-telegram-message-content-as-local-store-complete", "telegram-export-or-cache-triage-pivot"),
+        34: ("do-not-report-signal-message-content-as-sqlcipher-complete", "signal-export-or-inventory-triage-pivot"),
+        35: ("do-not-report-extended-messenger-content-as-service-complete", "extended-messenger-export-triage-pivot"),
+    }
+    decision, allowed_use = decisions.get(primary, ("do-not-report-messenger-content-as-commercial-grade", "messenger-triage-pivot"))
+    return {
+        "profile_version": "messenger-reportability-decision-v1",
+        "commercial_gap_ids": [f"#{number}" for number in item_numbers],
+        "decision": decision,
+        "allowed_use": allowed_use,
+        "service": service or "unknown",
+        "source_tool": source_tool,
+        "artifact_type": artifact_type,
+        "blockers": sorted(blockers),
+        "failed_issue_matrix_ids": list(failed_issue_matrix_ids),
+        "message_text_hash_only_default": True,
+        "encrypted_store_decryption_complete": False,
+        "deleted_record_recovery_complete": False,
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "attach app/service version, account ownership, timezone, and original acquisition/export logs",
+            "validate service-specific schema and deleted/ephemeral semantics against known-answer corpora",
+            "document encrypted-store or key/authority workflow before relying on message content",
+            "cross-check important rows against the original forensic tool or service export view",
+        ],
     }
 
 

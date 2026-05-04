@@ -20,7 +20,7 @@
       "number": 31,
       "title": "KakaoTalk parser",
       "assertions": [
-        "KakaoTalk export rows preserve service/profile detection, chat/message participant/media normalization, app/schema and BigBang compatibility metadata, encrypted/deleted warnings, source hashes, legal provenance, and #31 core_accuracy_gates."
+        "KakaoTalk export rows preserve service/profile detection, chat/message participant/media normalization, app/schema and BigBang compatibility metadata, encrypted/deleted warnings, source hashes, legal provenance, #31 core_accuracy_gates, and decrypted-complete reportability blockers."
       ],
       "blockers_kept": [
         "post-2025-08 KakaoTalk known-answer corpus",
@@ -32,7 +32,7 @@
       "number": 32,
       "title": "WhatsApp parser",
       "assertions": [
-        "WhatsApp export/database rows preserve service/profile detection, chat/contact/media normalization, crypt authority warnings, deleted-row warnings, source hash/app-version provenance, and #32 core_accuracy_gates."
+        "WhatsApp export/database rows preserve service/profile detection, chat/contact/media normalization, crypt authority warnings, deleted-row warnings, source hash/app-version provenance, #32 core_accuracy_gates, and crypt/deleted-complete reportability blockers."
       ],
       "blockers_kept": [
         "crypt backup key workflow",
@@ -44,7 +44,7 @@
       "number": 33,
       "title": "Telegram parser",
       "assertions": [
-        "Telegram export rows preserve service/profile detection, chat/user/media attribution, account/cache provenance, encrypted local-store warnings, deleted/cache limitation warnings, and #33 core_accuracy_gates."
+        "Telegram export rows preserve service/profile detection, chat/user/media attribution, account/cache provenance, encrypted local-store warnings, deleted/cache limitation warnings, #33 core_accuracy_gates, and local-store-complete reportability blockers."
       ],
       "blockers_kept": [
         "Telegram Desktop encrypted/local map decoding",
@@ -56,7 +56,7 @@
       "number": 34,
       "title": "Signal parser",
       "assertions": [
-        "Signal export rows preserve service/profile detection, thread/recipient/message inventory, SQLCipher/key authority gates, attachment/deleted warnings, secret-safe provenance, and #34 core_accuracy_gates."
+        "Signal export rows preserve service/profile detection, thread/recipient/message inventory, SQLCipher/key authority gates, attachment/deleted warnings, secret-safe provenance, #34 core_accuracy_gates, and SQLCipher-complete reportability blockers."
       ],
       "blockers_kept": [
         "SQLCipher/key handling module",
@@ -68,7 +68,7 @@
       "number": 35,
       "title": "Extended messenger parser",
       "assertions": [
-        "LINE/Discord/Instagram/Facebook Messenger style export rows preserve extended service detection, message/media/reaction normalization, schema registry evidence, encrypted/ephemeral warnings, source hashes, legal provenance, and #35 core_accuracy_gates."
+        "LINE/Discord/Instagram/Facebook Messenger style export rows preserve extended service detection, message/media/reaction normalization, schema registry evidence, encrypted/ephemeral warnings, source hashes, legal provenance, #35 core_accuracy_gates, and service-complete reportability blockers."
       ],
       "blockers_kept": [
         "service-specific encrypted stores",

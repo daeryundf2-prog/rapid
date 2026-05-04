@@ -136,6 +136,18 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("service-profile-known", kakao_uplift["passed_issue_matrix_ids"])
             self.assertIn("kakaotalk-post-2025-08-bigbang", kakao_uplift["failed_issue_matrix_ids"])
             self.assertFalse(kakao_uplift["large_data_controls"]["encrypted_store_decryption"])
+            self.assertEqual(
+                kakao_uplift["reportability_decision"]["decision"],
+                "do-not-report-kakaotalk-message-content-as-decrypted-complete",
+            )
+            self.assertEqual(
+                kakao_uplift["reportability_decision"]["allowed_use"],
+                "kakaotalk-export-or-inventory-triage-pivot",
+            )
+            self.assertIn(
+                "issue:kakaotalk-post-2025-08-bigbang",
+                kakao_uplift["reportability_decision"]["blockers"],
+            )
             facebook = next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Facebook Messenger")
             self.assertEqual(facebook["details"]["chat_app_forensic_review"]["gap_id"], "#35")
             self.assertIn(
@@ -152,6 +164,14 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             whatsapp_uplift = whatsapp["details"]["chat_app_commercial_uplift_evidence"]
             self.assertEqual(whatsapp_uplift["item_numbers"], [32])
             self.assertIn("encrypted-store-authority", whatsapp_uplift["failed_issue_matrix_ids"])
+            self.assertEqual(
+                whatsapp_uplift["reportability_decision"]["decision"],
+                "do-not-report-whatsapp-message-content-as-crypt-or-deleted-complete",
+            )
+            self.assertIn(
+                "issue:encrypted-store-authority",
+                whatsapp_uplift["reportability_decision"]["blockers"],
+            )
             self.assertIn(
                 "#33",
                 next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Telegram")["details"][
@@ -164,6 +184,10 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("chat/user/media attribution", telegram_gate["satisfied_checks"])
             self.assertIn("encrypted local store warning", telegram_gate["satisfied_checks"])
             self.assertEqual(telegram["details"]["chat_app_commercial_uplift_evidence"]["item_numbers"], [33])
+            self.assertEqual(
+                telegram["details"]["chat_app_commercial_uplift_evidence"]["reportability_decision"]["allowed_use"],
+                "telegram-export-or-cache-triage-pivot",
+            )
             self.assertIn(
                 "#34",
                 next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Signal")["details"][
@@ -176,6 +200,10 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("thread/recipient/message inventory", signal_gate["satisfied_checks"])
             self.assertIn("SQLCipher/key authority gate", signal_gate["satisfied_checks"])
             self.assertEqual(signal["details"]["chat_app_commercial_uplift_evidence"]["item_numbers"], [34])
+            self.assertEqual(
+                signal["details"]["chat_app_commercial_uplift_evidence"]["reportability_decision"]["decision"],
+                "do-not-report-signal-message-content-as-sqlcipher-complete",
+            )
             self.assertTrue(
                 all(
                     "#35" in next(
@@ -192,6 +220,10 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             line_uplift = line["details"]["chat_app_commercial_uplift_evidence"]
             self.assertEqual(line_uplift["item_numbers"], [35])
             self.assertIn("schema-version-known-answer", line_uplift["failed_issue_matrix_ids"])
+            self.assertEqual(
+                line_uplift["reportability_decision"]["allowed_use"],
+                "extended-messenger-export-triage-pivot",
+            )
 
             app = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-app")
             self.assertEqual(app["details"]["source_tool"], "graykey")

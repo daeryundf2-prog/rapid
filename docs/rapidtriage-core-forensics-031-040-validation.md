@@ -18,6 +18,8 @@ rapidtriage commercial-readiness \
 
 The internal fixtures assert that RapidTriage emits reviewable rows with source hashes, source IDs, parser versions, redaction/legal gates, validation matrices, `forensic_review`, commercial blockers, and `core_accuracy_gates` for the implemented messenger, mailbox, cloud export, and cloud API evidence surfaces.
 
+The #31~#35 messenger rows now also emit explicit reportability decisions in `chat_app_commercial_uplift_evidence`. KakaoTalk rows remain `kakaotalk-export-or-inventory-triage-pivot` until post-2025-08 BigBang behavior, schema-specific decoding, deleted/encrypted store handling, and known-answer comparison are attached. WhatsApp rows remain `whatsapp-export-or-db-inventory-triage-pivot` until crypt backup/key workflow, contacts/calls/media databases, and deleted rows are validated. Telegram rows remain `telegram-export-or-cache-triage-pivot` until local encrypted stores, cache/media recovery, and account attribution are validated. Signal rows remain `signal-export-or-inventory-triage-pivot` until SQLCipher/key handling, encrypted backups, attachments, and deleted rows are validated. Extended messenger rows remain `extended-messenger-export-triage-pivot` until service-specific schemas, read-state/reaction completeness, media recovery, and ephemeral/deleted behavior are proven.
+
 Validated item mapping:
 
 | Item | Fixture evidence | Remaining commercial blockers |
