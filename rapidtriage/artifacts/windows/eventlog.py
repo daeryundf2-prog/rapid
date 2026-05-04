@@ -5,11 +5,13 @@ import datetime as dt
 import hashlib
 import html
 import json
+import mmap
 import re
 import struct
 import xml.etree.ElementTree as ET
 import zlib
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable, Mapping, NamedTuple, Sequence
 
@@ -33,6 +35,7 @@ MAX_NATIVE_EVTX_CHUNKS = 4096
 MAX_NATIVE_EVTX_RECORD_SIZE = 16 * 1024 * 1024
 MAX_NATIVE_EVTX_STRINGS = 200
 MAX_NATIVE_EVTX_BINXML_TOKENS = 500
+NATIVE_EVTX_READER_STRATEGY = "mmap-bounded-record-scan"
 NATIVE_EVTX_PARSE_SCOPE = "record-header-binxml-template-scalar-recovery-triage"
 NATIVE_EVTX_BINXML_STATUS = "not-decoded"
 NATIVE_EVTX_REPORT_GRADE_BLOCKERS = [
@@ -852,141 +855,142 @@ def collect_native_evtx_events(
     message_catalog: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> Iterable[ArtifactRecord]:
     try:
-        blob = path.read_bytes()
+        with open_evtx_binary_view(path) as blob:
+            if not blob_startswith(blob, EVTX_FILE_SIGNATURE):
+                return
+
+            source_hashes = file_hashes(path)
+            for chunk_index, chunk in enumerate(iter_native_evtx_chunks(blob)):
+                yield native_evtx_chunk_record(path, chunk_index, source_hashes, blob, chunk)
+
+            previous_record_id: int | None = None
+            for source_index, candidate in enumerate(iter_evtx_record_candidates(blob)):
+                if not candidate.parseable:
+                    yield native_evtx_record_candidate_record(path, source_index, source_hashes, blob, candidate)
+                    continue
+                offset = candidate.offset
+                record_blob = candidate.record_blob
+                record_id = read_u64(record_blob, 8)
+                timestamp = filetime_to_iso(read_u64(record_blob, 16))
+                payload = record_blob[EVTX_RECORD_HEADER_SIZE:]
+                binxml = parse_native_evtx_binxml(payload)
+                binxml_promoted = native_evtx_promoted_fields(binxml)
+                extracted_strings = extract_utf16le_strings(payload)
+                binxml_strings = [str(item.get("text") or "") for item in binxml.get("value_fields", []) if item.get("text")]
+                searchable_strings = unique_texts([*binxml_strings, *extracted_strings])
+                native_indicators = merge_native_evtx_promoted_fields(
+                    native_evtx_indicators(searchable_strings, path),
+                    binxml_promoted,
+                )
+                integrity = native_evtx_record_integrity(record_blob, offset)
+                chunk_context = native_evtx_chunk_context(blob, offset, len(record_blob))
+                binxml_status = str(binxml.get("status") or NATIVE_EVTX_BINXML_STATUS)
+                recovery_context = native_evtx_recovery_context(candidate, integrity, chunk_context, binxml_status)
+                recovery_evidence = native_evtx_recovery_evidence(candidate, integrity, chunk_context, recovery_context, binxml_status)
+                recovery_validation_profile = native_evtx_recovery_validation_profile(recovery_context, recovery_evidence)
+                sequence = native_evtx_sequence(record_id, previous_record_id)
+                previous_record_id = record_id or previous_record_id
+                parameter_candidates = native_evtx_parameter_candidates(native_indicators, binxml)
+                raw_preview = str(binxml.get("rendered_preview") or "") or native_evtx_message_preview(native_indicators, searchable_strings)
+                field_fidelity = native_evtx_field_fidelity(binxml_status)
+                validation_required = native_evtx_validation_required(binxml_status, recovery_context)
+                validation_reasons = native_evtx_validation_reasons(binxml_status, recovery_context)
+                data = {
+                    "evtx_parse_status": "native-binary-partial",
+                    "evtx_reader_strategy": NATIVE_EVTX_READER_STRATEGY,
+                    "evtx_native_parse_scope": NATIVE_EVTX_PARSE_SCOPE,
+                    "evtx_binxml_status": binxml_status,
+                    "evtx_field_fidelity": field_fidelity,
+                    "evtx_validation_required": validation_required,
+                    "evtx_validation_reasons": validation_reasons,
+                    "evtx_validation_guidance": (
+                        "Use an EVTX-capable parser export such as EvtxECmd, Hayabusa, Chainsaw, or "
+                        "Velociraptor when report-grade Event/System/EventData field fidelity is required."
+                    ),
+                    "evtx_validation_checks": native_evtx_validation_checks(
+                        integrity,
+                        chunk_context,
+                        recovery_context,
+                        binxml,
+                    ),
+                    "evtx_validation_matrix": native_evtx_validation_matrix(
+                        integrity,
+                        chunk_context,
+                        recovery_context,
+                        binxml,
+                    ),
+                    "evtx_binxml": binxml,
+                    "binxml_system_fields": dict(binxml_promoted.get("system_fields") or {}),
+                    "binxml_event_data_fields": dict(binxml_promoted.get("event_data_fields") or {}),
+                    "binxml_event_data_sequence": list(binxml_promoted.get("event_data_sequence") or []),
+                    "binxml_event_data_values_by_name": dict(binxml_promoted.get("event_data_values_by_name") or {}),
+                    "binxml_user_data_fields": dict(binxml_promoted.get("user_data_fields") or {}),
+                    "evtx_file_header": native_evtx_file_header(blob),
+                    "evtx_chunk_context": chunk_context,
+                    "evtx_record_offset": offset,
+                    "evtx_record_size": len(record_blob),
+                    "evtx_record_sha256": hashlib.sha256(record_blob).hexdigest(),
+                    "evtx_record_integrity": integrity,
+                    "evtx_recovery_context": recovery_context,
+                    "evtx_recovery_evidence": recovery_evidence,
+                    "evtx_recovery_validation_profile": recovery_validation_profile,
+                    "evtx_recovery_status": recovery_context["status"],
+                    "evtx_allocation_status": recovery_context["allocation_status"],
+                    "evtx_native_capabilities": NATIVE_EVTX_CAPABILITIES,
+                    "evtx_record_sequence": sequence,
+                    "validation_required": validation_required,
+                    "caution_labels": recovery_context["caution_labels"] if validation_required else [],
+                    "extracted_strings": searchable_strings[:MAX_NATIVE_EVTX_STRINGS],
+                    "extracted_string_count": len(searchable_strings),
+                    "native_indicators": native_indicators,
+                    "ProviderName": native_indicators.get("provider_name", ""),
+                    "Channel": native_indicators.get("channel", ""),
+                    "Computer": native_indicators.get("computer", ""),
+                    "CommandLine": native_indicators.get("command_line", ""),
+                    "SourceIp": native_indicators.get("source_ip", ""),
+                    "TargetUserName": native_indicators.get("user_name", ""),
+                    "parameter_candidates": parameter_candidates,
+                    "native_message_preview": raw_preview,
+                }
+                data.update(dict(binxml_promoted.get("flat_fields") or {}))
+                system_fields = binxml_promoted.get("system_fields") if isinstance(binxml_promoted.get("system_fields"), Mapping) else {}
+                provider_name = str(native_indicators.get("provider_name") or "")
+                channel = str(native_indicators.get("channel") or "")
+                computer = str(native_indicators.get("computer") or "")
+                event_created_at = str(system_fields.get("TimeCreated") or timestamp)
+                details = normalize_event_details(
+                    parser="windows-eventlog-evtx-native",
+                    source_format="evtx",
+                    source_path=path,
+                    source_index=source_index,
+                    source_hashes=source_hashes,
+                    provider_name=provider_name,
+                    event_id=str(system_fields.get("EventID") or ""),
+                    record_id=str(system_fields.get("EventRecordID") or record_id or ""),
+                    channel=channel,
+                    level=str(system_fields.get("Level") or ""),
+                    computer=computer,
+                    event_created_at=event_created_at,
+                    data=data,
+                    raw_preview=raw_preview,
+                    user_sid=str(system_fields.get("UserID") or ""),
+                    user_name=str(native_indicators.get("user_name") or ""),
+                    process_id=str(system_fields.get("ProcessID") or ""),
+                    thread_id=str(system_fields.get("ThreadID") or ""),
+                    process_name=str(native_indicators.get("process_name") or ""),
+                    command_line=str(native_indicators.get("command_line") or raw_preview),
+                    message_catalog=message_catalog,
+                )
+                details.update(data)
+                details["parser_confidence"] = native_evtx_confidence(details)
+                details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
+                details["core_accuracy_gates"] = native_evtx_core_accuracy_gates(details)
+                details["commercial_uplift_evidence"] = native_evtx_commercial_uplift_evidence(details)
+                details["commercial_grade_ready"] = details["evtx_report_grade_assessment"]["report_grade_ready"]
+                details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
+                yield event_record(path, "eventlog-event", details)
     except OSError:
         return
-    if not blob.startswith(EVTX_FILE_SIGNATURE):
-        return
-
-    source_hashes = file_hashes(path)
-    for chunk_index, chunk in enumerate(iter_native_evtx_chunks(blob)):
-        yield native_evtx_chunk_record(path, chunk_index, source_hashes, blob, chunk)
-
-    previous_record_id: int | None = None
-    for source_index, candidate in enumerate(iter_evtx_record_candidates(blob)):
-        if not candidate.parseable:
-            yield native_evtx_record_candidate_record(path, source_index, source_hashes, blob, candidate)
-            continue
-        offset = candidate.offset
-        record_blob = candidate.record_blob
-        record_id = read_u64(record_blob, 8)
-        timestamp = filetime_to_iso(read_u64(record_blob, 16))
-        payload = record_blob[EVTX_RECORD_HEADER_SIZE:]
-        binxml = parse_native_evtx_binxml(payload)
-        binxml_promoted = native_evtx_promoted_fields(binxml)
-        extracted_strings = extract_utf16le_strings(payload)
-        binxml_strings = [str(item.get("text") or "") for item in binxml.get("value_fields", []) if item.get("text")]
-        searchable_strings = unique_texts([*binxml_strings, *extracted_strings])
-        native_indicators = merge_native_evtx_promoted_fields(
-            native_evtx_indicators(searchable_strings, path),
-            binxml_promoted,
-        )
-        integrity = native_evtx_record_integrity(record_blob, offset)
-        chunk_context = native_evtx_chunk_context(blob, offset, len(record_blob))
-        binxml_status = str(binxml.get("status") or NATIVE_EVTX_BINXML_STATUS)
-        recovery_context = native_evtx_recovery_context(candidate, integrity, chunk_context, binxml_status)
-        recovery_evidence = native_evtx_recovery_evidence(candidate, integrity, chunk_context, recovery_context, binxml_status)
-        recovery_validation_profile = native_evtx_recovery_validation_profile(recovery_context, recovery_evidence)
-        sequence = native_evtx_sequence(record_id, previous_record_id)
-        previous_record_id = record_id or previous_record_id
-        parameter_candidates = native_evtx_parameter_candidates(native_indicators, binxml)
-        raw_preview = str(binxml.get("rendered_preview") or "") or native_evtx_message_preview(native_indicators, searchable_strings)
-        field_fidelity = native_evtx_field_fidelity(binxml_status)
-        validation_required = native_evtx_validation_required(binxml_status, recovery_context)
-        validation_reasons = native_evtx_validation_reasons(binxml_status, recovery_context)
-        data = {
-            "evtx_parse_status": "native-binary-partial",
-            "evtx_native_parse_scope": NATIVE_EVTX_PARSE_SCOPE,
-            "evtx_binxml_status": binxml_status,
-            "evtx_field_fidelity": field_fidelity,
-            "evtx_validation_required": validation_required,
-            "evtx_validation_reasons": validation_reasons,
-            "evtx_validation_guidance": (
-                "Use an EVTX-capable parser export such as EvtxECmd, Hayabusa, Chainsaw, or "
-                "Velociraptor when report-grade Event/System/EventData field fidelity is required."
-            ),
-            "evtx_validation_checks": native_evtx_validation_checks(
-                integrity,
-                chunk_context,
-                recovery_context,
-                binxml,
-            ),
-            "evtx_validation_matrix": native_evtx_validation_matrix(
-                integrity,
-                chunk_context,
-                recovery_context,
-                binxml,
-            ),
-            "evtx_binxml": binxml,
-            "binxml_system_fields": dict(binxml_promoted.get("system_fields") or {}),
-            "binxml_event_data_fields": dict(binxml_promoted.get("event_data_fields") or {}),
-            "binxml_event_data_sequence": list(binxml_promoted.get("event_data_sequence") or []),
-            "binxml_event_data_values_by_name": dict(binxml_promoted.get("event_data_values_by_name") or {}),
-            "binxml_user_data_fields": dict(binxml_promoted.get("user_data_fields") or {}),
-            "evtx_file_header": native_evtx_file_header(blob),
-            "evtx_chunk_context": chunk_context,
-            "evtx_record_offset": offset,
-            "evtx_record_size": len(record_blob),
-            "evtx_record_sha256": hashlib.sha256(record_blob).hexdigest(),
-            "evtx_record_integrity": integrity,
-            "evtx_recovery_context": recovery_context,
-            "evtx_recovery_evidence": recovery_evidence,
-            "evtx_recovery_validation_profile": recovery_validation_profile,
-            "evtx_recovery_status": recovery_context["status"],
-            "evtx_allocation_status": recovery_context["allocation_status"],
-            "evtx_native_capabilities": NATIVE_EVTX_CAPABILITIES,
-            "evtx_record_sequence": sequence,
-            "validation_required": validation_required,
-            "caution_labels": recovery_context["caution_labels"] if validation_required else [],
-            "extracted_strings": searchable_strings[:MAX_NATIVE_EVTX_STRINGS],
-            "extracted_string_count": len(searchable_strings),
-            "native_indicators": native_indicators,
-            "ProviderName": native_indicators.get("provider_name", ""),
-            "Channel": native_indicators.get("channel", ""),
-            "Computer": native_indicators.get("computer", ""),
-            "CommandLine": native_indicators.get("command_line", ""),
-            "SourceIp": native_indicators.get("source_ip", ""),
-            "TargetUserName": native_indicators.get("user_name", ""),
-            "parameter_candidates": parameter_candidates,
-            "native_message_preview": raw_preview,
-        }
-        data.update(dict(binxml_promoted.get("flat_fields") or {}))
-        system_fields = binxml_promoted.get("system_fields") if isinstance(binxml_promoted.get("system_fields"), Mapping) else {}
-        provider_name = str(native_indicators.get("provider_name") or "")
-        channel = str(native_indicators.get("channel") or "")
-        computer = str(native_indicators.get("computer") or "")
-        event_created_at = str(system_fields.get("TimeCreated") or timestamp)
-        details = normalize_event_details(
-            parser="windows-eventlog-evtx-native",
-            source_format="evtx",
-            source_path=path,
-            source_index=source_index,
-            source_hashes=source_hashes,
-            provider_name=provider_name,
-            event_id=str(system_fields.get("EventID") or ""),
-            record_id=str(system_fields.get("EventRecordID") or record_id or ""),
-            channel=channel,
-            level=str(system_fields.get("Level") or ""),
-            computer=computer,
-            event_created_at=event_created_at,
-            data=data,
-            raw_preview=raw_preview,
-            user_sid=str(system_fields.get("UserID") or ""),
-            user_name=str(native_indicators.get("user_name") or ""),
-            process_id=str(system_fields.get("ProcessID") or ""),
-            thread_id=str(system_fields.get("ThreadID") or ""),
-            process_name=str(native_indicators.get("process_name") or ""),
-            command_line=str(native_indicators.get("command_line") or raw_preview),
-            message_catalog=message_catalog,
-        )
-        details.update(data)
-        details["parser_confidence"] = native_evtx_confidence(details)
-        details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
-        details["core_accuracy_gates"] = native_evtx_core_accuracy_gates(details)
-        details["commercial_uplift_evidence"] = native_evtx_commercial_uplift_evidence(details)
-        details["commercial_grade_ready"] = details["evtx_report_grade_assessment"]["report_grade_ready"]
-        details["commercial_grade_blockers"] = list(details["evtx_report_grade_assessment"]["blockers"])
-        yield event_record(path, "eventlog-event", details)
 
 
 def iter_evtx_record_blobs(blob: bytes) -> Iterable[tuple[int, bytes]]:
@@ -996,14 +1000,14 @@ def iter_evtx_record_blobs(blob: bytes) -> Iterable[tuple[int, bytes]]:
 
 
 def iter_native_evtx_chunks(blob: bytes) -> Iterable[dict[str, object]]:
-    if not blob.startswith(EVTX_FILE_SIGNATURE):
+    if not blob_startswith(blob, EVTX_FILE_SIGNATURE):
         return
     declared_chunks = read_u16(blob, 42)
     offset = EVTX_FILE_HEADER_SIZE
     emitted = 0
     while offset + len(EVTX_CHUNK_SIGNATURE) <= len(blob) and emitted < MAX_NATIVE_EVTX_CHUNKS:
         chunk_blob = blob[offset : min(len(blob), offset + EVTX_CHUNK_SIZE)]
-        if not chunk_blob.startswith(EVTX_CHUNK_SIGNATURE):
+        if not blob_startswith(chunk_blob, EVTX_CHUNK_SIGNATURE):
             next_signature = blob.find(EVTX_CHUNK_SIGNATURE, offset + 1)
             if next_signature < 0:
                 return
@@ -1057,6 +1061,20 @@ def iter_evtx_record_candidates(blob: bytes) -> Iterable[NativeEvtxRecordCandida
         )
         emitted += 1
         offset += declared_size
+
+
+@contextmanager
+def open_evtx_binary_view(path: Path) -> Iterable[bytes | mmap.mmap]:
+    with path.open("rb") as handle:
+        if path.stat().st_size == 0:
+            yield b""
+            return
+        with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+            yield mapped
+
+
+def blob_startswith(blob: bytes | mmap.mmap, prefix: bytes, offset: int = 0) -> bool:
+    return blob[offset : offset + len(prefix)] == prefix
 
 
 def native_evtx_record_integrity(record_blob: bytes, offset: int) -> dict[str, object]:
@@ -1567,8 +1585,10 @@ def native_evtx_commercial_uplift_evidence(details: Mapping[str, object]) -> dic
             "max_record_size_bytes": MAX_NATIVE_EVTX_RECORD_SIZE,
             "bounded_string_limit": MAX_NATIVE_EVTX_STRINGS,
             "bounded_binxml_token_limit": MAX_NATIVE_EVTX_BINXML_TOKENS,
-            "current_reader": "whole-file-read",
-            "streaming_reader_required_for_tb_claims": True,
+            "current_reader": str(details.get("evtx_reader_strategy") or NATIVE_EVTX_READER_STRATEGY),
+            "source_hash_strategy": "streaming-sha256",
+            "streaming_reader_required_for_tb_claims": False,
+            "remaining_large_data_proof_required": True,
         },
         "next_internal_step": (
             "Add streaming/mmap chunk iteration plus record-level diff fixtures against EvtxECmd or "
@@ -1715,11 +1735,11 @@ def native_evtx_chunk_record(
     return event_record(path, "eventlog-chunk", details)
 
 
-def native_evtx_file_header(blob: bytes) -> dict[str, object]:
+def native_evtx_file_header(blob: bytes | mmap.mmap) -> dict[str, object]:
     header_size = read_u32(blob, 32) or (EVTX_FILE_HEADER_SIZE if len(blob) >= EVTX_FILE_HEADER_SIZE else len(blob))
     checksum = read_u32(blob, 124)
     return {
-        "signature_valid": blob.startswith(EVTX_FILE_SIGNATURE),
+        "signature_valid": blob_startswith(blob, EVTX_FILE_SIGNATURE),
         "header_size": header_size,
         "file_size": len(blob),
         "oldest_chunk_number": read_u64(blob, 8),
@@ -1737,7 +1757,7 @@ def native_evtx_file_header(blob: bytes) -> dict[str, object]:
 
 
 def native_evtx_chunk_header(chunk_blob: bytes, chunk_offset: int) -> dict[str, object]:
-    signature_valid = chunk_blob.startswith(EVTX_CHUNK_SIGNATURE)
+    signature_valid = blob_startswith(chunk_blob, EVTX_CHUNK_SIGNATURE)
     header_size = read_u32(chunk_blob, 40) if signature_valid else 0
     last_record_offset = read_u32(chunk_blob, 44) if signature_valid else 0
     free_space_offset = read_u32(chunk_blob, 48) if signature_valid else 0
@@ -3526,6 +3546,7 @@ def build_eventlog_file_record(
                 else ("candidate-record-scan" if native_record_candidate_count else "no-records-emitted")
             ),
             "native_parser_scope": NATIVE_EVTX_PARSE_SCOPE,
+            "native_reader_strategy": NATIVE_EVTX_READER_STRATEGY,
             "native_binxml_status": NATIVE_EVTX_BINXML_STATUS,
             "native_capabilities": NATIVE_EVTX_CAPABILITIES,
             "native_report_grade_blockers": NATIVE_EVTX_REPORT_GRADE_BLOCKERS,

@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
 from rapidtriage.cli import main
+from rapidtriage.artifacts.windows.eventlog import collect_native_evtx_events
 from tests.windows_artifact_fixtures import (
     build_corrupt_evtx_record_candidate,
     build_evtx_with_slack_record,
@@ -505,14 +507,17 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 native_evtx["details"]["evtx_report_grade_assessment"]["blockers"],
             )
             self.assertIn("#1", native_evtx["details"]["evtx_report_grade_assessment"]["commercial_gap_ids"])
+            self.assertEqual(native_evtx["details"]["evtx_reader_strategy"], "mmap-bounded-record-scan")
             uplift = native_evtx["details"]["commercial_uplift_evidence"]
             self.assertEqual(uplift["batch_id"], "commercial-uplift-001-005")
             self.assertEqual(uplift["item_numbers"], [1, 2, 3])
             self.assertEqual(uplift["implementation_track"], "native-parser-depth")
             self.assertIn("record-magic", uplift["passed_validation_matrix_ids"])
             self.assertIn("chunk-context", uplift["failed_validation_matrix_ids"])
-            self.assertEqual(uplift["large_data_controls"]["current_reader"], "whole-file-read")
-            self.assertTrue(uplift["large_data_controls"]["streaming_reader_required_for_tb_claims"])
+            self.assertEqual(uplift["large_data_controls"]["current_reader"], "mmap-bounded-record-scan")
+            self.assertEqual(uplift["large_data_controls"]["source_hash_strategy"], "streaming-sha256")
+            self.assertFalse(uplift["large_data_controls"]["streaming_reader_required_for_tb_claims"])
+            self.assertTrue(uplift["large_data_controls"]["remaining_large_data_proof_required"])
             self.assertTrue(native_evtx["details"]["evtx_native_capabilities"]["template_substitution_values"])
             self.assertFalse(native_evtx["details"]["evtx_native_capabilities"]["provider_resource_message_rendering"])
             validation_matrix = {item["id"]: item for item in native_evtx["details"]["evtx_validation_matrix"]}
@@ -608,6 +613,31 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_rows[0]["details"]["source_path"], str(evtx_path.resolve()))
             self.assertEqual(native_rows[0]["details"]["channel"], "Security")
             self.assertEqual(native_rows[0]["details"]["command_line"], "wevtutil cl Security")
+
+    def test_native_evtx_collector_uses_mmap_reader_instead_of_read_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evtx_path = root / "Security.evtx"
+            evtx_path.write_bytes(
+                build_minimal_evtx(
+                    record_id=778,
+                    timestamp=datetime(2024, 4, 2, 2, 3, 4, tzinfo=timezone.utc),
+                    strings=["Microsoft-Windows-Security-Auditing", "Security", "WIN-MMAP", "wevtutil gl Security"],
+                )
+            )
+
+            with mock.patch.object(Path, "read_bytes", side_effect=AssertionError("EVTX collector must not read full files")):
+                artifacts = list(collect_native_evtx_events(evtx_path))
+
+            native_evtx = next(
+                item
+                for item in artifacts
+                if item.artifact_type == "eventlog-event"
+                and item.details["parser"] == "windows-eventlog-evtx-native"
+            )
+            self.assertEqual(native_evtx.details["record_id"], "778")
+            self.assertEqual(native_evtx.details["evtx_reader_strategy"], "mmap-bounded-record-scan")
+            self.assertEqual(native_evtx.details["commercial_uplift_evidence"]["large_data_controls"]["current_reader"], "mmap-bounded-record-scan")
 
     def test_eventlog_collector_decodes_native_evtx_template_substitution_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -800,9 +830,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(candidate["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-001-005")
             self.assertEqual(candidate["commercial_uplift_evidence"]["item_numbers"], [1, 2, 3])
             self.assertIn("record-magic", candidate["commercial_uplift_evidence"]["passed_validation_matrix_ids"])
-            self.assertTrue(
+            self.assertFalse(
                 candidate["commercial_uplift_evidence"]["large_data_controls"][
                     "streaming_reader_required_for_tb_claims"
+                ]
+            )
+            self.assertTrue(
+                candidate["commercial_uplift_evidence"]["large_data_controls"][
+                    "remaining_large_data_proof_required"
                 ]
             )
             self.assertIn("record-integrity-not-proven", candidate["evtx_report_grade_assessment"]["blockers"])
