@@ -5,7 +5,7 @@ import io
 import hashlib
 import re
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
 try:
     import cv2  # type: ignore[import-not-found]
@@ -398,6 +398,15 @@ def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], sou
             f"ocr_sidecar:{ocr_sidecar.get('source_path', '')}",
             f"translation_sidecar:{translation_sidecar.get('source_path', '')}",
         ],
+        "reportability_decision": media_image_reportability_decision(
+            failed_by_item={
+                "#56": ["dedicated-gallery-grid", "persistent-tags", "ml-visual-similarity", "deepfake-classifier-validation"],
+                "#58": ["native-ocr-engine-execution", "engine-retry-logs", "case-db-ocr-job-persistence"],
+                "#59": ["built-in-korean-ocr-execution", "machine-translation-worker", "confidence-calibration-corpus"],
+            },
+            ocr_sidecar=ocr_sidecar,
+            translation_sidecar=translation_sidecar,
+        ),
         "passed_validation_check_ids_by_item": passed_by_item,
         "failed_validation_check_ids_by_item": {
             "#56": ["dedicated-gallery-grid", "persistent-tags", "ml-visual-similarity", "deepfake-classifier-validation"],
@@ -418,6 +427,30 @@ def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], sou
             "machine_translation_execution": False,
         },
         "reporting_status": "triage-only-validation-required",
+    }
+
+
+def media_image_reportability_decision(
+    *,
+    failed_by_item: Mapping[str, Sequence[str]],
+    ocr_sidecar: Mapping[str, object],
+    translation_sidecar: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = {f"{item_id}:{check}" for item_id, checks in failed_by_item.items() for check in checks}
+    return {
+        "profile_version": "media-image-reportability-decision-v1",
+        "commercial_gap_ids": ["#56", "#58", "#59"],
+        "decision": "do-not-report-media-image-output-as-gallery-ocr-or-translation-complete",
+        "allowed_use": "image-gallery-ocr-sidecar-triage-pivot",
+        "blockers": sorted(blockers),
+        "ocr_sidecar_imported": bool(ocr_sidecar),
+        "translation_sidecar_imported": bool(translation_sidecar),
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "validate gallery virtualization, persistent tags, ML similarity, and sensitive/deepfake classifier behavior",
+            "run or validate OCR engine execution logs, retry state, confidence calibration, and Case DB queue persistence",
+            "attach certified Korean OCR/translation review evidence before reporting translated text",
+        ],
     }
 
 

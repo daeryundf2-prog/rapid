@@ -1574,6 +1574,8 @@ def viewer_workflow_reportability_decision(
         53: "bounded-hex-preview-triage-pivot",
         54: "read-only-sqlite-preview-triage-pivot",
         55: "bounded-email-conversation-triage-pivot",
+        56: "image-gallery-metadata-triage-pivot",
+        57: "media-transcript-sidecar-triage-pivot",
     }
     decisions = {
         51: "do-not-report-review-workflow-as-role-based-case-management",
@@ -1581,6 +1583,8 @@ def viewer_workflow_reportability_decision(
         53: "do-not-report-hex-preview-as-full-source-byte-citation",
         54: "do-not-report-sqlite-preview-as-deleted-row-or-wal-complete",
         55: "do-not-report-email-preview-as-native-mailbox-thread-complete",
+        56: "do-not-report-image-gallery-as-ml-or-sensitive-media-complete",
+        57: "do-not-report-media-preview-as-playback-or-asr-validated",
     }
     required = {
         51: [
@@ -1602,6 +1606,14 @@ def viewer_workflow_reportability_decision(
         55: [
             "add native PST/OST/MSG object decoding, deleted item recovery, attachment extraction, and mailbox corpus validation",
             "verify conversation threading and message-id graph reconstruction before reporting",
+        ],
+        56: [
+            "validate virtualized gallery review, persistent tags, ML similarity, and sensitive/deepfake classifier behavior",
+            "attach source hash and reviewer selection evidence before report export",
+        ],
+        57: [
+            "validate safe playback, ASR execution, waveform/thumb generation, and transcript alignment corpus",
+            "attach reviewed transcript cue citations before report use",
         ],
     }
     return {

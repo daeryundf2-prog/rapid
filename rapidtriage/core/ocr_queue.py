@@ -4,7 +4,7 @@ import datetime as dt
 import hashlib
 import json
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from ..artifacts.media import IMAGE_EXTENSIONS, contains_hangul, language_hint_for_text, ocr_quality_metrics
 from .forensic_accuracy import build_accuracy_gate
@@ -247,6 +247,14 @@ def ocr_queue_commercial_uplift_evidence(
         "item_numbers": [58, 59],
         "implementation_track": "ocr-queue-korean-translation-gates",
         "source_refs": [f"root:{root}", f"candidate_count:{len(items)}"],
+        "reportability_decision": ocr_queue_reportability_decision(
+            failed_by_item={
+                "#58": ["native-ocr-engine-execution", "engine-specific-retry-logs", "case-db-ocr-job-persistence"],
+                "#59": ["built-in-korean-ocr-execution", "machine-translation-worker", "certified-translation-workflow"],
+            },
+            item_count=len(items),
+            sidecar_imported_count=sum(1 for item in items if str(item.get("status")) == "sidecar-imported"),
+        ),
         "passed_validation_check_ids_by_item": passed_by_item,
         "failed_validation_check_ids_by_item": {
             "#58": ["native-ocr-engine-execution", "engine-specific-retry-logs", "case-db-ocr-job-persistence"],
@@ -290,6 +298,14 @@ def ocr_queue_item_commercial_uplift_evidence(
             f"sidecar:{sidecar.get('path', '')}",
             f"translation_sidecar:{translation_sidecar.get('path', '')}",
         ],
+        "reportability_decision": ocr_queue_reportability_decision(
+            failed_by_item={
+                "#58": ["native-ocr-engine-execution"],
+                "#59": ["machine-translation-worker", "human-certified-translation"],
+            },
+            item_count=1,
+            sidecar_imported_count=1 if sidecar else 0,
+        ),
         "passed_validation_check_ids_by_item": passed_by_item,
         "failed_validation_check_ids_by_item": {
             "#58": ["native-ocr-engine-execution"],
@@ -305,6 +321,30 @@ def ocr_queue_item_commercial_uplift_evidence(
             "native_ocr_engine_execution": False,
         },
         "reporting_status": "sidecar-review-required" if sidecar else "ocr-run-required",
+    }
+
+
+def ocr_queue_reportability_decision(
+    *,
+    failed_by_item: Mapping[str, Sequence[str]],
+    item_count: int,
+    sidecar_imported_count: int,
+) -> dict[str, object]:
+    blockers = {f"{item_id}:{check}" for item_id, checks in failed_by_item.items() for check in checks}
+    return {
+        "profile_version": "ocr-queue-reportability-decision-v1",
+        "commercial_gap_ids": ["#58", "#59"],
+        "decision": "do-not-report-ocr-or-translation-as-engine-validated",
+        "allowed_use": "ocr-sidecar-and-queue-triage-pivot",
+        "blockers": sorted(blockers),
+        "item_count": item_count,
+        "sidecar_imported_count": sidecar_imported_count,
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "execute or attach OCR engine logs, retry history, version capture, and confidence calibration",
+            "attach certified Korean OCR/translation review evidence before reporting translated text",
+            "persist queue state in Case DB for multi-reviewer long-running workflows",
+        ],
     }
 
 

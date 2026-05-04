@@ -533,6 +533,16 @@ def search_deduplication_commercial_uplift_evidence(
             f"duplicate_match_count:{summary.get('duplicate_match_count', 0)}",
             f"unique_fingerprint_count:{summary.get('unique_fingerprint_count', 0)}",
         ],
+        "reportability_decision": search_deduplication_reportability_decision(
+            failed_validation_check_ids=[
+                "ui-collapse-suppression-workflow",
+                "fuzzy-near-duplicate-text-grouping",
+                "perceptual-media-duplicate-grouping",
+                "case-db-duplicate-suppression-state",
+            ],
+            assessment_blockers=list(assessment["blockers"]),
+            summary=summary,
+        ),
         "passed_validation_check_ids": sorted(set(passed)),
         "failed_validation_check_ids": [
             "ui-collapse-suppression-workflow",
@@ -551,6 +561,31 @@ def search_deduplication_commercial_uplift_evidence(
             "case_db_suppression_state": False,
         },
         "reporting_status": "implemented-baseline-validation-required",
+    }
+
+
+def search_deduplication_reportability_decision(
+    *,
+    failed_validation_check_ids: Sequence[str],
+    assessment_blockers: Sequence[str],
+    summary: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = {str(item) for item in assessment_blockers if str(item)}
+    blockers.update(f"check:{item}" for item in failed_validation_check_ids)
+    return {
+        "profile_version": "search-deduplication-reportability-decision-v1",
+        "commercial_gap_ids": [SEARCH_DEDUP_GAP_ID],
+        "decision": "do-not-report-duplicate-groups-as-suppressed-or-content-complete",
+        "allowed_use": "duplicate-hit-triage-pivot",
+        "blockers": sorted(blockers),
+        "duplicate_group_count": int(summary.get("duplicate_group_count") or 0),
+        "duplicate_match_count": int(summary.get("duplicate_match_count") or 0),
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "validate exact, fuzzy text, perceptual image/video, and OCR duplicate groups against a large known-answer corpus",
+            "persist analyst suppression decisions in Case DB before hiding or excluding duplicates",
+            "verify representative source rows and hashes before using duplicates in reports",
+        ],
     }
 
 

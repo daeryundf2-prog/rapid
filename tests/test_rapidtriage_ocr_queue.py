@@ -49,11 +49,27 @@ class RapidTriageOcrQueueTests(unittest.TestCase):
             self.assertIn("sidecar import and hashes", queue_uplift["passed_validation_check_ids_by_item"]["#58"])
             self.assertIn("Korean language hinting", queue_uplift["passed_validation_check_ids_by_item"]["#59"])
             self.assertFalse(queue_uplift["large_data_controls"]["native_ocr_engine_execution"])
+            self.assertEqual(
+                queue_uplift["reportability_decision"]["decision"],
+                "do-not-report-ocr-or-translation-as-engine-validated",
+            )
+            self.assertEqual(
+                queue_uplift["reportability_decision"]["allowed_use"],
+                "ocr-sidecar-and-queue-triage-pivot",
+            )
+            self.assertIn(
+                "#59:certified-translation-workflow",
+                queue_uplift["reportability_decision"]["blockers"],
+            )
             item = payload["items"][0]
             self.assertEqual(item["status"], "sidecar-imported")
             self.assertIn("#58", item["commercial_gap_ids"])
             self.assertEqual(item["core_accuracy_gates"][0]["gap_id"], "#58")
             self.assertEqual(item["commercial_uplift_evidence"]["item_numbers"], [58, 59])
+            self.assertEqual(
+                item["commercial_uplift_evidence"]["reportability_decision"]["allowed_use"],
+                "ocr-sidecar-and-queue-triage-pivot",
+            )
             self.assertIn("#59", item["korean_ocr_translation_workflow"]["commercial_gap_ids"])
             self.assertFalse(item["report_grade_assessment"]["ready_for_court_report"])
             self.assertEqual(item["language_hint"], "ko+en")

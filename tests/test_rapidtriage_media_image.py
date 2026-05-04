@@ -65,6 +65,18 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertIn("sidecar import and hashes", media_uplift["passed_validation_check_ids_by_item"]["#58"])
             self.assertIn("Korean language hinting", media_uplift["passed_validation_check_ids_by_item"]["#59"])
             self.assertFalse(media_uplift["large_data_controls"]["native_ocr_execution"])
+            self.assertEqual(
+                media_uplift["reportability_decision"]["decision"],
+                "do-not-report-media-image-output-as-gallery-ocr-or-translation-complete",
+            )
+            self.assertEqual(
+                media_uplift["reportability_decision"]["allowed_use"],
+                "image-gallery-ocr-sidecar-triage-pivot",
+            )
+            self.assertIn(
+                "#56:ml-visual-similarity",
+                media_uplift["reportability_decision"]["blockers"],
+            )
             self.assertEqual(details["ocr_plan"]["status"], "sidecar-imported")
             self.assertIn("#58", details["ocr_plan"]["commercial_gap_ids"])
             self.assertEqual(details["ocr_plan"]["recommended_languages"], ["kor", "eng"])

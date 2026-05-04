@@ -154,6 +154,15 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("duplicate fingerprint generation", dedup_uplift["passed_validation_check_ids"])
         self.assertIn("ui-collapse-suppression-workflow", dedup_uplift["failed_validation_check_ids"])
         self.assertFalse(dedup_uplift["large_data_controls"]["case_db_suppression_state"])
+        self.assertEqual(
+            dedup_uplift["reportability_decision"]["decision"],
+            "do-not-report-duplicate-groups-as-suppressed-or-content-complete",
+        )
+        self.assertEqual(dedup_uplift["reportability_decision"]["allowed_use"], "duplicate-hit-triage-pivot")
+        self.assertIn(
+            "check:case-db-duplicate-suppression-state",
+            dedup_uplift["reportability_decision"]["blockers"],
+        )
         self.assertFalse(analysis["deduplication"]["deduplication_assessment"]["ready_for_court_report"])
 
         workbook = analysis["workbook"]
