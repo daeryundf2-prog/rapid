@@ -59,6 +59,18 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(e01_uplift["item_numbers"], [22])
             self.assertIn("#22-source-integrity", e01_uplift["passed_validation_matrix_ids"])
             self.assertIn("#22-native-commercial-parser", e01_uplift["failed_validation_matrix_ids"])
+            self.assertEqual(
+                e01_uplift["reportability_decision"]["decision"],
+                "do-not-report-e01-ex01-workflow-as-native-complete",
+            )
+            self.assertEqual(
+                e01_uplift["reportability_decision"]["allowed_use"],
+                "e01-ex01-extraction-triage-pivot",
+            )
+            self.assertIn(
+                "#22-native-commercial-parser",
+                e01_uplift["reportability_decision"]["failed_validation_matrix_ids"],
+            )
 
     def test_identifies_raw_image_as_direct_extract_when_sleuthkit_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -88,6 +100,14 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertIn("#23-source-integrity", raw_uplift["passed_validation_matrix_ids"])
             self.assertIn("#23-native-commercial-parser", raw_uplift["failed_validation_matrix_ids"])
             self.assertEqual(raw_uplift["large_data_controls"]["split_part_count"], 1)
+            self.assertEqual(
+                raw_uplift["reportability_decision"]["decision"],
+                "do-not-report-raw-split-workflow-as-native-complete",
+            )
+            self.assertEqual(
+                raw_uplift["reportability_decision"]["allowed_use"],
+                "raw-split-extraction-triage-pivot",
+            )
 
     def test_identifies_archive_image_as_direct_extract_when_tool_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -132,6 +152,14 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(vm_uplift["item_numbers"], [24])
             self.assertIn("#24-source-integrity", vm_uplift["passed_validation_matrix_ids"])
             self.assertIn("#24-native-commercial-parser", vm_uplift["failed_validation_matrix_ids"])
+            self.assertEqual(
+                vm_uplift["reportability_decision"]["decision"],
+                "do-not-report-virtual-disk-workflow-as-chain-complete",
+            )
+            self.assertEqual(
+                vm_uplift["reportability_decision"]["allowed_use"],
+                "virtual-disk-extraction-triage-pivot",
+            )
 
     def test_identifies_xva_as_export_first_virtual_disk(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -161,6 +189,14 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(xva_uplift["item_numbers"], [24])
             self.assertIn("#24-partition-or-container-metadata", xva_uplift["passed_validation_matrix_ids"])
             self.assertIn("xva-direct-extraction-not-implemented", xva_uplift["commercial_blockers"])
+            self.assertEqual(
+                xva_uplift["reportability_decision"]["allowed_use"],
+                "virtual-disk-extraction-triage-pivot",
+            )
+            self.assertIn(
+                "xva-direct-extraction-not-implemented",
+                xva_uplift["reportability_decision"]["blockers"],
+            )
 
     def test_identifies_common_image_formats_as_planned_adapters(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -206,6 +242,14 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 self.assertFalse(container_uplift["commercial_grade_ready"])
                 self.assertIn("#25-source-integrity", container_uplift["passed_validation_matrix_ids"])
                 self.assertIn("#25-native-commercial-parser", container_uplift["failed_validation_matrix_ids"])
+                self.assertEqual(
+                    container_uplift["reportability_decision"]["decision"],
+                    "do-not-report-proprietary-container-as-natively-parsed",
+                )
+                self.assertEqual(
+                    container_uplift["reportability_decision"]["allowed_use"],
+                    "vendor-export-container-triage-pivot",
+                )
 
     def test_unknown_format_is_not_supported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

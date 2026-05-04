@@ -343,6 +343,69 @@ def image_report_grade_assessment(gap_id: str, blockers: Sequence[str]) -> dict[
     }
 
 
+def image_reportability_decision(
+    number: int,
+    *,
+    blockers: Sequence[str],
+    failed_validation_matrix_ids: Sequence[str],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    decisions = {
+        22: ("do-not-report-e01-ex01-workflow-as-native-complete", "e01-ex01-extraction-triage-pivot"),
+        23: ("do-not-report-raw-split-workflow-as-native-complete", "raw-split-extraction-triage-pivot"),
+        24: ("do-not-report-virtual-disk-workflow-as-chain-complete", "virtual-disk-extraction-triage-pivot"),
+        25: ("do-not-report-proprietary-container-as-natively-parsed", "vendor-export-container-triage-pivot"),
+    }
+    decision, allowed_use = decisions.get(number, ("do-not-report-image-workflow-as-commercial-grade", "image-workflow-triage-pivot"))
+    source_integrity = details.get("source_integrity")
+    if isinstance(source_integrity, Mapping):
+        source_hash_statuses = [str(source_integrity.get("hash_status") or "")]
+    elif isinstance(source_integrity, list):
+        source_hash_statuses = [
+            str(item.get("hash_status") or "") for item in source_integrity if isinstance(item, Mapping)
+        ]
+    else:
+        source_hash_statuses = []
+    required_before_report = {
+        22: [
+            "validate E01/Ex01 segment metadata and extraction against known-answer images",
+            "attach libewf/Sleuth Kit versions, commands, hashes, and corrupt/encrypted image limitations",
+            "confirm extracted filesystem contents against a trusted forensic suite before final testimony",
+        ],
+        23: [
+            "validate split-set order/gap handling with damaged and large known-answer corpora",
+            "attach native partition/filesystem or trusted-tool comparison evidence",
+            "document encrypted-volume and deleted-file recovery limitations per case",
+        ],
+        24: [
+            "resolve or explicitly exclude snapshot and differencing-disk chains",
+            "preserve qemu-img conversion provenance and compare converted raw content against a trusted workflow",
+            "capture hypervisor metadata and encryption limitations before report-grade claims",
+        ],
+        25: [
+            "parse the proprietary container natively or attach a verified vendor export manifest",
+            "hash the original container and derived export payloads",
+            "validate embedded metadata, deleted entries, compression, and encryption behavior for the format",
+        ],
+    }
+    return {
+        "profile_version": "image-workflow-reportability-decision-v1",
+        "commercial_gap_ids": [f"#{number}"],
+        "decision": decision,
+        "allowed_use": allowed_use,
+        "blockers": sorted({str(item) for item in blockers if str(item)}),
+        "failed_validation_matrix_ids": list(failed_validation_matrix_ids),
+        "source_hash_statuses": [status for status in source_hash_statuses if status],
+        "native_parser_complete": False,
+        "external_tool_or_vendor_workflow_required": True,
+        "ready_for_court_report": False,
+        "required_before_report": required_before_report.get(
+            number,
+            ["attach known-answer validation and independent reviewer evidence before report-grade claims"],
+        ),
+    }
+
+
 def image_commercial_uplift_evidence(number: int, details: Mapping[str, object]) -> dict[str, object]:
     gap_id = f"#{number}"
     matrix = image_validation_matrix(
@@ -387,6 +450,18 @@ def image_commercial_uplift_evidence(number: int, details: Mapping[str, object])
         24: "Add snapshot/differencing-chain resolution, hypervisor metadata capture, and qemu-img version-matrix validation.",
         25: "Implement/import native or verified vendor parsers for AD1/L01/Lx01/AFF/AFF4/XVA and validate metadata/deleted-entry handling.",
     }
+    passed_validation_matrix_ids = [
+        str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+    ]
+    failed_validation_matrix_ids = [
+        str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+    ]
+    reportability_decision = image_reportability_decision(
+        number,
+        blockers=list(blockers or []),
+        failed_validation_matrix_ids=failed_validation_matrix_ids,
+        details=details,
+    )
     return {
         "batch_id": "commercial-uplift-021-025",
         "item_numbers": [number],
@@ -396,18 +471,15 @@ def image_commercial_uplift_evidence(number: int, details: Mapping[str, object])
         "validated": True,
         "commercial_grade_ready": False,
         "objective": objectives.get(number, "Expose evidence-image validation evidence without overclaiming commercial-grade readiness."),
+        "reportability_decision": reportability_decision,
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             *[f"source_sha256:{value}" for value in source_hashes[:5] if value and value != "None"],
             f"detected_format:{details.get('detected_format', '')}",
             f"converted_raw_path:{details.get('converted_raw_path', '')}",
         ],
-        "passed_validation_matrix_ids": [
-            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
-        ],
-        "failed_validation_matrix_ids": [
-            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
-        ],
+        "passed_validation_matrix_ids": passed_validation_matrix_ids,
+        "failed_validation_matrix_ids": failed_validation_matrix_ids,
         "commercial_blockers": list(blockers or []),
         "large_data_controls": {
             "direct_image_hash_limit_bytes": DIRECT_IMAGE_HASH_LIMIT_BYTES,

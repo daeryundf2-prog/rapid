@@ -104,6 +104,11 @@ DOS Partition Table
             self.assertEqual(e01_uplift["item_numbers"], [22])
             self.assertIn("#22-command-history", e01_uplift["passed_validation_matrix_ids"])
             self.assertIn("#22-native-commercial-parser", e01_uplift["failed_validation_matrix_ids"])
+            self.assertEqual(
+                e01_uplift["reportability_decision"]["decision"],
+                "do-not-report-e01-ex01-workflow-as-native-complete",
+            )
+            self.assertFalse(e01_uplift["reportability_decision"]["ready_for_court_report"])
 
     def test_raw_split_image_discovery_sorts_numeric_segments(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -196,6 +201,14 @@ DOS Partition Table
             self.assertEqual(raw_uplift["item_numbers"], [23])
             self.assertIn("#23-command-history", raw_uplift["passed_validation_matrix_ids"])
             self.assertEqual(raw_uplift["large_data_controls"]["split_part_count"], 2)
+            self.assertEqual(
+                raw_uplift["reportability_decision"]["allowed_use"],
+                "raw-split-extraction-triage-pivot",
+            )
+            self.assertIn(
+                "native-partition-filesystem-parser-not-implemented",
+                raw_uplift["reportability_decision"]["blockers"],
+            )
 
     def test_extract_raw_image_falls_back_to_whole_image_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -307,6 +320,11 @@ DOS Partition Table
             self.assertEqual(vm_uplift["item_numbers"], [24])
             self.assertIn("#24-command-history", vm_uplift["passed_validation_matrix_ids"])
             self.assertIn("#24-native-commercial-parser", vm_uplift["failed_validation_matrix_ids"])
+            self.assertEqual(
+                vm_uplift["reportability_decision"]["decision"],
+                "do-not-report-virtual-disk-workflow-as-chain-complete",
+            )
+            self.assertFalse(vm_uplift["reportability_decision"]["native_parser_complete"])
 
     def test_run_triage_accepts_e01_image_and_analyzes_extracted_filesystem(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

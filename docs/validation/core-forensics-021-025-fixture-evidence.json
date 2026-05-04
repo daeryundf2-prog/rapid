@@ -21,7 +21,7 @@
       "number": 21,
       "title": "AI service transcript parser for ChatGPT/Claude/Gemini/Perplexity",
       "assertions": [
-        "browser-ai-conversation rows preserve service labels, Q/A pairing confidence, orphan counts, storage/source provenance, privacy/completeness warnings, and #21 core_accuracy_gates."
+        "browser-ai-conversation rows preserve service labels, Q/A pairing confidence, orphan counts, storage/source provenance, privacy/completeness warnings, #21 core_accuracy_gates, and complete-transcript reportability blockers."
       ],
       "blockers_kept": [
         "service-side export completeness validation",
@@ -33,7 +33,7 @@
       "number": 22,
       "title": "E01/Ex01 fully integrated workflow",
       "assertions": [
-        "E01 evidence adapter and extraction metadata preserve source integrity, tool preflight/commands, partition selection, read-only recovery provenance, limitation reporting, and #22 core_accuracy_gates."
+        "E01 evidence adapter and extraction metadata preserve source integrity, tool preflight/commands, partition selection, read-only recovery provenance, limitation reporting, #22 core_accuracy_gates, and native-complete reportability blockers."
       ],
       "blockers_kept": [
         "native E01 segment metadata parsing",
@@ -45,7 +45,7 @@
       "number": 23,
       "title": "RAW/split image robust partition/filesystem handling",
       "assertions": [
-        "RAW/split evidence adapter and extraction metadata preserve split discovery, source hashes, partition parsing, tsk_recover audit commands, deleted-file recovery expectations, encrypted-volume warnings, and #23 core_accuracy_gates."
+        "RAW/split evidence adapter and extraction metadata preserve split discovery, source hashes, partition parsing, tsk_recover audit commands, deleted-file recovery expectations, encrypted-volume warnings, #23 core_accuracy_gates, and native-filesystem reportability blockers."
       ],
       "blockers_kept": [
         "native partition/filesystem parser",
@@ -57,7 +57,7 @@
       "number": 24,
       "title": "VHD/VHDX/VMDK/VDI/QCOW direct handling polish",
       "assertions": [
-        "Virtual disk adapter and extraction metadata preserve qemu-img preflight/commands, snapshot-chain limitation disclosure, converted raw hash/provenance, nested raw extraction metadata, unsupported/encrypted warnings, and #24 core_accuracy_gates."
+        "Virtual disk adapter and extraction metadata preserve qemu-img preflight/commands, snapshot-chain limitation disclosure, converted raw hash/provenance, nested raw extraction metadata, unsupported/encrypted warnings, #24 core_accuracy_gates, and chain-complete reportability blockers."
       ],
       "blockers_kept": [
         "snapshot/differencing chain resolution",
@@ -69,7 +69,7 @@
       "number": 25,
       "title": "AD1/L01/Lx01/AFF/AFF4/XVA support",
       "assertions": [
-        "Forensic container adapter preserves container type detection, source integrity, native-vs-export workflow disclosure, metadata/deleted-entry validation blockers, encrypted/compressed limitation warnings, #25 core_accuracy_gates, and #25 commercial_uplift_evidence implemented/usable/validated flags."
+        "Forensic container adapter preserves container type detection, source integrity, native-vs-export workflow disclosure, metadata/deleted-entry validation blockers, encrypted/compressed limitation warnings, #25 core_accuracy_gates, #25 commercial_uplift_evidence implemented/usable/validated flags, and native-parser reportability blockers."
       ],
       "blockers_kept": [
         "native AD1/L01/Lx01/AFF/AFF4 parser",

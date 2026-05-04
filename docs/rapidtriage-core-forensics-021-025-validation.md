@@ -20,6 +20,8 @@ rapidtriage commercial-readiness \
 
 Passing this package means internal `implemented + usable + validated` maturity only. Commercial-grade claims still require trusted-tool diffs, real image/container corpora, corrupt/encrypted edge cases, independent reviewer sign-off, and large-case repeatability.
 
+The #21~#25 rows now also emit explicit reportability decisions in their commercial-uplift evidence. AI transcript rows remain `ai-conversation-triage-pivot` until service-side exports, provider schema versions, orphan handling, and deleted-fragment recovery are validated. E01/Ex01 rows remain `e01-ex01-extraction-triage-pivot` until native segment metadata, corrupt/encrypted image corpora, and trusted-tool diffs exist. RAW/split rows remain `raw-split-extraction-triage-pivot` until large damaged split sets, native partition/filesystem interpretation, and encrypted-volume workflows are validated. Virtual disk rows remain `virtual-disk-extraction-triage-pivot` until snapshot/differencing chains, hypervisor metadata, and qemu-img conversion fidelity are proven. AD1/L01/Lx01/AFF/AFF4 rows remain `vendor-export-container-triage-pivot` until native parsing or verified vendor export manifests are attached.
+
 Current external blockers:
 
 - #21: service-side transcript export validation, service schema version matrix, deleted fragment recovery.

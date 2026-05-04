@@ -932,11 +932,18 @@ def ai_transcript_commercial_uplift_evidence(details: Mapping[str, object]) -> D
     transcript = details.get("transcript") if isinstance(details.get("transcript"), Mapping) else {}
     source_summary = details.get("source_summary") if isinstance(details.get("source_summary"), Mapping) else {}
     conversation_rows = [row for row in details.get("conversation_rows") or [] if isinstance(row, Mapping)]
+    reportability_decision = ai_transcript_reportability_decision(
+        details,
+        checks=checks,
+        transcript=transcript,
+        conversation_rows=conversation_rows,
+    )
     return {
         "batch_id": "commercial-uplift-021-025",
         "item_numbers": [21],
         "implementation_track": "ai-transcript-parser-validation",
         "objective": "Expose AI service question/answer candidate pairing evidence, source storage provenance, and validation blockers without claiming complete transcript recovery.",
+        "reportability_decision": reportability_decision,
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             f"browser:{details.get('browser', '')}",
@@ -965,6 +972,44 @@ def ai_transcript_commercial_uplift_evidence(details: Mapping[str, object]) -> D
         },
         "next_internal_step": "Add service-specific export/schema validators, deleted-fragment recovery fixtures, and FP/FN measurement for ChatGPT/Claude/Gemini/Perplexity.",
         "external_evidence_required": True,
+    }
+
+
+def ai_transcript_reportability_decision(
+    details: Mapping[str, object],
+    *,
+    checks: Mapping[str, object],
+    transcript: Mapping[str, object],
+    conversation_rows: Sequence[Mapping[str, object]],
+) -> Dict[str, object]:
+    blockers = set(AI_TRANSCRIPT_BLOCKERS)
+    if not checks.get("service_side_export_validated"):
+        blockers.add("service-side-export-not-validated")
+    if not checks.get("service_schema_version_known"):
+        blockers.add("service-schema-version-not-validated")
+    if not checks.get("deleted_fragment_recovery_validated"):
+        blockers.add("deleted-fragment-recovery-not-validated")
+    if transcript.get("orphan_question_count") or transcript.get("orphan_answer_count"):
+        blockers.add("orphan-question-answer-candidates-present")
+    if not transcript.get("complete_pair_count"):
+        blockers.add("no-complete-question-answer-pairs")
+    source_summary = details.get("source_summary") if isinstance(details.get("source_summary"), Mapping) else {}
+    return {
+        "profile_version": "ai-transcript-reportability-decision-v1",
+        "commercial_gap_ids": ["#21"],
+        "decision": "do-not-report-ai-transcript-as-complete",
+        "allowed_use": "ai-conversation-triage-pivot",
+        "blockers": sorted(blockers),
+        "candidate_row_count": len(conversation_rows),
+        "complete_pair_count": int(transcript.get("complete_pair_count") or 0),
+        "source_file_count": int(source_summary.get("source_file_count") or 0),
+        "raw_secret_or_account_values_redacted": True,
+        "required_before_report": [
+            "validate the same transcript with a service-side export or trusted browser profile fixture",
+            "record service/schema version for ChatGPT, Claude, Gemini, Perplexity or the detected provider",
+            "document orphan prompt/answer handling and deleted-fragment limitations",
+            "cite source storage files and hashes for every reportable Q/A pair",
+        ],
     }
 
 

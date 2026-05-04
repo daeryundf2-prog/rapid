@@ -157,6 +157,18 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("service_side_export_validated", ai_uplift["failed_validation_check_ids"])
             self.assertGreaterEqual(ai_uplift["candidate_quality"]["complete_pair_count"], 2)
             self.assertEqual(ai_uplift["large_data_controls"]["max_ai_storage_files"], 80)
+            self.assertEqual(
+                ai_uplift["reportability_decision"]["decision"],
+                "do-not-report-ai-transcript-as-complete",
+            )
+            self.assertEqual(
+                ai_uplift["reportability_decision"]["allowed_use"],
+                "ai-conversation-triage-pivot",
+            )
+            self.assertIn(
+                "service-side-export-not-validated",
+                ai_uplift["reportability_decision"]["blockers"],
+            )
             ai_gate = ai_conversation["details"]["core_accuracy_gates"][0]
             self.assertEqual(ai_gate["gap_id"], "#21")
             self.assertIn("service/schema version detection", ai_gate["satisfied_checks"])
