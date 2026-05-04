@@ -77,10 +77,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "registry key tree root reachability, parent-child backlinks, value-list ownership, last-write evidence, and transaction-log disclosure are preserved"
+          "registry key tree root reachability, parent-child backlinks, value-list ownership, last-write evidence, trusted key-tree diff gating, and transaction-log disclosure are preserved"
         ]
       },
-      "notes": "Internal fixture pass; transaction-log replay and broad hive corpus remain commercial-grade blockers."
+      "notes": "Internal fixture pass; trusted Registry Explorer/RegRipper/python-registry key-tree diff, transaction-log replay, and broad hive corpus remain commercial-grade blockers."
     },
     {
       "id": "core-forensics-005-registry-deleted-fixture",

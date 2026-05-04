@@ -16,7 +16,7 @@ from rapidtriage.artifacts.windows.eventlog import (
     native_evtx_core_accuracy_gates,
     native_evtx_promoted_fields,
 )
-from rapidtriage.artifacts.windows.registry import collect_registry_hive
+from rapidtriage.artifacts.windows.registry import build_registry_key_tree_diff, collect_registry_hive
 from rapidtriage.artifacts.windows.shellbags import WindowsShellbagsProvider
 from rapidtriage.cli import main
 from tests.windows_artifact_fixtures import build_minimal_registry_hive, build_minimal_shellbags_registry_hive
@@ -447,7 +447,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("root-cell reachability", key_gate["satisfied_checks"])
             self.assertIn("parent-child backlink consistency", key_gate["satisfied_checks"])
             self.assertIn("transaction-log replay disclosure", key_gate["satisfied_checks"])
-            self.assertEqual(key_gate["missing_required_checks"], [])
+            self.assertEqual(key_gate["missing_required_checks"], ["trusted registry key-tree diff pass"])
             self.assertIn("source file or export hash", key_gate["minimum_evidence"])
             self.assertFalse(key_gate["commercial_grade_ready"])
             key_uplift = run_key.details["commercial_uplift_evidence"]
@@ -470,6 +470,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertTrue(
                 key_uplift["large_data_controls"]["transaction_log_replay_required_for_commercial_claims"]
             )
+            self.assertEqual(key_uplift["key_tree_diff"]["status"], "not-attached")
 
             value_recovery = next(
                 record
@@ -577,6 +578,43 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 key_recovery.details["registry_recovery_reportability_decision"]["blockers"],
             )
             self.assertEqual(key_recovery.details["commercial_uplift_evidence"]["item_numbers"], [5])
+
+    def test_registry_key_tree_diff_compares_trusted_key_paths_and_values(self) -> None:
+        rapid = [
+            {
+                "key_path": r"HKEY_CURRENT_USER\Software\Run",
+                "value_names": ["SecurityUpdater"],
+                "last_written_at": "2024-04-01T04:05:06+00:00",
+                "root_reachable": True,
+            }
+        ]
+        trusted = [
+            {
+                "key": r"HKCU\Software\Run",
+                "value_names": "SecurityUpdater",
+                "last_write_time": "2024-04-01T04:05:06+00:00",
+                "root_reachable": True,
+            }
+        ]
+
+        diff = build_registry_key_tree_diff(rapid, trusted, trusted_tool="Registry Explorer")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["trusted_tool_recognized"])
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertEqual(diff["reportability_decision"]["decision"], "key-tree-diff-passed")
+
+    def test_registry_key_tree_diff_blocks_value_and_path_mismatches(self) -> None:
+        rapid = [{"key_path": r"HKCU\Software\Run", "value_names": ["SecurityUpdater"]}]
+        trusted = [{"key_path": r"HKCU\Software\Run", "value_names": ["OtherValue"]}]
+
+        diff = build_registry_key_tree_diff(rapid, trusted, trusted_tool="RegRipper")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertIn("registry-key-tree-cross-tool-diff-required", diff["reportability_decision"]["blockers"])
 
     def test_manifest_collects_browser_and_recent_file_artifacts_from_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

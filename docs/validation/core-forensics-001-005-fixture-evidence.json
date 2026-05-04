@@ -65,7 +65,8 @@
       "title": "Registry hive full key tree reconstruction",
       "assertions": [
         "registry-key-tree-node rows preserve root reachability, parent-child backlinks, value-list ownership, last-write timestamp evidence, transaction-log disclosure, source hashes, and #4 core_accuracy_gates.",
-        "registry hive/key-tree rows distinguish absent transaction logs from present-but-not-replayed LOG1/LOG2 files and preserve transaction log names, sizes, and hashes for later replay validation."
+        "registry hive/key-tree rows distinguish absent transaction logs from present-but-not-replayed LOG1/LOG2 files and preserve transaction log names, sizes, and hashes for later replay validation.",
+        "build_registry_key_tree_diff compares native key-tree rows with Registry Explorer/RegRipper/python-registry/.reg-style rows by normalized key path, value names, last-write timestamp, and root reachability."
       ],
       "blockers_kept": [
         "transaction-log replay",

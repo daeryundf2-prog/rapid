@@ -83,11 +83,13 @@ REGISTRY_NATIVE_CAPABILITIES = {
     "deleted_cell_report_grade_validation": False,
 }
 REGISTRY_REPORT_GRADE_BLOCKERS = [
+    "registry-key-tree-cross-tool-diff-required",
     "transaction-log-replay-not-implemented",
     "full-binary-value-decoding-not-implemented",
     "deleted-cell-known-answer-corpus-validation-required",
     "registry-security-descriptor-decoding-not-implemented",
 ]
+REGISTRY_TRUSTED_TOOL_HINTS = ("regipper", "regripper", "registryexplorer", "pythonregistry", "recmd", "regexport")
 
 
 class WindowsRegistryProvider:
@@ -1051,6 +1053,11 @@ def registry_core_accuracy_gates(
     gates: list[dict[str, object]] = []
     if "#4" in gap_ids:
         item4_checks: list[str] = []
+        key_tree_diff = (
+            details.get("registry_key_tree_diff")
+            if isinstance(details.get("registry_key_tree_diff"), Mapping)
+            else {}
+        )
         if "root-reachability" in matrix_ids:
             item4_checks.append("root-cell reachability")
         if "child-parent-backlinks" in matrix_ids or details.get("parent_link_consistency"):
@@ -1059,6 +1066,8 @@ def registry_core_accuracy_gates(
             item4_checks.append("value-list ownership")
         if details.get("last_written_at"):
             item4_checks.append("last-write timestamp preservation")
+        if key_tree_diff.get("status") == "pass":
+            item4_checks.append("trusted registry key-tree diff pass")
         item4_checks.append("transaction-log replay disclosure")
         gates.append(build_accuracy_gate(4, satisfied_checks=item4_checks, evidence_refs=evidence_refs))
     if "#5" in gap_ids:
@@ -1106,6 +1115,11 @@ def registry_commercial_uplift_evidence(
         if isinstance(details.get("transaction_log_evidence"), Mapping)
         else {}
     )
+    key_tree_diff = (
+        details.get("registry_key_tree_diff")
+        if isinstance(details.get("registry_key_tree_diff"), Mapping)
+        else {}
+    )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
     passed_matrix = [
         str(item.get("id"))
@@ -1136,6 +1150,15 @@ def registry_commercial_uplift_evidence(
         "recovery_profile_version": str(recovery_profile.get("profile_version") or ""),
         "recovery_reportability_decision": dict(recovery_profile.get("reportability_decision") or {}),
         "transaction_log_status": str(transaction_log_evidence.get("status") or ""),
+        "key_tree_diff": {
+            "status": str(key_tree_diff.get("status") or "not-attached"),
+            "trusted_tool": str(key_tree_diff.get("trusted_tool") or ""),
+            "matched_count": int(key_tree_diff.get("matched_count") or 0),
+            "mismatch_count": int(key_tree_diff.get("mismatch_count") or 0),
+            "missing_in_trusted_count": int(key_tree_diff.get("missing_in_trusted_count") or 0),
+            "extra_in_trusted_count": int(key_tree_diff.get("extra_in_trusted_count") or 0),
+            "commercial_grade_evidence": bool(key_tree_diff.get("commercial_grade_evidence")),
+        },
         "report_grade_status": str(report_grade.get("status") or ""),
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "commercial_blocker_analysis": registry_commercial_blocker_analysis(
@@ -1190,6 +1213,112 @@ def registry_commercial_blocker_analysis(blockers: Sequence[object]) -> list[dic
             }
         )
     return rows
+
+
+def build_registry_key_tree_diff(
+    rapid_nodes: Sequence[Mapping[str, object]],
+    trusted_nodes: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    """Compare native registry key-tree rows against a trusted parser or exported .reg view."""
+
+    tool_name = str(trusted_tool or "").strip()
+    rapid_by_path = {
+        key: normalized
+        for node in rapid_nodes
+        for key, normalized in [_normalize_registry_key_tree_node(node)]
+        if key
+    }
+    trusted_by_path = {
+        key: normalized
+        for node in trusted_nodes
+        for key, normalized in [_normalize_registry_key_tree_node(node)]
+        if key
+    }
+    missing_in_trusted = sorted(path for path in rapid_by_path if path not in trusted_by_path)
+    extra_in_trusted = sorted(path for path in trusted_by_path if path not in rapid_by_path)
+    mismatches: list[dict[str, object]] = []
+    matched_count = 0
+    for key in sorted(set(rapid_by_path) & set(trusted_by_path)):
+        rapid = rapid_by_path[key]
+        trusted = trusted_by_path[key]
+        field_diffs = []
+        for field in ("value_names", "last_written_at", "root_reachable"):
+            left = rapid.get(field, "")
+            right = trusted.get(field, "")
+            if left or right:
+                if left != right:
+                    field_diffs.append({"field": field, "rapid": left, "trusted": right})
+        if field_diffs:
+            mismatches.append({"key_path": key, "field_diffs": field_diffs})
+        else:
+            matched_count += 1
+
+    status = "pass"
+    if not tool_name or not rapid_by_path or not trusted_by_path:
+        status = "not-enough-evidence"
+    elif missing_in_trusted or extra_in_trusted or mismatches:
+        status = "diffs-present"
+    normalized_tool = re.sub(r"[^a-z0-9]+", "", tool_name.lower())
+    trusted_tool_recognized = any(hint in normalized_tool for hint in REGISTRY_TRUSTED_TOOL_HINTS)
+    return {
+        "profile_version": "registry-key-tree-diff-v1",
+        "trusted_tool": tool_name,
+        "trusted_tool_recognized": trusted_tool_recognized,
+        "compare_fields": ["key_path", "value_names", "last_written_at", "root_reachable"],
+        "rapid_node_count": len(rapid_by_path),
+        "trusted_node_count": len(trusted_by_path),
+        "matched_count": matched_count,
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing_in_trusted),
+        "extra_in_trusted_count": len(extra_in_trusted),
+        "status": status,
+        "commercial_grade_evidence": status == "pass" and trusted_tool_recognized,
+        "missing_in_trusted": missing_in_trusted[:100],
+        "extra_in_trusted": extra_in_trusted[:100],
+        "mismatches": mismatches[:100],
+        "reportability_decision": {
+            "decision": "key-tree-diff-passed" if status == "pass" else "do-not-use-native-key-tree-as-final",
+            "allowed_use": (
+                "support report-grade registry key-tree assertions with attached transaction-log/reviewer evidence"
+                if status == "pass" and trusted_tool_recognized
+                else "triage-only key-tree pivot until trusted key-tree diff is clean"
+            ),
+            "blockers": [] if status == "pass" and trusted_tool_recognized else ["registry-key-tree-cross-tool-diff-required"],
+        },
+    }
+
+
+def _normalize_registry_key_tree_node(node: Mapping[str, object]) -> tuple[str, dict[str, str]]:
+    key_path = str(node.get("key_path") or node.get("path") or node.get("key") or "").strip()
+    if not key_path:
+        return "", {}
+    value_names = node.get("value_names")
+    if isinstance(value_names, str):
+        values = [part.strip() for part in re.split(r"[,;]", value_names) if part.strip()]
+    elif isinstance(value_names, Sequence):
+        values = [str(item) for item in value_names if str(item)]
+    else:
+        values = []
+    return normalize_registry_key_path(key_path), {
+        "key_path": normalize_registry_key_path(key_path),
+        "value_names": "|".join(sorted(values, key=str.lower)),
+        "last_written_at": str(node.get("last_written_at") or node.get("last_write_time") or ""),
+        "root_reachable": str(bool(node.get("root_reachable", True))).lower(),
+    }
+
+
+def normalize_registry_key_path(key_path: str) -> str:
+    text = re.sub(r"\\+", r"\\", str(key_path or "").strip())
+    aliases = {
+        "HKCU": "HKEY_CURRENT_USER",
+        "HKLM": "HKEY_LOCAL_MACHINE",
+        "HKU": "HKEY_USERS",
+        "HKCR": "HKEY_CLASSES_ROOT",
+    }
+    prefix, sep, rest = text.partition("\\")
+    return f"{aliases.get(prefix.upper(), prefix.upper())}{sep}{rest}".rstrip("\\")
 
 
 def build_registry_record(

@@ -64,6 +64,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "parent-child backlink consistency",
             "value-list ownership",
             "last-write timestamp preservation",
+            "trusted registry key-tree diff pass",
             "transaction-log replay disclosure",
         ),
     },
