@@ -35,10 +35,12 @@
       "assertions": [
         "message_rendering provenance, fallback message text, parameter mapping, unresolved-template warning, and limitation disclosure are represented in #2 core_accuracy_gates.",
         "curated provider message catalogs preserve source type, message ID, extraction tool, locale, catalog path, and template SHA256 provenance.",
-        "native EVTX rows can render from curated provider catalogs and remove the built-in-template fallback blocker for that row while retaining other commercial blockers."
+        "native EVTX rows can render from curated provider catalogs and remove the built-in-template fallback blocker for that row while retaining other commercial blockers.",
+        "Windows Event Manifest XML catalog fixtures resolve provider event message string references into rendered native EVTX messages with source_type=windows-event-manifest provenance."
       ],
       "blockers_kept": [
-        "provider manifest/resource DLL rendering",
+        "automatic provider DLL/resource-table extraction",
+        "broad manifest corpus coverage",
         "cross-tool rendered-message diff"
       ]
     },

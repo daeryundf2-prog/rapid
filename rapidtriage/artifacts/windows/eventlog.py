@@ -624,12 +624,11 @@ def load_event_message_catalog(path: Path) -> dict[str, dict[str, dict[str, obje
     - {"templates": [{"provider": "...", "event_id": "4624", "message": "..."}]}
     - {"providers": {"Provider Name": {"4624": "..."}}}
     - {"Provider Name": {"4624": "..."}}
+
+    Supported Windows manifest shape:
+    - provider/event entries with message="$(string.Id)" and localization string tables.
     """
 
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return {}
     catalog: dict[str, dict[str, dict[str, object]]] = {}
 
     def add_entry(provider: object, event_id: object, entry: object) -> None:
@@ -651,6 +650,22 @@ def load_event_message_catalog(path: Path) -> dict[str, dict[str, dict[str, obje
         metadata.setdefault("catalog_path", str(path.resolve()))
         catalog.setdefault(provider_key, {})[event_key] = metadata
 
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeError):
+        return {}
+
+    if path.suffix.lower() in {".man", ".xml"} or text.lstrip().startswith("<"):
+        for provider, event_id, entry in event_message_manifest_entries(path, text):
+            add_entry(provider, event_id, entry)
+        if catalog:
+            return catalog
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return catalog
+
     if isinstance(payload, Mapping):
         templates = payload.get("templates")
         if isinstance(templates, list):
@@ -670,6 +685,88 @@ def load_event_message_catalog(path: Path) -> dict[str, dict[str, dict[str, obje
                 for event_id, entry in events.items():
                     add_entry(provider, event_id, entry)
     return catalog
+
+
+def event_message_manifest_entries(path: Path, text: str) -> list[tuple[str, str, dict[str, object]]]:
+    """Extract provider/event message templates from a Windows Event Manifest XML file."""
+
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return []
+
+    string_table: dict[str, str] = {}
+    string_culture: dict[str, str] = {}
+    for resource in root.iter():
+        if strip_namespace(resource.tag).lower() != "resources":
+            continue
+        culture = str(resource.attrib.get("culture") or resource.attrib.get("Culture") or "")
+        for child in resource.iter():
+            if strip_namespace(child.tag).lower() != "string":
+                continue
+            string_id = str(child.attrib.get("id") or child.attrib.get("Id") or "")
+            value = str(child.attrib.get("value") or child.attrib.get("Value") or "")
+            if string_id and value:
+                string_table[string_id] = value
+                if culture:
+                    string_culture[string_id] = culture
+
+    entries: list[tuple[str, str, dict[str, object]]] = []
+    for provider in root.iter():
+        if strip_namespace(provider.tag).lower() != "provider":
+            continue
+        provider_name = str(
+            provider.attrib.get("name")
+            or provider.attrib.get("Name")
+            or provider.attrib.get("symbol")
+            or provider.attrib.get("guid")
+            or ""
+        )
+        if not provider_name:
+            continue
+        for event in provider.iter():
+            if strip_namespace(event.tag).lower() != "event":
+                continue
+            event_id = str(
+                event.attrib.get("value")
+                or event.attrib.get("Value")
+                or event.attrib.get("eventID")
+                or event.attrib.get("eventId")
+                or event.attrib.get("id")
+                or ""
+            )
+            message_ref = str(event.attrib.get("message") or event.attrib.get("Message") or "")
+            if not event_id or not message_ref:
+                continue
+            string_id = manifest_message_string_id(message_ref)
+            message = string_table.get(string_id) if string_id else ""
+            if not message:
+                message = message_ref
+            entries.append(
+                (
+                    provider_name,
+                    event_id,
+                    {
+                        "message": message,
+                        "source": "windows-event-manifest",
+                        "source_type": "windows-event-manifest",
+                        "locale": string_culture.get(string_id, "") if string_id else "",
+                        "message_id": message_ref,
+                        "resource_id": string_id,
+                        "extraction_tool": "rapidtriage-manifest-loader",
+                        "catalog_path": str(path.resolve()),
+                        "template_sha256": hashlib.sha256(message.encode("utf-8")).hexdigest(),
+                    },
+                )
+            )
+    return entries
+
+
+def manifest_message_string_id(message_ref: str) -> str:
+    match = re.fullmatch(r"\$\(string\.([^)]+)\)", message_ref.strip())
+    if match:
+        return match.group(1)
+    return ""
 
 
 def normalize_provider_catalog_key(value: str) -> str:
