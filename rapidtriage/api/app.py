@@ -1546,11 +1546,74 @@ def viewer_workflow_commercial_uplift_evidence(
         "item_numbers": [item_number],
         "implementation_track": component,
         "source_refs": list(source_refs),
+        "reportability_decision": viewer_workflow_reportability_decision(
+            item_number=item_number,
+            component=component,
+            blockers=blockers,
+            controls=controls,
+        ),
         "passed_validation_check_ids": sorted(set(passed)),
         "failed_validation_check_ids": list(blockers),
         "commercial_blockers": list(blockers),
         "large_data_controls": dict(controls),
         "reporting_status": "implemented-baseline-validation-required",
+    }
+
+
+def viewer_workflow_reportability_decision(
+    *,
+    item_number: int,
+    component: str,
+    blockers: Sequence[str],
+    controls: Mapping[str, object],
+) -> dict[str, object]:
+    gap_id = f"#{item_number}"
+    allowed_uses = {
+        51: "single-user-review-status-triage-pivot",
+        52: "bounded-file-compare-triage-pivot",
+        53: "bounded-hex-preview-triage-pivot",
+        54: "read-only-sqlite-preview-triage-pivot",
+        55: "bounded-email-conversation-triage-pivot",
+    }
+    decisions = {
+        51: "do-not-report-review-workflow-as-role-based-case-management",
+        52: "do-not-report-compare-output-as-semantic-diff-complete",
+        53: "do-not-report-hex-preview-as-full-source-byte-citation",
+        54: "do-not-report-sqlite-preview-as-deleted-row-or-wal-complete",
+        55: "do-not-report-email-preview-as-native-mailbox-thread-complete",
+    }
+    required = {
+        51: [
+            "enable role-based multi-user queues, conflict handling, notifications, and signed reviewer SOPs",
+            "verify source hashes and parser limitations before report inclusion",
+        ],
+        52: [
+            "add semantic binary/image/SQLite/mailbox diff viewers and persistent analyst comparison notes",
+            "attach reviewed selection rationale for each compared evidence item",
+        ],
+        53: [
+            "add jump-to-offset, byte selection hashing, and exported range citation packages",
+            "validate offsets against full-source hashes and source parser context",
+        ],
+        54: [
+            "add large-table pagination, WHERE builder, WAL/journal replay, and deleted-row validation",
+            "validate database previews against known-answer SQLite corpora",
+        ],
+        55: [
+            "add native PST/OST/MSG object decoding, deleted item recovery, attachment extraction, and mailbox corpus validation",
+            "verify conversation threading and message-id graph reconstruction before reporting",
+        ],
+    }
+    return {
+        "profile_version": "viewer-workflow-reportability-decision-v1",
+        "commercial_gap_ids": [gap_id],
+        "component": component,
+        "decision": decisions.get(item_number, "do-not-report-viewer-output-as-commercial-complete"),
+        "allowed_use": allowed_uses.get(item_number, "bounded-viewer-triage-pivot"),
+        "blockers": sorted({str(item) for item in blockers if str(item)}),
+        "control_snapshot": dict(controls),
+        "ready_for_court_report": False,
+        "required_before_report": required.get(item_number, ["attach source hash, parser validation, reviewer decision, and export citation evidence"]),
     }
 
 

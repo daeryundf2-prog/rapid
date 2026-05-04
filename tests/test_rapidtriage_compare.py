@@ -72,6 +72,11 @@ class RapidTriageCompareTests(unittest.TestCase):
             self.assertEqual(uplift["item_numbers"], [52])
             self.assertIn("bounded text diff", uplift["passed_validation_check_ids"])
             self.assertIn("binary-structure-aware-diff", uplift["failed_validation_check_ids"])
+            self.assertEqual(
+                uplift["reportability_decision"]["allowed_use"],
+                "bounded-file-compare-triage-pivot",
+            )
+            self.assertIn("check:sqlite-table-aware-diff", uplift["reportability_decision"]["blockers"])
             self.assertTrue(uplift["large_data_controls"]["bounded_text_diff"])
             result = payload["results"][0]
             self.assertEqual(result["status"], "different")

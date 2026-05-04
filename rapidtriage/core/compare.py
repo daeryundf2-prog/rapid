@@ -279,6 +279,12 @@ def compare_commercial_uplift_evidence(
             f"result_count:{len(results)}",
             *[f"comparison_id:{result.get('comparison_id', '')}" for result in results[:5]],
         ],
+        "reportability_decision": compare_reportability_decision(
+            mode=mode,
+            results=results,
+            failed_validation_check_ids=failed,
+            commercial_blockers=list(report_grade.get("blockers") or []),
+        ),
         "passed_validation_check_ids": sorted(set(passed)),
         "failed_validation_check_ids": failed,
         "commercial_blockers": list(report_grade.get("blockers") or []),
@@ -292,6 +298,32 @@ def compare_commercial_uplift_evidence(
             "timeline_aware_compare": False,
         },
         "reporting_status": "implemented-baseline-validation-required",
+    }
+
+
+def compare_reportability_decision(
+    *,
+    mode: str,
+    results: Sequence[Mapping[str, object]],
+    failed_validation_check_ids: Sequence[str],
+    commercial_blockers: Sequence[str],
+) -> dict[str, object]:
+    blockers = {str(item) for item in commercial_blockers if str(item)}
+    blockers.update(f"check:{item}" for item in failed_validation_check_ids)
+    return {
+        "profile_version": "compare-reportability-decision-v1",
+        "commercial_gap_ids": [COMPARE_GAP_ID],
+        "decision": "do-not-report-compare-output-as-semantic-diff-complete",
+        "allowed_use": "bounded-file-compare-triage-pivot",
+        "blockers": sorted(blockers),
+        "mode": mode,
+        "result_count": len(results),
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "record analyst-selected comparison rationale and persistent compare notes",
+            "run semantic binary, image, SQLite, mailbox, or timeline-aware viewers for specialized evidence",
+            "attach source hashes and reviewed citations for each compared item",
+        ],
     }
 
 

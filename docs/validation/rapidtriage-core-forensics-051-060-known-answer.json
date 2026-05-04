@@ -11,7 +11,7 @@
       "status": "pass",
       "backlog_items": [51],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Review marks preserve status, verification, assignment, priority, report inclusion, history/audit warnings, and #51 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Review marks preserve status, verification, assignment, priority, report inclusion, history/audit warnings, and #51 core_accuracy_gates.", "Reviewer workflow reportability decisions block role-based case-management claims until multi-user RBAC, conflict handling, notifications, and signed reviewer SOP evidence exists."]},
       "notes": "Internal fixture pass; role-based multi-user review remains commercial blocker."
     },
     {
@@ -22,7 +22,7 @@
       "status": "pass",
       "backlog_items": [52],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_compare.py", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Compare preserves A/B/C baseline review, hashes, bounded text diff, status counts, specialized-diff warning, and #52 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Compare preserves A/B/C baseline review, hashes, bounded text diff, status counts, specialized-diff warning, and #52 core_accuracy_gates.", "Compare reportability decisions block semantic-diff-complete claims until binary/image/SQLite/mailbox diff viewers, compare notes, selection rationale, and reviewed citations exist."]},
       "notes": "Internal fixture pass; semantic binary/image/table diff viewers remain future work."
     },
     {
@@ -33,7 +33,7 @@
       "status": "pass",
       "backlog_items": [53],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Source preview preserves bounded hex rows, byte offsets, preview hash, byte-search citation support, source validation warning, and #53 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Source preview preserves bounded hex rows, byte offsets, preview hash, byte-search citation support, source validation warning, and #53 core_accuracy_gates.", "Hex viewer reportability decisions block full-source byte-citation claims until jump-to-offset, byte selection hashing, range export, and citation package validation exists."]},
       "notes": "Internal fixture pass; full range export and source-byte citation package remain validation-gated."
     },
     {
@@ -44,7 +44,7 @@
       "status": "pass",
       "backlog_items": [54],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["SQLite preview preserves read-only open, table/schema inventory, column/index metadata, bounded row preview, deleted/WAL warning, and #54 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["SQLite preview preserves read-only open, table/schema inventory, column/index metadata, bounded row preview, deleted/WAL warning, and #54 core_accuracy_gates.", "SQLite viewer reportability decisions block deleted-row/WAL-complete claims until pagination, WHERE builder, WAL/journal replay, deleted-row validation, and large database corpus evidence exists."]},
       "notes": "Internal fixture pass; deleted-row/WAL and large database corpus validation remain blockers."
     },
     {
@@ -55,7 +55,7 @@
       "status": "pass",
       "backlog_items": [55],
       "evidence_paths": ["docs/validation/core-forensics-051-060-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Email preview preserves thread grouping, message order, participant/header fields, attachment inventory, mailbox limitations, and #55 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Email preview preserves thread grouping, message order, participant/header fields, attachment inventory, mailbox limitations, and #55 core_accuracy_gates.", "Email viewer reportability decisions block native-mailbox-thread-complete claims until PST/OST/MSG decoding, deleted item recovery, attachment extraction, and mailbox corpus validation exists."]},
       "notes": "Internal fixture pass; native PST/OST/MSG conversation validation remains required."
     },
     {

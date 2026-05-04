@@ -3972,6 +3972,23 @@ def review_workflow_assessment(*, assignee: str, priority: str, due_at: str) -> 
                 "case_db:review_mark",
                 "case_db:review_mark_history",
             ],
+            "reportability_decision": {
+                "profile_version": "case-review-workflow-reportability-decision-v1",
+                "commercial_gap_ids": ["#51"],
+                "decision": "do-not-report-review-workflow-as-role-based-case-management",
+                "allowed_use": "single-user-review-status-triage-pivot",
+                "blockers": [
+                    "multi-user-conflict-resolution",
+                    "notification-workflow",
+                    "role-based-assignment-queue",
+                    "sla-dashboard",
+                ],
+                "ready_for_court_report": False,
+                "required_before_report": [
+                    "enable role-based multi-user queues, conflict handling, notifications, and signed reviewer SOPs",
+                    "verify source hashes, parser limitations, and immutable history before report inclusion",
+                ],
+            },
             "passed_validation_check_ids": sorted(set(satisfied)),
             "failed_validation_check_ids": [
                 "role-based-assignment-queue",

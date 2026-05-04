@@ -31,6 +31,8 @@ rapidtriage commercial-readiness \
 | #59 Korean OCR/translation | OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, and #59 `core_accuracy_gates`. | OCR calibration, certified translation workflow, and side-by-side review UI. |
 | #60 Search dedup | Search analysis emits duplicate fingerprints, group counts, representative links, source/path references, and #60 `core_accuracy_gates`. | UI collapse/suppression workflow, fuzzy text near-duplicate grouping, and media duplicate validation. |
 
+The #51 through #55 rows now include explicit reportability decisions. #51 is limited to `single-user-review-status-triage-pivot`, #52 to `bounded-file-compare-triage-pivot`, #53 to `bounded-hex-preview-triage-pivot`, #54 to `read-only-sqlite-preview-triage-pivot`, and #55 to `bounded-email-conversation-triage-pivot`. These outputs must not be described as role-based case management, semantic-diff-complete, full byte citation, deleted-row/WAL-complete, or native mailbox-thread-complete until the named external validation and workflow evidence is attached.
+
 ## Interpretation
 
 Passing this manifest promotes #51 through #60 to the internal `validated` maturity stage only. These features remain `commercial_grade_ready=false` until broader UX, multi-user, external-tool, large-case, and independent validation evidence is attached.

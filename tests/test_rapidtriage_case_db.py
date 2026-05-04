@@ -599,6 +599,14 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(review_uplift["batch_id"], "commercial-uplift-051-055")
             self.assertEqual(review_uplift["item_numbers"], [51])
             self.assertIn("review status fields persisted", review_uplift["passed_validation_check_ids"])
+            self.assertEqual(
+                review_uplift["reportability_decision"]["decision"],
+                "do-not-report-review-workflow-as-role-based-case-management",
+            )
+            self.assertEqual(
+                review_uplift["reportability_decision"]["allowed_use"],
+                "single-user-review-status-triage-pivot",
+            )
             self.assertFalse(review_uplift["large_data_controls"]["role_based_case_server"])
             self.assertFalse(review["review_workflow"]["ready_for_court_report"])
 

@@ -9,7 +9,7 @@
       "title": "Reviewer assignment/status workflow",
       "test_files": ["tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Case DB review marks preserve status, verification status, reviewer, assignee, priority, due date, report inclusion, history, and #51 core_accuracy_gates."
+        "Case DB review marks preserve status, verification status, reviewer, assignee, priority, due date, report inclusion, history, #51 core_accuracy_gates, and reportability blockers for missing role-based queue, conflict handling, notifications, and reviewer SOP."
       ],
       "remaining_external_validation": ["Role-based multi-user server, conflict handling, notifications, and signed reviewer SOP."]
     },
@@ -18,7 +18,7 @@
       "title": "A/B/C multi-evidence compare",
       "test_files": ["tests/test_rapidtriage_compare.py", "tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Compare output preserves A/B and A/B/C baseline comparison, file hashes, bounded text diff, status counts, report pivots, and #52 core_accuracy_gates."
+        "Compare output preserves A/B and A/B/C baseline comparison, file hashes, bounded text diff, status counts, report pivots, #52 core_accuracy_gates, and reportability blockers for missing semantic binary/image/SQLite/mailbox diff plus compare notes."
       ],
       "remaining_external_validation": ["Binary/image/SQLite semantic diff viewers and reviewer-selected comparison known-answer corpus."]
     },
@@ -27,7 +27,7 @@
       "title": "Raw/source hex viewer",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Source preview emits bounded hex rows with offsets, ASCII, preview hash, byte-search citation support, and #53 core_accuracy_gates."
+        "Source preview emits bounded hex rows with offsets, ASCII, preview hash, byte-search citation support, #53 core_accuracy_gates, and reportability blockers for missing jump-to-offset, byte selection hashing, and export-range citation package."
       ],
       "remaining_external_validation": ["Full-file jump/export-range UI and byte-level citation package validation."]
     },
@@ -36,7 +36,7 @@
       "title": "SQLite/table specialized viewer",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "SQLite source preview opens read-only, records table/schema/column/index metadata, bounded row previews, search hooks, and #54 core_accuracy_gates."
+        "SQLite source preview opens read-only, records table/schema/column/index metadata, bounded row previews, search hooks, #54 core_accuracy_gates, and reportability blockers for missing pagination, WHERE builder, WAL/journal replay, deleted-row validation, and large database corpus."
       ],
       "remaining_external_validation": ["WHERE-builder UI, deleted-row/WAL validation, and large database fixture corpus."]
     },
@@ -45,7 +45,7 @@
       "title": "Email conversation viewer",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Email source preview emits conversation threads, message order, participants, headers, attachment inventory, and #55 core_accuracy_gates."
+        "Email source preview emits conversation threads, message order, participants, headers, attachment inventory, #55 core_accuracy_gates, and reportability blockers for missing PST/OST/MSG decoding, deleted item recovery, attachment extraction, and mailbox corpus validation."
       ],
       "remaining_external_validation": ["Native PST/OST/MSG threading, deleted items, attachment extraction, and mailbox known-answer validation."]
     },

@@ -237,7 +237,15 @@ class RapidTriageApiTests(unittest.TestCase):
                 "review status fields persisted",
                 preview_payload["review_workflow"]["commercial_uplift_evidence"]["passed_validation_check_ids"],
             )
+            self.assertEqual(
+                preview_payload["review_workflow"]["commercial_uplift_evidence"]["reportability_decision"]["allowed_use"],
+                "single-user-review-status-triage-pivot",
+            )
             self.assertEqual(preview_payload["compare_workflow"]["commercial_uplift_evidence"]["item_numbers"], [52])
+            self.assertEqual(
+                preview_payload["compare_workflow"]["commercial_uplift_evidence"]["reportability_decision"]["decision"],
+                "do-not-report-compare-output-as-semantic-diff-complete",
+            )
             self.assertEqual(
                 {action["id"] for action in preview_payload["viewer_actions"]},
                 {"download", "hash", "search-current-file", "pin-compare", "save-review"},
@@ -290,6 +298,14 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(sqlite_uplift["item_numbers"], [54])
             self.assertIn("read-only SQLite open", sqlite_uplift["passed_validation_check_ids"])
             self.assertFalse(sqlite_uplift["large_data_controls"]["deleted_row_recovery"])
+            self.assertEqual(
+                sqlite_uplift["reportability_decision"]["allowed_use"],
+                "read-only-sqlite-preview-triage-pivot",
+            )
+            self.assertIn(
+                "deleted-row-and-wal-recovery-not-implemented-in-viewer",
+                sqlite_uplift["reportability_decision"]["blockers"],
+            )
             self.assertIn("read-only SQLite open", sqlite_preview["sqlite"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("#74", sqlite_preview["sqlite"]["sqlite_fts_optimization_assessment"]["commercial_gap_ids"])
             self.assertIn("#74", sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["commercial_gap_ids"])
@@ -334,6 +350,14 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(eml_uplift["item_numbers"], [55])
             self.assertIn("thread grouping", eml_uplift["passed_validation_check_ids"])
             self.assertFalse(eml_uplift["large_data_controls"]["native_pst_ost_msg"])
+            self.assertEqual(
+                eml_uplift["reportability_decision"]["decision"],
+                "do-not-report-email-preview-as-native-mailbox-thread-complete",
+            )
+            self.assertIn(
+                "native-pst-ost-msg-conversation-view-not-implemented",
+                eml_uplift["reportability_decision"]["blockers"],
+            )
             self.assertEqual(eml_preview["email"]["conversation_view"]["thread_count"], 1)
             self.assertEqual(
                 eml_preview["email"]["conversation_view"]["threads"][0]["message_order"][0]["subject"],
@@ -353,6 +377,14 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(hex_uplift["item_numbers"], [53])
             self.assertIn("bounded hex rows", hex_uplift["passed_validation_check_ids"])
             self.assertFalse(hex_uplift["large_data_controls"]["export_range_citation"])
+            self.assertEqual(
+                hex_uplift["reportability_decision"]["allowed_use"],
+                "bounded-hex-preview-triage-pivot",
+            )
+            self.assertIn(
+                "exported-hex-range-citation-package-not-implemented",
+                hex_uplift["reportability_decision"]["blockers"],
+            )
             self.assertTrue(binary_preview["hex"]["offset_navigation"]["supports_keyword_byte_hits"])
             binary_search_response = client.get(
                 f"/api/runs/{run_id}/source-search",
