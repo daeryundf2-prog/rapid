@@ -40,6 +40,7 @@ NATIVE_EVTX_PARSE_SCOPE = "record-header-binxml-template-scalar-recovery-triage"
 NATIVE_EVTX_BINXML_STATUS = "not-decoded"
 NATIVE_EVTX_REPORT_GRADE_BLOCKERS = [
     "trusted-tool-record-diff-required",
+    "trusted-rendered-message-diff-required",
     "provider-message-resource-rendering-not-implemented",
     "full-binxml-object-model-not-implemented",
     "broad-deleted-corrupt-record-corpus-validation-required",
@@ -1651,6 +1652,11 @@ def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[s
         if isinstance(details.get("evtx_trusted_tool_record_diff"), Mapping)
         else {}
     )
+    message_diff = (
+        details.get("evtx_message_rendering_diff")
+        if isinstance(details.get("evtx_message_rendering_diff"), Mapping)
+        else {}
+    )
     binxml_status = str(details.get("evtx_binxml_status") or details.get("binxml_status") or checks.get("binxml_status") or "")
 
     if not checks.get("passes_basic_record_integrity"):
@@ -1668,12 +1674,16 @@ def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[s
         blockers.append("provider-message-resource-rendering-required")
     if trusted_diff.get("status") != "pass":
         blockers.append("trusted-tool-record-diff-required")
+    if message_diff.get("status") != "pass":
+        blockers.append("trusted-rendered-message-diff-required")
     if details.get("validation_required"):
         blockers.append("native-record-validation-required")
 
     static_blockers = list(NATIVE_EVTX_REPORT_GRADE_BLOCKERS)
     if trusted_diff.get("status") == "pass" and "trusted-tool-record-diff-required" in static_blockers:
         static_blockers.remove("trusted-tool-record-diff-required")
+    if message_diff.get("status") == "pass" and "trusted-rendered-message-diff-required" in static_blockers:
+        static_blockers.remove("trusted-rendered-message-diff-required")
     if (
         isinstance(message.get("provenance"), Mapping)
         and message["provenance"].get("provider_message_resource_resolved")
@@ -1711,6 +1721,11 @@ def native_evtx_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[
     checks = details.get("evtx_validation_checks") if isinstance(details.get("evtx_validation_checks"), Mapping) else {}
     recovery = details.get("evtx_recovery_context") if isinstance(details.get("evtx_recovery_context"), Mapping) else {}
     message = details.get("message_rendering") if isinstance(details.get("message_rendering"), Mapping) else {}
+    message_diff = (
+        details.get("evtx_message_rendering_diff")
+        if isinstance(details.get("evtx_message_rendering_diff"), Mapping)
+        else {}
+    )
     matrix = details.get("evtx_validation_matrix") if isinstance(details.get("evtx_validation_matrix"), list) else []
     matrix_ids = {
         str(item.get("id"))
@@ -1763,6 +1778,8 @@ def native_evtx_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[
         item2_checks.append("inserted parameter mapping")
     if message or details.get("message_catalog"):
         item2_checks.append("provider/template/source provenance")
+    if message_diff.get("status") == "pass":
+        item2_checks.append("trusted rendered-message diff pass")
     if binxml_status not in {"basic-rendered", "template-substituted-partial"}:
         item2_checks.append("unresolved template warning")
     if message.get("limitations") or details.get("evtx_validation_guidance"):
@@ -1810,6 +1827,11 @@ def native_evtx_commercial_uplift_evidence(details: Mapping[str, object]) -> dic
         if isinstance(details.get("evtx_trusted_tool_record_diff"), Mapping)
         else {}
     )
+    message_diff = (
+        details.get("evtx_message_rendering_diff")
+        if isinstance(details.get("evtx_message_rendering_diff"), Mapping)
+        else {}
+    )
     return {
         "batch_id": "commercial-uplift-001-005",
         "item_numbers": [1, 2, 3],
@@ -1835,6 +1857,15 @@ def native_evtx_commercial_uplift_evidence(details: Mapping[str, object]) -> dic
             "missing_in_trusted_count": int(trusted_diff.get("missing_in_trusted_count") or 0),
             "extra_in_trusted_count": int(trusted_diff.get("extra_in_trusted_count") or 0),
             "commercial_grade_evidence": bool(trusted_diff.get("commercial_grade_evidence")),
+        },
+        "message_rendering_diff": {
+            "status": str(message_diff.get("status") or "not-attached"),
+            "trusted_tool": str(message_diff.get("trusted_tool") or ""),
+            "matched_count": int(message_diff.get("matched_count") or 0),
+            "mismatch_count": int(message_diff.get("mismatch_count") or 0),
+            "missing_in_trusted_count": int(message_diff.get("missing_in_trusted_count") or 0),
+            "extra_in_trusted_count": int(message_diff.get("extra_in_trusted_count") or 0),
+            "commercial_grade_evidence": bool(message_diff.get("commercial_grade_evidence")),
         },
         "report_grade_status": str(report_grade.get("status") or ""),
         "commercial_blockers": list(report_grade.get("blockers") or []),
@@ -1968,6 +1999,83 @@ def build_evtx_trusted_tool_record_diff(
     }
 
 
+def build_evtx_message_rendering_diff(
+    rapid_records: Sequence[Mapping[str, object]],
+    trusted_records: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    """Compare rendered EVTX messages against Event Viewer or trusted parser exports."""
+
+    tool_name = str(trusted_tool or "").strip()
+    rapid_by_key = {
+        key: normalized
+        for record in rapid_records
+        for key, normalized in [_normalize_evtx_message_record(record)]
+        if key
+    }
+    trusted_by_key = {
+        key: normalized
+        for record in trusted_records
+        for key, normalized in [_normalize_evtx_message_record(record)]
+        if key
+    }
+
+    missing_in_trusted = sorted(key for key in rapid_by_key if key not in trusted_by_key)
+    extra_in_trusted = sorted(key for key in trusted_by_key if key not in rapid_by_key)
+    mismatches: list[dict[str, object]] = []
+    matched_count = 0
+    for key in sorted(set(rapid_by_key) & set(trusted_by_key)):
+        rapid = rapid_by_key[key]
+        trusted = trusted_by_key[key]
+        if rapid.get("message_normalized") == trusted.get("message_normalized"):
+            matched_count += 1
+            continue
+        mismatches.append(
+            {
+                "record_key": key,
+                "rapid_message_sha256": rapid.get("message_sha256", ""),
+                "trusted_message_sha256": trusted.get("message_sha256", ""),
+                "rapid_preview": rapid.get("message_preview", ""),
+                "trusted_preview": trusted.get("message_preview", ""),
+            }
+        )
+
+    status = "pass"
+    if not tool_name or not rapid_by_key or not trusted_by_key:
+        status = "not-enough-evidence"
+    elif missing_in_trusted or extra_in_trusted or mismatches:
+        status = "diffs-present"
+
+    normalized_tool = re.sub(r"[^a-z0-9]+", "", tool_name.lower())
+    trusted_tool_recognized = any(hint in normalized_tool for hint in TRUSTED_EVTX_TOOL_HINTS)
+    return {
+        "profile_version": "evtx-rendered-message-diff-v1",
+        "trusted_tool": tool_name,
+        "trusted_tool_recognized": trusted_tool_recognized,
+        "rapid_record_count": len(rapid_by_key),
+        "trusted_record_count": len(trusted_by_key),
+        "matched_count": matched_count,
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing_in_trusted),
+        "extra_in_trusted_count": len(extra_in_trusted),
+        "status": status,
+        "commercial_grade_evidence": status == "pass" and trusted_tool_recognized,
+        "missing_in_trusted": missing_in_trusted[:100],
+        "extra_in_trusted": extra_in_trusted[:100],
+        "mismatches": mismatches[:100],
+        "reportability_decision": {
+            "decision": "rendered-message-diff-passed" if status == "pass" else "do-not-use-rendered-message-as-final",
+            "allowed_use": (
+                "support report-grade rendered-message wording with attached corpus/signoff"
+                if status == "pass" and trusted_tool_recognized
+                else "triage-only wording until Event Viewer/trusted parser message diff is clean"
+            ),
+            "blockers": [] if status == "pass" and trusted_tool_recognized else ["trusted-rendered-message-diff-required"],
+        },
+    }
+
+
 def _normalize_evtx_diff_record(record: Mapping[str, object]) -> tuple[str, dict[str, str]]:
     key = _first_present_string(
         record,
@@ -1997,6 +2105,32 @@ def _normalize_evtx_diff_record(record: Mapping[str, object]) -> tuple[str, dict
     if template and not normalized["template_sha256"]:
         normalized["template_sha256"] = hashlib.sha256(template.encode("utf-8", errors="replace")).hexdigest()
     return key, normalized
+
+
+def _normalize_evtx_message_record(record: Mapping[str, object]) -> tuple[str, dict[str, str]]:
+    key = _first_present_string(
+        record,
+        ("record_id", "event_record_id", "event_record_number", "record_number", "recordid"),
+    )
+    if not key:
+        return "", {}
+    message_rendering = record.get("message_rendering") if isinstance(record.get("message_rendering"), Mapping) else {}
+    message = _first_present_string(record, ("event_message", "message", "rendered_message"))
+    if not message and message_rendering:
+        message = str(message_rendering.get("message") or message_rendering.get("event_message") or "")
+    message_normalized = normalize_evtx_rendered_message(message)
+    return key, {
+        "record_id": key,
+        "message_normalized": message_normalized,
+        "message_sha256": hashlib.sha256(message_normalized.encode("utf-8", errors="replace")).hexdigest()
+        if message_normalized
+        else "",
+        "message_preview": message_normalized[:240],
+    }
+
+
+def normalize_evtx_rendered_message(message: str) -> str:
+    return re.sub(r"\s+", " ", html.unescape(str(message or ""))).strip()
 
 
 def _first_present_string(record: Mapping[str, object], keys: Sequence[str]) -> str:

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from rapidtriage.artifacts.windows.eventlog import (
     binxml_value_field_map,
+    build_evtx_message_rendering_diff,
     build_evtx_trusted_tool_record_diff,
     native_evtx_commercial_uplift_evidence,
     native_evtx_core_accuracy_gates,
@@ -121,9 +122,19 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "evtx_recovery_evidence": {"caution_labels": ["slack-record-candidate"]},
                 "message_rendering": {
                     "event_message": "An account was successfully logged on.",
+                    "message": "An account was successfully logged on.",
                     "normalized_template_preview": "%1 logged on from %2",
                     "parameter_candidates": ["alice", "10.0.0.5"],
                     "limitations": ["provider-resource-dll-not-resolved"],
+                },
+                "evtx_message_rendering_diff": {
+                    "status": "pass",
+                    "trusted_tool": "Windows Event Viewer",
+                    "matched_count": 1,
+                    "mismatch_count": 0,
+                    "missing_in_trusted_count": 0,
+                    "extra_in_trusted_count": 0,
+                    "commercial_grade_evidence": True,
                 },
                 "evtx_validation_guidance": {"message": "Compare against Event Viewer rendering."},
             }
@@ -136,6 +147,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertIn("message text normalization", by_gap["#2"]["satisfied_checks"])
         self.assertIn("inserted parameter mapping", by_gap["#2"]["satisfied_checks"])
         self.assertIn("provider/template/source provenance", by_gap["#2"]["satisfied_checks"])
+        self.assertIn("trusted rendered-message diff pass", by_gap["#2"]["satisfied_checks"])
         self.assertIn("chunk-boundary containment", by_gap["#3"]["satisfied_checks"])
         self.assertEqual(by_gap["#1"]["missing_required_checks"], [])
         self.assertIn("expected-answer manifest", by_gap["#1"]["minimum_evidence"])
@@ -214,6 +226,41 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(diff["extra_in_trusted_count"], 1)
         self.assertEqual(diff["mismatches"][0]["record_key"], "1")
         self.assertEqual(diff["reportability_decision"]["decision"], "do-not-use-native-evtx-as-final")
+
+    def test_evtx_message_rendering_diff_normalizes_and_compares_rendered_text(self) -> None:
+        rapid = [
+            {
+                "record_id": "42",
+                "message_rendering": {
+                    "message": "An account was successfully logged on.\n\nSubject: Alice",
+                },
+            }
+        ]
+        trusted = [
+            {
+                "event_record_id": "42",
+                "rendered_message": "An account was successfully logged on. Subject: Alice",
+            }
+        ]
+
+        diff = build_evtx_message_rendering_diff(rapid, trusted, trusted_tool="Windows Event Viewer")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["trusted_tool_recognized"])
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertEqual(diff["reportability_decision"]["decision"], "rendered-message-diff-passed")
+
+    def test_evtx_message_rendering_diff_blocks_message_wording_mismatch(self) -> None:
+        rapid = [{"record_id": "42", "event_message": "Rapid fallback wording"}]
+        trusted = [{"record_id": "42", "message": "Windows provider-rendered wording"}]
+
+        diff = build_evtx_message_rendering_diff(rapid, trusted, trusted_tool="EvtxECmd")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertIn("trusted-rendered-message-diff-required", diff["reportability_decision"]["blockers"])
 
     def test_shellbags_provider_emits_native_hive_candidate_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

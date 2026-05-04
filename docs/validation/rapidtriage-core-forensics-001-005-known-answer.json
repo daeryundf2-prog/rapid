@@ -38,10 +38,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "message text, inserted parameters, provenance, unresolved template warnings, and fallback limitations are preserved"
+          "message text, inserted parameters, provenance, trusted rendered-message diff gating, unresolved template warnings, and fallback limitations are preserved"
         ]
       },
-      "notes": "Internal fixture pass; provider resource DLL rendering remains commercial-grade evidence."
+      "notes": "Internal fixture pass; real Windows Event Viewer/EvtxECmd rendered-message output and provider resource DLL rendering remain commercial-grade evidence."
     },
     {
       "id": "core-forensics-003-evtx-recovery-fixture",

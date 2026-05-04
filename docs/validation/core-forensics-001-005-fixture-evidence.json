@@ -38,7 +38,8 @@
         "curated provider message catalogs preserve source type, message ID, extraction tool, locale, catalog path, and template SHA256 provenance.",
         "native EVTX rows can render from curated provider catalogs and remove the built-in-template fallback blocker for that row while retaining other commercial blockers.",
         "Windows Event Manifest XML catalog fixtures resolve provider event message string references into rendered native EVTX messages with source_type=windows-event-manifest provenance.",
-        "Manifest insertion placeholders such as %1 are mapped through the referenced template's ordered data fields before native EVTX message rendering."
+        "Manifest insertion placeholders such as %1 are mapped through the referenced template's ordered data fields before native EVTX message rendering.",
+        "build_evtx_message_rendering_diff normalizes RapidTriage rendered messages and trusted Windows Event Viewer/EvtxECmd-style rendered messages by EventRecordID, then blocks report-grade wording when text differs or trusted rendering is missing."
       ],
       "blockers_kept": [
         "automatic provider DLL/resource-table extraction",

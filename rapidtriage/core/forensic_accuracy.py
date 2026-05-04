@@ -33,6 +33,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "message text normalization",
             "inserted parameter mapping",
             "provider/template/source provenance",
+            "trusted rendered-message diff pass",
             "unresolved template warning",
             "fallback-message limitation disclosure",
         ),
