@@ -18,10 +18,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "EVTX record metadata, promoted fields, duplicate EventData ordering, and BinXML warning coverage are preserved"
+          "EVTX record metadata, promoted fields, duplicate EventData ordering, trusted-tool record diff gating, and BinXML warning coverage are preserved"
         ]
       },
-      "notes": "Internal fixture pass; provider-specific grammar and external corpus validation remain commercial-grade blockers."
+      "notes": "Internal fixture pass; real EvtxECmd/Hayabusa/Windows Event Viewer output, provider-specific grammar, and external corpus validation remain commercial-grade blockers."
     },
     {
       "id": "core-forensics-002-evtx-message-fixture",

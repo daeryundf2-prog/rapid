@@ -19,6 +19,7 @@
       "title": "Native EVTX BinXML full parsing",
       "assertions": [
         "native_evtx_core_accuracy_gates records EventRecordID, file offset, provider/channel/EventID/computer pivots, duplicate EventData ordering, scalar type decoding, and unsupported grammar warnings.",
+        "build_evtx_trusted_tool_record_diff compares RapidTriage native EVTX rows with trusted EvtxECmd/Hayabusa-style exports by EventRecordID, EventID, provider, channel, computer, timestamp, message hash, and template hash; mismatches, missing rows, or extra rows keep #1 triage-only.",
         "fixture EVTX rows preserve source hash, record metadata, promoted EventData fields, and #1 core_accuracy_gates.",
         "native EVTX collection uses mmap-bounded-record-scan plus streaming SHA256 instead of Path.read_bytes whole-file loading.",
         "native chunk fixture covers matching header and events CRC32 validation."

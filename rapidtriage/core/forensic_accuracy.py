@@ -19,6 +19,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "timestamp/EventID/provider/channel/computer equality",
             "duplicate EventData order preservation",
             "BinXML scalar type decoding diff",
+            "trusted-tool record-level diff pass",
             "unsupported grammar warning coverage",
         ),
     },

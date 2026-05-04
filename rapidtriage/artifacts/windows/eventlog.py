@@ -39,11 +39,22 @@ NATIVE_EVTX_READER_STRATEGY = "mmap-bounded-record-scan"
 NATIVE_EVTX_PARSE_SCOPE = "record-header-binxml-template-scalar-recovery-triage"
 NATIVE_EVTX_BINXML_STATUS = "not-decoded"
 NATIVE_EVTX_REPORT_GRADE_BLOCKERS = [
+    "trusted-tool-record-diff-required",
     "provider-message-resource-rendering-not-implemented",
     "full-binxml-object-model-not-implemented",
     "broad-deleted-corrupt-record-corpus-validation-required",
     "chunk-crc-algorithm-variant-validation-required",
 ]
+TRUSTED_EVTX_TOOL_HINTS = ("evtxecmd", "hayabusa", "windowseventviewer", "chainsaw", "velociraptor")
+EVTX_TRUSTED_DIFF_COMPARE_FIELDS = (
+    "event_id",
+    "provider_name",
+    "channel",
+    "computer",
+    "timestamp",
+    "message_sha256",
+    "template_sha256",
+)
 NATIVE_EVTX_CAPABILITIES = {
     "record_header": True,
     "file_header": True,
@@ -1635,6 +1646,11 @@ def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[s
     message = details.get("message_rendering") if isinstance(details.get("message_rendering"), Mapping) else {}
     recovery = details.get("evtx_recovery_context") if isinstance(details.get("evtx_recovery_context"), Mapping) else {}
     chunk = details.get("evtx_chunk_context") if isinstance(details.get("evtx_chunk_context"), Mapping) else {}
+    trusted_diff = (
+        details.get("evtx_trusted_tool_record_diff")
+        if isinstance(details.get("evtx_trusted_tool_record_diff"), Mapping)
+        else {}
+    )
     binxml_status = str(details.get("evtx_binxml_status") or details.get("binxml_status") or checks.get("binxml_status") or "")
 
     if not checks.get("passes_basic_record_integrity"):
@@ -1650,10 +1666,14 @@ def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[s
         and message["provenance"].get("provider_message_resource_resolved")
     ):
         blockers.append("provider-message-resource-rendering-required")
+    if trusted_diff.get("status") != "pass":
+        blockers.append("trusted-tool-record-diff-required")
     if details.get("validation_required"):
         blockers.append("native-record-validation-required")
 
     static_blockers = list(NATIVE_EVTX_REPORT_GRADE_BLOCKERS)
+    if trusted_diff.get("status") == "pass" and "trusted-tool-record-diff-required" in static_blockers:
+        static_blockers.remove("trusted-tool-record-diff-required")
     if (
         isinstance(message.get("provenance"), Mapping)
         and message["provenance"].get("provider_message_resource_resolved")
@@ -1710,6 +1730,11 @@ def native_evtx_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[
         if isinstance(details.get("binxml_event_data_values_by_name"), Mapping)
         else {}
     )
+    trusted_diff = (
+        details.get("evtx_trusted_tool_record_diff")
+        if isinstance(details.get("evtx_trusted_tool_record_diff"), Mapping)
+        else {}
+    )
     source_refs = [
         f"source_path:{details.get('source_path', '')}",
         f"record_id:{details.get('record_id', '')}",
@@ -1726,6 +1751,8 @@ def native_evtx_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[
         item1_checks.append("duplicate EventData order preservation")
     if checks.get("decoded_value_type_counts"):
         item1_checks.append("BinXML scalar type decoding diff")
+    if trusted_diff.get("status") == "pass":
+        item1_checks.append("trusted-tool record-level diff pass")
     if binxml_status and binxml_status not in {"basic-rendered", "template-substituted-partial"}:
         item1_checks.append("unsupported grammar warning coverage")
 
@@ -1778,6 +1805,11 @@ def native_evtx_commercial_uplift_evidence(details: Mapping[str, object]) -> dic
         for item in matrix
         if isinstance(item, Mapping) and not item.get("passed")
     ]
+    trusted_diff = (
+        details.get("evtx_trusted_tool_record_diff")
+        if isinstance(details.get("evtx_trusted_tool_record_diff"), Mapping)
+        else {}
+    )
     return {
         "batch_id": "commercial-uplift-001-005",
         "item_numbers": [1, 2, 3],
@@ -1795,6 +1827,15 @@ def native_evtx_commercial_uplift_evidence(details: Mapping[str, object]) -> dic
         "passed_validation_matrix_ids": passed_matrix,
         "failed_validation_matrix_ids": failed_matrix,
         "binxml_status": str(details.get("evtx_binxml_status") or checks.get("binxml_status") or ""),
+        "trusted_tool_record_diff": {
+            "status": str(trusted_diff.get("status") or "not-attached"),
+            "trusted_tool": str(trusted_diff.get("trusted_tool") or ""),
+            "matched_count": int(trusted_diff.get("matched_count") or 0),
+            "mismatch_count": int(trusted_diff.get("mismatch_count") or 0),
+            "missing_in_trusted_count": int(trusted_diff.get("missing_in_trusted_count") or 0),
+            "extra_in_trusted_count": int(trusted_diff.get("extra_in_trusted_count") or 0),
+            "commercial_grade_evidence": bool(trusted_diff.get("commercial_grade_evidence")),
+        },
         "report_grade_status": str(report_grade.get("status") or ""),
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "commercial_blocker_analysis": evtx_commercial_blocker_analysis(
@@ -1848,6 +1889,131 @@ def evtx_commercial_blocker_analysis(blockers: Sequence[object]) -> list[dict[st
             }
         )
     return rows
+
+
+def build_evtx_trusted_tool_record_diff(
+    rapid_records: Sequence[Mapping[str, object]],
+    trusted_records: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    """Compare normalized EVTX records against a trusted parser/export at record granularity."""
+
+    tool_name = str(trusted_tool or "").strip()
+    rapid_by_key = {
+        key: normalized
+        for record in rapid_records
+        for key, normalized in [_normalize_evtx_diff_record(record)]
+        if key
+    }
+    trusted_by_key = {
+        key: normalized
+        for record in trusted_records
+        for key, normalized in [_normalize_evtx_diff_record(record)]
+        if key
+    }
+
+    missing_in_trusted = sorted(key for key in rapid_by_key if key not in trusted_by_key)
+    extra_in_trusted = sorted(key for key in trusted_by_key if key not in rapid_by_key)
+    mismatches: list[dict[str, object]] = []
+    matched_count = 0
+    for key in sorted(set(rapid_by_key) & set(trusted_by_key)):
+        rapid = rapid_by_key[key]
+        trusted = trusted_by_key[key]
+        field_diffs = []
+        for field in EVTX_TRUSTED_DIFF_COMPARE_FIELDS:
+            left = rapid.get(field, "")
+            right = trusted.get(field, "")
+            if left or right:
+                if left != right:
+                    field_diffs.append({"field": field, "rapid": left, "trusted": right})
+        if field_diffs:
+            mismatches.append({"record_key": key, "field_diffs": field_diffs})
+        else:
+            matched_count += 1
+
+    status = "pass"
+    if not tool_name or not rapid_by_key or not trusted_by_key:
+        status = "not-enough-evidence"
+    elif missing_in_trusted or extra_in_trusted or mismatches:
+        status = "diffs-present"
+
+    normalized_tool = re.sub(r"[^a-z0-9]+", "", tool_name.lower())
+    trusted_tool_recognized = any(hint in normalized_tool for hint in TRUSTED_EVTX_TOOL_HINTS)
+    return {
+        "profile_version": "evtx-trusted-tool-record-diff-v1",
+        "trusted_tool": tool_name,
+        "trusted_tool_recognized": trusted_tool_recognized,
+        "compare_fields": list(EVTX_TRUSTED_DIFF_COMPARE_FIELDS),
+        "rapid_record_count": len(rapid_by_key),
+        "trusted_record_count": len(trusted_by_key),
+        "matched_count": matched_count,
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing_in_trusted),
+        "extra_in_trusted_count": len(extra_in_trusted),
+        "status": status,
+        "commercial_grade_evidence": status == "pass" and trusted_tool_recognized,
+        "missing_in_trusted": missing_in_trusted[:100],
+        "extra_in_trusted": extra_in_trusted[:100],
+        "mismatches": mismatches[:100],
+        "reportability_decision": {
+            "decision": "record-diff-passed" if status == "pass" else "do-not-use-native-evtx-as-final",
+            "allowed_use": (
+                "support report-grade EVTX assertions with attached corpus/signoff"
+                if status == "pass" and trusted_tool_recognized
+                else "triage-only until trusted EVTX diff is clean"
+            ),
+            "blockers": [] if status == "pass" and trusted_tool_recognized else ["trusted-tool-record-diff-required"],
+        },
+    }
+
+
+def _normalize_evtx_diff_record(record: Mapping[str, object]) -> tuple[str, dict[str, str]]:
+    key = _first_present_string(
+        record,
+        ("record_id", "event_record_id", "event_record_number", "record_number", "recordid"),
+    )
+    if not key:
+        return "", {}
+    normalized = {
+        "record_id": key,
+        "event_id": _first_present_string(record, ("event_id", "eventid", "id")),
+        "provider_name": _first_present_string(record, ("provider_name", "provider", "providerName")),
+        "channel": _first_present_string(record, ("channel", "log_name", "logname")),
+        "computer": _first_present_string(record, ("computer", "computer_name", "hostname", "system_computer")),
+        "timestamp": _normalize_evtx_timestamp(
+            _first_present_string(record, ("timestamp", "time_created", "timeCreated", "time_created_system_time"))
+        ),
+        "message_sha256": _first_present_string(
+            record,
+            ("message_sha256", "rendered_message_sha256", "event_message_sha256"),
+        ),
+        "template_sha256": _first_present_string(record, ("template_sha256", "binxml_template_sha256")),
+    }
+    message = _first_present_string(record, ("event_message", "message", "rendered_message"))
+    if message and not normalized["message_sha256"]:
+        normalized["message_sha256"] = hashlib.sha256(message.encode("utf-8", errors="replace")).hexdigest()
+    template = _first_present_string(record, ("template", "template_preview", "normalized_template_preview"))
+    if template and not normalized["template_sha256"]:
+        normalized["template_sha256"] = hashlib.sha256(template.encode("utf-8", errors="replace")).hexdigest()
+    return key, normalized
+
+
+def _first_present_string(record: Mapping[str, object], keys: Sequence[str]) -> str:
+    for key in keys:
+        value = record.get(key)
+        if value is not None and str(value) != "":
+            return str(value)
+    return ""
+
+
+def _normalize_evtx_timestamp(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.endswith("Z"):
+        return text[:-1] + "+00:00"
+    return text
 
 
 def native_evtx_record_candidate_record(

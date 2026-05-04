@@ -9,6 +9,7 @@ from pathlib import Path
 
 from rapidtriage.artifacts.windows.eventlog import (
     binxml_value_field_map,
+    build_evtx_trusted_tool_record_diff,
     native_evtx_commercial_uplift_evidence,
     native_evtx_core_accuracy_gates,
     native_evtx_promoted_fields,
@@ -107,6 +108,15 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                     {"id": "integrity-hash", "passed": True},
                 ],
                 "evtx_record_integrity": {"record_hash": "a" * 64},
+                "evtx_trusted_tool_record_diff": {
+                    "status": "pass",
+                    "trusted_tool": "EvtxECmd",
+                    "matched_count": 1,
+                    "mismatch_count": 0,
+                    "missing_in_trusted_count": 0,
+                    "extra_in_trusted_count": 0,
+                    "commercial_grade_evidence": True,
+                },
                 "evtx_recovery_context": {"validation_required": True},
                 "evtx_recovery_evidence": {"caution_labels": ["slack-record-candidate"]},
                 "message_rendering": {
@@ -122,6 +132,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         by_gap = {gate["gap_id"]: gate for gate in gates}
         self.assertEqual(set(by_gap), {"#1", "#2", "#3"})
         self.assertIn("duplicate EventData order preservation", by_gap["#1"]["satisfied_checks"])
+        self.assertIn("trusted-tool record-level diff pass", by_gap["#1"]["satisfied_checks"])
         self.assertIn("message text normalization", by_gap["#2"]["satisfied_checks"])
         self.assertIn("inserted parameter mapping", by_gap["#2"]["satisfied_checks"])
         self.assertIn("provider/template/source provenance", by_gap["#2"]["satisfied_checks"])
@@ -150,6 +161,59 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             blocker_categories["broad-deleted-corrupt-record-corpus-validation-required"],
             "external_validation",
         )
+
+    def test_evtx_trusted_tool_record_diff_requires_record_level_equality(self) -> None:
+        rapid = [
+            {
+                "record_id": "42",
+                "event_id": "4624",
+                "provider_name": "Microsoft-Windows-Security-Auditing",
+                "channel": "Security",
+                "computer": "host01",
+                "timestamp": "2024-01-02T03:04:05Z",
+                "event_message": "Alice logged on from 10.0.0.5",
+            }
+        ]
+        trusted = [
+            {
+                "event_record_id": "42",
+                "eventid": "4624",
+                "provider": "Microsoft-Windows-Security-Auditing",
+                "log_name": "Security",
+                "hostname": "host01",
+                "time_created": "2024-01-02T03:04:05+00:00",
+                "message": "Alice logged on from 10.0.0.5",
+            }
+        ]
+
+        diff = build_evtx_trusted_tool_record_diff(rapid, trusted, trusted_tool="EvtxECmd")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["trusted_tool_recognized"])
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertEqual(diff["mismatch_count"], 0)
+        self.assertEqual(diff["reportability_decision"]["decision"], "record-diff-passed")
+
+    def test_evtx_trusted_tool_record_diff_blocks_mismatches_and_gaps(self) -> None:
+        rapid = [
+            {"record_id": "1", "event_id": "4624", "provider_name": "Security", "channel": "Security"},
+            {"record_id": "2", "event_id": "4625", "provider_name": "Security", "channel": "Security"},
+        ]
+        trusted = [
+            {"record_id": "1", "event_id": "4625", "provider_name": "Security", "channel": "Security"},
+            {"record_id": "3", "event_id": "1102", "provider_name": "Security", "channel": "Security"},
+        ]
+
+        diff = build_evtx_trusted_tool_record_diff(rapid, trusted, trusted_tool="Hayabusa")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["missing_in_trusted_count"], 1)
+        self.assertEqual(diff["extra_in_trusted_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["record_key"], "1")
+        self.assertEqual(diff["reportability_decision"]["decision"], "do-not-use-native-evtx-as-final")
 
     def test_shellbags_provider_emits_native_hive_candidate_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
