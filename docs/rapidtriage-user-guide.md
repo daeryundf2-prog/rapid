@@ -112,6 +112,7 @@ The commercial re-architecture introduces isolated Rust parser workers while kee
 
 ```bash
 rapidtriage rearchitecture-status --json
+rapidtriage commercial-readiness --validation-package docs/validation/rapidtriage-core-forensics-001-120-known-answer.json --output-dir ./commercial-readiness --json
 ```
 
 When a `rapid-worker` binary is available, `worker-parse` can run it as a separate process and stage normalized `ArtifactRecordV1` rows without loading a whole evidence source into Python memory:
