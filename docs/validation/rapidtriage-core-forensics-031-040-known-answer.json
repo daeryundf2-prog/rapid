@@ -111,7 +111,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Email rows preserve mailbox/message profile, header/body/attachment inventory, PST/OST limitations, threading warnings, legal boundary, and #36 core_accuracy_gates"
+          "Email rows preserve mailbox/message profile, header/body/attachment inventory, PST/OST limitations, threading warnings, legal boundary, and #36 core_accuracy_gates",
+          "Email reportability decisions block native/deleted-complete mailbox claims until PST/OST/MSG, deleted item, threading, and privilege validation exists"
         ]
       },
       "notes": "Internal fixture pass; native PST/OST/MSG decoding and deleted item recovery remain commercial blockers."
@@ -129,7 +130,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Google cloud rows preserve profile detection, Gmail/Drive/Activity/Location normalization, export warnings, schema/timezone warnings, and #37 core_accuracy_gates"
+          "Google cloud rows preserve profile detection, Gmail/Drive/Activity/Location normalization, export warnings, schema/timezone warnings, and #37 core_accuracy_gates",
+          "Google export reportability decisions block product-matrix-complete claims until Takeout scope, sidecars, timezone, and provider-native validation exists"
         ]
       },
       "notes": "Internal fixture pass; full Takeout product matrix and provider-native diffs remain required."
@@ -147,7 +149,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Apple/iCloud rows preserve profile detection, account/file/photo normalization, ADP/shared-album limitations, retention/schema warnings, and #38 core_accuracy_gates"
+          "Apple/iCloud rows preserve profile detection, account/file/photo normalization, ADP/shared-album limitations, retention/schema warnings, and #38 core_accuracy_gates",
+          "iCloud reportability decisions block account/photo-complete claims until ADP/shared-album, retention, and schema validation exists"
         ]
       },
       "notes": "Internal fixture pass; ADP, shared album, and third-party container semantics need provider corpus."
@@ -165,7 +168,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Microsoft cloud rows preserve profile detection, file/message/audit normalization, eDiscovery warnings, permission/retention limitations, and #39 core_accuracy_gates"
+          "Microsoft cloud rows preserve profile detection, file/message/audit normalization, eDiscovery warnings, permission/retention limitations, and #39 core_accuracy_gates",
+          "Microsoft 365 reportability decisions block tenant/permission-complete claims until eDiscovery, permission graph, retention, and Teams/SharePoint validation exists"
         ]
       },
       "notes": "Internal fixture pass; Graph/eDiscovery diffs and permission graph validation remain required."
@@ -183,7 +187,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Cloud API collection preserves manifest validation, credential redaction, response hash/provenance, API limitation warnings, and #40 core_accuracy_gates"
+          "Cloud API collection preserves manifest validation, credential redaction, response hash/provenance, API limitation warnings, and #40 core_accuracy_gates",
+          "Cloud API reportability decisions block provider-complete acquisition claims until OAuth scope/consent, pagination/delta, legal hold, and provider schema validation exists"
         ]
       },
       "notes": "Internal fixture pass; provider OAuth/device flow, pagination/delta, and legal-hold workflows remain validation-gated."

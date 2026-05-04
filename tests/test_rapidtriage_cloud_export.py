@@ -71,6 +71,18 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertEqual(mail_uplift["item_numbers"], [37])
             self.assertIn("source-hash-present", mail_uplift["passed_validation_matrix_ids"])
             self.assertIn("provider-scope-verified", mail_uplift["failed_validation_matrix_ids"])
+            self.assertEqual(
+                mail_uplift["reportability_decision"]["decision"],
+                "do-not-report-google-takeout-as-product-matrix-complete",
+            )
+            self.assertEqual(
+                mail_uplift["reportability_decision"]["allowed_use"],
+                "google-export-triage-pivot",
+            )
+            self.assertIn(
+                "provider-export-scope-not-verified",
+                mail_uplift["reportability_decision"]["blockers"],
+            )
 
             apple_gate = account["details"]["core_accuracy_gates"][0]
             self.assertEqual(apple_gate["gap_id"], "#38")
@@ -80,6 +92,10 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             account_uplift = account["details"]["commercial_uplift_evidence"]
             self.assertEqual(account_uplift["item_numbers"], [38])
             self.assertIn("icloud-copy-limitations", account_uplift["failed_issue_matrix_ids"])
+            self.assertEqual(
+                account_uplift["reportability_decision"]["allowed_use"],
+                "icloud-export-triage-pivot",
+            )
 
             cloud_file = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "cloud-file")
             self.assertEqual(cloud_file["details"]["service"], "microsoft-onedrive")
@@ -95,6 +111,14 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             file_uplift = cloud_file["details"]["commercial_uplift_evidence"]
             self.assertEqual(file_uplift["item_numbers"], [39])
             self.assertIn("retention-hold-and-deleted-state", file_uplift["failed_issue_matrix_ids"])
+            self.assertEqual(
+                file_uplift["reportability_decision"]["decision"],
+                "do-not-report-m365-export-as-tenant-or-permission-complete",
+            )
+            self.assertEqual(
+                file_uplift["reportability_decision"]["allowed_use"],
+                "m365-export-triage-pivot",
+            )
 
             message = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "cloud-message")
             self.assertEqual(message["details"]["service"], "microsoft-teams")

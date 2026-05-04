@@ -596,16 +596,30 @@ def cloud_commercial_uplift_evidence(
         value = optional_text(details.get(key))
         if value:
             source_refs.append(f"{key}:{value}")
+    passed_validation_matrix_ids = [str(item.get("id")) for item in matrix if item.get("passed")]
+    failed_validation_matrix_ids = [str(item.get("id")) for item in matrix if not item.get("passed")]
+    passed_issue_matrix_ids = [str(item.get("id")) for item in issue_matrix if item.get("passed")]
+    failed_issue_matrix_ids = [str(item.get("id")) for item in issue_matrix if not item.get("passed")]
     return {
         "batch_id": "commercial-uplift-036-040",
         "item_numbers": item_numbers,
         "implementation_track": "cloud-export-provider-validation",
         "objective": " ".join(objectives[number] for number in item_numbers if number in objectives),
+        "reportability_decision": cloud_reportability_decision(
+            item_numbers=item_numbers,
+            family=family,
+            service=service,
+            validation_checks=validation_checks,
+            failed_validation_matrix_ids=failed_validation_matrix_ids,
+            failed_issue_matrix_ids=failed_issue_matrix_ids,
+            report_grade=report_grade,
+            details=details,
+        ),
         "source_refs": source_refs,
-        "passed_validation_matrix_ids": [str(item.get("id")) for item in matrix if item.get("passed")],
-        "failed_validation_matrix_ids": [str(item.get("id")) for item in matrix if not item.get("passed")],
-        "passed_issue_matrix_ids": [str(item.get("id")) for item in issue_matrix if item.get("passed")],
-        "failed_issue_matrix_ids": [str(item.get("id")) for item in issue_matrix if not item.get("passed")],
+        "passed_validation_matrix_ids": passed_validation_matrix_ids,
+        "failed_validation_matrix_ids": failed_validation_matrix_ids,
+        "passed_issue_matrix_ids": passed_issue_matrix_ids,
+        "failed_issue_matrix_ids": failed_issue_matrix_ids,
         "report_grade_status": str(report_grade.get("status") or ""),
         "commercial_blockers": list(report_grade.get("blockers") or CLOUD_REPORT_GRADE_BLOCKERS),
         "large_data_controls": {
@@ -617,6 +631,55 @@ def cloud_commercial_uplift_evidence(
         },
         "next_internal_step": "Add provider-specific export manifests, sidecar merge validation, sharing/retention graph capture, and provider known-answer corpora.",
         "external_evidence_required": True,
+    }
+
+
+def cloud_reportability_decision(
+    *,
+    item_numbers: list[int],
+    family: str,
+    service: str,
+    validation_checks: Mapping[str, object],
+    failed_validation_matrix_ids: list[str],
+    failed_issue_matrix_ids: list[str],
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = {str(item) for item in report_grade.get("blockers") or CLOUD_REPORT_GRADE_BLOCKERS if str(item)}
+    blockers.update(f"matrix:{item}" for item in failed_validation_matrix_ids)
+    blockers.update(f"issue:{item}" for item in failed_issue_matrix_ids)
+    if not validation_checks.get("provider_scope_verified"):
+        blockers.add("provider-export-scope-not-verified")
+    if not validation_checks.get("original_export_hash_verified"):
+        blockers.add("original-cloud-export-hash-not-verified")
+    if not validation_checks.get("provider_known_answer_validated"):
+        blockers.add("provider-known-answer-corpus-not-attached")
+    primary = item_numbers[0] if item_numbers else 37
+    decisions = {
+        37: ("do-not-report-google-takeout-as-product-matrix-complete", "google-export-triage-pivot"),
+        38: ("do-not-report-icloud-export-as-account-or-photo-complete", "icloud-export-triage-pivot"),
+        39: ("do-not-report-m365-export-as-tenant-or-permission-complete", "m365-export-triage-pivot"),
+    }
+    decision, allowed_use = decisions.get(primary, ("do-not-report-cloud-export-as-commercial-grade", "cloud-export-triage-pivot"))
+    return {
+        "profile_version": "cloud-export-reportability-decision-v1",
+        "commercial_gap_ids": [f"#{number}" for number in item_numbers],
+        "decision": decision,
+        "allowed_use": allowed_use,
+        "family": family,
+        "service": service,
+        "blockers": sorted(blockers),
+        "failed_validation_matrix_ids": list(failed_validation_matrix_ids),
+        "failed_issue_matrix_ids": list(failed_issue_matrix_ids),
+        "source_subject_or_object": optional_text(
+            details.get("subject") or details.get("file_name") or details.get("chat_id") or details.get("account_email")
+        ),
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "attach provider export/API scope, account ownership proof, timestamps/timezone notes, and original export hashes",
+            "validate rows against provider-native views or known-answer exports",
+            "document retention/deleted-state, sharing/permission, sidecar, and product-scope limitations",
+        ],
     }
 
 

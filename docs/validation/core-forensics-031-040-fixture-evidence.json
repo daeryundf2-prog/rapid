@@ -80,7 +80,7 @@
       "number": 36,
       "title": "Email PST/OST full mailbox parser",
       "assertions": [
-        "EML/MBOX/Maildir/PST/OST/MSG rows preserve source profiles, source hashes, message/body/attachment inventory, PST/OST limitations, threading/dedup warnings, legal privilege boundary, and #36 core_accuracy_gates."
+        "EML/MBOX/Maildir/PST/OST/MSG rows preserve source profiles, source hashes, message/body/attachment inventory, PST/OST limitations, threading/dedup warnings, legal privilege boundary, #36 core_accuracy_gates, and native/deleted-complete reportability blockers."
       ],
       "blockers_kept": [
         "native PST/OST/MSG object decoding",
@@ -92,7 +92,7 @@
       "number": 37,
       "title": "Gmail/Google Takeout deep parser",
       "assertions": [
-        "Google/Gmail/Takeout rows preserve provider profile detection, Gmail/Drive/Activity/Location normalization, source hashes, export-scope warnings, sidecar/linkage limitations, provider schema/timezone warnings, and #37 core_accuracy_gates."
+        "Google/Gmail/Takeout rows preserve provider profile detection, Gmail/Drive/Activity/Location normalization, source hashes, export-scope warnings, sidecar/linkage limitations, provider schema/timezone warnings, #37 core_accuracy_gates, and product-matrix reportability blockers."
       ],
       "blockers_kept": [
         "full Takeout product matrix",
@@ -104,7 +104,7 @@
       "number": 38,
       "title": "Apple iCloud export parser",
       "assertions": [
-        "Apple/iCloud rows preserve provider profile detection, account/file/photo metadata normalization, source hashes, export-scope warnings, ADP/shared-album warnings, retention/schema warnings, and #38 core_accuracy_gates."
+        "Apple/iCloud rows preserve provider profile detection, account/file/photo metadata normalization, source hashes, export-scope warnings, ADP/shared-album warnings, retention/schema warnings, #38 core_accuracy_gates, and account/photo-complete reportability blockers."
       ],
       "blockers_kept": [
         "Advanced Data Protection limitations",
@@ -116,7 +116,7 @@
       "number": 39,
       "title": "Microsoft 365/OneDrive/Teams export parser",
       "assertions": [
-        "Microsoft 365/OneDrive/Teams rows preserve provider profile detection, mail/file/message/audit normalization, source hashes, eDiscovery/export warnings, permissions/retention/deleted warnings, provider schema/timestamp warnings, and #39 core_accuracy_gates."
+        "Microsoft 365/OneDrive/Teams rows preserve provider profile detection, mail/file/message/audit normalization, source hashes, eDiscovery/export warnings, permissions/retention/deleted warnings, provider schema/timestamp warnings, #39 core_accuracy_gates, and tenant/permission-complete reportability blockers."
       ],
       "blockers_kept": [
         "Graph/eDiscovery version matrix",
@@ -128,7 +128,7 @@
       "number": 40,
       "title": "Cloud API acquisition workflow",
       "assertions": [
-        "Cloud API collection payloads preserve manifest validation, credential redaction, response hash/provenance, pagination/backoff limitations, OAuth/scope/legal warnings, and #40 core_accuracy_gates."
+        "Cloud API collection payloads preserve manifest validation, credential redaction, response hash/provenance, pagination/backoff limitations, OAuth/scope/legal warnings, #40 core_accuracy_gates, and provider-complete acquisition reportability blockers."
       ],
       "blockers_kept": [
         "provider-specific OAuth/device flow",

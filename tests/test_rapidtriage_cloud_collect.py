@@ -58,6 +58,18 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertEqual(api_uplift["item_numbers"], [40])
                 self.assertIn("manifest-validated", api_uplift["passed_validation_matrix_ids"])
                 self.assertIn("provider-oauth-scope-capture", api_uplift["failed_validation_matrix_ids"])
+                self.assertEqual(
+                    api_uplift["reportability_decision"]["decision"],
+                    "do-not-report-cloud-api-collection-as-provider-complete",
+                )
+                self.assertEqual(
+                    api_uplift["reportability_decision"]["allowed_use"],
+                    "cloud-api-response-triage-pivot",
+                )
+                self.assertIn(
+                    "provider-scope-inventory-not-captured",
+                    api_uplift["reportability_decision"]["blockers"],
+                )
                 api_gate = payload["core_accuracy_gates"][0]
                 self.assertEqual(api_gate["gap_id"], "#40")
                 self.assertIn("manifest request validation", api_gate["satisfied_checks"])

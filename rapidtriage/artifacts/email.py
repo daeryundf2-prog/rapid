@@ -529,11 +529,22 @@ def email_commercial_uplift_evidence(
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
     matrix = email_validation_matrix(source_format, validation)
     issue_matrix = email_issue_matrix(source_format)
+    passed_validation_matrix_ids = [str(item.get("id")) for item in matrix if item.get("passed")]
+    failed_validation_matrix_ids = [str(item.get("id")) for item in matrix if not item.get("passed")]
+    passed_issue_matrix_ids = [str(item.get("id")) for item in issue_matrix if item.get("passed")]
+    failed_issue_matrix_ids = [str(item.get("id")) for item in issue_matrix if not item.get("passed")]
     return {
         "batch_id": "commercial-uplift-036-040",
         "item_numbers": [36],
         "implementation_track": "email-mailbox-parser-validation",
         "objective": "Expose email/PST/OST/MBOX parsing evidence, mailbox bounds, and report-grade blockers without claiming native MAPI parity.",
+        "reportability_decision": email_reportability_decision(
+            source_format=source_format,
+            validation_checks=validation,
+            failed_validation_matrix_ids=failed_validation_matrix_ids,
+            failed_issue_matrix_ids=failed_issue_matrix_ids,
+            details=details,
+        ),
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             f"source_format:{source_format}",
@@ -541,10 +552,10 @@ def email_commercial_uplift_evidence(
             f"source_index:{details.get('source_index', '')}",
             f"mailbox_name:{details.get('mailbox_name', '')}",
         ],
-        "passed_validation_matrix_ids": [str(item.get("id")) for item in matrix if item.get("passed")],
-        "failed_validation_matrix_ids": [str(item.get("id")) for item in matrix if not item.get("passed")],
-        "passed_issue_matrix_ids": [str(item.get("id")) for item in issue_matrix if item.get("passed")],
-        "failed_issue_matrix_ids": [str(item.get("id")) for item in issue_matrix if not item.get("passed")],
+        "passed_validation_matrix_ids": passed_validation_matrix_ids,
+        "failed_validation_matrix_ids": failed_validation_matrix_ids,
+        "passed_issue_matrix_ids": passed_issue_matrix_ids,
+        "failed_issue_matrix_ids": failed_issue_matrix_ids,
         "commercial_blockers": email_blockers(source_format),
         "large_data_controls": {
             "max_mbox_messages": MAX_MBOX_MESSAGES,
@@ -557,6 +568,41 @@ def email_commercial_uplift_evidence(
         },
         "next_internal_step": "Add libpff/native MAPI object decoding, folder/deleted item recovery, attachment hashing, and mailbox known-answer corpus validation.",
         "external_evidence_required": True,
+    }
+
+
+def email_reportability_decision(
+    *,
+    source_format: str,
+    validation_checks: dict[str, object],
+    failed_validation_matrix_ids: list[str],
+    failed_issue_matrix_ids: list[str],
+    details: dict[str, object],
+) -> dict[str, object]:
+    blockers = set(email_blockers(source_format))
+    blockers.update(f"matrix:{item}" for item in failed_validation_matrix_ids)
+    blockers.update(f"issue:{item}" for item in failed_issue_matrix_ids)
+    if source_format in {"pst", "ost", "msg"}:
+        blockers.add("native-mapi-container-decoding-not-validated")
+    if not validation_checks.get("commercial_parser_validated"):
+        blockers.add("mailbox-known-answer-corpus-not-attached")
+    return {
+        "profile_version": "email-reportability-decision-v1",
+        "commercial_gap_ids": ["#36"],
+        "decision": "do-not-report-mailbox-as-native-or-deleted-complete",
+        "allowed_use": "email-message-or-mailbox-inventory-triage-pivot",
+        "source_format": source_format,
+        "blockers": sorted(blockers),
+        "failed_validation_matrix_ids": list(failed_validation_matrix_ids),
+        "failed_issue_matrix_ids": list(failed_issue_matrix_ids),
+        "message_count": int(details.get("message_count") or 0),
+        "attachment_count": int(details.get("attachment_count") or 0),
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "validate native PST/OST/MSG object and folder decoding where applicable",
+            "validate deleted item recovery, threading, duplicates, timezone, and attachments with known-answer mailboxes",
+            "review privilege, legal scope, and search/export limitations before reporting message content",
+        ],
     }
 
 

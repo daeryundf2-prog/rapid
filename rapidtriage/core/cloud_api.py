@@ -438,19 +438,27 @@ def cloud_api_commercial_uplift_evidence(
     report_grade: Mapping[str, object],
 ) -> dict[str, object]:
     matrix = cloud_api_validation_matrix(summary, credential_handling)
+    passed_validation_matrix_ids = [str(item.get("id")) for item in matrix if item.get("passed")]
+    failed_validation_matrix_ids = [str(item.get("id")) for item in matrix if not item.get("passed")]
     return {
         "batch_id": "commercial-uplift-036-040",
         "item_numbers": [40],
         "implementation_track": "cloud-api-acquisition-workflow",
         "objective": "Expose cloud API collection manifest validation, credential redaction, response hash provenance, and provider OAuth/scope blockers.",
+        "reportability_decision": cloud_api_reportability_decision(
+            summary=summary,
+            credential_handling=credential_handling,
+            failed_validation_matrix_ids=failed_validation_matrix_ids,
+            report_grade=report_grade,
+        ),
         "source_refs": [
             f"manifest_path:{manifest_path.resolve()}",
             f"manifest_sha256:{compute_sha256(manifest_path)}",
             f"output_dir:{output_dir.resolve()}",
             *[f"response_sha256:{request.get('response_sha256')}" for request in requests[:5] if request.get("response_sha256")],
         ],
-        "passed_validation_matrix_ids": [str(item.get("id")) for item in matrix if item.get("passed")],
-        "failed_validation_matrix_ids": [str(item.get("id")) for item in matrix if not item.get("passed")],
+        "passed_validation_matrix_ids": passed_validation_matrix_ids,
+        "failed_validation_matrix_ids": failed_validation_matrix_ids,
         "report_grade_status": str(report_grade.get("status") or ""),
         "commercial_blockers": list(report_grade.get("blockers") or CLOUD_API_REPORT_GRADE_BLOCKERS),
         "large_data_controls": {
@@ -465,6 +473,41 @@ def cloud_api_commercial_uplift_evidence(
         },
         "next_internal_step": "Add provider OAuth/device flow, scope capture, pagination/backoff manifests, delta collection, and provider API known-answer validation.",
         "external_evidence_required": True,
+    }
+
+
+def cloud_api_reportability_decision(
+    *,
+    summary: Mapping[str, object],
+    credential_handling: Mapping[str, object],
+    failed_validation_matrix_ids: list[str],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = {str(item) for item in report_grade.get("blockers") or CLOUD_API_REPORT_GRADE_BLOCKERS if str(item)}
+    blockers.update(f"matrix:{item}" for item in failed_validation_matrix_ids)
+    if not credential_handling.get("provider_scope_inventory"):
+        blockers.add("provider-scope-inventory-not-captured")
+    if not credential_handling.get("provider_oauth_consent_record"):
+        blockers.add("oauth-consent-record-not-captured")
+    if not summary.get("provider_api_known_answer_validated"):
+        blockers.add("provider-api-known-answer-corpus-not-attached")
+    return {
+        "profile_version": "cloud-api-reportability-decision-v1",
+        "commercial_gap_ids": ["#40"],
+        "decision": "do-not-report-cloud-api-collection-as-provider-complete",
+        "allowed_use": "cloud-api-response-triage-pivot",
+        "blockers": sorted(blockers),
+        "failed_validation_matrix_ids": list(failed_validation_matrix_ids),
+        "request_count": int(summary.get("request_count") or 0),
+        "collected_count": int(summary.get("collected_count") or 0),
+        "dry_run": bool(summary.get("dry_run")),
+        "credentials_redacted": bool(credential_handling.get("headers_redacted")),
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "capture provider OAuth/device-flow consent, scopes, legal hold, and account ownership evidence",
+            "validate API pagination, delta, retry/backoff, and response schemas against provider known-answer data",
+            "compare collected JSON with provider-native export or admin/eDiscovery views before testimony",
+        ],
     }
 
 

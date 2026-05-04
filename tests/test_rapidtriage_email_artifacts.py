@@ -55,6 +55,18 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             self.assertEqual(eml_uplift["item_numbers"], [36])
             self.assertIn("source-hash-and-basic-parse", eml_uplift["passed_validation_matrix_ids"])
             self.assertIn("thread-dedup-validation", eml_uplift["failed_validation_matrix_ids"])
+            self.assertEqual(
+                eml_uplift["reportability_decision"]["decision"],
+                "do-not-report-mailbox-as-native-or-deleted-complete",
+            )
+            self.assertEqual(
+                eml_uplift["reportability_decision"]["allowed_use"],
+                "email-message-or-mailbox-inventory-triage-pivot",
+            )
+            self.assertIn(
+                "mailbox-known-answer-corpus-not-attached",
+                eml_uplift["reportability_decision"]["blockers"],
+            )
 
             emlx = next(artifact for artifact in messages if artifact["details"]["source_format"] == "emlx")
             self.assertEqual(emlx["details"]["email_format_profile"]["family"], "apple-mail-message")
@@ -76,6 +88,10 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             pst_uplift = pst["details"]["commercial_uplift_evidence"]
             self.assertIn("native-container-object-decode", pst_uplift["failed_validation_matrix_ids"])
             self.assertEqual(pst_uplift["large_data_controls"]["container_scan_limit"], 16 * 1024 * 1024)
+            self.assertIn(
+                "native-mapi-container-decoding-not-validated",
+                pst_uplift["reportability_decision"]["blockers"],
+            )
 
 
 def write_email_fixture(root: Path) -> None:
