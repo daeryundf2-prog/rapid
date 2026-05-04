@@ -11,6 +11,7 @@ from rapidtriage.cli import main
 from rapidtriage.artifacts.windows.eventlog import collect_native_evtx_events
 from tests.windows_artifact_fixtures import (
     build_corrupt_evtx_record_candidate,
+    build_evtx_with_checked_chunk,
     build_evtx_with_slack_record,
     build_minimal_evtx,
     build_template_evtx,
@@ -638,6 +639,37 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_evtx.details["record_id"], "778")
             self.assertEqual(native_evtx.details["evtx_reader_strategy"], "mmap-bounded-record-scan")
             self.assertEqual(native_evtx.details["commercial_uplift_evidence"]["large_data_controls"]["current_reader"], "mmap-bounded-record-scan")
+
+    def test_eventlog_collector_validates_native_evtx_chunk_checksums(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evtx_path = root / "Windows" / "System32" / "winevt" / "Logs" / "Checked.evtx"
+            evtx_path.parent.mkdir(parents=True, exist_ok=True)
+            evtx_path.write_bytes(
+                build_evtx_with_checked_chunk(
+                    record_id=779,
+                    timestamp=datetime(2024, 4, 2, 3, 4, 5, tzinfo=timezone.utc),
+                    strings=["Microsoft-Windows-Security-Auditing", "Security", "WIN-CRC", "wevtutil gli Security"],
+                )
+            )
+            output = root / "eventlog.json"
+
+            self.assertEqual(main(["artifacts", str(root), "--kind", "eventlog", "--output", str(output)]), 0)
+            artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
+            chunk = next(item for item in artifacts if item["artifact_type"] == "eventlog-chunk")["details"]
+            native_evtx = next(
+                item
+                for item in artifacts
+                if item["artifact_type"] == "eventlog-event"
+                and item["details"]["parser"] == "windows-eventlog-evtx-native"
+            )["details"]
+            summary = next(item for item in artifacts if item["artifact_type"] == "eventlog-summary")["details"]
+
+            self.assertEqual(native_evtx["record_id"], "779")
+            self.assertEqual(chunk["evtx_chunk_integrity"]["checksum_status"], "matched")
+            self.assertTrue(chunk["evtx_chunk_integrity"]["header_checksum_match"])
+            self.assertTrue(chunk["evtx_chunk_integrity"]["events_checksum_match"])
+            self.assertIn({"value": "matched", "count": 1}, summary["native_chunk_integrity_counts"])
 
     def test_eventlog_collector_decodes_native_evtx_template_substitution_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

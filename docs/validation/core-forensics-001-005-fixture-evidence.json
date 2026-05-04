@@ -20,7 +20,8 @@
       "assertions": [
         "native_evtx_core_accuracy_gates records EventRecordID, file offset, provider/channel/EventID/computer pivots, duplicate EventData ordering, scalar type decoding, and unsupported grammar warnings.",
         "fixture EVTX rows preserve source hash, record metadata, promoted EventData fields, and #1 core_accuracy_gates.",
-        "native EVTX collection uses mmap-bounded-record-scan plus streaming SHA256 instead of Path.read_bytes whole-file loading."
+        "native EVTX collection uses mmap-bounded-record-scan plus streaming SHA256 instead of Path.read_bytes whole-file loading.",
+        "native chunk fixture covers matching header and events CRC32 validation."
       ],
       "blockers_kept": [
         "complete provider-specific BinXML grammar coverage",

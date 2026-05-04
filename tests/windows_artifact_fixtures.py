@@ -4,6 +4,7 @@ import os
 import sqlite3
 import struct
 import uuid
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -583,6 +584,30 @@ def build_evtx_with_slack_record(record_id: int, timestamp: datetime, strings: l
     chunk[40:44] = (512).to_bytes(4, "little")
     chunk[44:48] = (512).to_bytes(4, "little")
     return bytes(header) + bytes(chunk) + (b"\x00" * 128) + record
+
+
+def build_evtx_with_checked_chunk(record_id: int, timestamp: datetime, strings: list[str]) -> bytes:
+    source = build_minimal_evtx(record_id, timestamp, strings)
+    record = source[4096:]
+    header = bytearray(source[:4096])
+    chunk = bytearray(65536)
+    chunk[0:8] = b"ElfChnk\x00"
+    chunk[8:16] = record_id.to_bytes(8, "little")
+    chunk[16:24] = record_id.to_bytes(8, "little")
+    chunk[24:32] = record_id.to_bytes(8, "little")
+    chunk[32:40] = record_id.to_bytes(8, "little")
+    free_space_offset = 512 + len(record)
+    chunk[40:44] = (512).to_bytes(4, "little")
+    chunk[44:48] = free_space_offset.to_bytes(4, "little")
+    chunk[48:52] = free_space_offset.to_bytes(4, "little")
+    chunk[512:free_space_offset] = record
+    chunk[52:56] = _fixture_crc32(chunk[512:free_space_offset]).to_bytes(4, "little")
+    chunk[124:128] = _fixture_crc32(chunk[:120]).to_bytes(4, "little")
+    return bytes(header) + bytes(chunk)
+
+
+def _fixture_crc32(value: bytes) -> int:
+    return zlib.crc32(value) & 0xFFFFFFFF
 
 
 def build_corrupt_evtx_record_candidate(record_id: int, timestamp: datetime, strings: list[str]) -> bytes:
