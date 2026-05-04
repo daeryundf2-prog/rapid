@@ -532,6 +532,16 @@ def cloud_credential_commercial_uplift_evidence(
         "item_numbers": [41],
         "implementation_track": "cloud-credential-handling",
         "objective": "Expose token redaction, storage boundary, scope/audit blockers, and legal authority requirements.",
+        "reportability_decision": cloud_credential_reportability_decision(
+            credential_handling=credential_handling,
+            failed_validation_check_ids=[
+                "provider_oauth_consent_record",
+                "provider_scope_inventory",
+                "secure_token_vault",
+                "token_rotation_audit",
+            ],
+            commercial_blockers=list(assessment.get("blockers") or CLOUD_CREDENTIAL_SECURITY_BLOCKERS),
+        ),
         "source_refs": [
             f"manifest_path:{manifest_path.resolve()}",
             f"manifest_sha256:{compute_sha256(manifest_path)}",
@@ -560,6 +570,33 @@ def cloud_credential_commercial_uplift_evidence(
         },
         "next_internal_step": "Integrate OS/enterprise token vault, OAuth scope capture, consent evidence, and token rotation/revocation audit.",
         "external_evidence_required": True,
+    }
+
+
+def cloud_credential_reportability_decision(
+    *,
+    credential_handling: Mapping[str, object],
+    failed_validation_check_ids: list[str],
+    commercial_blockers: list[str],
+) -> dict[str, object]:
+    blockers = set(commercial_blockers)
+    blockers.update(f"check:{item}" for item in failed_validation_check_ids)
+    return {
+        "profile_version": "cloud-credential-reportability-decision-v1",
+        "commercial_gap_ids": ["#41"],
+        "decision": "do-not-report-cloud-credential-handling-as-enterprise-vaulted",
+        "allowed_use": "redacted-credential-handling-triage-pivot",
+        "blockers": sorted(blockers),
+        "failed_validation_check_ids": list(failed_validation_check_ids),
+        "credential_storage": str(credential_handling.get("credential_storage") or ""),
+        "headers_redacted": bool(credential_handling.get("headers_redacted")),
+        "tokens_written_to_output": bool(credential_handling.get("tokens_written_to_output")),
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "attach OAuth consent and provider scope evidence",
+            "integrate or document enterprise token vault handling",
+            "record token rotation/revocation audit and legal authority sign-off",
+        ],
     }
 
 

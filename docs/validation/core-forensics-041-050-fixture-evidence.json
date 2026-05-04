@@ -9,7 +9,7 @@
       "title": "Cloud token/credential secure handling",
       "test_files": ["tests/test_rapidtriage_cloud_collect.py"],
       "assertions": [
-        "Cloud collection redacts credential-bearing headers, never writes token values, records environment-variable storage boundaries, and emits #41 core_accuracy_gates."
+        "Cloud collection redacts credential-bearing headers, never writes token values, records environment-variable storage boundaries, emits #41 core_accuracy_gates, and blocks enterprise-vaulted reportability without OAuth consent, scope, vault, and rotation evidence."
       ],
       "remaining_external_validation": [
         "Provider OAuth consent capture, secure enterprise vault integration, token rotation/revocation evidence, and signed legal authority records."
@@ -20,7 +20,7 @@
       "title": "Browser password/cookie/session artifact handling with strict legal warning",
       "test_files": ["tests/test_rapidtriage_windows_artifacts.py"],
       "assertions": [
-        "Browser storage inventory identifies sensitive stores, keeps secret values redacted, records strict legal warnings, and emits #42 core_accuracy_gates."
+        "Browser storage inventory identifies sensitive stores, keeps secret values redacted, records strict legal warnings, emits #42 core_accuracy_gates, and blocks decrypted/revealed secret reportability without lawful reveal, DPAPI/keychain, browser-version, and audit evidence."
       ],
       "remaining_external_validation": [
         "DPAPI/keychain/browser-version known-answer fixtures and audited opt-in reveal workflow."
@@ -31,7 +31,7 @@
       "title": "Mobile app media/message timeline correlation",
       "test_files": ["tests/test_rapidtriage_mobile_export.py"],
       "assertions": [
-        "Mobile correlation summary preserves message/media/contact/call counts, candidate media-message links, service attribution, timeline readiness, and #43 core_accuracy_gates."
+        "Mobile correlation summary preserves message/media/contact/call counts, candidate media-message links, service attribution, timeline readiness, #43 core_accuracy_gates, and blocks device-wide timeline reportability without timeline/timezone/attachment/vendor diff validation."
       ],
       "remaining_external_validation": [
         "Device-wide timeline joins, timezone validation, attachment recovery, and vendor-tool diff corpus."
@@ -42,7 +42,7 @@
       "title": "Contact/call/SMS unified mobile view",
       "test_files": ["tests/test_rapidtriage_mobile_export.py"],
       "assertions": [
-        "Mobile correlation summary builds unified contact/call/SMS actor pivots with source links, participants, export-scope warnings, and #44 core_accuracy_gates."
+        "Mobile correlation summary builds unified contact/call/SMS actor pivots with source links, participants, export-scope warnings, #44 core_accuracy_gates, and blocks identity-complete actor reportability without analyst merge/split and cross-app validation."
       ],
       "remaining_external_validation": [
         "Identity dedupe, merge/split workflow, and cross-app known-answer actor validation."
@@ -53,7 +53,7 @@
       "title": "App-specific known schema version management",
       "test_files": ["tests/test_rapidtriage_mobile_export.py"],
       "assertions": [
-        "Mobile correlation summary records app/service schema versions, schema registry entries, compatibility warnings, and #45 core_accuracy_gates."
+        "Mobile correlation summary records app/service schema versions, schema registry entries, compatibility warnings, #45 core_accuracy_gates, and blocks release-safe schema reportability without compatibility matrix, migration fixtures, and release-gate evidence."
       ],
       "remaining_external_validation": [
         "Per-app schema compatibility matrix, migration fixtures, and release-gated schema support policy."

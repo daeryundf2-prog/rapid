@@ -356,6 +356,22 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 "correlation_validated_against_known_answer",
                 correlation_uplift["failed_validation_check_ids"],
             )
+            self.assertEqual(
+                correlation_uplift["reportability_decision"]["decision"],
+                "do-not-report-mobile-correlation-as-device-wide-or-identity-complete",
+            )
+            self.assertEqual(
+                correlation_uplift["reportability_decision"]["allowed_use"],
+                "mobile-correlation-and-schema-triage-pivot",
+            )
+            self.assertIn(
+                "device-wide-timeline-not-validated",
+                correlation_uplift["reportability_decision"]["blockers"],
+            )
+            self.assertIn(
+                "schema-version-registry-known-answer-not-attached",
+                correlation_uplift["reportability_decision"]["blockers"],
+            )
             self.assertFalse(correlation_uplift["large_data_controls"]["device_wide_timeline_ready"])
             self.assertTrue(correlation_uplift["large_data_controls"]["known_answer_correlation_required"])
 

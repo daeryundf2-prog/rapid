@@ -219,6 +219,16 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("strict_legal_warning_present", secret_uplift["passed_control_ids"])
             self.assertTrue(secret_uplift["large_data_controls"]["secret_values_redacted_by_default"])
             self.assertFalse(secret_uplift["large_data_controls"]["dpapi_keychain_integration"])
+            self.assertEqual(
+                secret_uplift["reportability_decision"]["decision"],
+                "do-not-report-browser-secrets-as-decrypted-or-revealed",
+            )
+            self.assertEqual(
+                secret_uplift["reportability_decision"]["allowed_use"],
+                "browser-secret-store-inventory-triage-pivot",
+            )
+            self.assertTrue(secret_uplift["reportability_decision"]["secret_values_redacted_by_default"])
+            self.assertFalse(secret_uplift["reportability_decision"]["dpapi_keychain_integration"])
             storage_uplift = storage_inventory["details"]["commercial_uplift_evidence"]
             self.assertEqual(storage_uplift["batch_id"], "commercial-uplift-016-020")
             self.assertEqual(storage_uplift["item_numbers"], [19, 20])

@@ -1166,6 +1166,12 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
         "batch_id": "commercial-uplift-041-045",
         "item_numbers": [42],
         "implementation_track": "browser-secret-legal-gate",
+        "reportability_decision": browser_secret_reportability_decision(
+            checks=checks,
+            failed_control_ids=failed_control_ids,
+            commercial_blockers=list(assessment.get("blockers") or []),
+            details=details,
+        ),
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             f"browser:{details.get('browser', '')}",
@@ -1185,6 +1191,39 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
             "dpapi_keychain_integration": False,
         },
         "reporting_status": "inventory-only-validation-required",
+    }
+
+
+def browser_secret_reportability_decision(
+    *,
+    checks: Mapping[str, object],
+    failed_control_ids: Sequence[str],
+    commercial_blockers: list[str],
+    details: Mapping[str, object],
+) -> Dict[str, object]:
+    blockers = set(commercial_blockers)
+    blockers.update(f"control:{item}" for item in failed_control_ids)
+    if not checks.get("scope_review_required"):
+        blockers.add("case-scope-review-not-required-by-fixture-but-still-operator-owned")
+    if not checks.get("inventory_only_mode"):
+        blockers.add("inventory-only-mode-not-confirmed")
+    return {
+        "profile_version": "browser-secret-reportability-decision-v1",
+        "commercial_gap_ids": ["#42"],
+        "decision": "do-not-report-browser-secrets-as-decrypted-or-revealed",
+        "allowed_use": "browser-secret-store-inventory-triage-pivot",
+        "blockers": sorted(blockers),
+        "failed_control_ids": list(failed_control_ids),
+        "browser": str(details.get("browser") or ""),
+        "profile": str(details.get("profile") or ""),
+        "secret_values_redacted_by_default": not bool(checks.get("raw_secret_values_extracted")),
+        "dpapi_keychain_integration": False,
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "document legal authority and case scope before any reveal workflow",
+            "validate DPAPI/keychain/browser-version handling with known-answer fixtures",
+            "record analyst audit events for each controlled secret reveal",
+        ],
     }
 
 

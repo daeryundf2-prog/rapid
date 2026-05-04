@@ -1254,6 +1254,15 @@ def mobile_correlation_commercial_uplift_evidence(
         "batch_id": "commercial-uplift-041-045",
         "item_numbers": [43, 44, 45],
         "implementation_track": "mobile-correlation-schema-gate",
+        "reportability_decision": mobile_correlation_reportability_decision(
+            validation_checks=validation_checks,
+            failed_validation_check_ids=sorted(set(failed_validation_check_ids)),
+            report_grade=report_grade,
+            message_count=message_count,
+            media_count=media_count,
+            unified_actor_count=unified_actor_count,
+            schema_version_count=schema_version_count,
+        ),
         "source_refs": [f"service:{service}" for service in services[:20]],
         "passed_validation_check_ids": sorted(set(passed_validation_check_ids)),
         "failed_validation_check_ids": sorted(set(failed_validation_check_ids)),
@@ -1273,6 +1282,42 @@ def mobile_correlation_commercial_uplift_evidence(
             "known_answer_correlation_required": True,
         },
         "reporting_status": "candidate-correlation-validation-required",
+    }
+
+
+def mobile_correlation_reportability_decision(
+    *,
+    validation_checks: Mapping[str, object],
+    failed_validation_check_ids: list[str],
+    report_grade: Mapping[str, object],
+    message_count: int,
+    media_count: int,
+    unified_actor_count: int,
+    schema_version_count: int,
+) -> dict[str, object]:
+    blockers = {str(item) for item in report_grade["blockers"] if str(item)}
+    blockers.update(f"check:{item}" for item in failed_validation_check_ids)
+    if not validation_checks.get("device_wide_timeline_validated"):
+        blockers.add("device-wide-timeline-not-validated")
+    if not validation_checks.get("schema_version_registry_known_answer_validated"):
+        blockers.add("schema-version-registry-known-answer-not-attached")
+    return {
+        "profile_version": "mobile-correlation-reportability-decision-v1",
+        "commercial_gap_ids": ["#43", "#44", "#45"],
+        "decision": "do-not-report-mobile-correlation-as-device-wide-or-identity-complete",
+        "allowed_use": "mobile-correlation-and-schema-triage-pivot",
+        "blockers": sorted(blockers),
+        "failed_validation_check_ids": list(failed_validation_check_ids),
+        "message_count": message_count,
+        "media_count": media_count,
+        "unified_actor_count": unified_actor_count,
+        "schema_version_count": schema_version_count,
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "validate device-wide timeline joins, timezone assumptions, and attachment recovery",
+            "attach analyst-reviewed identity merge/split decisions for contacts/calls/SMS actors",
+            "gate each app parser with schema migration fixtures and release-reviewed compatibility matrices",
+        ],
     }
 
 

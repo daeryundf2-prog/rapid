@@ -31,6 +31,8 @@ rapidtriage commercial-readiness \
 | #49 Timeline | Search analysis extracts timestamps, normalizes UTC, builds date buckets, preserves source anchors, and emits #49 `core_accuracy_gates`. | Full Case DB timeline join, timezone/skew validation, annotations, and large cursor-paged timeline tests. |
 | #50 Workbook | Search analysis emits draft hypotheses, cluster evidence links, review questions/tasks, report-readiness flags, and #50 `core_accuracy_gates`. | Editable persistent workbook, evidence attachment workflow, reviewer assignments, report export, and version history. |
 
+The #41 through #45 rows now emit explicit reportability decisions so internal triage output cannot be mistaken for commercial-grade proof. #41 is limited to `redacted-credential-handling-triage-pivot` until OAuth consent, provider scope inventory, secure token vault, and rotation audit evidence exists. #42 is limited to `browser-secret-store-inventory-triage-pivot` until lawful reveal authority, DPAPI/keychain/browser-version validation, and reveal audit logging exist. #43 through #45 are limited to `mobile-correlation-and-schema-triage-pivot` until device-wide timeline/timezone/attachment recovery, identity merge/split, and schema migration/release matrix evidence is attached.
+
 ## Interpretation
 
 Passing this manifest promotes #41 through #50 to the internal `validated` maturity stage only. These rows remain `commercial_grade_ready=false` until broader corpus, cross-tool diff, independent validation, and operator-controlled legal evidence are attached.

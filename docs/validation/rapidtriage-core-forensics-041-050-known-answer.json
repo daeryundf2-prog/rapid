@@ -16,7 +16,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Cloud collection preserves token redaction, environment/vault boundary metadata, scope/consent warnings, rotation audit warnings, legal warning, and #41 core_accuracy_gates."
+          "Cloud collection preserves token redaction, environment/vault boundary metadata, scope/consent warnings, rotation audit warnings, legal warning, and #41 core_accuracy_gates.",
+          "Cloud credential reportability decisions block enterprise-vaulted claims until OAuth consent, provider scope inventory, secure token vault, and token rotation audit evidence exists."
         ]
       },
       "notes": "Internal fixture pass; enterprise vault, OAuth consent records, and provider audit evidence remain external blockers."
@@ -34,7 +35,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Browser storage inventory preserves sensitive artifact inventory, secret redaction, strict legal warning, opt-in reveal warning, audit/scope review requirement, and #42 core_accuracy_gates."
+          "Browser storage inventory preserves sensitive artifact inventory, secret redaction, strict legal warning, opt-in reveal warning, audit/scope review requirement, and #42 core_accuracy_gates.",
+          "Browser secret reportability decisions block decrypted or revealed secret claims until lawful reveal authority, DPAPI/keychain/browser-version validation, and audit evidence exists."
         ]
       },
       "notes": "Internal fixture pass; lawful DPAPI/keychain reveal workflows and browser-version corpora remain validation-gated."
@@ -52,7 +54,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Mobile correlation summary preserves message-media links, row counts, service attribution, timeline readiness, known-answer warning, and #43 core_accuracy_gates."
+          "Mobile correlation summary preserves message-media links, row counts, service attribution, timeline readiness, known-answer warning, and #43 core_accuracy_gates.",
+          "Mobile correlation reportability decisions block device-wide timeline claims until timeline, timezone, attachment recovery, and vendor diff validation exists."
         ]
       },
       "notes": "Internal fixture pass; device-wide timeline and vendor diff validation remain required."
@@ -70,7 +73,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Mobile correlation summary preserves contact/call/SMS actor merge, source row links, participant attribution, dedupe/export-scope warnings, and #44 core_accuracy_gates."
+          "Mobile correlation summary preserves contact/call/SMS actor merge, source row links, participant attribution, dedupe/export-scope warnings, and #44 core_accuracy_gates.",
+          "Mobile unified view reportability decisions block identity-complete actor claims until analyst merge/split and cross-app actor validation exists."
         ]
       },
       "notes": "Internal fixture pass; analyst-verified identity resolution and grouped mobile UI remain future work."
@@ -88,7 +92,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Mobile correlation summary preserves app/service schema registry, source app/version attribution, schema compatibility warnings, migration warnings, release-gate disclosure, and #45 core_accuracy_gates."
+          "Mobile correlation summary preserves app/service schema registry, source app/version attribution, schema compatibility warnings, migration warnings, release-gate disclosure, and #45 core_accuracy_gates.",
+          "Schema reportability decisions block release-safe schema claims until per-app compatibility, migration fixture, and release-gate evidence exists."
         ]
       },
       "notes": "Internal fixture pass; per-app schema migration fixture matrix remains required for commercial-grade claims."

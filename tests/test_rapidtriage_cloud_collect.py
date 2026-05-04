@@ -84,6 +84,19 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertEqual(credential_uplift["item_numbers"], [41])
                 self.assertIn("tokens_not_written", credential_uplift["passed_validation_check_ids"])
                 self.assertIn("secure_token_vault", credential_uplift["failed_validation_check_ids"])
+                self.assertEqual(
+                    credential_uplift["reportability_decision"]["decision"],
+                    "do-not-report-cloud-credential-handling-as-enterprise-vaulted",
+                )
+                self.assertEqual(
+                    credential_uplift["reportability_decision"]["allowed_use"],
+                    "redacted-credential-handling-triage-pivot",
+                )
+                self.assertIn(
+                    "check:secure_token_vault",
+                    credential_uplift["reportability_decision"]["blockers"],
+                )
+                self.assertFalse(credential_uplift["reportability_decision"]["tokens_written_to_output"])
                 credential_gate = payload["credential_handling"]["core_accuracy_gates"][0]
                 self.assertEqual(credential_gate["gap_id"], "#41")
                 self.assertIn("token value redaction", credential_gate["satisfied_checks"])
