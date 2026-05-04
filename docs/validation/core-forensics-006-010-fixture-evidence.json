@@ -18,7 +18,8 @@
       "assertions": [
         "windows-account-lifecycle rows preserve user name, RID, UAC flags, SAM F/V candidate fields, group membership hints, inherited privilege context, source hashes, and #6 core_accuracy_gates.",
         "windows-lsa-policy-location rows preserve secret metadata without decrypting or exposing protected values.",
-        "windows-privilege-assignment rows attribute high-risk privileges to assigned SID/principal hints."
+        "windows-privilege-assignment rows attribute high-risk privileges to assigned SID/principal hints.",
+        "account reportability decisions keep rows as triage pivots until SAM F/V, alias-member, SECURITY, domain, and transaction-log validation is attached."
       ],
       "blockers_kept": [
         "full native SAM F/V layout validation",
@@ -32,7 +33,8 @@
       "title": "Amcache parser",
       "assertions": [
         "amcache-entry rows preserve path, program name, publisher, SHA1, timestamp source, execution caveat, source hash, and #7 core_accuracy_gates.",
-        "amcache-hive native rows preserve bounded path/hash string pivots and keep native schema decode blockers explicit."
+        "amcache-hive native rows preserve bounded path/hash string pivots and keep native schema decode blockers explicit.",
+        "Amcache reportability decisions block standalone execution claims."
       ],
       "blockers_kept": [
         "full native Amcache.hve schema decoding",
@@ -43,7 +45,7 @@
       "number": 8,
       "title": "ShimCache/AppCompatCache parser",
       "assertions": [
-        "shimcache-entry rows preserve path/timestamp candidates, source order, OS-layout warning, not-proof-of-execution wording, and #8 core_accuracy_gates."
+        "shimcache-entry rows preserve path/timestamp candidates, source order, OS-layout warning, not-proof-of-execution wording, #8 core_accuracy_gates, and program-presence-only reportability decisions."
       ],
       "blockers_kept": [
         "native AppCompatCache binary layout decoding across Windows versions"
@@ -53,7 +55,7 @@
       "number": 9,
       "title": "BAM/DAM execution parser",
       "assertions": [
-        "bam-entry rows preserve SID, device path, FILETIME timestamp, CurrentControlSet attribution, execution semantics warning, and #9 core_accuracy_gates."
+        "bam-entry rows preserve SID, device path, FILETIME timestamp, CurrentControlSet attribution, execution semantics warning, #9 core_accuracy_gates, and correlate-before-testimony reportability decisions."
       ],
       "blockers_kept": [
         "native SYSTEM hive BAM/DAM binary value interpretation",
@@ -65,7 +67,7 @@
       "title": "SRUM full ESE table parser",
       "assertions": [
         "srum-network-usage rows preserve source-tool app/user/timestamp/counter normalization.",
-        "srum-database-file, srum-table-candidate, and srum-row-candidate rows preserve ESE header validation, table markers, row string candidates, counter/timestamp candidates, source hashes, and #10 core_accuracy_gates."
+        "srum-database-file, srum-table-candidate, and srum-row-candidate rows preserve ESE header validation, table markers, row string candidates, counter/timestamp candidates, source hashes, #10 core_accuracy_gates, and native-row-not-decoded reportability decisions."
       ],
       "blockers_kept": [
         "full native ESE catalog decoding",

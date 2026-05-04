@@ -823,6 +823,17 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 "validation_checks": validation_checks,
             }
         )
+        deep_parse_profile = account_privilege_deep_parse_profile(
+            artifact_scope="account-lifecycle-security-context",
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            evidence_fields={
+                "user_name": user_name,
+                "rid": rid,
+                "group_count": len(group_rows),
+                "inherited_privilege_count": security_context.get("inherited_privilege_count", 0),
+            },
+        )
         yield ArtifactRecord(
             provider=WindowsOsAccountProvider.name,
             artifact_type="windows-account-lifecycle",
@@ -866,20 +877,12 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                         "rid": rid,
                         "os_account_validation_matrix": os_account_validation_matrix(validation_checks),
                         "os_account_report_grade_assessment": report_grade,
+                        "account_privilege_deep_parse_profile": deep_parse_profile,
                     }
                 ),
                 "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
-                "account_privilege_deep_parse_profile": account_privilege_deep_parse_profile(
-                    artifact_scope="account-lifecycle-security-context",
-                    validation_checks=validation_checks,
-                    report_grade=report_grade,
-                    evidence_fields={
-                        "user_name": user_name,
-                        "rid": rid,
-                        "group_count": len(group_rows),
-                        "inherited_privilege_count": security_context.get("inherited_privilege_count", 0),
-                    },
-                ),
+                "account_privilege_deep_parse_profile": deep_parse_profile,
+                "account_reportability_decision": deep_parse_profile["reportability_decision"],
                 "forensic_review": build_forensic_review(
                     gap_id="#6",
                     artifact_goal="SAM/SECURITY/SYSTEM account and privilege context",
@@ -1070,6 +1073,17 @@ def security_secret_value_metadata(name: str, value: str) -> dict[str, object]:
         "metadata_only": True,
         "decrypted": False,
         "decryption_status": "not-attempted",
+        "secret_handling_decision": {
+            "profile_version": "security-secret-handling-decision-v1",
+            "decision": "do-not-decrypt-or-display-secret",
+            "allowed_use": "metadata-inventory-only",
+            "protected_value_redacted": True,
+            "authority_gate": "explicit-legal-authority-and-audit-required-before-decryption",
+            "reporting_constraint": (
+                "Report value names, hashes, sizes, entropy, and timestamp candidates only; do not report "
+                "secret contents unless a separate authority-gated decrypt workflow produced audited output."
+            ),
+        },
         "commercial_grade_ready": False,
         "commercial_grade_blockers": ["security-secret-decryption-not-implemented"],
         "validation_note": "SECURITY Policy\\Secrets values are inventoried and hashed, but not decrypted.",
@@ -1098,6 +1112,11 @@ def account_privilege_deep_parse_profile(
     report_grade: Mapping[str, object],
     evidence_fields: Mapping[str, object],
 ) -> dict[str, object]:
+    reportability_decision = os_account_reportability_decision(
+        artifact_scope=artifact_scope,
+        report_grade=report_grade,
+        validation_checks=validation_checks,
+    )
     return {
         "profile_version": "account-privilege-deep-parser-v1",
         "commercial_gap_id": "#6",
@@ -1126,6 +1145,7 @@ def account_privilege_deep_parse_profile(
             "transaction_log_replay": not OS_ACCOUNT_NATIVE_CAPABILITIES["transaction_log_replay"],
         },
         "evidence_fields": dict(evidence_fields),
+        "reportability_decision": reportability_decision,
         "required_independent_checks": [
             "validate SAM F/V offsets and field semantics by Windows build",
             "decode SAM alias/member binary values for actual group membership",
@@ -1138,6 +1158,34 @@ def account_privilege_deep_parse_profile(
         "commercial_grade_ready": False,
         "commercial_grade_blockers": list(report_grade.get("blockers") or []),
         "legal_handling": "SECURITY secrets are inventoried as metadata only; decryption requires explicit lawful authority and audit logging.",
+    }
+
+
+def os_account_reportability_decision(
+    *,
+    artifact_scope: str,
+    report_grade: Mapping[str, object],
+    validation_checks: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = set(str(item) for item in report_grade.get("blockers") or [])
+    if validation_checks.get("requires_legal_authorization") or validation_checks.get("has_secret_name"):
+        blockers.add("security-secret-authority-gate-required")
+    if not OS_ACCOUNT_NATIVE_CAPABILITIES["transaction_log_replay"]:
+        blockers.add("sam-security-system-transaction-log-replay-required")
+    return {
+        "profile_version": "os-account-reportability-decision-v1",
+        "commercial_gap_id": "#6",
+        "artifact_scope": artifact_scope,
+        "decision": "do-not-report-as-final-account-state",
+        "allowed_use": "account-security-triage-pivot",
+        "blockers": sorted(blockers),
+        "secret_values_redacted": True,
+        "requires_domain_context_review": not OS_ACCOUNT_NATIVE_CAPABILITIES["domain_controller_context_resolution"],
+        "requires_transaction_log_replay": not OS_ACCOUNT_NATIVE_CAPABILITIES["transaction_log_replay"],
+        "analyst_wording": (
+            "Describe SAM/SECURITY/SYSTEM rows as account, group, privilege, or secret metadata candidates "
+            "until native SAM binary attributes, SECURITY authority gates, domain context, and transaction logs are validated."
+        ),
     }
 
 
@@ -1183,6 +1231,11 @@ def os_account_commercial_uplift_evidence(details: Mapping[str, object]) -> dict
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    profile = (
+        details.get("account_privilege_deep_parse_profile")
+        if isinstance(details.get("account_privilege_deep_parse_profile"), Mapping)
+        else {}
+    )
     return {
         "batch_id": "commercial-uplift-006-010",
         "item_numbers": [6],
@@ -1201,6 +1254,7 @@ def os_account_commercial_uplift_evidence(details: Mapping[str, object]) -> dict
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
         ],
         "report_grade_status": str(report_grade.get("status") or ""),
+        "reportability_decision": dict(profile.get("reportability_decision") or {}),
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
             "row_scope": "account-lifecycle-row",

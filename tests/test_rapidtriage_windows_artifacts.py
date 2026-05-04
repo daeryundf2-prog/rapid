@@ -1167,6 +1167,18 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(account_profile["decoded_components"]["sam_fv_candidate_fields"])
             self.assertTrue(account_profile["decoded_components"]["privilege_rights_export_mapping"])
             self.assertTrue(account_profile["not_yet_report_grade"]["sam_alias_member_binary_decode"])
+            self.assertEqual(
+                account_profile["reportability_decision"]["decision"],
+                "do-not-report-as-final-account-state",
+            )
+            self.assertEqual(
+                lifecycle["details"]["account_reportability_decision"]["allowed_use"],
+                "account-security-triage-pivot",
+            )
+            self.assertIn(
+                "sam-security-system-transaction-log-replay-required",
+                lifecycle["details"]["account_reportability_decision"]["blockers"],
+            )
             self.assertIn("decode SAM alias/member binary values for actual group membership", account_profile["required_independent_checks"])
             inherited_debug = lifecycle["details"]["account_security_context"]["inherited_privileges"][0]
             self.assertEqual(inherited_debug["privilege"], "SeDebugPrivilege")
@@ -1185,6 +1197,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(lifecycle_uplift["item_numbers"], [6])
             self.assertIn("has-sam-f-value", lifecycle_uplift["passed_validation_matrix_ids"])
             self.assertIn("native-sam-fv-report-grade", lifecycle_uplift["failed_validation_matrix_ids"])
+            self.assertEqual(
+                lifecycle_uplift["reportability_decision"]["allowed_use"],
+                "account-security-triage-pivot",
+            )
             self.assertTrue(lifecycle_uplift["large_data_controls"]["secret_values_redacted"])
             group = next(item for item in group_rows if item["details"]["group_name"] == "Administrators")
             self.assertFalse(group["details"]["commercial_grade_ready"])
@@ -1224,6 +1240,15 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("CurrVal", lsa_secret["details"]["value_names"])
             self.assertEqual(lsa_secret["details"]["secret_value_metadata"]["CurrVal"]["byte_count"], 2)
             self.assertFalse(lsa_secret["details"]["secret_value_metadata"]["CurrVal"]["decrypted"])
+            self.assertEqual(
+                lsa_secret["details"]["secret_value_metadata"]["CurrVal"]["secret_handling_decision"]["allowed_use"],
+                "metadata-inventory-only",
+            )
+            self.assertTrue(
+                lsa_secret["details"]["secret_value_metadata"]["CurrVal"]["secret_handling_decision"][
+                    "protected_value_redacted"
+                ]
+            )
             self.assertFalse(lsa_secret["details"]["commercial_grade_ready"])
             self.assertEqual(lsa_secret["details"]["validation_checks"]["exported_value_count"], 3)
             self.assertIn("#6", lsa_secret["details"]["os_account_report_grade_assessment"]["commercial_gap_ids"])
@@ -1297,6 +1322,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(exported_amcache["details"]["amcache_schema_profile"]["commercial_gap_id"], "#7")
             self.assertEqual(exported_amcache["details"]["amcache_schema_profile"]["source_format"], "reg")
             self.assertFalse(exported_amcache["details"]["amcache_schema_profile"]["standalone_execution_proof"])
+            self.assertEqual(
+                exported_amcache["details"]["amcache_schema_profile"]["reportability_decision"]["decision"],
+                "do-not-report-as-standalone-execution",
+            )
             self.assertTrue(exported_amcache["details"]["amcache_schema_profile"]["schema_components"]["root_file_paths"])
             self.assertTrue(exported_amcache["details"]["validation_checks"]["has_hash"])
             self.assertFalse(exported_amcache["details"]["commercial_grade_ready"])
@@ -1314,6 +1343,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             amcache_uplift = exported_amcache["details"]["commercial_uplift_evidence"]
             self.assertEqual(amcache_uplift["batch_id"], "commercial-uplift-006-010")
             self.assertEqual(amcache_uplift["item_numbers"], [7])
+            self.assertEqual(
+                amcache_uplift["reportability_decision"]["allowed_use"],
+                "program-presence-install-execution-related-pivot",
+            )
             self.assertIn("has-hash", amcache_uplift["passed_validation_matrix_ids"])
             self.assertTrue(amcache_uplift["large_data_controls"]["schema_version_matrix_required"])
             native_amcache_hive = next(item for item in artifacts if item["artifact_type"] == "amcache-hive")
@@ -1343,6 +1376,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 bam["details"]["bam_dam_decode_profile"]["timestamp_semantics"],
                 "bam-dam-last-execution-filetime-candidate",
             )
+            self.assertEqual(
+                bam["details"]["bam_dam_decode_profile"]["reportability_decision"]["decision"],
+                "report-only-with-correlation",
+            )
             self.assertTrue(bam["details"]["validation_checks"]["has_timestamp"])
             self.assertFalse(bam["details"]["commercial_grade_ready"])
             self.assertIn("native-system-hive-bam-decoding-required", bam["details"]["commercial_grade_blockers"])
@@ -1357,6 +1394,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("ControlSet attribution", bam_gate["satisfied_checks"])
             bam_uplift = bam["details"]["commercial_uplift_evidence"]
             self.assertEqual(bam_uplift["item_numbers"], [9])
+            self.assertEqual(
+                bam_uplift["reportability_decision"]["allowed_use"],
+                "recent-execution-pivot-corroborate-before-testimony",
+            )
             self.assertTrue(bam_uplift["large_data_controls"]["native_binary_layout_required_for_commercial_claims"])
             self.assertTrue(shimcache["details"]["validation_required"])
             self.assertEqual(shimcache["details"]["execution_caveat"], "Presence in ShimCache is not proof the executable ran.")
@@ -1367,6 +1408,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(shimcache["details"]["shimcache_evidence"]["requires_os_version_layout_validation"])
             self.assertEqual(shimcache["details"]["shimcache_execution_caveat_profile"]["commercial_gap_id"], "#8")
             self.assertFalse(shimcache["details"]["shimcache_execution_caveat_profile"]["standalone_execution_proof"])
+            self.assertEqual(
+                shimcache["details"]["shimcache_execution_caveat_profile"]["reportability_decision"]["decision"],
+                "do-not-report-as-execution-proof",
+            )
             self.assertIn(
                 "preserve the UX warning that ShimCache is not proof of execution",
                 shimcache["details"]["shimcache_execution_caveat_profile"]["required_independent_checks"],
@@ -1381,6 +1426,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("malformed binary bounds checks", shimcache_gate["satisfied_checks"])
             shimcache_uplift = shimcache["details"]["commercial_uplift_evidence"]
             self.assertEqual(shimcache_uplift["item_numbers"], [8])
+            self.assertEqual(
+                shimcache_uplift["reportability_decision"]["allowed_use"],
+                "program-presence-cache-order-pivot",
+            )
             self.assertTrue(shimcache_uplift["large_data_controls"]["native_binary_layout_required_for_commercial_claims"])
             self.assertEqual(srum_rows[0]["details"]["app_id"], "powershell.exe")
             self.assertEqual(srum_rows[0]["details"]["bytes_received"], 2048)
@@ -1401,6 +1450,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(srum_database_rows[0]["details"]["srum_ese_validation_profile"]["commercial_gap_id"], "#10")
             self.assertEqual(srum_database_rows[0]["details"]["srum_ese_validation_profile"]["artifact_scope"], "database")
             self.assertTrue(srum_database_rows[0]["details"]["srum_ese_validation_profile"]["decoded_components"]["ese_header"])
+            self.assertEqual(
+                srum_database_rows[0]["details"]["srum_ese_validation_profile"]["reportability_decision"]["decision"],
+                "do-not-report-native-row-as-decoded-fact",
+            )
             self.assertEqual(
                 srum_database_rows[0]["details"]["srum_database_evidence"]["schema_decode_status"],
                 "not-implemented-header-and-string-pivot-only",
@@ -1425,6 +1478,7 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             srum_uplift = srum_database_rows[0]["details"]["commercial_uplift_evidence"]
             self.assertEqual(srum_uplift["batch_id"], "commercial-uplift-006-010")
             self.assertEqual(srum_uplift["item_numbers"], [10])
+            self.assertEqual(srum_uplift["reportability_decision"]["allowed_use"], "srum-usage-triage-pivot")
             self.assertTrue(srum_uplift["large_data_controls"]["row_level_native_decode_required_for_commercial_claims"])
             self.assertTrue(any("powershell.exe" in value.lower() for value in srum_database_rows[0]["details"]["path_candidates"]))
             self.assertTrue(any(item["details"]["app_id"] == "powershell.exe" for item in srum_pivots))

@@ -19,7 +19,8 @@
         "required_assertions": [
           "account lifecycle RID/name/UAC/SAM F/V candidates are preserved",
           "group membership and privilege attribution are emitted",
-          "SECURITY secret metadata is redacted and not decrypted"
+          "SECURITY secret metadata is redacted and not decrypted",
+          "account reportability decisions block final account-state claims until SAM/SECURITY/SYSTEM validation is attached"
         ]
       },
       "notes": "Internal fixture pass; external SAM/SECURITY/SYSTEM corpora and independent parser diffs are still required for commercial-grade claims."
@@ -39,7 +40,8 @@
       "expected": {
         "required_assertions": [
           "Amcache path/hash/publisher/timestamp-source fields are normalized",
-          "native Amcache.hve string pivots are emitted with explicit schema blockers"
+          "native Amcache.hve string pivots are emitted with explicit schema blockers",
+          "Amcache reportability decisions prevent standalone execution claims"
         ]
       },
       "notes": "Internal fixture pass; AmcacheParser/RECmd cross-tool corpus remains commercial-grade evidence."
@@ -59,7 +61,8 @@
       "expected": {
         "required_assertions": [
           "ShimCache path/timestamp candidates are emitted",
-          "not-proof-of-execution warning is preserved"
+          "not-proof-of-execution warning is preserved",
+          "ShimCache reportability decisions preserve program-presence-only wording"
         ]
       },
       "notes": "Internal fixture pass; OS-version native AppCompatCache binary decoding corpus remains required."
@@ -78,7 +81,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "BAM SID, device path, FILETIME timestamp, and ControlSet attribution are emitted"
+          "BAM SID, device path, FILETIME timestamp, and ControlSet attribution are emitted",
+          "BAM/DAM reportability decisions require correlation before testimony"
         ]
       },
       "notes": "Internal fixture pass; native SYSTEM hive binary decoding and broad Windows version validation remain required."
@@ -98,7 +102,8 @@
       "expected": {
         "required_assertions": [
           "SRUM source-tool counters and native ESE header/table/row candidates are emitted",
-          "native row candidates preserve app, timestamp, counters, and validation blockers"
+          "native row candidates preserve app, timestamp, counters, and validation blockers",
+          "SRUM reportability decisions block native row facts until ESE row decoding and trusted-tool diffs are attached"
         ]
       },
       "notes": "Internal fixture pass; SrumECmd/libesedb cross-tool and full native ESE row decoding remain commercial-grade evidence."

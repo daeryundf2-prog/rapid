@@ -1437,6 +1437,12 @@ def amcache_schema_profile(
     executable_path: str,
     sha1: str,
 ) -> dict[str, object]:
+    reportability_decision = execution_reportability_decision(
+        artifact_type="amcache-entry",
+        artifact_scope="amcache-reg-export" if source_format == "reg" else "amcache-native-hive",
+        report_grade=report_grade,
+        validation_checks=validation_checks,
+    )
     return {
         "profile_version": "amcache-schema-v1",
         "commercial_gap_id": "#7",
@@ -1453,6 +1459,7 @@ def amcache_schema_profile(
             and not bool(validation_checks.get("requires_second_parser_validation")),
         },
         "timestamp_semantics": amcache_timestamp_semantics(timestamp_source, source_format),
+        "reportability_decision": reportability_decision,
         "evidence_fields": {
             "executable_path": executable_path,
             "sha1": sha1,
@@ -1535,6 +1542,12 @@ def shimcache_execution_caveat_profile(
     executable_path: str,
     timestamp: str,
 ) -> dict[str, object]:
+    reportability_decision = execution_reportability_decision(
+        artifact_type="shimcache-entry",
+        artifact_scope="shimcache-export",
+        report_grade=report_grade,
+        validation_checks=validation_checks,
+    )
     return {
         "profile_version": "shimcache-caveat-v1",
         "commercial_gap_id": "#8",
@@ -1543,6 +1556,7 @@ def shimcache_execution_caveat_profile(
         "standalone_execution_proof": False,
         "interpretation": "program-presence-and-cache-order-candidate",
         "timestamp_semantics": "os-version-dependent-and-not-proof-of-execution" if timestamp else "not-available",
+        "reportability_decision": reportability_decision,
         "decoded_components": {
             "path_candidate": bool(executable_path),
             "timestamp_candidate": bool(timestamp),
@@ -1601,6 +1615,12 @@ def bam_dam_decode_profile(
     timestamp: str,
     timestamp_source: str,
 ) -> dict[str, object]:
+    reportability_decision = execution_reportability_decision(
+        artifact_type="bam-entry",
+        artifact_scope="bam-dam-export",
+        report_grade=report_grade,
+        validation_checks=validation_checks,
+    )
     return {
         "profile_version": "bam-dam-decode-v1",
         "commercial_gap_id": "#9",
@@ -1615,6 +1635,7 @@ def bam_dam_decode_profile(
         "timestamp_semantics": "bam-dam-last-execution-filetime-candidate"
         if timestamp_source == "bam_value_filetime"
         else "timestamp-candidate-validation-required",
+        "reportability_decision": reportability_decision,
         "evidence_fields": {
             "user_sid": user_sid,
             "executable_path": executable_path,
@@ -1641,6 +1662,12 @@ def srum_ese_validation_profile(
     report_grade: Mapping[str, object],
     evidence_fields: Mapping[str, object],
 ) -> dict[str, object]:
+    reportability_decision = execution_reportability_decision(
+        artifact_type="srum-row-candidate" if artifact_scope == "row-candidate" else "srum-database-file",
+        artifact_scope=artifact_scope,
+        report_grade=report_grade,
+        validation_checks=validation_checks,
+    )
     return {
         "profile_version": "srum-ese-validation-v1",
         "commercial_gap_id": "#10",
@@ -1656,6 +1683,7 @@ def srum_ese_validation_profile(
             "native_catalog_decoding": bool(validation_checks.get("native_table_catalog_decoding_available")),
         },
         "evidence_fields": dict(evidence_fields),
+        "reportability_decision": reportability_decision,
         "required_independent_checks": [
             "decode ESE catalog pages and tagged columns",
             "map SRUM table GUIDs to Windows build-specific schemas",
@@ -1666,6 +1694,52 @@ def srum_ese_validation_profile(
         "report_grade_ready": bool(report_grade.get("report_grade_ready")),
         "commercial_grade_ready": False,
         "commercial_grade_blockers": list(report_grade.get("blockers") or []),
+    }
+
+
+def execution_reportability_decision(
+    *,
+    artifact_type: str,
+    artifact_scope: str,
+    report_grade: Mapping[str, object],
+    validation_checks: Mapping[str, object],
+) -> dict[str, object]:
+    gap_ids = execution_gap_ids(artifact_type)
+    gap_id = gap_ids[0] if gap_ids else "#10"
+    blockers = set(str(item) for item in report_grade.get("blockers") or [])
+    if artifact_type == "amcache-entry":
+        allowed_use = "program-presence-install-execution-related-pivot"
+        decision = "do-not-report-as-standalone-execution"
+        blockers.add("amcache-timestamp-semantics-validation-required")
+    elif artifact_type == "shimcache-entry":
+        allowed_use = "program-presence-cache-order-pivot"
+        decision = "do-not-report-as-execution-proof"
+        blockers.add("shimcache-not-proof-of-execution")
+    elif artifact_type == "bam-entry":
+        allowed_use = "recent-execution-pivot-corroborate-before-testimony"
+        decision = "report-only-with-correlation"
+        blockers.add("bam-dam-native-system-hive-validation-required")
+    else:
+        allowed_use = "srum-usage-triage-pivot"
+        decision = "do-not-report-native-row-as-decoded-fact"
+        blockers.add("srum-native-row-decoder-validation-required")
+    if validation_checks.get("requires_second_parser_validation") or validation_checks.get("requires_srum_parser"):
+        blockers.add("trusted-tool-diff-required")
+    return {
+        "profile_version": "windows-execution-reportability-decision-v1",
+        "commercial_gap_id": gap_id,
+        "artifact_type": artifact_type,
+        "artifact_scope": artifact_scope,
+        "decision": decision,
+        "allowed_use": allowed_use,
+        "standalone_execution_proof": artifact_type == "bam-entry" and not bool(validation_checks.get("requires_correlation")),
+        "blockers": sorted(blockers),
+        "required_before_report": [
+            "source hash and parser version captured",
+            "artifact-specific timestamp semantics validated",
+            "trusted-tool or known-answer diff attached",
+            "correlated with at least one independent execution artifact where semantics require it",
+        ],
     }
 
 
@@ -1751,6 +1825,30 @@ def execution_commercial_uplift_evidence(artifact_type: str, details: Mapping[st
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    reportability_decision: Mapping[str, object] = {}
+    for profile_key in (
+        "amcache_schema_profile",
+        "shimcache_execution_caveat_profile",
+        "bam_dam_decode_profile",
+        "srum_ese_validation_profile",
+    ):
+        profile = details.get(profile_key) if isinstance(details.get(profile_key), Mapping) else {}
+        decision = profile.get("reportability_decision") if isinstance(profile.get("reportability_decision"), Mapping) else {}
+        if decision:
+            reportability_decision = decision
+            break
+    if not reportability_decision:
+        validation_checks = (
+            details.get("validation_checks")
+            if isinstance(details.get("validation_checks"), Mapping)
+            else {}
+        )
+        reportability_decision = execution_reportability_decision(
+            artifact_type="amcache-entry" if artifact_type == "amcache-hive" else artifact_type,
+            artifact_scope=str(details.get("source_format") or artifact_type),
+            report_grade=report_grade,
+            validation_checks=validation_checks,
+        )
     gap_ids = execution_gap_ids(artifact_type)
     item_numbers = [int(gap_id.lstrip("#")) for gap_id in gap_ids if gap_id.lstrip("#").isdigit()]
     return {
@@ -1771,6 +1869,7 @@ def execution_commercial_uplift_evidence(artifact_type: str, details: Mapping[st
             str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
         ],
         "report_grade_status": str(report_grade.get("status") or ""),
+        "reportability_decision": dict(reportability_decision),
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
             "bounded_native_string_scan_bytes": MAX_NATIVE_AMCACHE_SCAN_BYTES
