@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
@@ -59,6 +59,7 @@ EXECUTION_NATIVE_CAPABILITIES = {
     "native_srum_page_row_decode": False,
 }
 EXECUTION_REPORT_GRADE_BLOCKERS = [
+    "execution-artifact-trusted-diff-required",
     "native-amcache-schema-decoding-required",
     "native-appcompatcache-layout-decoding-required",
     "native-system-hive-bam-decoding-required",
@@ -66,6 +67,7 @@ EXECUTION_REPORT_GRADE_BLOCKERS = [
     "native-ese-page-row-decoding-required",
     "known-answer-execution-artifact-validation-required",
 ]
+EXECUTION_TRUSTED_TOOL_HINTS = ("amcacheparser", "appcompatcacheparser", "shimcacheparser", "srumecmd", "recmd", "velociraptor")
 
 
 class WindowsExecutionProvider:
@@ -1755,6 +1757,11 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
 
     if artifact_type == "amcache-hive":
         artifact_type = "amcache-entry"
+    trusted_diff = (
+        details.get("execution_trusted_diff")
+        if isinstance(details.get("execution_trusted_diff"), Mapping)
+        else {}
+    )
 
     if artifact_type == "amcache-entry":
         satisfied: list[str] = []
@@ -1767,6 +1774,8 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
         satisfied.append("execution caveat wording")
         if checks.get("requires_second_parser_validation") or not EXECUTION_NATIVE_CAPABILITIES["native_amcache_schema_decode"]:
             satisfied.append("deleted/legacy schema fallback warnings")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted Amcache parser diff pass")
         return [build_accuracy_gate(7, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
     if artifact_type == "shimcache-entry":
@@ -1780,6 +1789,8 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
         satisfied.append("not-proof-of-execution warning")
         if not EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"]:
             satisfied.append("malformed binary bounds checks")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted ShimCache parser diff pass")
         return [build_accuracy_gate(8, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
     if artifact_type == "bam-entry":
@@ -1793,6 +1804,8 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
         if "CurrentControlSet" in str(details.get("source_key") or ""):
             satisfied.append("ControlSet attribution")
         satisfied.append("execution-semantics warning")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted BAM/DAM parser diff pass")
         return [build_accuracy_gate(9, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
     if artifact_type.startswith("srum-"):
@@ -1812,6 +1825,8 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
             satisfied.append("counter/timestamp semantics")
         if details.get("row_candidate_count") or artifact_type == "srum-row-candidate":
             satisfied.append("native-row confidence scoring")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted SRUM parser row diff pass")
         return [build_accuracy_gate(10, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
     return []
@@ -1825,6 +1840,11 @@ def execution_commercial_uplift_evidence(artifact_type: str, details: Mapping[st
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    trusted_diff = (
+        details.get("execution_trusted_diff")
+        if isinstance(details.get("execution_trusted_diff"), Mapping)
+        else {}
+    )
     reportability_decision: Mapping[str, object] = {}
     for profile_key in (
         "amcache_schema_profile",
@@ -1870,6 +1890,15 @@ def execution_commercial_uplift_evidence(artifact_type: str, details: Mapping[st
         ],
         "report_grade_status": str(report_grade.get("status") or ""),
         "reportability_decision": dict(reportability_decision),
+        "trusted_diff": {
+            "status": str(trusted_diff.get("status") or "not-attached"),
+            "trusted_tool": str(trusted_diff.get("trusted_tool") or ""),
+            "matched_count": int(trusted_diff.get("matched_count") or 0),
+            "mismatch_count": int(trusted_diff.get("mismatch_count") or 0),
+            "missing_in_trusted_count": int(trusted_diff.get("missing_in_trusted_count") or 0),
+            "extra_in_trusted_count": int(trusted_diff.get("extra_in_trusted_count") or 0),
+            "commercial_grade_evidence": bool(trusted_diff.get("commercial_grade_evidence")),
+        },
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
             "bounded_native_string_scan_bytes": MAX_NATIVE_AMCACHE_SCAN_BYTES
@@ -1990,6 +2019,110 @@ def execution_report_grade_assessment(
             "Correlate execution signals with Prefetch, SRUM, BAM/DAM, Amcache, ShimCache, Event Logs, and "
             "known-answer parser output before making report-grade execution conclusions."
         ),
+    }
+
+
+def build_execution_artifact_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+    artifact_family: str,
+) -> dict[str, object]:
+    """Compare execution artifact rows with trusted parser exports at row granularity."""
+
+    tool_name = str(trusted_tool or "").strip()
+    rapid_by_key = {
+        key: normalized
+        for row in rapid_rows
+        for key, normalized in [_normalize_execution_diff_row(row, artifact_family)]
+        if key
+    }
+    trusted_by_key = {
+        key: normalized
+        for row in trusted_rows
+        for key, normalized in [_normalize_execution_diff_row(row, artifact_family)]
+        if key
+    }
+    missing = sorted(key for key in rapid_by_key if key not in trusted_by_key)
+    extra = sorted(key for key in trusted_by_key if key not in rapid_by_key)
+    mismatches: list[dict[str, object]] = []
+    matched = 0
+    for key in sorted(set(rapid_by_key) & set(trusted_by_key)):
+        rapid = rapid_by_key[key]
+        trusted = trusted_by_key[key]
+        field_diffs = []
+        for field in ("executable_path", "timestamp", "sha1", "user_sid", "counter_sha256", "semantics_warning"):
+            left = rapid.get(field, "")
+            right = trusted.get(field, "")
+            if left or right:
+                if left != right:
+                    field_diffs.append({"field": field, "rapid": left, "trusted": right})
+        if field_diffs:
+            mismatches.append({"row_key": key, "field_diffs": field_diffs})
+        else:
+            matched += 1
+    status = "pass"
+    if not tool_name or not rapid_by_key or not trusted_by_key:
+        status = "not-enough-evidence"
+    elif missing or extra or mismatches:
+        status = "diffs-present"
+    normalized_tool = re.sub(r"[^a-z0-9]+", "", tool_name.lower())
+    trusted_tool_recognized = any(hint in normalized_tool for hint in EXECUTION_TRUSTED_TOOL_HINTS)
+    return {
+        "profile_version": "execution-artifact-trusted-diff-v1",
+        "artifact_family": str(artifact_family),
+        "trusted_tool": tool_name,
+        "trusted_tool_recognized": trusted_tool_recognized,
+        "compare_fields": ["executable_path", "timestamp", "sha1", "user_sid", "counter_sha256", "semantics_warning"],
+        "rapid_row_count": len(rapid_by_key),
+        "trusted_row_count": len(trusted_by_key),
+        "matched_count": matched,
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "status": status,
+        "commercial_grade_evidence": status == "pass" and trusted_tool_recognized,
+        "missing_in_trusted": missing[:100],
+        "extra_in_trusted": extra[:100],
+        "mismatches": mismatches[:100],
+        "reportability_decision": {
+            "decision": "execution-artifact-diff-passed" if status == "pass" else "do-not-report-execution-artifact-as-final",
+            "allowed_use": (
+                "support report-grade execution artifact assertions with attached parser corpus/signoff"
+                if status == "pass" and trusted_tool_recognized
+                else "triage-only execution pivot until trusted parser diff is clean"
+            ),
+            "blockers": [] if status == "pass" and trusted_tool_recognized else ["execution-artifact-trusted-diff-required"],
+        },
+    }
+
+
+def _normalize_execution_diff_row(row: Mapping[str, object], artifact_family: str) -> tuple[str, dict[str, str]]:
+    executable_path = str(row.get("executable_path") or row.get("path") or row.get("file_path") or row.get("app_id") or "").strip()
+    timestamp = str(row.get("timestamp") or row.get("last_run") or row.get("last_execution") or "").strip().replace("Z", "+00:00")
+    sha1 = str(row.get("sha1") or row.get("hash") or "").strip().lower()
+    user_sid = str(row.get("user_sid") or row.get("sid") or "").strip()
+    counters = {
+        "bytes_sent": row.get("bytes_sent", ""),
+        "bytes_received": row.get("bytes_received", ""),
+        "energy_usage": row.get("energy_usage", ""),
+        "cpu_time": row.get("cpu_time", ""),
+    }
+    key_basis = "|".join(str(item) for item in (artifact_family, executable_path.lower(), timestamp, sha1, user_sid) if item)
+    if not key_basis:
+        return "", {}
+    counter_text = json.dumps(counters, sort_keys=True, ensure_ascii=True)
+    semantics_warning = str(row.get("execution_caveat") or row.get("semantics_warning") or row.get("warning") or "")
+    return hashlib.sha256(key_basis.encode("utf-8", errors="replace")).hexdigest(), {
+        "executable_path": executable_path.lower(),
+        "timestamp": timestamp,
+        "sha1": sha1,
+        "user_sid": user_sid,
+        "counter_sha256": hashlib.sha256(counter_text.encode("utf-8")).hexdigest()
+        if any(str(value) for value in counters.values())
+        else "",
+        "semantics_warning": re.sub(r"\s+", " ", semantics_warning).strip().lower(),
     }
 
 

@@ -20,6 +20,7 @@
           "account lifecycle RID/name/UAC/SAM F/V candidates are preserved",
           "group membership and privilege attribution are emitted",
           "SECURITY secret metadata is redacted and not decrypted",
+          "trusted SAM/SECURITY/SYSTEM diff gating is enforced",
           "account reportability decisions block final account-state claims until SAM/SECURITY/SYSTEM validation is attached"
         ]
       },
@@ -40,6 +41,7 @@
       "expected": {
         "required_assertions": [
           "Amcache path/hash/publisher/timestamp-source fields are normalized",
+          "trusted Amcache parser diff gating is enforced",
           "native Amcache.hve string pivots are emitted with explicit schema blockers",
           "Amcache reportability decisions prevent standalone execution claims"
         ]
@@ -62,6 +64,7 @@
         "required_assertions": [
           "ShimCache path/timestamp candidates are emitted",
           "not-proof-of-execution warning is preserved",
+          "trusted ShimCache parser diff gating is enforced",
           "ShimCache reportability decisions preserve program-presence-only wording"
         ]
       },
@@ -82,6 +85,7 @@
       "expected": {
         "required_assertions": [
           "BAM SID, device path, FILETIME timestamp, and ControlSet attribution are emitted",
+          "trusted BAM/DAM parser diff gating is enforced",
           "BAM/DAM reportability decisions require correlation before testimony"
         ]
       },
@@ -103,6 +107,7 @@
         "required_assertions": [
           "SRUM source-tool counters and native ESE header/table/row candidates are emitted",
           "native row candidates preserve app, timestamp, counters, and validation blockers",
+          "trusted SRUM parser row diff gating is enforced",
           "SRUM reportability decisions block native row facts until ESE row decoding and trusted-tool diffs are attached"
         ]
       },

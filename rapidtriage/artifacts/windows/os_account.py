@@ -5,7 +5,7 @@ import hashlib
 import math
 import re
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
@@ -82,11 +82,13 @@ OS_ACCOUNT_NATIVE_CAPABILITIES = {
     "transaction_log_replay": False,
 }
 OS_ACCOUNT_REPORT_GRADE_BLOCKERS = [
+    "sam-security-system-trusted-diff-required",
     "full-native-sam-fv-layout-validation-required",
     "native-sam-alias-member-binary-decoding-required",
     "security-secret-decryption-not-implemented",
     "domain-context-and-transaction-log-validation-required",
 ]
+OS_ACCOUNT_TRUSTED_TOOL_HINTS = ("recmd", "registryexplorer", "regripper", "windowsapi", "samparser", "secretsdump")
 
 
 class WindowsOsAccountProvider:
@@ -1219,6 +1221,13 @@ def os_account_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[s
     secret_metadata = details.get("secret_value_metadata") if isinstance(details.get("secret_value_metadata"), Mapping) else {}
     if secret_metadata or details.get("secret_name") or not OS_ACCOUNT_NATIVE_CAPABILITIES["security_secret_decryption"]:
         satisfied.append("secret-value redaction and authority gate")
+    trusted_diff = (
+        details.get("os_account_trusted_diff")
+        if isinstance(details.get("os_account_trusted_diff"), Mapping)
+        else {}
+    )
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted SAM/SECURITY/SYSTEM diff pass")
 
     return [build_accuracy_gate(6, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
@@ -1234,6 +1243,11 @@ def os_account_commercial_uplift_evidence(details: Mapping[str, object]) -> dict
     profile = (
         details.get("account_privilege_deep_parse_profile")
         if isinstance(details.get("account_privilege_deep_parse_profile"), Mapping)
+        else {}
+    )
+    trusted_diff = (
+        details.get("os_account_trusted_diff")
+        if isinstance(details.get("os_account_trusted_diff"), Mapping)
         else {}
     )
     return {
@@ -1255,6 +1269,15 @@ def os_account_commercial_uplift_evidence(details: Mapping[str, object]) -> dict
         ],
         "report_grade_status": str(report_grade.get("status") or ""),
         "reportability_decision": dict(profile.get("reportability_decision") or {}),
+        "trusted_diff": {
+            "status": str(trusted_diff.get("status") or "not-attached"),
+            "trusted_tool": str(trusted_diff.get("trusted_tool") or ""),
+            "matched_count": int(trusted_diff.get("matched_count") or 0),
+            "mismatch_count": int(trusted_diff.get("mismatch_count") or 0),
+            "missing_in_trusted_count": int(trusted_diff.get("missing_in_trusted_count") or 0),
+            "extra_in_trusted_count": int(trusted_diff.get("extra_in_trusted_count") or 0),
+            "commercial_grade_evidence": bool(trusted_diff.get("commercial_grade_evidence")),
+        },
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
             "row_scope": "account-lifecycle-row",
@@ -1340,6 +1363,122 @@ def os_account_report_grade_assessment(
             "transaction logs, domain context, and a second trusted parser before final testimony."
         ),
     }
+
+
+def build_os_account_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    """Compare account/group/privilege rows with a trusted SAM/SECURITY/SYSTEM parser export."""
+
+    tool_name = str(trusted_tool or "").strip()
+    rapid_by_key = {
+        key: normalized
+        for row in rapid_rows
+        for key, normalized in [_normalize_os_account_row(row)]
+        if key
+    }
+    trusted_by_key = {
+        key: normalized
+        for row in trusted_rows
+        for key, normalized in [_normalize_os_account_row(row)]
+        if key
+    }
+    missing = sorted(key for key in rapid_by_key if key not in trusted_by_key)
+    extra = sorted(key for key in trusted_by_key if key not in rapid_by_key)
+    mismatches: list[dict[str, object]] = []
+    matched = 0
+    for key in sorted(set(rapid_by_key) & set(trusted_by_key)):
+        rapid = rapid_by_key[key]
+        trusted = trusted_by_key[key]
+        field_diffs = []
+        for field in ("user_name", "rid", "sid", "uac_flags", "group_names", "privileges", "secret_redacted"):
+            left = rapid.get(field, "")
+            right = trusted.get(field, "")
+            if left or right:
+                if left != right:
+                    field_diffs.append({"field": field, "rapid": left, "trusted": right})
+        if field_diffs:
+            mismatches.append({"account_key": key, "field_diffs": field_diffs})
+        else:
+            matched += 1
+    status = "pass"
+    if not tool_name or not rapid_by_key or not trusted_by_key:
+        status = "not-enough-evidence"
+    elif missing or extra or mismatches:
+        status = "diffs-present"
+    normalized_tool = re.sub(r"[^a-z0-9]+", "", tool_name.lower())
+    trusted_tool_recognized = any(hint in normalized_tool for hint in OS_ACCOUNT_TRUSTED_TOOL_HINTS)
+    return {
+        "profile_version": "os-account-trusted-diff-v1",
+        "trusted_tool": tool_name,
+        "trusted_tool_recognized": trusted_tool_recognized,
+        "compare_fields": ["user_name", "rid", "sid", "uac_flags", "group_names", "privileges", "secret_redacted"],
+        "rapid_row_count": len(rapid_by_key),
+        "trusted_row_count": len(trusted_by_key),
+        "matched_count": matched,
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "status": status,
+        "commercial_grade_evidence": status == "pass" and trusted_tool_recognized,
+        "missing_in_trusted": missing[:100],
+        "extra_in_trusted": extra[:100],
+        "mismatches": mismatches[:100],
+        "reportability_decision": {
+            "decision": "account-diff-passed" if status == "pass" else "do-not-report-account-state-as-final",
+            "allowed_use": (
+                "support report-grade account assertions with attached SAM/SECURITY/SYSTEM corpus/signoff"
+                if status == "pass" and trusted_tool_recognized
+                else "triage-only account pivot until trusted SAM/SECURITY/SYSTEM diff is clean"
+            ),
+            "blockers": [] if status == "pass" and trusted_tool_recognized else ["sam-security-system-trusted-diff-required"],
+        },
+    }
+
+
+def _normalize_os_account_row(row: Mapping[str, object]) -> tuple[str, dict[str, str]]:
+    user_name = str(row.get("user_name") or row.get("account_name") or row.get("name") or "").strip()
+    rid = str(row.get("rid") or row.get("rid_decimal") or "").strip()
+    sid = str(row.get("sid") or row.get("user_sid") or "").strip()
+    key = sid or f"{user_name.lower()}:{rid}"
+    if not key.strip(":"):
+        return "", {}
+    group_names = row.get("group_names") or row.get("groups") or row.get("group_membership_hints") or []
+    privileges = row.get("privileges") or row.get("assigned_privileges") or row.get("assigned_sids") or []
+    uac_flags = row.get("uac_flags") or row.get("user_account_control_flags") or []
+    secret_metadata = row.get("secret_value_metadata") if isinstance(row.get("secret_value_metadata"), Mapping) else {}
+    return key, {
+        "user_name": user_name,
+        "rid": rid,
+        "sid": sid,
+        "uac_flags": _join_sorted_values(uac_flags),
+        "group_names": _join_sorted_values(group_names),
+        "privileges": _join_sorted_values(privileges),
+        "secret_redacted": str(bool(secret_metadata) and all(
+            not bool(item.get("decrypted")) for item in secret_metadata.values() if isinstance(item, Mapping)
+        )).lower() if secret_metadata else "",
+    }
+
+
+def _join_sorted_values(value: object) -> str:
+    if isinstance(value, str):
+        parts = [value]
+    elif isinstance(value, Mapping):
+        parts = [str(item) for item in value.values() if str(item)]
+    elif isinstance(value, Sequence):
+        parts = [
+            str(item.get("group_name") or item.get("principal") or item.get("sid") or item)
+            if isinstance(item, Mapping)
+            else str(item)
+            for item in value
+            if str(item)
+        ]
+    else:
+        parts = []
+    return "|".join(sorted({part for part in parts if part}, key=str.lower))
 
 
 def registry_value_type_label(value: str) -> str:

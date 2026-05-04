@@ -9,6 +9,8 @@ from pathlib import Path, PureWindowsPath
 
 from rapidtriage.cli import main
 from rapidtriage.artifacts.windows.eventlog import collect_native_evtx_events
+from rapidtriage.artifacts.windows.execution import build_execution_artifact_trusted_diff
+from rapidtriage.artifacts.windows.os_account import build_os_account_trusted_diff
 from tests.windows_artifact_fixtures import (
     build_corrupt_evtx_record_candidate,
     build_evtx_with_checked_chunk,
@@ -1304,6 +1306,47 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             )
             self.assertIn("high-risk-privilege", privilege["details"]["risk_flags"])
 
+    def test_os_account_trusted_diff_blocks_unverified_account_state(self) -> None:
+        rapid = [
+            {
+                "user_name": "alice",
+                "rid_decimal": 1001,
+                "sid": "S-1-5-21-1000-1001",
+                "uac_flags": ["NORMAL_ACCOUNT"],
+                "group_names": ["Administrators"],
+                "privileges": ["SeDebugPrivilege"],
+            }
+        ]
+        trusted = [
+            {
+                "account_name": "alice",
+                "rid": "1001",
+                "user_sid": "S-1-5-21-1000-1001",
+                "user_account_control_flags": ["NORMAL_ACCOUNT"],
+                "groups": ["Administrators"],
+                "assigned_privileges": ["SeDebugPrivilege"],
+            }
+        ]
+
+        diff = build_os_account_trusted_diff(rapid, trusted, trusted_tool="RECmd SAM parser")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["trusted_tool_recognized"])
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertEqual(diff["reportability_decision"]["decision"], "account-diff-passed")
+
+    def test_os_account_trusted_diff_flags_group_mismatches(self) -> None:
+        rapid = [{"user_name": "alice", "rid": "1001", "group_names": ["Administrators"]}]
+        trusted = [{"user_name": "alice", "rid": "1001", "group_names": ["Users"]}]
+
+        diff = build_os_account_trusted_diff(rapid, trusted, trusted_tool="Registry Explorer")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertIn("sam-security-system-trusted-diff-required", diff["reportability_decision"]["blockers"])
+
     def test_windows_execution_collector_maps_registry_and_powershell_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -1556,6 +1599,53 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("srum-database-pivot", groups["powershell.exe"]["signal_types"])
             self.assertIn("suspicious-command:powershell -enc", groups["powershell.exe"]["risk_flags"])
             self.assertIn("Prefetch", groups["evil.exe"]["correlation_targets"])
+
+    def test_execution_artifact_trusted_diff_passes_matching_rows(self) -> None:
+        rapid = [
+            {
+                "executable_path": r"C:\Program Files\Example\app.exe",
+                "timestamp": "2024-04-01T06:07:08Z",
+                "sha1": "0123456789abcdef0123456789abcdef01234567",
+                "execution_caveat": "Amcache supports program presence/install/execution-related pivots but is not standalone proof of execution.",
+            }
+        ]
+        trusted = [
+            {
+                "path": r"C:\Program Files\Example\app.exe",
+                "last_execution": "2024-04-01T06:07:08+00:00",
+                "hash": "0123456789abcdef0123456789abcdef01234567",
+                "warning": "Amcache supports program presence/install/execution-related pivots but is not standalone proof of execution.",
+            }
+        ]
+
+        diff = build_execution_artifact_trusted_diff(
+            rapid,
+            trusted,
+            trusted_tool="AmcacheParser",
+            artifact_family="amcache",
+        )
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["trusted_tool_recognized"])
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertEqual(diff["reportability_decision"]["decision"], "execution-artifact-diff-passed")
+
+    def test_execution_artifact_trusted_diff_blocks_srum_counter_mismatch(self) -> None:
+        rapid = [{"app_id": "powershell.exe", "timestamp": "2024-04-01T05:06:07+00:00", "bytes_received": 2048}]
+        trusted = [{"app_id": "powershell.exe", "timestamp": "2024-04-01T05:06:07+00:00", "bytes_received": 1024}]
+
+        diff = build_execution_artifact_trusted_diff(
+            rapid,
+            trusted,
+            trusted_tool="SrumECmd",
+            artifact_family="srum",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertIn("execution-artifact-trusted-diff-required", diff["reportability_decision"]["blockers"])
 
     def test_windows_prefetch_fixture_surfaces_run_count_and_last_run_time(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
