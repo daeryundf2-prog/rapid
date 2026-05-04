@@ -5478,6 +5478,7 @@
               "binxml_fragment_token_scan": true,
               "chunk_boundary_context": true,
               "chunk_header": true,
+              "curated_provider_message_catalog": true,
               "deleted_slack_candidate_labeling": true,
               "file_header": true,
               "full_binxml_dom": false,

@@ -33,7 +33,9 @@
       "number": 2,
       "title": "EVTX event template/message rendering",
       "assertions": [
-        "message_rendering provenance, fallback message text, parameter mapping, unresolved-template warning, and limitation disclosure are represented in #2 core_accuracy_gates."
+        "message_rendering provenance, fallback message text, parameter mapping, unresolved-template warning, and limitation disclosure are represented in #2 core_accuracy_gates.",
+        "curated provider message catalogs preserve source type, message ID, extraction tool, locale, catalog path, and template SHA256 provenance.",
+        "native EVTX rows can render from curated provider catalogs and remove the built-in-template fallback blocker for that row while retaining other commercial blockers."
       ],
       "blockers_kept": [
         "provider manifest/resource DLL rendering",

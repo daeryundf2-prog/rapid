@@ -54,6 +54,7 @@ NATIVE_EVTX_CAPABILITIES = {
     "binxml_fragment_token_scan": True,
     "template_instance_header": True,
     "template_substitution_values": True,
+    "curated_provider_message_catalog": True,
     "provider_resource_message_rendering": False,
     "full_binxml_dom": False,
     "report_grade_deleted_record_validation": False,
@@ -645,6 +646,8 @@ def load_event_message_catalog(path: Path) -> dict[str, dict[str, dict[str, obje
         if not message:
             return
         metadata["message"] = message
+        metadata.setdefault("source_type", "curated-message-catalog")
+        metadata.setdefault("template_sha256", hashlib.sha256(message.encode("utf-8")).hexdigest())
         metadata.setdefault("catalog_path", str(path.resolve()))
         catalog.setdefault(provider_key, {})[event_key] = metadata
 
@@ -3159,7 +3162,11 @@ def render_event_message(
                 provider_message_resource_source={
                     "catalog_path": str(catalog_entry.get("catalog_path") or ""),
                     "source": str(catalog_entry.get("source") or catalog_entry.get("version") or ""),
+                    "source_type": str(catalog_entry.get("source_type") or ""),
                     "locale": str(catalog_entry.get("locale") or ""),
+                    "message_id": str(catalog_entry.get("message_id") or catalog_entry.get("resource_id") or ""),
+                    "extraction_tool": str(catalog_entry.get("extraction_tool") or ""),
+                    "template_sha256": str(catalog_entry.get("template_sha256") or ""),
                 },
             ),
         }

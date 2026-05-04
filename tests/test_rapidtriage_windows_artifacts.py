@@ -340,7 +340,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                                 "event_id": "9001",
                                 "message": "Custom provider event. User={User}; action={Action}.",
                                 "source": "unit-test-provider-manifest",
+                                "source_type": "manifest-export",
                                 "locale": "en-US",
+                                "message_id": "9001",
+                                "extraction_tool": "fixture-manifest-dump",
                             }
                         ]
                     }
@@ -374,6 +377,96 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 rendering["provenance"]["provider_message_resource_source"]["source"],
                 "unit-test-provider-manifest",
             )
+            self.assertEqual(
+                rendering["provenance"]["provider_message_resource_source"]["source_type"],
+                "manifest-export",
+            )
+            self.assertEqual(
+                rendering["provenance"]["provider_message_resource_source"]["message_id"],
+                "9001",
+            )
+            self.assertEqual(
+                rendering["provenance"]["provider_message_resource_source"]["extraction_tool"],
+                "fixture-manifest-dump",
+            )
+            self.assertEqual(
+                len(rendering["provenance"]["provider_message_resource_source"]["template_sha256"]),
+                64,
+            )
+
+    def test_native_evtx_can_render_from_curated_provider_message_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evtx_path = root / "Windows" / "System32" / "winevt" / "Logs" / "PowerShell.evtx"
+            evtx_path.parent.mkdir(parents=True, exist_ok=True)
+            evtx_path.write_bytes(
+                build_template_evtx(
+                    record_id=901,
+                    timestamp=datetime(2024, 4, 4, 1, 2, 3, tzinfo=timezone.utc),
+                    command="powershell -enc CatalogNative",
+                )
+            )
+            catalog = root / "message-catalog.json"
+            catalog.write_text(
+                json.dumps(
+                    {
+                        "templates": [
+                            {
+                                "provider": "Microsoft-Windows-PowerShell",
+                                "event_id": "4104",
+                                "message": "Catalog PowerShell script block: {CommandLine}.",
+                                "source": "fixture-provider-resource-table",
+                                "source_type": "resource-table-export",
+                                "locale": "en-US",
+                                "message_id": "4104",
+                                "extraction_tool": "fixture-resource-extractor",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output = root / "eventlog.json"
+
+            self.assertEqual(
+                main(
+                    [
+                        "artifacts",
+                        str(root),
+                        "--kind",
+                        "eventlog",
+                        "--eventlog-message-catalog",
+                        str(catalog),
+                        "--output",
+                        str(output),
+                    ]
+                ),
+                0,
+            )
+            artifacts = json.loads(output.read_text(encoding="utf-8"))["artifacts"]
+            native_evtx = next(
+                item
+                for item in artifacts
+                if item["artifact_type"] == "eventlog-event"
+                and item["details"]["parser"] == "windows-eventlog-evtx-native"
+            )["details"]
+            rendering = native_evtx["message_rendering"]
+            source = rendering["provenance"]["provider_message_resource_source"]
+
+            self.assertEqual(rendering["status"], "rendered-provider-catalog-template")
+            self.assertEqual(native_evtx["event_message"], "Catalog PowerShell script block: powershell -enc CatalogNative.")
+            self.assertFalse(rendering["provider_resource_required"])
+            self.assertTrue(rendering["provenance"]["provider_message_resource_resolved"])
+            self.assertEqual(source["source_type"], "resource-table-export")
+            self.assertEqual(source["message_id"], "4104")
+            self.assertEqual(source["extraction_tool"], "fixture-resource-extractor")
+            self.assertEqual(len(source["template_sha256"]), 64)
+            self.assertNotIn(
+                "provider-message-resource-rendering-not-implemented",
+                native_evtx["evtx_report_grade_assessment"]["blockers"],
+            )
+            self.assertTrue(native_evtx["evtx_native_capabilities"]["curated_provider_message_catalog"])
+            self.assertFalse(native_evtx["commercial_grade_ready"])
 
     def test_eventlog_collector_normalizes_exports_detections_and_evtx_inventory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
