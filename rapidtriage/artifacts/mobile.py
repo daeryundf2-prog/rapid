@@ -1793,18 +1793,30 @@ def mobile_commercial_uplift_evidence(
         value = optional_text(details.get(key))
         if value:
             source_refs.append(f"{key}:{value}")
+    passed_validation_matrix_ids = [
+        str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
+    ]
+    failed_validation_matrix_ids = [
+        str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
+    ]
     return {
         "batch_id": "commercial-uplift-026-030",
         "item_numbers": item_numbers,
         "implementation_track": "mobile-and-app-import-validation",
         "objective": " ".join(objectives[number] for number in item_numbers if number in objectives),
+        "reportability_decision": mobile_reportability_decision(
+            artifact_type=artifact_type,
+            item_numbers=item_numbers,
+            source_tool=source_tool,
+            source_index=source_index,
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            failed_validation_matrix_ids=failed_validation_matrix_ids,
+            details=details,
+        ),
         "source_refs": source_refs,
-        "passed_validation_matrix_ids": [
-            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")
-        ],
-        "failed_validation_matrix_ids": [
-            str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
-        ],
+        "passed_validation_matrix_ids": passed_validation_matrix_ids,
+        "failed_validation_matrix_ids": failed_validation_matrix_ids,
         "report_grade_status": str(report_grade.get("status") or ""),
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
@@ -1820,6 +1832,66 @@ def mobile_commercial_uplift_evidence(
         },
         "next_internal_step": "Add vendor schema/version mappers, iOS protected-data validation, Android backup payload decoding, and mobile known-answer FP/FN corpora.",
         "external_evidence_required": True,
+    }
+
+
+def mobile_reportability_decision(
+    *,
+    artifact_type: str,
+    item_numbers: list[int],
+    source_tool: str,
+    source_index: int,
+    validation_checks: Mapping[str, object],
+    report_grade: Mapping[str, object],
+    failed_validation_matrix_ids: list[str],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = {str(item) for item in report_grade.get("blockers") or [] if str(item)}
+    if not validation_checks.get("vendor_export_settings_verified"):
+        blockers.add("vendor-export-settings-not-verified")
+    if not validation_checks.get("original_acquisition_hash_verified"):
+        blockers.add("original-acquisition-hash-not-verified")
+    if not validation_checks.get("vendor_schema_validated"):
+        blockers.add("vendor-or-app-schema-not-validated")
+    if not validation_checks.get("encrypted_backup_unlocked", True):
+        blockers.add("encrypted-backup-not-unlocked")
+    if validation_checks.get("secrets_extracted"):
+        blockers.add("secret-values-extracted-authority-review-required")
+    if "known-answer-mobile-validation" in failed_validation_matrix_ids:
+        blockers.add("known-answer-mobile-corpus-not-attached")
+    allowed = {
+        26: "vendor-mobile-export-triage-pivot",
+        27: "ios-backup-inventory-triage-pivot",
+        28: "ios-keychain-redacted-inventory-pivot",
+        29: "android-app-data-inventory-triage-pivot",
+        30: "android-apk-risk-inventory-triage-pivot",
+    }
+    primary_item = item_numbers[0] if item_numbers else 26
+    decision = {
+        26: "do-not-report-vendor-mobile-export-as-source-complete",
+        27: "do-not-report-ios-backup-as-decrypted-complete",
+        28: "do-not-report-ios-keychain-secrets-or-access-semantics",
+        29: "do-not-report-android-app-data-as-decoded-content",
+        30: "do-not-report-android-apk-as-malware-or-signature-validated",
+    }.get(primary_item, "do-not-report-mobile-artifact-as-commercial-grade")
+    return {
+        "profile_version": "mobile-reportability-decision-v1",
+        "commercial_gap_ids": [f"#{number}" for number in item_numbers],
+        "decision": decision,
+        "allowed_use": allowed.get(primary_item, "mobile-artifact-triage-pivot"),
+        "blockers": sorted(blockers),
+        "failed_validation_matrix_ids": list(failed_validation_matrix_ids),
+        "source_tool": source_tool,
+        "artifact_type": artifact_type,
+        "source_record_id": source_record_id(details, source_index),
+        "secret_values_redacted_by_default": not bool(validation_checks.get("secrets_extracted")),
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "attach original acquisition/export hashes and vendor export settings",
+            "validate parser behavior against vendor/app/schema-version known-answer corpora",
+            "document deleted-record, encrypted-store, and protected-data boundaries",
+            "preserve lawful authority and reviewer audit evidence for any protected data reveal",
+        ],
     }
 
 

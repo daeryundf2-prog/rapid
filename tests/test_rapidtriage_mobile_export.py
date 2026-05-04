@@ -79,6 +79,18 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("source-hash-present", message_uplift["passed_validation_matrix_ids"])
             self.assertIn("vendor-settings-verified", message_uplift["failed_validation_matrix_ids"])
             self.assertEqual(message_uplift["large_data_controls"]["max_rows_per_source"], 50000)
+            self.assertEqual(
+                message_uplift["reportability_decision"]["decision"],
+                "do-not-report-vendor-mobile-export-as-source-complete",
+            )
+            self.assertEqual(
+                message_uplift["reportability_decision"]["allowed_use"],
+                "vendor-mobile-export-triage-pivot",
+            )
+            self.assertIn(
+                "vendor-export-settings-not-verified",
+                message_uplift["reportability_decision"]["blockers"],
+            )
 
             chat_messages = [
                 artifact
@@ -212,6 +224,14 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(ios_uplift["item_numbers"], [27])
             self.assertIn("protected-data-boundary", ios_uplift["passed_validation_matrix_ids"])
             self.assertIn("known-answer-mobile-validation", ios_uplift["failed_validation_matrix_ids"])
+            self.assertEqual(
+                ios_uplift["reportability_decision"]["decision"],
+                "do-not-report-ios-backup-as-decrypted-complete",
+            )
+            self.assertEqual(
+                ios_uplift["reportability_decision"]["allowed_use"],
+                "ios-backup-inventory-triage-pivot",
+            )
 
             ios_metadata = next(
                 artifact
@@ -241,6 +261,15 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(keychain_uplift["item_numbers"], [28])
             self.assertTrue(keychain_uplift["large_data_controls"]["protected_values_redacted_by_default"])
             self.assertIn("protected-data-boundary", keychain_uplift["passed_validation_matrix_ids"])
+            self.assertEqual(
+                keychain_uplift["reportability_decision"]["decision"],
+                "do-not-report-ios-keychain-secrets-or-access-semantics",
+            )
+            self.assertEqual(
+                keychain_uplift["reportability_decision"]["allowed_use"],
+                "ios-keychain-redacted-inventory-pivot",
+            )
+            self.assertTrue(keychain_uplift["reportability_decision"]["secret_values_redacted_by_default"])
 
             chat_db = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-chat-database")
             self.assertEqual(chat_db["details"]["service"], "WhatsApp")

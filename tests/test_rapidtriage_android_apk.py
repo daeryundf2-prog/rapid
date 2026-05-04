@@ -75,6 +75,18 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertIn("source-readable", apk_uplift["passed_validation_matrix_ids"])
             self.assertIn("signature-and-binary-manifest", apk_uplift["failed_validation_matrix_ids"])
             self.assertEqual(apk_uplift["large_data_controls"]["apk_string_scan_limit"], 1024 * 1024)
+            self.assertEqual(
+                apk_uplift["reportability_decision"]["decision"],
+                "do-not-report-android-apk-as-malware-or-signature-validated",
+            )
+            self.assertEqual(
+                apk_uplift["reportability_decision"]["allowed_use"],
+                "android-apk-risk-inventory-triage-pivot",
+            )
+            self.assertIn(
+                "binary-manifest-or-signature-not-validated",
+                apk_uplift["reportability_decision"]["blockers"],
+            )
 
             app_data = next(item for item in payload["artifacts"] if item["artifact_type"] == "android-app-data")
             self.assertEqual(app_data["details"]["package"], "com.example.spy")
@@ -99,6 +111,18 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertIn("manifest-or-package-context", app_data_uplift["passed_validation_matrix_ids"])
             self.assertIn("app-data-report-grade", app_data_uplift["failed_validation_matrix_ids"])
             self.assertFalse(app_data_uplift["large_data_controls"]["secret_values_extracted"])
+            self.assertEqual(
+                app_data_uplift["reportability_decision"]["decision"],
+                "do-not-report-android-app-data-as-decoded-content",
+            )
+            self.assertEqual(
+                app_data_uplift["reportability_decision"]["allowed_use"],
+                "android-app-data-inventory-triage-pivot",
+            )
+            self.assertIn(
+                "app-data-schema-or-deleted-record-validation-missing",
+                app_data_uplift["reportability_decision"]["blockers"],
+            )
 
 
 def write_apk_fixture(path: Path) -> None:

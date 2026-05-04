@@ -16,7 +16,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "vendor export rows preserve source tool/profile hints, source row IDs, hashes, duplicate/deleted warnings, schema compatibility blockers, and #26 core_accuracy_gates"
+          "vendor export rows preserve source tool/profile hints, source row IDs, hashes, duplicate/deleted warnings, schema compatibility blockers, and #26 core_accuracy_gates",
+          "vendor export reportability decisions block source-complete claims until export settings, acquisition hashes, schemas, and deleted-row semantics are validated"
         ]
       },
       "notes": "Internal fixture pass; vendor-version schema corpora and original acquisition hash logs remain commercial-grade evidence."
@@ -34,7 +35,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "iOS Manifest.db/plist rows preserve domain/fileID mapping, plist consistency, authority gates, app DB candidates, deleted-record warnings, and #27 core_accuracy_gates"
+          "iOS Manifest.db/plist rows preserve domain/fileID mapping, plist consistency, authority gates, app DB candidates, deleted-record warnings, and #27 core_accuracy_gates",
+          "iOS backup reportability decisions block decrypted-complete backup claims until encryption, app schema, and deleted-record validation exists"
         ]
       },
       "notes": "Internal fixture pass; encrypted backups, app database schemas, and deleted records remain validation blockers."
@@ -52,7 +54,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "iOS keychain inventory preserves redaction, protected-data labeling, reveal authority/audit gates, table counts, and #28 core_accuracy_gates"
+          "iOS keychain inventory preserves redaction, protected-data labeling, reveal authority/audit gates, table counts, and #28 core_accuracy_gates",
+          "iOS keychain reportability decisions block secret/access-semantics claims until lawful protected-data decryption and audit evidence exist"
         ]
       },
       "notes": "Internal fixture pass; protected-data decryption and legal reveal package remain operator-owned blockers."
@@ -70,7 +73,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "Android app-data rows preserve package/path attribution, communication/browser/media linkage hints, encrypted-store limits, schema tracking, and #29 core_accuracy_gates"
+          "Android app-data rows preserve package/path attribution, communication/browser/media linkage hints, encrypted-store limits, schema tracking, and #29 core_accuracy_gates",
+          "Android app-data reportability decisions block decoded-content claims until app schema, encrypted-store, and deleted-record validation exists"
         ]
       },
       "notes": "Internal fixture pass; Android backup payload decoding, app schemas, and encrypted/deleted stores remain commercial blockers."
@@ -88,7 +92,8 @@
       ],
       "expected": {
         "required_assertions": [
-          "APK rows preserve manifest, permissions/components, certificate/signature limitation, bounded DEX/native pivots, secret-handling warnings, and #30 core_accuracy_gates"
+          "APK rows preserve manifest, permissions/components, certificate/signature limitation, bounded DEX/native pivots, secret-handling warnings, and #30 core_accuracy_gates",
+          "APK reportability decisions block malware/signature-validated claims until binary manifest, signature-chain, and behavior validation exists"
         ]
       },
       "notes": "Internal fixture pass; binary manifests, signature-chain trust, and malware behavior validation remain required."

@@ -577,23 +577,31 @@ def android_commercial_uplift_evidence(details: dict[str, object], *, gap_ids: l
         29: "Expose Android backup/app-data package attribution, source hashing, category risk flags, and encrypted-store/app-schema blockers.",
         30: "Expose Android APK package metadata, permission/component inventory, DEX/native string pivots, and signature/binary-manifest blockers.",
     }
+    passed_validation_matrix_ids = [
+        str(item.get("id")) for item in matrix if isinstance(item, dict) and item.get("passed")
+    ]
+    failed_validation_matrix_ids = [
+        str(item.get("id")) for item in matrix if isinstance(item, dict) and not item.get("passed")
+    ]
     return {
         "batch_id": "commercial-uplift-026-030",
         "item_numbers": sorted(gap_ids),
         "implementation_track": "android-app-and-backup-validation",
         "objective": " ".join(objectives[number] for number in sorted(gap_ids) if number in objectives),
+        "reportability_decision": android_reportability_decision(
+            details,
+            gap_ids=sorted(gap_ids),
+            checks=checks,
+            failed_validation_matrix_ids=failed_validation_matrix_ids,
+        ),
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             f"source_format:{details.get('source_format', '')}",
             f"package:{details.get('package', '')}",
             f"source_sha256:{hashes.get('sha256', '')}",
         ],
-        "passed_validation_matrix_ids": [
-            str(item.get("id")) for item in matrix if isinstance(item, dict) and item.get("passed")
-        ],
-        "failed_validation_matrix_ids": [
-            str(item.get("id")) for item in matrix if isinstance(item, dict) and not item.get("passed")
-        ],
+        "passed_validation_matrix_ids": passed_validation_matrix_ids,
+        "failed_validation_matrix_ids": failed_validation_matrix_ids,
         "commercial_blockers": list(ANDROID_REPORT_GRADE_BLOCKERS),
         "large_data_controls": {
             "apk_string_scan_limit": APK_STRING_SCAN_LIMIT,
@@ -606,6 +614,53 @@ def android_commercial_uplift_evidence(details: dict[str, object], *, gap_ids: l
         },
         "next_internal_step": "Add binary AndroidManifest decoding, signature-chain verification, app-specific schema decoders, and Android known-answer validation.",
         "external_evidence_required": True,
+    }
+
+
+def android_reportability_decision(
+    details: dict[str, object],
+    *,
+    gap_ids: list[int],
+    checks: dict[str, object],
+    failed_validation_matrix_ids: list[str],
+) -> dict[str, object]:
+    blockers = set(ANDROID_REPORT_GRADE_BLOCKERS)
+    if "signature-and-binary-manifest" in failed_validation_matrix_ids:
+        blockers.add("binary-manifest-or-signature-not-validated")
+    if "app-data-report-grade" in failed_validation_matrix_ids:
+        blockers.add("app-data-schema-or-deleted-record-validation-missing")
+    if not checks.get("commercial_validation_corpus"):
+        blockers.add("known-answer-android-corpus-not-attached")
+    if not checks.get("binary_manifest_decoder_available"):
+        blockers.add("binary-android-manifest-decoder-not-available")
+    if not checks.get("secret_values_extracted", False):
+        blockers.add("secret-values-not-extracted-in-inventory-mode")
+    primary = gap_ids[0] if gap_ids else 30
+    return {
+        "profile_version": "android-reportability-decision-v1",
+        "commercial_gap_ids": [f"#{number}" for number in gap_ids],
+        "decision": (
+            "do-not-report-android-app-data-as-decoded-content"
+            if primary == 29
+            else "do-not-report-android-apk-as-malware-or-signature-validated"
+        ),
+        "allowed_use": (
+            "android-app-data-inventory-triage-pivot"
+            if primary == 29
+            else "android-apk-risk-inventory-triage-pivot"
+        ),
+        "blockers": sorted(blockers),
+        "failed_validation_matrix_ids": list(failed_validation_matrix_ids),
+        "package": str(details.get("package") or ""),
+        "source_format": str(details.get("source_format") or ""),
+        "secret_values_redacted_by_default": not bool(checks.get("secret_values_extracted")),
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "validate binary AndroidManifest parsing and package identity against known-good APKs",
+            "verify signature/certificate chain and signing lineage with trusted Android tooling",
+            "decode app-specific databases with schema-version fixtures before claiming content",
+            "validate malware or behavior conclusions with dedicated mobile/malware-analysis tooling",
+        ],
     }
 
 
