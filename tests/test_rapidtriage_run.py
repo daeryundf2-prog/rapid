@@ -237,10 +237,18 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(incremental_uplift["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(incremental_uplift["item_numbers"], [68])
             self.assertIn("bounded fingerprint", " ".join(incremental_uplift["large_data_controls"]))
+            self.assertEqual(
+                incremental_uplift["reportability_decision"]["decision"],
+                "do-not-report-incremental-indexing-as-content-hash-complete",
+            )
             checkpoint_uplift = summary_payload["processing"]["checkpoint_resume"]["commercial_uplift_evidence"]
             self.assertEqual(checkpoint_uplift["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(checkpoint_uplift["item_numbers"], [70])
             self.assertIn("stage status records", " ".join(checkpoint_uplift["large_data_controls"]))
+            self.assertEqual(
+                checkpoint_uplift["reportability_decision"]["allowed_use"],
+                "stage-checkpoint-resume-triage-pivot",
+            )
             self.assertIn("#71", summary_payload["processing"]["parser_crash_isolation"]["commercial_gap_ids"])
             self.assertIn("#72", summary_payload["processing"]["memory_cap_enforcement"]["commercial_gap_ids"])
             self.assertIn("#75", summary_payload["processing"]["parallel_parser_scheduler"]["commercial_gap_ids"])

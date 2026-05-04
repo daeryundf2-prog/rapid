@@ -418,9 +418,43 @@ def performance_commercial_uplift_evidence(
         "usable": True,
         "validated": True,
         "commercial_grade_ready": False,
+        "reportability_decision": performance_reportability_decision(
+            item_number=item_number,
+            external_validation=external_validation,
+            large_data_controls=large_data_controls,
+        ),
         "passed_validation_check_ids": list(validation_ids),
         "large_data_controls": list(large_data_controls),
         "remaining_external_validation": list(external_validation),
+    }
+
+
+def performance_reportability_decision(
+    *,
+    item_number: int,
+    external_validation: Sequence[str],
+    large_data_controls: Sequence[str],
+) -> dict[str, object]:
+    decisions = {
+        66: "do-not-report-benchmark-as-published-scale-proof",
+        67: "do-not-report-stress-plan-as-executed-terabyte-validation",
+    }
+    allowed_uses = {
+        66: "benchmark-run-and-scale-plan-triage-pivot",
+        67: "stress-runbook-triage-pivot",
+    }
+    return {
+        "profile_version": "performance-reportability-decision-v1",
+        "commercial_gap_ids": [f"#{item_number}"],
+        "decision": decisions.get(item_number, "do-not-report-performance-output-as-commercial-scale-proof"),
+        "allowed_use": allowed_uses.get(item_number, "performance-evidence-triage-pivot"),
+        "blockers": sorted({str(item) for item in external_validation if str(item)}),
+        "control_snapshot": list(large_data_controls),
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "publish hardware, OS, dependency, evidence-size, wall-time, memory, and p95 latency evidence",
+            "attach independent reproduction logs and release threshold comparisons before scale claims",
+        ],
     }
 
 

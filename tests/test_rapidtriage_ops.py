@@ -136,6 +136,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertFalse(uplift["commercial_grade_ready"])
             self.assertIn("p50/p95 search latency", " ".join(uplift["large_data_controls"]))
             self.assertIn("published 100k/1M/10M hardware and OS benchmark matrix", uplift["remaining_external_validation"])
+            self.assertEqual(
+                uplift["reportability_decision"]["decision"],
+                "do-not-report-benchmark-as-published-scale-proof",
+            )
 
     def test_stress_plan_command_writes_large_case_runbook(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -178,6 +182,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(uplift["item_numbers"], [67])
             self.assertIn("1TB/5TB/10TB runbook scenarios", " ".join(uplift["large_data_controls"]))
             self.assertIn("actual 1TB-10TB hardware stress runs", uplift["remaining_external_validation"])
+            self.assertEqual(
+                uplift["reportability_decision"]["allowed_use"],
+                "stress-runbook-triage-pivot",
+            )
             scenario_uplift = payload["scenarios"][0]["commercial_uplift_evidence"]
             self.assertEqual(scenario_uplift["item_numbers"], [67])
 
@@ -937,6 +945,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(queue_uplift["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(queue_uplift["item_numbers"], [69])
             self.assertIn("local-threadpool limitation", " ".join(queue_uplift["large_data_controls"]))
+            self.assertEqual(
+                queue_uplift["reportability_decision"]["decision"],
+                "do-not-report-job-queue-as-distributed-parser-scheduler",
+            )
             self.assertTrue(
                 all(step["commercial_uplift_evidence"]["batch_id"] == "commercial-uplift-066-070" for step in canceled.to_dict()["steps"])
             )

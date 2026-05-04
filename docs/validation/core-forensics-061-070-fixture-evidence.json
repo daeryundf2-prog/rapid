@@ -54,7 +54,7 @@
       "title": "100k/1M/10M record benchmark",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Benchmark output preserves scale matrix, ingest/search metrics, memory/output size, run-summary link, #66 core_accuracy_gates, and #66 commercial_uplift_evidence."
+        "Benchmark output preserves scale matrix, ingest/search metrics, memory/output size, run-summary link, #66 core_accuracy_gates, #66 commercial_uplift_evidence, and reportability blockers for missing hardware/OS/dependency/evidence-size/wall-time/memory/p95 independent reproduction evidence."
       ],
       "remaining_external_validation": ["Published 100k/1M/10M hardware runs and release thresholds."]
     },
@@ -63,7 +63,7 @@
       "title": "1TB-10TB evidence stress test",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, #67 core_accuracy_gates, and #67 commercial_uplift_evidence on plan/scenario payloads."
+        "Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, #67 core_accuracy_gates, #67 commercial_uplift_evidence, and reportability blockers for missing actual 1TB-10TB hardware runs, bottleneck traces, and independent reproduction logs."
       ],
       "remaining_external_validation": ["Actual 1TB-10TB hardware runs, bottleneck logs, and independent reproduction."]
     },
@@ -72,7 +72,7 @@
       "title": "Incremental indexing",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Run fingerprint output preserves path/size/mtime metadata, truncation disclosure, reuse safety, #68 core_accuracy_gates, and #68 commercial_uplift_evidence."
+        "Run fingerprint output preserves path/size/mtime metadata, truncation disclosure, reuse safety, #68 core_accuracy_gates, #68 commercial_uplift_evidence, and reportability blockers for missing content-hash reuse, changed-source behavior, and large-case replay validation."
       ],
       "remaining_external_validation": ["Per-file content-hash incremental reindexing and large-case validation."]
     },
@@ -81,7 +81,7 @@
       "title": "Background job queue",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Job payloads preserve job status, step progress, state-file persistence assessment, cancel/retry state, #69 core_accuracy_gates, and #69 commercial_uplift_evidence on queue/step payloads."
+        "Job payloads preserve job status, step progress, state-file persistence assessment, cancel/retry state, #69 core_accuracy_gates, #69 commercial_uplift_evidence, and reportability blockers for missing distributed workers, parser-level progress, resource telemetry, cancellation, and retry validation under load."
       ],
       "remaining_external_validation": ["Distributed workers, parser-level progress percentages, and cancellation validation under load."]
     },
@@ -90,7 +90,7 @@
       "title": "Stage checkpoint/resume hardening",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Run checkpoint output preserves stage outputs, sizes, reused flags, resume state, partial-stage warnings, #70 core_accuracy_gates, and #70 commercial_uplift_evidence on summary/stage records."
+        "Run checkpoint output preserves stage outputs, sizes, reused flags, resume state, partial-stage warnings, #70 core_accuracy_gates, #70 commercial_uplift_evidence, and reportability blockers for missing failed-stage and mid-parser resume validation across long-running corpora."
       ],
       "remaining_external_validation": ["Mid-parser checkpointing, failed-stage resume, and long-running case replay validation."]
     }

@@ -33,6 +33,8 @@ rapidtriage commercial-readiness \
 
 The #61 through #65 rows now include reportability decisions. Advanced search is limited to `advanced-search-triage-pivot`; keyword packs to `keyword-pack-expansion-triage-pivot`; IOC/TI enrichment to `offline-ioc-ti-triage-pivot`; citation exports to `report-citation-index-triage-pivot`; and evidence-selection history to `evidence-selection-history-triage-pivot`. These are not source-proof, release-reviewed pack, live TI verdict, court exhibit, or multi-user signed-history claims until the missing corpus, signing, feed provenance, source-hash, reviewer, and append-only evidence is attached.
 
+The #66 through #70 rows also emit reportability decisions. Benchmarks are limited to `benchmark-run-and-scale-plan-triage-pivot`, stress plans to `stress-runbook-triage-pivot`, incremental fingerprints to `bounded-input-fingerprint-triage-pivot`, background jobs to `local-background-job-triage-pivot`, and checkpoint outputs to `stage-checkpoint-resume-triage-pivot`. They are not published scale proof, executed TB validation, content-hash-complete incremental indexing, distributed parser scheduling, or mid-parser resume proof without hardware runs, replay logs, distributed worker telemetry, and long-running corpus evidence.
+
 ## Interpretation
 
 Passing this manifest promotes #61 through #70 to the internal `validated` maturity stage only. These features remain `commercial_grade_ready=false` until broad relevance, scale, multi-user, hardware, and independent validation evidence is attached.

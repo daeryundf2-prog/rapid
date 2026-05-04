@@ -582,12 +582,42 @@ def job_queue_commercial_uplift_evidence(
         "usable": True,
         "validated": True,
         "commercial_grade_ready": False,
+        "reportability_decision": job_queue_reportability_decision(
+            validation_ids=validation_ids,
+            large_data_controls=large_data_controls,
+        ),
         "passed_validation_check_ids": list(validation_ids),
         "large_data_controls": list(large_data_controls),
         "remaining_external_validation": [
             "distributed worker execution",
             "parser-level progress percentage and resource telemetry under load",
             "cooperative cancellation validation on long-running parser workloads",
+        ],
+    }
+
+
+def job_queue_reportability_decision(
+    *,
+    validation_ids: Sequence[str],
+    large_data_controls: Sequence[str],
+) -> Dict[str, object]:
+    blockers = {
+        "distributed worker execution",
+        "parser-level progress percentage and resource telemetry under load",
+        "cooperative cancellation validation on long-running parser workloads",
+    }
+    return {
+        "profile_version": "job-queue-reportability-decision-v1",
+        "commercial_gap_ids": [BACKGROUND_JOB_GAP_ID],
+        "decision": "do-not-report-job-queue-as-distributed-parser-scheduler",
+        "allowed_use": "local-background-job-triage-pivot",
+        "blockers": sorted(blockers),
+        "validation_snapshot": list(validation_ids),
+        "control_snapshot": list(large_data_controls),
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "validate distributed workers, parser-level progress, resource telemetry, cancellation, and retry under load",
+            "capture persisted job state and partial-output handling across long-running evidence corpora",
         ],
     }
 
