@@ -1558,6 +1558,9 @@ def native_evtx_commercial_uplift_evidence(details: Mapping[str, object]) -> dic
         "binxml_status": str(details.get("evtx_binxml_status") or checks.get("binxml_status") or ""),
         "report_grade_status": str(report_grade.get("status") or ""),
         "commercial_blockers": list(report_grade.get("blockers") or []),
+        "commercial_blocker_analysis": evtx_commercial_blocker_analysis(
+            list(report_grade.get("blockers") or [])
+        ),
         "large_data_controls": {
             "record_limit": MAX_NATIVE_EVTX_RECORDS,
             "chunk_limit": MAX_NATIVE_EVTX_CHUNKS,
@@ -1573,6 +1576,37 @@ def native_evtx_commercial_uplift_evidence(details: Mapping[str, object]) -> dic
         ),
         "external_evidence_required": True,
     }
+
+
+def evtx_commercial_blocker_analysis(blockers: Sequence[object]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for raw in blockers:
+        blocker = str(raw)
+        if "independent" in blocker or "corpus" in blocker or "validation-required" in blocker:
+            category = "external_validation"
+            owner = "operator-or-independent-validator"
+            next_step = "Attach real EVTX corpus, trusted-tool diff output, and reviewer signoff before commercial claims."
+        elif "stream" in blocker or "large" in blocker or "chunk-crc" in blocker:
+            category = "large_data_proof"
+            owner = "engineering-plus-benchmark-lab"
+            next_step = "Run large/corrupt EVTX benchmark corpus with chunk-level pass/fail evidence."
+        elif "provider-message" in blocker or "binxml" in blocker:
+            category = "internal_implementation"
+            owner = "engineering"
+            next_step = "Extend native BinXML/message rendering and add record-level expected-output tests."
+        else:
+            category = "internal_implementation"
+            owner = "engineering"
+            next_step = "Reduce parser-depth blocker with source-offset-preserving implementation and fixture coverage."
+        rows.append(
+            {
+                "blocker": blocker,
+                "category": category,
+                "owner": owner,
+                "next_step": next_step,
+            }
+        )
+    return rows
 
 
 def native_evtx_record_candidate_record(

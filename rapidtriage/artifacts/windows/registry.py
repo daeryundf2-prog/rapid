@@ -1035,6 +1035,9 @@ def registry_commercial_uplift_evidence(
         "recovery_profile_version": str(recovery_profile.get("profile_version") or ""),
         "report_grade_status": str(report_grade.get("status") or ""),
         "commercial_blockers": list(report_grade.get("blockers") or []),
+        "commercial_blocker_analysis": registry_commercial_blocker_analysis(
+            list(report_grade.get("blockers") or [])
+        ),
         "large_data_controls": {
             "bounded_cell_scan_bytes": MAX_HIVE_CELL_SCAN_BYTES,
             "bounded_string_scan_bytes": MAX_HIVE_STRING_SCAN_BYTES,
@@ -1049,6 +1052,41 @@ def registry_commercial_uplift_evidence(
         ),
         "external_evidence_required": True,
     }
+
+
+def registry_commercial_blocker_analysis(blockers: Sequence[object]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for raw in blockers:
+        blocker = str(raw)
+        if "independent" in blocker or "corpus" in blocker or "validation-required" in blocker:
+            category = "external_validation"
+            owner = "operator-or-independent-validator"
+            next_step = "Attach real hive corpus, transaction-log context, second-parser diff output, and reviewer signoff."
+        elif "transaction-log" in blocker:
+            category = "internal_implementation"
+            owner = "engineering"
+            next_step = "Implement LOG1/LOG2 transaction-log discovery/replay evidence and fixture-backed pass/fail checks."
+        elif "binary-value" in blocker or "security-descriptor" in blocker:
+            category = "internal_implementation"
+            owner = "engineering"
+            next_step = "Decode the native value/security structure with offset-preserving tests before changing reportability."
+        elif "large" in blocker or "bounded" in blocker:
+            category = "large_data_proof"
+            owner = "engineering-plus-benchmark-lab"
+            next_step = "Run large hive benchmark corpus with memory and cursor evidence."
+        else:
+            category = "internal_implementation"
+            owner = "engineering"
+            next_step = "Reduce parser-depth blocker with source-offset-preserving implementation and fixture coverage."
+        rows.append(
+            {
+                "blocker": blocker,
+                "category": category,
+                "owner": owner,
+                "next_step": next_step,
+            }
+        )
+    return rows
 
 
 def build_registry_record(

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from rapidtriage.artifacts.windows.eventlog import (
     binxml_value_field_map,
+    native_evtx_commercial_uplift_evidence,
     native_evtx_core_accuracy_gates,
     native_evtx_promoted_fields,
 )
@@ -128,6 +129,27 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(by_gap["#1"]["missing_required_checks"], [])
         self.assertIn("expected-answer manifest", by_gap["#1"]["minimum_evidence"])
         self.assertFalse(by_gap["#1"]["commercial_grade_ready"])
+        uplift = native_evtx_commercial_uplift_evidence(
+            {
+                "source_path": "Security.evtx",
+                "record_id": "42",
+                "evtx_record_offset": 8192,
+                "evtx_record_sha256": "a" * 64,
+                "evtx_report_grade_assessment": {
+                    "status": "validation-required",
+                    "blockers": [
+                        "full-binxml-field-decoding-required",
+                        "broad-deleted-corrupt-record-corpus-validation-required",
+                    ],
+                },
+            }
+        )
+        blocker_categories = {row["blocker"]: row["category"] for row in uplift["commercial_blocker_analysis"]}
+        self.assertEqual(blocker_categories["full-binxml-field-decoding-required"], "internal_implementation")
+        self.assertEqual(
+            blocker_categories["broad-deleted-corrupt-record-corpus-validation-required"],
+            "external_validation",
+        )
 
     def test_shellbags_provider_emits_native_hive_candidate_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -249,6 +271,17 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(key_uplift["item_numbers"], [4])
             self.assertEqual(key_uplift["implementation_track"], "native-parser-depth")
             self.assertIn("root-reachability", key_uplift["passed_validation_matrix_ids"])
+            key_blocker_categories = {
+                row["blocker"]: row["category"] for row in key_uplift["commercial_blocker_analysis"]
+            }
+            self.assertEqual(
+                key_blocker_categories["transaction-log-replay-not-implemented"],
+                "internal_implementation",
+            )
+            self.assertEqual(
+                key_blocker_categories["deleted-cell-known-answer-corpus-validation-required"],
+                "external_validation",
+            )
             self.assertEqual(key_uplift["large_data_controls"]["reader"], "bounded-hbin-cell-scan")
             self.assertTrue(
                 key_uplift["large_data_controls"]["transaction_log_replay_required_for_commercial_claims"]
