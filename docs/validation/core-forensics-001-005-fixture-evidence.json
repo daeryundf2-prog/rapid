@@ -49,7 +49,8 @@
       "number": 3,
       "title": "EVTX deleted/corrupt record recovery validation",
       "assertions": [
-        "eventlog-record-candidate rows preserve recovery status, candidate reason, offset/integrity context, caution labels, non-reportable default, and #3 core_accuracy_gates."
+        "eventlog-record-candidate rows preserve recovery status, candidate reason, offset/integrity context, caution labels, non-reportable default, and #3 core_accuracy_gates.",
+        "slack/deleted/corrupt EVTX candidates expose confidence bands, confidence factors, confidence penalties, and a reportability decision that keeps them triage-only until secondary validation."
       ],
       "blockers_kept": [
         "large slack/deleted/corrupt EVTX corpus",

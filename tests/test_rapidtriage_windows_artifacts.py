@@ -967,7 +967,23 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             recovery_profile = native_evtx["details"]["evtx_recovery_validation_profile"]
             self.assertEqual(recovery_profile["candidate_class"], "slack-or-deleted-record")
             self.assertFalse(recovery_profile["reportable_without_secondary_validation"])
+            self.assertEqual(recovery_profile["reportability_decision"]["decision"], "do-not-report-as-fact")
+            self.assertEqual(recovery_profile["reportability_decision"]["allowed_use"], "triage-pivot-only")
+            self.assertIn(
+                "secondary-parser-validation-required",
+                recovery_profile["reportability_decision"]["blockers"],
+            )
             self.assertIn("known-answer-deleted-record-fixture-match", recovery_profile["required_independent_checks"])
+            self.assertIn("confidence_band", native_evtx["details"]["evtx_recovery_context"])
+            self.assertIn(
+                "chunk-signature-valid",
+                native_evtx["details"]["evtx_recovery_evidence"]["confidence_factors"],
+            )
+            self.assertIn(
+                "declared-size-plausible",
+                native_evtx["details"]["evtx_recovery_evidence"]["confidence_factors"],
+            )
+            self.assertIn("confidence_penalties", native_evtx["details"]["evtx_recovery_evidence"])
             self.assertGreaterEqual(
                 native_evtx["details"]["evtx_recovery_evidence"]["record_relative_offset"],
                 native_evtx["details"]["evtx_recovery_evidence"]["free_space_offset"],
@@ -1030,6 +1046,16 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 "known-answer-corrupt-record-fixture-match",
                 candidate["evtx_recovery_validation_profile"]["required_independent_checks"],
             )
+            self.assertEqual(
+                candidate["evtx_recovery_validation_profile"]["reportability_decision"]["decision"],
+                "do-not-report-as-fact",
+            )
+            self.assertIn(
+                "candidate-not-live-allocated-record",
+                candidate["evtx_recovery_validation_profile"]["reportability_decision"]["blockers"],
+            )
+            self.assertEqual(candidate["evtx_recovery_context"]["confidence_band"], "low-validation-required")
+            self.assertIn("trailing-size-invalid", candidate["evtx_recovery_evidence"]["confidence_penalties"])
             self.assertEqual(candidate["evtx_report_grade_assessment"]["status"], "validation-required")
             self.assertEqual(candidate["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-001-005")
             self.assertEqual(candidate["commercial_uplift_evidence"]["item_numbers"], [1, 2, 3])

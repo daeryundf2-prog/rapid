@@ -1276,6 +1276,12 @@ def native_evtx_recovery_context(
     else:
         status = "recoverable-record"
 
+    confidence = native_evtx_recovery_confidence_assessment(
+        status=status,
+        integrity=integrity,
+        chunk_context=chunk_context,
+        binxml_status=binxml_status,
+    )
     validation_required = status != "recoverable-record" or binxml_status == NATIVE_EVTX_BINXML_STATUS
     if validation_required:
         caution_labels.append("do-not-report-without-validation")
@@ -1283,7 +1289,10 @@ def native_evtx_recovery_context(
         "status": status,
         "allocation_status": allocation_status,
         "candidate_reason": candidate.reason,
-        "confidence": native_evtx_recovery_confidence(status, integrity, chunk_context, binxml_status),
+        "confidence": confidence["score"],
+        "confidence_band": confidence["band"],
+        "confidence_factors": confidence["factors"],
+        "confidence_penalties": confidence["penalties"],
         "validation_required": validation_required,
         "caution_labels": sorted(set(caution_labels)),
     }
@@ -1319,6 +1328,13 @@ def native_evtx_recovery_evidence(
         "allocation_status": allocation_status,
         "recovery_status": str(recovery_context.get("status") or ""),
         "confidence": float(recovery_context.get("confidence") or 0),
+        "confidence_band": str(recovery_context.get("confidence_band") or ""),
+        "confidence_factors": list(recovery_context.get("confidence_factors") or [])
+        if isinstance(recovery_context.get("confidence_factors"), list)
+        else [],
+        "confidence_penalties": list(recovery_context.get("confidence_penalties") or [])
+        if isinstance(recovery_context.get("confidence_penalties"), list)
+        else [],
         "record_relative_offset": int(chunk_context.get("record_relative_offset") or 0),
         "free_space_offset": int(chunk_context.get("free_space_offset") or 0),
         "last_record_offset": int(chunk_context.get("last_record_offset") or 0),
@@ -1380,6 +1396,11 @@ def native_evtx_recovery_validation_profile(
         "allocation_status": allocation_status,
         "confidence": float(recovery_context.get("confidence") or 0),
         "reportable_without_secondary_validation": reportable_without_secondary,
+        "reportability_decision": native_evtx_recovery_reportability_decision(
+            status=status,
+            recovery_context=recovery_context,
+            recovery_evidence=recovery_evidence,
+        ),
         "required_independent_checks": required_checks,
         "evidence_reasons": list(recovery_evidence.get("evidence_reasons") or [])
         if isinstance(recovery_evidence.get("evidence_reasons"), list)
@@ -1413,20 +1434,83 @@ def native_evtx_recovery_confidence(
     chunk_context: Mapping[str, object],
     binxml_status: str,
 ) -> float:
+    return float(native_evtx_recovery_confidence_assessment(status, integrity, chunk_context, binxml_status)["score"])
+
+
+def native_evtx_recovery_confidence_assessment(
+    status: str,
+    integrity: Mapping[str, object],
+    chunk_context: Mapping[str, object],
+    binxml_status: str,
+) -> dict[str, object]:
     score = 0.35 if status == "corrupt-record-candidate" else 0.55
+    factors: list[str] = []
+    penalties: list[str] = []
     if integrity.get("magic_valid"):
         score += 0.05
+        factors.append("record-magic-valid")
+    else:
+        penalties.append("record-magic-invalid")
     if integrity.get("declared_size_valid"):
         score += 0.1
+        factors.append("declared-size-plausible")
+    else:
+        penalties.append("declared-size-invalid")
     if integrity.get("trailing_size_valid"):
         score += 0.1
+        factors.append("trailing-size-valid")
+    else:
+        penalties.append("trailing-size-invalid")
     if chunk_context.get("chunk_signature_valid"):
         score += 0.05
+        factors.append("chunk-signature-valid")
+    else:
+        penalties.append("chunk-signature-invalid")
     if binxml_status in {"basic-rendered", "template-substituted-partial"}:
         score += 0.1
+        factors.append(f"binxml:{binxml_status}")
     elif binxml_status == "partial-tokenized":
         score += 0.05
-    return min(0.9, round(score, 2))
+        factors.append("binxml:partial-tokenized")
+    else:
+        penalties.append(f"binxml:{binxml_status}")
+    final_score = min(0.9, round(score, 2))
+    if final_score >= 0.75:
+        band = "high-validation-required"
+    elif final_score >= 0.55:
+        band = "medium-validation-required"
+    else:
+        band = "low-validation-required"
+    return {
+        "score": final_score,
+        "band": band,
+        "factors": factors,
+        "penalties": penalties,
+    }
+
+
+def native_evtx_recovery_reportability_decision(
+    *,
+    status: str,
+    recovery_context: Mapping[str, object],
+    recovery_evidence: Mapping[str, object],
+) -> dict[str, object]:
+    blockers = ["secondary-parser-validation-required", "known-answer-corpus-validation-required"]
+    if status != "recoverable-record":
+        blockers.append("candidate-not-live-allocated-record")
+    if recovery_evidence.get("evidence_reasons"):
+        blockers.append("candidate-evidence-reasons-present")
+    return {
+        "decision": "do-not-report-as-fact",
+        "allowed_use": "triage-pivot-only",
+        "confidence_band": str(recovery_context.get("confidence_band") or ""),
+        "blockers": sorted(set(blockers)),
+        "required_before_report": [
+            "record offset confirmed by a second parser or manual hex review",
+            "source EVTX hash and chunk context attached",
+            "known-answer or case-specific validation note attached",
+        ],
+    }
 
 
 def native_evtx_validation_required(binxml_status: str, recovery_context: Mapping[str, object]) -> bool:
