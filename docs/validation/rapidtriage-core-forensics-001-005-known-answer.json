@@ -58,10 +58,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "corrupt/slack candidate reason, offset context, integrity status, caution labels, and non-reportable default are preserved"
+          "corrupt/slack candidate reason, offset context, integrity status, trusted recovery offset diff gating, caution labels, and non-reportable default are preserved"
         ]
       },
-      "notes": "Internal fixture pass; large deleted/corrupt EVTX corpus and independent validation remain required."
+      "notes": "Internal fixture pass; large deleted/corrupt EVTX corpus, offset/hash oracle diff, and independent validation remain required."
     },
     {
       "id": "core-forensics-004-registry-tree-fixture",

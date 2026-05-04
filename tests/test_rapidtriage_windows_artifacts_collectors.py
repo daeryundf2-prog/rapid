@@ -10,6 +10,7 @@ from pathlib import Path
 from rapidtriage.artifacts.windows.eventlog import (
     binxml_value_field_map,
     build_evtx_message_rendering_diff,
+    build_evtx_recovery_corpus_diff,
     build_evtx_trusted_tool_record_diff,
     native_evtx_commercial_uplift_evidence,
     native_evtx_core_accuracy_gates,
@@ -137,6 +138,15 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                     "commercial_grade_evidence": True,
                 },
                 "evtx_validation_guidance": {"message": "Compare against Event Viewer rendering."},
+                "evtx_recovery_corpus_diff": {
+                    "status": "pass",
+                    "oracle": "hand-labeled deleted EVTX fixture",
+                    "matched_count": 1,
+                    "mismatch_count": 0,
+                    "missing_in_oracle_count": 0,
+                    "extra_in_oracle_count": 0,
+                    "commercial_grade_evidence": True,
+                },
             }
         )
 
@@ -149,6 +159,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertIn("provider/template/source provenance", by_gap["#2"]["satisfied_checks"])
         self.assertIn("trusted rendered-message diff pass", by_gap["#2"]["satisfied_checks"])
         self.assertIn("chunk-boundary containment", by_gap["#3"]["satisfied_checks"])
+        self.assertIn("trusted recovery offset diff pass", by_gap["#3"]["satisfied_checks"])
         self.assertEqual(by_gap["#1"]["missing_required_checks"], [])
         self.assertIn("expected-answer manifest", by_gap["#1"]["minimum_evidence"])
         self.assertFalse(by_gap["#1"]["commercial_grade_ready"])
@@ -261,6 +272,46 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertFalse(diff["commercial_grade_evidence"])
         self.assertEqual(diff["mismatch_count"], 1)
         self.assertIn("trusted-rendered-message-diff-required", diff["reportability_decision"]["blockers"])
+
+    def test_evtx_recovery_corpus_diff_requires_offset_and_hash_equality(self) -> None:
+        rapid = [
+            {
+                "evtx_record_offset": "0x2000",
+                "evtx_record_sha256": "b" * 64,
+                "evtx_declared_size": 256,
+                "evtx_allocation_status": "slack-record-candidate",
+                "evtx_recovery_status": "candidate-validation-required",
+            }
+        ]
+        oracle = [
+            {
+                "record_offset": 8192,
+                "record_sha256": "b" * 64,
+                "declared_size": "256",
+                "allocation_status": "slack-record-candidate",
+                "recovery_status": "candidate-validation-required",
+            }
+        ]
+
+        diff = build_evtx_recovery_corpus_diff(rapid, oracle, oracle="hand-labeled deleted EVTX fixture")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["oracle_recognized"])
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertEqual(diff["reportability_decision"]["decision"], "recovery-corpus-diff-passed")
+
+    def test_evtx_recovery_corpus_diff_blocks_unmatched_recovery_candidates(self) -> None:
+        rapid = [{"evtx_record_offset": 8192, "evtx_record_sha256": "b" * 64}]
+        oracle = [{"record_offset": 12288, "record_sha256": "c" * 64}]
+
+        diff = build_evtx_recovery_corpus_diff(rapid, oracle, oracle="Hayabusa recovery export")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["missing_in_oracle_count"], 1)
+        self.assertEqual(diff["extra_in_oracle_count"], 1)
+        self.assertIn("deleted-corrupt-recovery-corpus-diff-required", diff["reportability_decision"]["blockers"])
 
     def test_shellbags_provider_emits_native_hive_candidate_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

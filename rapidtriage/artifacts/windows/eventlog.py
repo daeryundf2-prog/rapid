@@ -41,6 +41,7 @@ NATIVE_EVTX_BINXML_STATUS = "not-decoded"
 NATIVE_EVTX_REPORT_GRADE_BLOCKERS = [
     "trusted-tool-record-diff-required",
     "trusted-rendered-message-diff-required",
+    "deleted-corrupt-recovery-corpus-diff-required",
     "provider-message-resource-rendering-not-implemented",
     "full-binxml-object-model-not-implemented",
     "broad-deleted-corrupt-record-corpus-validation-required",
@@ -1657,6 +1658,11 @@ def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[s
         if isinstance(details.get("evtx_message_rendering_diff"), Mapping)
         else {}
     )
+    recovery_diff = (
+        details.get("evtx_recovery_corpus_diff")
+        if isinstance(details.get("evtx_recovery_corpus_diff"), Mapping)
+        else {}
+    )
     binxml_status = str(details.get("evtx_binxml_status") or details.get("binxml_status") or checks.get("binxml_status") or "")
 
     if not checks.get("passes_basic_record_integrity"):
@@ -1676,6 +1682,8 @@ def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[s
         blockers.append("trusted-tool-record-diff-required")
     if message_diff.get("status") != "pass":
         blockers.append("trusted-rendered-message-diff-required")
+    if recovery_diff.get("status") != "pass":
+        blockers.append("deleted-corrupt-recovery-corpus-diff-required")
     if details.get("validation_required"):
         blockers.append("native-record-validation-required")
 
@@ -1684,6 +1692,8 @@ def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[s
         static_blockers.remove("trusted-tool-record-diff-required")
     if message_diff.get("status") == "pass" and "trusted-rendered-message-diff-required" in static_blockers:
         static_blockers.remove("trusted-rendered-message-diff-required")
+    if recovery_diff.get("status") == "pass" and "deleted-corrupt-recovery-corpus-diff-required" in static_blockers:
+        static_blockers.remove("deleted-corrupt-recovery-corpus-diff-required")
     if (
         isinstance(message.get("provenance"), Mapping)
         and message["provenance"].get("provider_message_resource_resolved")
@@ -1727,6 +1737,11 @@ def native_evtx_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[
         else {}
     )
     matrix = details.get("evtx_validation_matrix") if isinstance(details.get("evtx_validation_matrix"), list) else []
+    recovery_diff = (
+        details.get("evtx_recovery_corpus_diff")
+        if isinstance(details.get("evtx_recovery_corpus_diff"), Mapping)
+        else {}
+    )
     matrix_ids = {
         str(item.get("id"))
         for item in matrix
@@ -1794,6 +1809,8 @@ def native_evtx_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[
         item3_checks.append("checksum/integrity status")
     if recovery.get("caution_labels") or details.get("evtx_recovery_evidence"):
         item3_checks.append("candidate reason and confidence")
+    if recovery_diff.get("status") == "pass":
+        item3_checks.append("trusted recovery offset diff pass")
     if details.get("validation_required") or recovery.get("validation_required"):
         item3_checks.append("non-reportable default for unvalidated recovery")
 
@@ -1832,6 +1849,11 @@ def native_evtx_commercial_uplift_evidence(details: Mapping[str, object]) -> dic
         if isinstance(details.get("evtx_message_rendering_diff"), Mapping)
         else {}
     )
+    recovery_diff = (
+        details.get("evtx_recovery_corpus_diff")
+        if isinstance(details.get("evtx_recovery_corpus_diff"), Mapping)
+        else {}
+    )
     return {
         "batch_id": "commercial-uplift-001-005",
         "item_numbers": [1, 2, 3],
@@ -1866,6 +1888,15 @@ def native_evtx_commercial_uplift_evidence(details: Mapping[str, object]) -> dic
             "missing_in_trusted_count": int(message_diff.get("missing_in_trusted_count") or 0),
             "extra_in_trusted_count": int(message_diff.get("extra_in_trusted_count") or 0),
             "commercial_grade_evidence": bool(message_diff.get("commercial_grade_evidence")),
+        },
+        "recovery_corpus_diff": {
+            "status": str(recovery_diff.get("status") or "not-attached"),
+            "oracle": str(recovery_diff.get("oracle") or ""),
+            "matched_count": int(recovery_diff.get("matched_count") or 0),
+            "mismatch_count": int(recovery_diff.get("mismatch_count") or 0),
+            "missing_in_oracle_count": int(recovery_diff.get("missing_in_oracle_count") or 0),
+            "extra_in_oracle_count": int(recovery_diff.get("extra_in_oracle_count") or 0),
+            "commercial_grade_evidence": bool(recovery_diff.get("commercial_grade_evidence")),
         },
         "report_grade_status": str(report_grade.get("status") or ""),
         "commercial_blockers": list(report_grade.get("blockers") or []),
@@ -2076,6 +2107,82 @@ def build_evtx_message_rendering_diff(
     }
 
 
+def build_evtx_recovery_corpus_diff(
+    rapid_candidates: Sequence[Mapping[str, object]],
+    oracle_candidates: Sequence[Mapping[str, object]],
+    *,
+    oracle: str,
+) -> dict[str, object]:
+    """Compare recovered/corrupt EVTX candidates with hand-labeled or second-parser offsets."""
+
+    oracle_name = str(oracle or "").strip()
+    rapid_by_key = {
+        key: normalized
+        for candidate in rapid_candidates
+        for key, normalized in [_normalize_evtx_recovery_candidate(candidate)]
+        if key
+    }
+    oracle_by_key = {
+        key: normalized
+        for candidate in oracle_candidates
+        for key, normalized in [_normalize_evtx_recovery_candidate(candidate)]
+        if key
+    }
+
+    missing_in_oracle = sorted(key for key in rapid_by_key if key not in oracle_by_key)
+    extra_in_oracle = sorted(key for key in oracle_by_key if key not in rapid_by_key)
+    mismatches: list[dict[str, object]] = []
+    matched_count = 0
+    for key in sorted(set(rapid_by_key) & set(oracle_by_key)):
+        rapid = rapid_by_key[key]
+        oracle_row = oracle_by_key[key]
+        field_diffs = []
+        for field in ("record_sha256", "declared_size", "allocation_status", "recovery_status"):
+            left = rapid.get(field, "")
+            right = oracle_row.get(field, "")
+            if left or right:
+                if left != right:
+                    field_diffs.append({"field": field, "rapid": left, "oracle": right})
+        if field_diffs:
+            mismatches.append({"candidate_key": key, "field_diffs": field_diffs})
+        else:
+            matched_count += 1
+
+    status = "pass"
+    if not oracle_name or not rapid_by_key or not oracle_by_key:
+        status = "not-enough-evidence"
+    elif missing_in_oracle or extra_in_oracle or mismatches:
+        status = "diffs-present"
+
+    recognized_oracle = bool(re.search(r"(hand|labeled|oracle|evtxecmd|hayabusa|chainsaw|velociraptor)", oracle_name, re.I))
+    return {
+        "profile_version": "evtx-recovery-corpus-diff-v1",
+        "oracle": oracle_name,
+        "oracle_recognized": recognized_oracle,
+        "compare_fields": ["record_offset", "record_sha256", "declared_size", "allocation_status", "recovery_status"],
+        "rapid_candidate_count": len(rapid_by_key),
+        "oracle_candidate_count": len(oracle_by_key),
+        "matched_count": matched_count,
+        "mismatch_count": len(mismatches),
+        "missing_in_oracle_count": len(missing_in_oracle),
+        "extra_in_oracle_count": len(extra_in_oracle),
+        "status": status,
+        "commercial_grade_evidence": status == "pass" and recognized_oracle,
+        "missing_in_oracle": missing_in_oracle[:100],
+        "extra_in_oracle": extra_in_oracle[:100],
+        "mismatches": mismatches[:100],
+        "reportability_decision": {
+            "decision": "recovery-corpus-diff-passed" if status == "pass" else "do-not-report-recovered-record-as-fact",
+            "allowed_use": (
+                "support report-grade recovered-record assertions with attached corpus/signoff"
+                if status == "pass" and recognized_oracle
+                else "triage-only recovered-record pivot until offset corpus diff is clean"
+            ),
+            "blockers": [] if status == "pass" and recognized_oracle else ["deleted-corrupt-recovery-corpus-diff-required"],
+        },
+    }
+
+
 def _normalize_evtx_diff_record(record: Mapping[str, object]) -> tuple[str, dict[str, str]]:
     key = _first_present_string(
         record,
@@ -2127,6 +2234,32 @@ def _normalize_evtx_message_record(record: Mapping[str, object]) -> tuple[str, d
         else "",
         "message_preview": message_normalized[:240],
     }
+
+
+def _normalize_evtx_recovery_candidate(candidate: Mapping[str, object]) -> tuple[str, dict[str, str]]:
+    offset = _first_present_string(candidate, ("evtx_record_offset", "record_offset", "offset", "byte_offset"))
+    if not offset:
+        return "", {}
+    key = _normalize_numeric_string(offset)
+    return key, {
+        "record_offset": key,
+        "record_sha256": _first_present_string(candidate, ("evtx_record_sha256", "record_sha256", "sha256")),
+        "declared_size": _normalize_numeric_string(
+            _first_present_string(candidate, ("evtx_declared_size", "declared_size", "record_size"))
+        ),
+        "allocation_status": _first_present_string(candidate, ("evtx_allocation_status", "allocation_status")),
+        "recovery_status": _first_present_string(candidate, ("evtx_recovery_status", "recovery_status", "status")),
+    }
+
+
+def _normalize_numeric_string(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        return text
 
 
 def normalize_evtx_rendered_message(message: str) -> str:

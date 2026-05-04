@@ -49,6 +49,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "record-size plausibility",
             "checksum/integrity status",
             "candidate reason and confidence",
+            "trusted recovery offset diff pass",
             "non-reportable default for unvalidated recovery",
         ),
     },
