@@ -320,6 +320,10 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "deleted-or-free-value-cell",
             )
             self.assertTrue(value_recovery.details["registry_recovery_evidence"]["positive_size_free_cell"])
+            self.assertEqual(
+                value_recovery.details["registry_recovery_evidence"]["allocator_context"]["validation_status"],
+                "free-cell-candidate-validation-required",
+            )
             self.assertEqual(value_recovery.details["registry_recovery_evidence"]["parent_confidence"], "key-value-list")
             self.assertIn(
                 "parent:key-value-list",
@@ -338,6 +342,16 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 "parent-key-link-confirmation",
                 value_recovery.details["registry_recovery_validation_profile"]["required_independent_checks"],
             )
+            value_reportability = value_recovery.details["registry_recovery_reportability_decision"]
+            self.assertEqual(value_reportability["decision"], "do-not-report-as-fact")
+            self.assertEqual(value_reportability["allowed_use"], "triage-pivot-only")
+            self.assertEqual(value_reportability["transaction_log_status"], "present-not-replayed")
+            self.assertIn("transaction-log-present-not-replayed", value_reportability["blockers"])
+            self.assertIn("hive-allocator-state-validation-required", value_reportability["blockers"])
+            self.assertEqual(
+                value_recovery.details["registry_transaction_log_evidence"]["status"],
+                "present-not-replayed",
+            )
             self.assertIn("#5", value_recovery.details["registry_report_grade_assessment"]["commercial_gap_ids"])
             self.assertIn(
                 "deleted-or-free-cell-independent-validation-required",
@@ -350,6 +364,8 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(value_gate["gap_id"], "#5")
             self.assertIn("positive-size free-cell validation", value_gate["satisfied_checks"])
             self.assertIn("parent-key confirmation", value_gate["satisfied_checks"])
+            self.assertIn("allocator reportability context", value_gate["satisfied_checks"])
+            self.assertIn("transaction-log context disclosure", value_gate["satisfied_checks"])
             self.assertIn("reportability blocked until independent confirmation", value_gate["satisfied_checks"])
             self.assertEqual(value_gate["missing_required_checks"], [])
             self.assertIn("expected-answer manifest", value_gate["minimum_evidence"])
@@ -361,6 +377,11 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(
                 value_uplift["recovery_profile_version"],
                 "registry-deleted-cell-validation-v1",
+            )
+            self.assertEqual(value_uplift["transaction_log_status"], "present-not-replayed")
+            self.assertEqual(
+                value_uplift["recovery_reportability_decision"]["allowed_use"],
+                "triage-pivot-only",
             )
             self.assertTrue(value_uplift["external_evidence_required"])
             key_recovery = next(
@@ -376,6 +397,14 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn(
                 "parent-chain-and-root-reachability-review",
                 key_recovery.details["registry_recovery_validation_profile"]["required_independent_checks"],
+            )
+            self.assertEqual(
+                key_recovery.details["registry_recovery_reportability_decision"]["transaction_log_status"],
+                "present-not-replayed",
+            )
+            self.assertIn(
+                "transaction-log-present-not-replayed",
+                key_recovery.details["registry_recovery_reportability_decision"]["blockers"],
             )
             self.assertEqual(key_recovery.details["commercial_uplift_evidence"]["item_numbers"], [5])
 
@@ -529,6 +558,13 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                     for artifact in key_recovery
                 )
             )
+            self.assertTrue(
+                all(
+                    artifact["details"]["registry_recovery_reportability_decision"]["allowed_use"]
+                    == "triage-pivot-only"
+                    for artifact in key_recovery
+                )
+            )
             value_recovery = [
                 artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-value-recovery-candidate"
             ]
@@ -538,6 +574,19 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 all(
                     artifact["details"]["registry_recovery_validation_profile"]["candidate_class"]
                     == "deleted-value-cell"
+                    for artifact in value_recovery
+                )
+            )
+            self.assertTrue(
+                all(
+                    artifact["details"]["registry_recovery_evidence"]["allocator_context"]["positive_size_free_cell"]
+                    for artifact in value_recovery
+                )
+            )
+            self.assertTrue(
+                all(
+                    artifact["details"]["registry_recovery_reportability_decision"]["decision"]
+                    == "do-not-report-as-fact"
                     for artifact in value_recovery
                 )
             )

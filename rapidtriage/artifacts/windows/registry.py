@@ -596,6 +596,11 @@ def build_registry_key_recovery_records(
     metadata: Mapping[str, object],
     source_hashes: Mapping[str, str],
 ) -> Iterable[ArtifactRecord]:
+    transaction_log_evidence = (
+        metadata.get("transaction_log_evidence")
+        if isinstance(metadata.get("transaction_log_evidence"), Mapping)
+        else {}
+    )
     key_by_offset = {
         int(candidate.get("cell_offset") or 0): candidate
         for candidate in candidates
@@ -631,6 +636,7 @@ def build_registry_key_recovery_records(
             recovery_evidence,
             "deleted-or-free-key-cell",
             validation_checks=validation_matrix,
+            transaction_log_evidence=transaction_log_evidence,
         )
         core_accuracy_gates = registry_core_accuracy_gates(
             gap_ids=["#5"],
@@ -641,6 +647,8 @@ def build_registry_key_recovery_records(
                 "cell_offset": candidate.get("cell_offset", 0),
                 "allocation_status": candidate.get("allocation_status", ""),
                 "positive_size_free_cell": recovery_evidence.get("positive_size_free_cell", False),
+                "allocator_context": recovery_evidence.get("allocator_context", {}),
+                "transaction_log_evidence": transaction_log_evidence,
                 "recovery_evidence": recovery_evidence,
                 "recovery_profile": recovery_profile,
             },
@@ -664,6 +672,8 @@ def build_registry_key_recovery_records(
                 "evidence_strength": "registry-deleted-key-candidate",
                 "registry_recovery_evidence": recovery_evidence,
                 "registry_recovery_validation_profile": recovery_profile,
+                "registry_recovery_reportability_decision": recovery_profile["reportability_decision"],
+                "registry_transaction_log_evidence": dict(transaction_log_evidence),
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
@@ -677,6 +687,7 @@ def build_registry_key_recovery_records(
                         "registry_validation_matrix": validation_matrix,
                         "registry_report_grade_assessment": report_grade_assessment,
                         "recovery_profile": recovery_profile,
+                        "transaction_log_evidence": transaction_log_evidence,
                     },
                 ),
                 "registry_native_capabilities": REGISTRY_NATIVE_CAPABILITIES,
@@ -712,6 +723,11 @@ def build_registry_value_recovery_records(
     metadata: Mapping[str, object],
     source_hashes: Mapping[str, str],
 ) -> Iterable[ArtifactRecord]:
+    transaction_log_evidence = (
+        metadata.get("transaction_log_evidence")
+        if isinstance(metadata.get("transaction_log_evidence"), Mapping)
+        else {}
+    )
     key_by_offset = {
         int(candidate.get("cell_offset") or 0): candidate
         for candidate in candidates
@@ -757,6 +773,7 @@ def build_registry_value_recovery_records(
             recovery_evidence,
             "deleted-or-free-value-cell",
             validation_checks=validation_matrix,
+            transaction_log_evidence=transaction_log_evidence,
         )
         core_accuracy_gates = registry_core_accuracy_gates(
             gap_ids=["#5"],
@@ -769,6 +786,8 @@ def build_registry_value_recovery_records(
                 "positive_size_free_cell": recovery_evidence.get("positive_size_free_cell", False),
                 "parent_key_confidence": parent_confidence,
                 "decoded_data_preview": decoded_data,
+                "allocator_context": recovery_evidence.get("allocator_context", {}),
+                "transaction_log_evidence": transaction_log_evidence,
                 "recovery_evidence": recovery_evidence,
                 "recovery_profile": recovery_profile,
             },
@@ -792,6 +811,8 @@ def build_registry_value_recovery_records(
                 "evidence_strength": "registry-deleted-value-candidate",
                 "registry_recovery_evidence": recovery_evidence,
                 "registry_recovery_validation_profile": recovery_profile,
+                "registry_recovery_reportability_decision": recovery_profile["reportability_decision"],
+                "registry_transaction_log_evidence": dict(transaction_log_evidence),
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
@@ -805,6 +826,7 @@ def build_registry_value_recovery_records(
                         "registry_validation_matrix": validation_matrix,
                         "registry_report_grade_assessment": report_grade_assessment,
                         "recovery_profile": recovery_profile,
+                        "transaction_log_evidence": transaction_log_evidence,
                     },
                 ),
                 "registry_native_capabilities": REGISTRY_NATIVE_CAPABILITIES,
@@ -858,6 +880,23 @@ def registry_recovery_evidence(
         evidence_reasons.append(f"parent:{parent_confidence or 'unknown'}")
     if decoded_data_present:
         evidence_reasons.append("value-data:preview-decoded")
+    allocator_context = {
+        "profile_version": "registry-free-cell-allocator-context-v1",
+        "allocation_status": allocation_status,
+        "positive_size_free_cell": allocation_status == "free-or-deleted-candidate" and cell_size > 0,
+        "cell_size": cell_size,
+        "hbin_offset": int(candidate.get("hbin_offset") or 0),
+        "cell_relative_offset": int(candidate.get("cell_relative_offset") or 0),
+        "validation_status": (
+            "free-cell-candidate-validation-required"
+            if allocation_status == "free-or-deleted-candidate" and cell_size > 0
+            else "allocator-state-not-confirmed"
+        ),
+        "reporting_constraint": (
+            "A positive registry cell size marks an unallocated/free cell candidate, not a proven deletion. "
+            "Use only with surrounding hbin context and independent offset validation."
+        ),
+    }
     return {
         "candidate_kind": candidate_kind,
         "cell_kind": str(candidate.get("cell_kind") or ""),
@@ -873,6 +912,7 @@ def registry_recovery_evidence(
         "parent_confidence": parent_confidence,
         "parent_path": parent_path,
         "decoded_data_present": decoded_data_present,
+        "allocator_context": allocator_context,
         "validation_required": True,
         "evidence_reasons": sorted(set(evidence_reasons)),
     }
@@ -884,6 +924,7 @@ def registry_recovery_validation_profile(
     candidate_kind: str,
     *,
     validation_checks: Sequence[Mapping[str, object]],
+    transaction_log_evidence: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     cell_kind = str(candidate.get("cell_kind") or "")
     signature = str(candidate.get("cell_signature") or "")
@@ -917,6 +958,13 @@ def registry_recovery_validation_profile(
     else:
         candidate_class = "deleted-generic-cell"
         required_checks.append("manual-cell-structure-review")
+    reportability_decision = registry_recovery_reportability_decision(
+        candidate_kind,
+        recovery_evidence,
+        transaction_log_evidence or {},
+        failed_validation_checks=failed_checks,
+        required_independent_checks=required_checks,
+    )
     return {
         "profile_version": "registry-deleted-cell-validation-v1",
         "candidate_class": candidate_class,
@@ -933,10 +981,50 @@ def registry_recovery_validation_profile(
         "decoded_data_present": bool(recovery_evidence.get("decoded_data_present")),
         "failed_validation_checks": failed_checks,
         "reportable_without_secondary_validation": False,
+        "reportability_decision": reportability_decision,
         "required_independent_checks": sorted(set(required_checks)),
         "known_answer_corpus_requirement": (
             "Validate deleted/free registry nk/vk candidates against allocated, deleted, overwritten, "
             "and false-positive hive fixtures before using them as standalone testimony."
+        ),
+    }
+
+
+def registry_recovery_reportability_decision(
+    candidate_kind: str,
+    recovery_evidence: Mapping[str, object],
+    transaction_log_evidence: Mapping[str, object],
+    *,
+    failed_validation_checks: Sequence[str],
+    required_independent_checks: Sequence[str],
+) -> dict[str, object]:
+    transaction_status = str(transaction_log_evidence.get("status") or "unknown")
+    blockers = [
+        "deleted-or-free-cell-independent-validation-required",
+        "second-parser-cell-offset-confirmation-required",
+        "hive-allocator-state-validation-required",
+        "known-answer-deleted-cell-fixture-required",
+    ]
+    if transaction_status == "present-not-replayed":
+        blockers.append("transaction-log-present-not-replayed")
+    elif transaction_status == "absent":
+        blockers.append("transaction-log-absent-or-not-supplied")
+    else:
+        blockers.append("transaction-log-context-unknown")
+    blockers.extend(f"validation-check-failed:{check}" for check in failed_validation_checks)
+    return {
+        "profile_version": "registry-recovery-reportability-decision-v1",
+        "candidate_kind": candidate_kind,
+        "decision": "do-not-report-as-fact",
+        "allowed_use": "triage-pivot-only",
+        "blockers": sorted(set(blockers)),
+        "transaction_log_status": transaction_status,
+        "allocator_status": str(recovery_evidence.get("allocation_status") or ""),
+        "positive_size_free_cell": bool(recovery_evidence.get("positive_size_free_cell")),
+        "required_before_report": sorted(set(str(check) for check in required_independent_checks)),
+        "analyst_wording": (
+            "Describe this row as a deleted/free registry cell candidate until offset, allocator state, "
+            "transaction context, and second-parser evidence are independently confirmed."
         ),
     }
 
@@ -983,6 +1071,10 @@ def registry_core_accuracy_gates(
             item5_checks.append("data-type and data-length plausibility")
         if details.get("recovery_evidence"):
             item5_checks.append("allocator-state evidence")
+        if isinstance(details.get("allocator_context"), Mapping):
+            item5_checks.append("allocator reportability context")
+        if isinstance(details.get("transaction_log_evidence"), Mapping) and details["transaction_log_evidence"].get("status"):
+            item5_checks.append("transaction-log context disclosure")
         if details.get("recovery_profile"):
             item5_checks.append("reportability blocked until independent confirmation")
         gates.append(build_accuracy_gate(5, satisfied_checks=item5_checks, evidence_refs=evidence_refs))
@@ -1007,6 +1099,11 @@ def registry_commercial_uplift_evidence(
     recovery_profile = (
         details.get("recovery_profile")
         if isinstance(details.get("recovery_profile"), Mapping)
+        else {}
+    )
+    transaction_log_evidence = (
+        details.get("transaction_log_evidence")
+        if isinstance(details.get("transaction_log_evidence"), Mapping)
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
@@ -1037,6 +1134,8 @@ def registry_commercial_uplift_evidence(
         "passed_validation_matrix_ids": passed_matrix,
         "failed_validation_matrix_ids": failed_matrix,
         "recovery_profile_version": str(recovery_profile.get("profile_version") or ""),
+        "recovery_reportability_decision": dict(recovery_profile.get("reportability_decision") or {}),
+        "transaction_log_status": str(transaction_log_evidence.get("status") or ""),
         "report_grade_status": str(report_grade.get("status") or ""),
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "commercial_blocker_analysis": registry_commercial_blocker_analysis(
