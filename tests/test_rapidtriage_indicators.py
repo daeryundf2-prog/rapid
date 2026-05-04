@@ -83,6 +83,11 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             self.assertEqual(ioc_uplift["item_numbers"], [63])
             self.assertIn("offline feed provenance", ioc_uplift["passed_validation_check_ids"])
             self.assertFalse(ioc_uplift["large_data_controls"]["external_ti_api_calls"])
+            self.assertEqual(
+                ioc_uplift["reportability_decision"]["decision"],
+                "do-not-report-ioc-enrichment-as-live-ti-verdict",
+            )
+            self.assertEqual(ioc_uplift["reportability_decision"]["allowed_use"], "offline-ioc-ti-triage-pivot")
             self.assertFalse(manual_payload["indicator_native_capabilities"]["external_ti_api_calls"])
             self.assertEqual(manual_payload["ti_feed_sources"][0]["name"], "unit-ti-plugin")
             self.assertEqual(manual_payload["ti_feed_sources"][0]["version"], "2026.04")

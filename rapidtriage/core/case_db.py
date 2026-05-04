@@ -2810,11 +2810,56 @@ def case_report_commercial_uplift_evidence(
         "item_numbers": [item_number],
         "implementation_track": component,
         "source_refs": list(source_refs),
+        "reportability_decision": case_report_reportability_decision(
+            item_number=item_number,
+            component=component,
+            blockers=blockers,
+            controls=controls,
+        ),
         "passed_validation_check_ids": sorted(set(passed)),
         "failed_validation_check_ids": list(blockers),
         "commercial_blockers": list(blockers),
         "large_data_controls": dict(controls),
         "reporting_status": "implemented-baseline-validation-required",
+    }
+
+
+def case_report_reportability_decision(
+    *,
+    item_number: int,
+    component: str,
+    blockers: Sequence[str],
+    controls: Mapping[str, object],
+) -> dict[str, object]:
+    gap_id = f"#{item_number}"
+    decisions = {
+        64: "do-not-report-citation-index-as-court-exhibit-complete",
+        65: "do-not-report-evidence-selection-history-as-multi-user-signed",
+    }
+    allowed_uses = {
+        64: "report-citation-index-triage-pivot",
+        65: "evidence-selection-history-triage-pivot",
+    }
+    required = {
+        64: [
+            "verify every report item has review and source-record citations plus source hashes and parser versions",
+            "attach exhibit numbering, exported manifest, and reviewer sign-off before court package use",
+        ],
+        65: [
+            "persist immutable multi-user signed selection history with conflict handling",
+            "verify include-in-report changes against source hash and parser limitation evidence before final export",
+        ],
+    }
+    return {
+        "profile_version": "case-report-reportability-decision-v1",
+        "commercial_gap_ids": [gap_id],
+        "component": component,
+        "decision": decisions.get(item_number, "do-not-report-case-output-as-commercial-complete"),
+        "allowed_use": allowed_uses.get(item_number, "case-report-triage-pivot"),
+        "blockers": sorted({str(item) for item in blockers if str(item)}),
+        "control_snapshot": dict(controls),
+        "ready_for_court_report": False,
+        "required_before_report": required.get(item_number, ["attach source hash, parser validation, reviewer sign-off, and export manifest evidence"]),
     }
 
 

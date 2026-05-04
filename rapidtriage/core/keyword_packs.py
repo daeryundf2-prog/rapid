@@ -221,6 +221,17 @@ def keyword_pack_commercial_uplift_evidence(
         "item_numbers": [62],
         "implementation_track": "saved-keyword-pack-library-gate",
         "source_refs": list(provenance_refs),
+        "reportability_decision": keyword_pack_reportability_decision(
+            failed_validation_check_ids=[
+                "per-case-pack-editor",
+                "signed-pack-distribution",
+                "release-reviewed-pack-versioning",
+                "language-domain-specific-pack-corpus",
+            ],
+            pack_count=pack_count,
+            keyword_count=keyword_count,
+            custom_file_count=custom_file_count,
+        ),
         "passed_validation_check_ids": sorted(set(passed)),
         "failed_validation_check_ids": [
             "per-case-pack-editor",
@@ -238,6 +249,33 @@ def keyword_pack_commercial_uplift_evidence(
             "case_pack_editor": False,
         },
         "reporting_status": "implemented-baseline-validation-required",
+    }
+
+
+def keyword_pack_reportability_decision(
+    *,
+    failed_validation_check_ids: Sequence[str],
+    pack_count: int,
+    keyword_count: int,
+    custom_file_count: int,
+) -> dict[str, object]:
+    blockers = set(KEYWORD_PACK_REPORT_GRADE_BLOCKERS)
+    blockers.update(f"check:{item}" for item in failed_validation_check_ids)
+    return {
+        "profile_version": "keyword-pack-reportability-decision-v1",
+        "commercial_gap_ids": [KEYWORD_PACK_GAP_ID],
+        "decision": "do-not-report-keyword-pack-as-release-reviewed-or-complete",
+        "allowed_use": "keyword-pack-expansion-triage-pivot",
+        "blockers": sorted(blockers),
+        "pack_count": pack_count,
+        "keyword_count": keyword_count,
+        "custom_file_count": custom_file_count,
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "sign and version keyword packs with release review records",
+            "validate pack false-positive/false-negative behavior against language and domain corpora",
+            "record case-specific pack edits and provenance before using results as report scope",
+        ],
     }
 
 

@@ -31,6 +31,8 @@ rapidtriage commercial-readiness \
 | #69 Background jobs | Job payloads preserve status, step progress, persisted-state assessment, cancellation/retry state, local-threadpool warning, #69 `core_accuracy_gates`, and #69 `commercial_uplift_evidence` on queue/step payloads. | Distributed workers, parser-level progress percentages, and cooperative cancellation validation under load. |
 | #70 Checkpoint/resume | Run checkpoints preserve stage outputs, sizes, reused flags, resume state, partial-stage warnings, #70 `core_accuracy_gates`, and #70 `commercial_uplift_evidence` on summary/stage records. | Mid-parser checkpointing, failed-stage resume, and long-running case replay validation. |
 
+The #61 through #65 rows now include reportability decisions. Advanced search is limited to `advanced-search-triage-pivot`; keyword packs to `keyword-pack-expansion-triage-pivot`; IOC/TI enrichment to `offline-ioc-ti-triage-pivot`; citation exports to `report-citation-index-triage-pivot`; and evidence-selection history to `evidence-selection-history-triage-pivot`. These are not source-proof, release-reviewed pack, live TI verdict, court exhibit, or multi-user signed-history claims until the missing corpus, signing, feed provenance, source-hash, reviewer, and append-only evidence is attached.
+
 ## Interpretation
 
 Passing this manifest promotes #61 through #70 to the internal `validated` maturity stage only. These features remain `commercial_grade_ready=false` until broad relevance, scale, multi-user, hardware, and independent validation evidence is attached.

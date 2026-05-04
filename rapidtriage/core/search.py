@@ -159,6 +159,16 @@ def search_commercial_uplift_evidence(
             f"search_mode:{options.get('search_mode', '')}",
             f"proximity_window:{options.get('proximity_window', 0)}",
         ],
+        "reportability_decision": search_reportability_decision(
+            failed_validation_check_ids=[
+                "multilingual-relevance-corpus",
+                "query-builder-ux-validation",
+                "tuned-false-positive-false-negative-metrics",
+            ],
+            commercial_blockers=list(report_grade.get("blockers") or []),
+            options=options,
+            match_count=len(matches),
+        ),
         "passed_validation_check_ids": sorted(set(passed)),
         "failed_validation_check_ids": [
             "multilingual-relevance-corpus",
@@ -176,6 +186,32 @@ def search_commercial_uplift_evidence(
             "semantic_near_duplicate_search": False,
         },
         "reporting_status": "implemented-baseline-validation-required",
+    }
+
+
+def search_reportability_decision(
+    *,
+    failed_validation_check_ids: Sequence[str],
+    commercial_blockers: Sequence[str],
+    options: Mapping[str, object],
+    match_count: int,
+) -> dict[str, object]:
+    blockers = {str(item) for item in commercial_blockers if str(item)}
+    blockers.update(f"check:{item}" for item in failed_validation_check_ids)
+    return {
+        "profile_version": "advanced-search-reportability-decision-v1",
+        "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
+        "decision": "do-not-report-advanced-search-hit-as-source-proof",
+        "allowed_use": "advanced-search-triage-pivot",
+        "blockers": sorted(blockers),
+        "search_mode": str(options.get("search_mode") or ""),
+        "match_count": match_count,
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "open and hash-verify source rows for every report candidate",
+            "document regex/fuzzy/proximity query rationale and false-positive review",
+            "attach language/domain corpus validation before claiming search completeness",
+        ],
     }
 
 

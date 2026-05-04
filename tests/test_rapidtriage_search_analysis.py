@@ -337,6 +337,12 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             self.assertEqual(search_uplift["item_numbers"], [61])
             self.assertIn("query mode and options recorded", search_uplift["passed_validation_check_ids"])
             self.assertFalse(search_uplift["large_data_controls"]["full_linguistic_stemming"])
+            self.assertEqual(
+                search_uplift["reportability_decision"]["decision"],
+                "do-not-report-advanced-search-hit-as-source-proof",
+            )
+            self.assertEqual(search_uplift["reportability_decision"]["allowed_use"], "advanced-search-triage-pivot")
+            self.assertIn("check:query-builder-ux-validation", search_uplift["reportability_decision"]["blockers"])
             self.assertTrue(fuzzy["search_native_capabilities"]["regex_search"])
             self.assertEqual(fuzzy["matches"][0]["search_match"]["mode"], "fuzzy")
             self.assertIn("#61", fuzzy["matches"][0]["search_match"]["commercial_gap_ids"])

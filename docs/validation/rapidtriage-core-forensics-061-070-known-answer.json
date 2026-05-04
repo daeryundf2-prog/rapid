@@ -11,7 +11,7 @@
       "status": "pass",
       "backlog_items": [61],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_search_analysis.py"],
-      "expected": {"required_assertions": ["Search output preserves query mode/options, fuzzy/stem/regex support, proximity metadata, hit pointers, verification warnings, and #61 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Search output preserves query mode/options, fuzzy/stem/regex support, proximity metadata, hit pointers, verification warnings, and #61 core_accuracy_gates.", "Advanced search reportability decisions block source-proof claims until source rows are hash verified and regex/fuzzy/proximity false-positive review is documented."]},
       "notes": "Internal fixture pass; broad relevance/false-positive corpus remains commercial blocker."
     },
     {
@@ -22,7 +22,7 @@
       "status": "pass",
       "backlog_items": [62],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_api.py", "tests/test_rapidtriage_search_analysis.py"],
-      "expected": {"required_assertions": ["Keyword-pack outputs preserve built-in inventory, custom JSON support, deduplicated expansion, pack provenance, case-specific warnings, and #62 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Keyword-pack outputs preserve built-in inventory, custom JSON support, deduplicated expansion, pack provenance, case-specific warnings, and #62 core_accuracy_gates.", "Keyword-pack reportability decisions block release-reviewed pack claims until signed/versioned packs, case edits, and language/domain corpus validation exist."]},
       "notes": "Internal fixture pass; signed pack library and per-case editing UI remain blockers."
     },
     {
@@ -33,7 +33,7 @@
       "status": "pass",
       "backlog_items": [63],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_indicators.py"],
-      "expected": {"required_assertions": ["Indicator output preserves source links, local rule matches, offline feed provenance, match mode, local-only warning, and #63 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Indicator output preserves source links, local rule matches, offline feed provenance, match mode, local-only warning, and #63 core_accuracy_gates.", "IOC/TI reportability decisions block live TI verdict claims until signed feed provenance, STIX/TAXII/provider validation, confidence decay, and API governance exist."]},
       "notes": "Internal fixture pass; signed/STIX/TAXII feed validation remains blocker."
     },
     {
@@ -44,7 +44,7 @@
       "status": "pass",
       "backlog_items": [64],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report export preserves review/source citation IDs, source references, citation counts, report-use warnings, and #64 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Case DB report export preserves review/source citation IDs, source references, citation counts, report-use warnings, and #64 core_accuracy_gates.", "Citation manager reportability decisions block court exhibit claims until review/source citations, source hashes, parser versions, exhibit numbering, manifests, and reviewer sign-off exist."]},
       "notes": "Internal fixture pass; exhibit numbering and jurisdiction-specific packaging remain blockers."
     },
     {
@@ -55,7 +55,7 @@
       "status": "pass",
       "backlog_items": [65],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Review history preserves version rows, changed fields, previous/current state, report inclusion changes, multi-user warning, and #65 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Review history preserves version rows, changed fields, previous/current state, report inclusion changes, multi-user warning, and #65 core_accuracy_gates.", "Evidence history reportability decisions block multi-user signed-history claims until immutable signed selection history and conflict handling exist."]},
       "notes": "Internal fixture pass; signed multi-user append-only enforcement remains blocker."
     },
     {

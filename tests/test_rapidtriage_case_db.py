@@ -782,6 +782,10 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(citation_uplift["item_numbers"], [64])
             self.assertIn("citation count summary", citation_uplift["passed_validation_check_ids"])
             self.assertFalse(citation_uplift["large_data_controls"]["exhibit_numbering_ui"])
+            self.assertEqual(
+                citation_uplift["reportability_decision"]["decision"],
+                "do-not-report-citation-index-as-court-exhibit-complete",
+            )
             self.assertGreaterEqual(len(export["items"][0]["review_history"]), 1)
             self.assertIn("#65", export["items"][0]["review_history"][0]["commercial_gap_ids"])
             self.assertEqual(export["items"][0]["review_history"][0]["core_accuracy_gates"][0]["gap_id"], "#65")
@@ -791,6 +795,10 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(history_uplift["item_numbers"], [65])
             self.assertIn("versioned review history rows", history_uplift["passed_validation_check_ids"])
             self.assertFalse(history_uplift["large_data_controls"]["multi_user_signed_history"])
+            self.assertEqual(
+                history_uplift["reportability_decision"]["allowed_use"],
+                "evidence-selection-history-triage-pivot",
+            )
             self.assertIn("#65", export["items"][0]["commercial_gap_ids"])
             self.assertIn("custody_workflow", export)
             self.assertGreaterEqual(export["custody_workflow"]["summary"]["evidence_source_count"], 1)

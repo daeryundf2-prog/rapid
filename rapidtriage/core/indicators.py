@@ -437,6 +437,17 @@ def ioc_ti_commercial_uplift_evidence(
             f"ti_feed_count:{len(ti_feed_sources)}",
             *[f"ti_feed:{item.get('name', '')}:{item.get('version', '')}" for item in ti_feed_sources[:5]],
         ],
+        "reportability_decision": ioc_ti_reportability_decision(
+            failed_validation_check_ids=[
+                "signed-feed-package-validation",
+                "stix-taxii-import",
+                "confidence-decay-workflow",
+                "external-ti-api-governance",
+            ],
+            commercial_blockers=list(assessment.get("blockers") or []),
+            indicator_count=len(indicators),
+            ti_feed_count=len(ti_feed_sources),
+        ),
         "passed_validation_check_ids": sorted(set(passed)),
         "failed_validation_check_ids": [
             "signed-feed-package-validation",
@@ -455,6 +466,32 @@ def ioc_ti_commercial_uplift_evidence(
             "signed_feed_packages": False,
         },
         "reporting_status": "offline-feed-enabled" if ti_feed_sources else "available-no-feed-loaded",
+    }
+
+
+def ioc_ti_reportability_decision(
+    *,
+    failed_validation_check_ids: Sequence[str],
+    commercial_blockers: Sequence[str],
+    indicator_count: int,
+    ti_feed_count: int,
+) -> dict[str, object]:
+    blockers = {str(item) for item in commercial_blockers if str(item)}
+    blockers.update(f"check:{item}" for item in failed_validation_check_ids)
+    return {
+        "profile_version": "ioc-ti-reportability-decision-v1",
+        "commercial_gap_ids": [IOC_TI_GAP_ID],
+        "decision": "do-not-report-ioc-enrichment-as-live-ti-verdict",
+        "allowed_use": "offline-ioc-ti-triage-pivot",
+        "blockers": sorted(blockers),
+        "indicator_count": indicator_count,
+        "ti_feed_count": ti_feed_count,
+        "ready_for_court_report": False,
+        "required_before_report": [
+            "attach signed feed package provenance, versioning, and freshness evidence",
+            "document STIX/TAXII or provider-native import validation and confidence-decay policy",
+            "record local-only versus external TI API governance before reporting maliciousness",
+        ],
     }
 
 

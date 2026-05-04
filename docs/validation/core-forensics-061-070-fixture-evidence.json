@@ -9,7 +9,7 @@
       "title": "Fuzzy search/stemming/regex proximity search",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search output preserves query mode/options, fuzzy/stem/regex behavior, proximity metadata, source pointers, verification warnings, and #61 core_accuracy_gates."
+        "Search output preserves query mode/options, fuzzy/stem/regex behavior, proximity metadata, source pointers, verification warnings, #61 core_accuracy_gates, and reportability blockers for missing source-row hash verification plus regex/fuzzy/proximity false-positive review."
       ],
       "remaining_external_validation": ["Large multilingual query relevance corpus and UI query-builder validation."]
     },
@@ -18,7 +18,7 @@
       "title": "Saved keyword pack library",
       "test_files": ["tests/test_rapidtriage_api.py", "tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Keyword-pack API and resolver preserve built-in inventory, deduplicated expansion, pack provenance, custom JSON support, and #62 core_accuracy_gates."
+        "Keyword-pack API and resolver preserve built-in inventory, deduplicated expansion, pack provenance, custom JSON support, #62 core_accuracy_gates, and reportability blockers for missing signed/versioned packs, case edits, and language/domain corpus validation."
       ],
       "remaining_external_validation": ["Signed pack library, per-case editing UI, and release-reviewed pack versions."]
     },
@@ -27,7 +27,7 @@
       "title": "IOC/TI enrichment plugin",
       "test_files": ["tests/test_rapidtriage_indicators.py"],
       "assertions": [
-        "Indicator summaries preserve source links, local rules, offline feed provenance, matched_on mode, local-only warning, and #63 core_accuracy_gates."
+        "Indicator summaries preserve source links, local rules, offline feed provenance, matched_on mode, local-only warning, #63 core_accuracy_gates, and reportability blockers for missing signed feed provenance, STIX/TAXII/provider validation, confidence decay, and API governance."
       ],
       "remaining_external_validation": ["Signed feeds, STIX/TAXII import, confidence decay, and feed trust workflow."]
     },
@@ -36,7 +36,7 @@
       "title": "Report citation manager",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB report exports preserve citation IDs, source references, citation counts, report-use warnings, and #64 core_accuracy_gates."
+        "Case DB report exports preserve citation IDs, source references, citation counts, report-use warnings, #64 core_accuracy_gates, and reportability blockers for missing source hashes, parser versions, exhibit numbering, manifests, and reviewer sign-off."
       ],
       "remaining_external_validation": ["Exhibit numbering UI, jurisdiction templates, and full source-hash completeness validation."]
     },
@@ -45,7 +45,7 @@
       "title": "Evidence selection/version history",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Review history preserves version rows, changed fields, previous/current state, include-in-report changes, and #65 core_accuracy_gates."
+        "Review history preserves version rows, changed fields, previous/current state, include-in-report changes, #65 core_accuracy_gates, and reportability blockers for missing immutable signed multi-user history and conflict handling."
       ],
       "remaining_external_validation": ["Multi-user signed history, conflict handling, and database-level append-only enforcement."]
     },

@@ -47,6 +47,10 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertIn("#62", keyword_packs["keyword_pack_library_assessment"]["commercial_gap_ids"])
         self.assertEqual(keyword_packs["keyword_pack_library_assessment"]["core_accuracy_gates"][0]["gap_id"], "#62")
         self.assertEqual(keyword_packs["keyword_pack_library_assessment"]["commercial_uplift_evidence"]["item_numbers"], [62])
+        self.assertEqual(
+            keyword_packs["keyword_pack_library_assessment"]["commercial_uplift_evidence"]["reportability_decision"]["allowed_use"],
+            "keyword-pack-expansion-triage-pivot",
+        )
         self.assertIn("#62", keyword_packs["packs"][0]["commercial_gap_ids"])
         self.assertEqual(keyword_packs["packs"][0]["core_accuracy_gates"][0]["gap_id"], "#62")
         self.assertEqual(keyword_packs["packs"][0]["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-061-065")
