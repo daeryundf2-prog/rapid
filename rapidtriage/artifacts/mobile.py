@@ -48,6 +48,25 @@ MOBILE_REPORT_GRADE_BLOCKERS = [
     "protected-encrypted-store-decryption-not-implemented",
     "deleted-record-and-schema-version-known-answer-validation-required",
 ]
+MOBILE_TRUSTED_TOOLS = {
+    "cellebrite",
+    "ufed",
+    "physical analyzer",
+    "xry",
+    "msab",
+    "graykey",
+    "axiom",
+    "magnet axiom",
+    "ileapp",
+    "idevicebackup",
+    "ios backup manifest",
+    "keychain-dumper",
+}
+MOBILE_TRUSTED_DIFF_BLOCKERS = {
+    26: "vendor-mobile-export-trusted-diff-required",
+    27: "ios-backup-manifest-trusted-diff-required",
+    28: "ios-keychain-inventory-trusted-diff-required",
+}
 
 VENDOR_HINTS = {
     "cellebrite": ("cellebrite", "ufed", "ufdr", "ufdx", "physical analyzer"),
@@ -567,6 +586,123 @@ def normalize_keys(row: Mapping[str, object]) -> dict[str, object]:
 
 def normalize_key(key: object) -> str:
     return "".join(character for character in str(key).lower() if character.isalnum())
+
+
+def build_mobile_trusted_diff(
+    number: int,
+    rapid_rows: list[Mapping[str, object]],
+    trusted_rows: list[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    blocker = MOBILE_TRUSTED_DIFF_BLOCKERS.get(number, "mobile-trusted-diff-required")
+    rapid_index = index_mobile_trusted_rows(rapid_rows)
+    trusted_index = index_mobile_trusted_rows(trusted_rows)
+    recognized = trusted_tool.strip().lower().replace(" ", "") in {
+        item.replace(" ", "").lower() for item in MOBILE_TRUSTED_TOOLS
+    }
+    common = sorted(set(rapid_index) & set(trusted_index))
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in common:
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append(
+                    {
+                        "mobile_row_key": key,
+                        "field": field,
+                        "rapid_value": rapid_value,
+                        "trusted_value": trusted_value,
+                    }
+                )
+                break
+    status = "pass" if recognized and common and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": "mobile-trusted-diff-v1",
+        "gap_id": f"#{number}",
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(common) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-mobile-output-as-final",
+            "blockers": [] if status == "pass" else [blocker],
+        },
+    }
+
+
+def index_mobile_trusted_rows(rows: list[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        event_type = normalized_mobile_diff_value(first_mobile_alias(row, "artifact_type", "event_type", "type"))
+        source_record_id_value = normalized_mobile_diff_value(first_mobile_alias(row, "source_record_id", "record_id", "id"))
+        timestamp = normalized_mobile_diff_value(first_mobile_alias(row, "timestamp", "date", "time"))
+        message_id = normalized_mobile_diff_value(first_mobile_alias(row, "message_id", "guid", "msg_id"))
+        text_hash = normalized_mobile_diff_value(first_mobile_alias(row, "message_text_sha256", "text_sha256", "body_sha256"))
+        sender = normalized_mobile_diff_value(first_mobile_alias(row, "sender", "from"))
+        recipient = normalized_mobile_diff_value(first_mobile_alias(row, "recipient", "to"))
+        domain = normalized_mobile_diff_value(first_mobile_alias(row, "domain"))
+        file_id = normalized_mobile_diff_value(first_mobile_alias(row, "file_id", "fileID"))
+        logical_path = normalized_mobile_diff_value(first_mobile_alias(row, "logical_path", "relative_path", "path"))
+        table = normalized_mobile_diff_value(first_mobile_alias(row, "table", "table_name"))
+        row_count = normalized_mobile_diff_value(first_mobile_alias(row, "row_count", "count"))
+        key = "|".join(
+            item
+            for item in (
+                event_type,
+                source_record_id_value,
+                message_id,
+                timestamp,
+                sender,
+                recipient,
+                domain,
+                file_id,
+                logical_path,
+                table,
+            )
+            if item
+        )
+        if not key:
+            continue
+        indexed[key] = {
+            "event_type": event_type,
+            "source_record_id": source_record_id_value,
+            "timestamp": timestamp,
+            "message_id": message_id,
+            "message_text_sha256": text_hash,
+            "sender": sender,
+            "recipient": recipient,
+            "domain": domain,
+            "file_id": file_id,
+            "logical_path": logical_path,
+            "table": table,
+            "row_count": row_count,
+        }
+    return indexed
+
+
+def first_mobile_alias(row: Mapping[str, object], *aliases: str) -> object:
+    normalized = {normalize_key(key): value for key, value in row.items()}
+    for alias in aliases:
+        value = normalized.get(normalize_key(alias))
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalized_mobile_diff_value(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
 
 
 def detect_artifact_type(row: Mapping[str, object], path: Path) -> str:
@@ -1844,6 +1980,11 @@ def mobile_commercial_uplift_evidence(
     failed_validation_matrix_ids = [
         str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")
     ]
+    trusted_diff = (
+        details.get("mobile_trusted_diff")
+        if isinstance(details.get("mobile_trusted_diff"), Mapping)
+        else {"status": "not-attached", "commercial_grade_evidence": False}
+    )
     return {
         "batch_id": "commercial-uplift-026-030",
         "item_numbers": item_numbers,
@@ -1858,7 +1999,9 @@ def mobile_commercial_uplift_evidence(
             report_grade=report_grade,
             failed_validation_matrix_ids=failed_validation_matrix_ids,
             details=details,
+            trusted_diff=trusted_diff,
         ),
+        "mobile_trusted_diff": trusted_diff,
         "source_refs": source_refs,
         "passed_validation_matrix_ids": passed_validation_matrix_ids,
         "failed_validation_matrix_ids": failed_validation_matrix_ids,
@@ -1890,6 +2033,7 @@ def mobile_reportability_decision(
     report_grade: Mapping[str, object],
     failed_validation_matrix_ids: list[str],
     details: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in report_grade.get("blockers") or [] if str(item)}
     if not validation_checks.get("vendor_export_settings_verified"):
@@ -1904,6 +2048,11 @@ def mobile_reportability_decision(
         blockers.add("secret-values-extracted-authority-review-required")
     if "known-answer-mobile-validation" in failed_validation_matrix_ids:
         blockers.add("known-answer-mobile-corpus-not-attached")
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        for number in item_numbers:
+            blocker = MOBILE_TRUSTED_DIFF_BLOCKERS.get(number)
+            if blocker:
+                blockers.add(blocker)
     allowed = {
         26: "vendor-mobile-export-triage-pivot",
         27: "ios-backup-inventory-triage-pivot",
@@ -1962,6 +2111,7 @@ def mobile_core_accuracy_gates(
         evidence_refs.append(f"source_record_id:{record_id}")
 
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    trusted_diff = details.get("mobile_trusted_diff") if isinstance(details.get("mobile_trusted_diff"), Mapping) else {}
     gates: list[dict[str, object]] = []
     if "#26" in mobile_commercial_gap_ids(artifact_type, source_tool):
         satisfied = []
@@ -1975,6 +2125,8 @@ def mobile_core_accuracy_gates(
             satisfied.append("source hash and acquisition linkage")
         if details.get("mobile_report_grade_assessment") or details.get("commercial_grade_blockers") or not validation.get("vendor_schema_validated", False):
             satisfied.append("schema version compatibility warning")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted vendor mobile export diff pass")
         gates.append(build_accuracy_gate(26, satisfied_checks=satisfied, evidence_refs=evidence_refs))
 
     if artifact_type in {"ios-backup-file", "ios-backup-source", "ios-backup-metadata"}:
@@ -1991,6 +2143,8 @@ def mobile_core_accuracy_gates(
             satisfied.append("app database schema detection")
         if details.get("commercial_grade_blockers"):
             satisfied.append("deleted-record limitation warning")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted iOS backup manifest diff pass")
         gates.append(build_accuracy_gate(27, satisfied_checks=satisfied, evidence_refs=evidence_refs))
 
     if artifact_type == "ios-keychain-inventory":
@@ -2006,6 +2160,8 @@ def mobile_core_accuracy_gates(
             satisfied.append("record count/table inventory")
         if details.get("controlled_reveal_audit"):
             satisfied.append("audit log for any controlled reveal")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted iOS keychain inventory diff pass")
         gates.append(build_accuracy_gate(28, satisfied_checks=satisfied, evidence_refs=evidence_refs))
 
     return gates

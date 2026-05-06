@@ -17,6 +17,7 @@
       "expected": {
         "required_assertions": [
           "vendor export rows preserve source tool/profile hints, source row IDs, hashes, duplicate/deleted warnings, schema compatibility blockers, and #26 core_accuracy_gates",
+          "vendor mobile export trusted diff helper requires recognized vendor/tool row equality before satisfying the #26 trusted vendor mobile export diff pass gate",
           "vendor export reportability decisions block source-complete claims until export settings, acquisition hashes, schemas, and deleted-row semantics are validated"
         ]
       },
@@ -36,6 +37,7 @@
       "expected": {
         "required_assertions": [
           "iOS Manifest.db/plist rows preserve domain/fileID mapping, plist consistency, authority gates, app DB candidates, deleted-record warnings, and #27 core_accuracy_gates",
+          "iOS backup trusted diff helper requires Manifest/file mapping equality before satisfying the #27 trusted iOS backup manifest diff pass gate",
           "iOS backup reportability decisions block decrypted-complete backup claims until encryption, app schema, and deleted-record validation exists"
         ]
       },
@@ -55,6 +57,7 @@
       "expected": {
         "required_assertions": [
           "iOS keychain inventory preserves redaction, protected-data labeling, reveal authority/audit gates, table counts, and #28 core_accuracy_gates",
+          "iOS keychain trusted diff helper requires table/count inventory equality before satisfying the #28 trusted iOS keychain inventory diff pass gate",
           "iOS keychain reportability decisions block secret/access-semantics claims until lawful protected-data decryption and audit evidence exist"
         ]
       },
@@ -74,6 +77,7 @@
       "expected": {
         "required_assertions": [
           "Android app-data rows preserve package/path attribution, communication/browser/media linkage hints, encrypted-store limits, schema tracking, and #29 core_accuracy_gates",
+          "Android artifact trusted diff helper requires app-data package/path/source equality before satisfying the #29 trusted Android artifact export diff pass gate",
           "Android app-data reportability decisions block decoded-content claims until app schema, encrypted-store, and deleted-record validation exists"
         ]
       },
@@ -93,6 +97,7 @@
       "expected": {
         "required_assertions": [
           "APK rows preserve manifest, permissions/components, certificate/signature limitation, bounded DEX/native pivots, secret-handling warnings, and #30 core_accuracy_gates",
+          "APK/tool trusted diff helper requires package/manifest/DEX/native/tool output equality before satisfying the #30 trusted APK/tool analysis diff pass gate",
           "APK reportability decisions block malware/signature-validated claims until binary manifest, signature-chain, and behavior validation exists"
         ]
       },

@@ -16,7 +16,8 @@
       "number": 26,
       "title": "Cellebrite/XRY/GrayKey/AXIOM export deep import",
       "assertions": [
-        "vendor CSV/JSON rows preserve source tool/profile hints, row IDs, source hashes, deleted/duplicate semantics warnings, schema compatibility blockers, #26 core_accuracy_gates, and source-complete reportability blockers."
+        "vendor CSV/JSON rows preserve source tool/profile hints, row IDs, source hashes, deleted/duplicate semantics warnings, schema compatibility blockers, #26 core_accuracy_gates, and source-complete reportability blockers.",
+        "build_mobile_trusted_diff compares RapidTriage vendor export rows against Cellebrite/XRY/GrayKey/AXIOM-style row output and only clears the #26 trusted diff gate on recognized-tool equality."
       ],
       "blockers_kept": [
         "vendor version-specific schema matrix",
@@ -28,7 +29,8 @@
       "number": 27,
       "title": "iOS backup parser",
       "assertions": [
-        "iOS Manifest.db and plist rows preserve domain/fileID mapping, Info/Status plist consistency, encrypted-backup authority gating, app DB candidate detection, deleted-record warnings, #27 core_accuracy_gates, and decrypted-complete reportability blockers."
+        "iOS Manifest.db and plist rows preserve domain/fileID mapping, Info/Status plist consistency, encrypted-backup authority gating, app DB candidate detection, deleted-record warnings, #27 core_accuracy_gates, and decrypted-complete reportability blockers.",
+        "build_mobile_trusted_diff compares iOS backup fileID/domain/logical path rows against iLEAPP/backup manifest rows before satisfying the #27 trusted diff gate."
       ],
       "blockers_kept": [
         "encrypted backup unlock workflow",
@@ -40,7 +42,8 @@
       "number": 28,
       "title": "iOS keychain/artifact parser",
       "assertions": [
-        "iOS keychain inventory rows preserve read-only table counts, default redaction, protected-data labels, reveal authority/audit gate metadata, #28 core_accuracy_gates, and secret/access-semantics reportability blockers."
+        "iOS keychain inventory rows preserve read-only table counts, default redaction, protected-data labels, reveal authority/audit gate metadata, #28 core_accuracy_gates, and secret/access-semantics reportability blockers.",
+        "build_mobile_trusted_diff compares redacted keychain table/count inventory against authorized keychain inventory output before satisfying the #28 trusted diff gate."
       ],
       "blockers_kept": [
         "protected data decryption",
@@ -52,7 +55,8 @@
       "number": 29,
       "title": "Android backup/artifact parser",
       "assertions": [
-        "Android app-data export rows preserve package/path attribution, communication/browser/media store hints, encrypted-store limits, schema tracking, #29 core_accuracy_gates, and decoded-content reportability blockers."
+        "Android app-data export rows preserve package/path attribution, communication/browser/media store hints, encrypted-store limits, schema tracking, #29 core_accuracy_gates, and decoded-content reportability blockers.",
+        "build_android_trusted_diff compares app-data package/path/category/source rows against ALEAPP/vendor export output before satisfying the #29 trusted diff gate."
       ],
       "blockers_kept": [
         "Android backup payload decoder",
@@ -64,7 +68,8 @@
       "number": 30,
       "title": "Android app package/data parser",
       "assertions": [
-        "APK and app-data rows preserve manifest/permission/component normalization, certificate/signature limitation evidence, bounded DEX/native pivots, secret-handling warnings, #30 core_accuracy_gates, and malware/signature reportability blockers."
+        "APK and app-data rows preserve manifest/permission/component normalization, certificate/signature limitation evidence, bounded DEX/native pivots, secret-handling warnings, #30 core_accuracy_gates, and malware/signature reportability blockers.",
+        "build_android_trusted_diff compares APK package/manifest/permission/DEX/native summary rows against aapt/apkanalyzer/MobSF-style output before satisfying the #30 trusted diff gate."
       ],
       "blockers_kept": [
         "binary AndroidManifest decoder",

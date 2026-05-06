@@ -76,6 +76,20 @@ ANDROID_REPORT_GRADE_BLOCKERS = [
     "encrypted-store-and-deleted-record-recovery-not-implemented",
     "known-answer-android-corpus-required",
 ]
+ANDROID_TRUSTED_TOOLS = {
+    "aleapp",
+    "aapt",
+    "apkanalyzer",
+    "jadx",
+    "mobsf",
+    "androguard",
+    "android studio",
+    "vendor export",
+}
+ANDROID_TRUSTED_DIFF_BLOCKERS = {
+    29: "android-artifact-export-trusted-diff-required",
+    30: "apk-tool-analysis-trusted-diff-required",
+}
 
 
 class AndroidApkProvider:
@@ -455,6 +469,106 @@ def looks_like_android_package(value: str) -> bool:
     return "." in value and all(part and part.replace("_", "").isalnum() for part in value.split("."))
 
 
+def build_android_trusted_diff(
+    number: int,
+    rapid_rows: list[dict[str, object]],
+    trusted_rows: list[dict[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    blocker = ANDROID_TRUSTED_DIFF_BLOCKERS.get(number, "android-trusted-diff-required")
+    rapid_index = index_android_trusted_rows(rapid_rows)
+    trusted_index = index_android_trusted_rows(trusted_rows)
+    recognized = trusted_tool.strip().lower().replace(" ", "") in {
+        item.replace(" ", "").lower() for item in ANDROID_TRUSTED_TOOLS
+    }
+    common = sorted(set(rapid_index) & set(trusted_index))
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in common:
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append(
+                    {
+                        "android_row_key": key,
+                        "field": field,
+                        "rapid_value": rapid_value,
+                        "trusted_value": trusted_value,
+                    }
+                )
+                break
+    status = "pass" if recognized and common and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": "android-trusted-diff-v1",
+        "gap_id": f"#{number}",
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(common) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-android-output-as-final",
+            "blockers": [] if status == "pass" else [blocker],
+        },
+    }
+
+
+def index_android_trusted_rows(rows: list[dict[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        package = normalized_android_diff_value(first_android_alias(row, "package", "package_name", "application_id"))
+        source_path = normalized_android_diff_value(first_android_alias(row, "source_path", "path", "file_path"))
+        data_category = normalized_android_diff_value(first_android_alias(row, "data_category", "category"))
+        manifest_format = normalized_android_diff_value(first_android_alias(row, "manifest_format", "manifest"))
+        permission_count = normalized_android_diff_value(first_android_alias(row, "permission_count", "permissions"))
+        component_count = normalized_android_diff_value(first_android_alias(row, "component_count", "components"))
+        dex_count = normalized_android_diff_value(first_android_alias(row, "dex_count"))
+        native_library_count = normalized_android_diff_value(first_android_alias(row, "native_library_count", "native_libraries"))
+        source_sha256 = normalized_android_diff_value(first_android_alias(row, "source_sha256", "sha256"))
+        key = "|".join(item for item in (package, source_path, data_category, manifest_format) if item)
+        if not key:
+            continue
+        indexed[key] = {
+            "package": package,
+            "source_path": source_path,
+            "data_category": data_category,
+            "manifest_format": manifest_format,
+            "permission_count": permission_count,
+            "component_count": component_count,
+            "dex_count": dex_count,
+            "native_library_count": native_library_count,
+            "source_sha256": source_sha256,
+        }
+    return indexed
+
+
+def first_android_alias(row: dict[str, object], *aliases: str) -> object:
+    normalized = {normalize_android_key(key): value for key, value in row.items()}
+    for alias in aliases:
+        value = normalized.get(normalize_android_key(alias))
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalize_android_key(value: object) -> str:
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
+
+
+def normalized_android_diff_value(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
+
+
 def android_app_data_category(path: Path) -> str:
     lowered = str(path).lower()
     if lowered.endswith((".db", ".sqlite", ".sqlite3")):
@@ -583,6 +697,11 @@ def android_commercial_uplift_evidence(details: dict[str, object], *, gap_ids: l
     failed_validation_matrix_ids = [
         str(item.get("id")) for item in matrix if isinstance(item, dict) and not item.get("passed")
     ]
+    trusted_diff = (
+        details.get("android_trusted_diff")
+        if isinstance(details.get("android_trusted_diff"), dict)
+        else {"status": "not-attached", "commercial_grade_evidence": False}
+    )
     return {
         "batch_id": "commercial-uplift-026-030",
         "item_numbers": sorted(gap_ids),
@@ -593,7 +712,9 @@ def android_commercial_uplift_evidence(details: dict[str, object], *, gap_ids: l
             gap_ids=sorted(gap_ids),
             checks=checks,
             failed_validation_matrix_ids=failed_validation_matrix_ids,
+            trusted_diff=trusted_diff,
         ),
+        "android_trusted_diff": trusted_diff,
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             f"source_format:{details.get('source_format', '')}",
@@ -623,6 +744,7 @@ def android_reportability_decision(
     gap_ids: list[int],
     checks: dict[str, object],
     failed_validation_matrix_ids: list[str],
+    trusted_diff: dict[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = set(ANDROID_REPORT_GRADE_BLOCKERS)
     if "signature-and-binary-manifest" in failed_validation_matrix_ids:
@@ -635,6 +757,11 @@ def android_reportability_decision(
         blockers.add("binary-android-manifest-decoder-not-available")
     if not checks.get("secret_values_extracted", False):
         blockers.add("secret-values-not-extracted-in-inventory-mode")
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        for number in gap_ids:
+            blocker = ANDROID_TRUSTED_DIFF_BLOCKERS.get(number)
+            if blocker:
+                blockers.add(blocker)
     primary = gap_ids[0] if gap_ids else 30
     return {
         "profile_version": "android-reportability-decision-v1",
@@ -688,6 +815,7 @@ def android_core_accuracy_gates(number: int, details: dict[str, object]) -> list
         evidence_refs.append(f"source_sha256:{hashes['sha256']}")
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
     risk_flags = details.get("risk_flags") if isinstance(details.get("risk_flags"), list) else []
+    trusted_diff = details.get("android_trusted_diff") if isinstance(details.get("android_trusted_diff"), dict) else {}
     satisfied: list[str] = []
     if number == 29:
         if details.get("package") and details.get("source_path"):
@@ -700,6 +828,8 @@ def android_core_accuracy_gates(number: int, details: dict[str, object]) -> list
             satisfied.append("encrypted-store limitation")
         if details.get("app_schema_profile") or validation.get("app_specific_schema_version_tracked"):
             satisfied.append("app-specific schema version tracking")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted Android artifact export diff pass")
     elif number == 30:
         if details.get("manifest_format") or not details.get("android_native_capabilities", {}).get("binary_manifest_decode", True):
             satisfied.append("binary manifest decode or limitation")
@@ -711,6 +841,8 @@ def android_core_accuracy_gates(number: int, details: dict[str, object]) -> list
             satisfied.append("DEX/native string pivot bounds")
         if details.get("legal_warning") and details.get("commercial_grade_blockers"):
             satisfied.append("app-data schema and secret-handling warnings")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted APK/tool analysis diff pass")
     return [build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 

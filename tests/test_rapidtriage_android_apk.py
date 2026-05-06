@@ -6,6 +6,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from rapidtriage.artifacts.android import build_android_trusted_diff, android_core_accuracy_gates
 from rapidtriage.cli import build_parser, main
 
 
@@ -123,6 +124,69 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
                 "app-data-schema-or-deleted-record-validation-missing",
                 app_data_uplift["reportability_decision"]["blockers"],
             )
+
+    def test_android_trusted_diffs_gate_app_data_and_apk_claims(self) -> None:
+        app_data_diff = build_android_trusted_diff(
+            29,
+            [{"package": "com.example.spy", "source_path": "Android/data/com.example.spy/files/messages.db", "data_category": "database", "source_sha256": "a" * 64}],
+            [{"Package": "com.example.spy", "Path": "Android/data/com.example.spy/files/messages.db", "Category": "database", "SHA256": "a" * 64}],
+            trusted_tool="ALEAPP",
+        )
+        apk_diff = build_android_trusted_diff(
+            30,
+            [{"package": "com.example.spy", "source_path": "suspicious.apk", "manifest_format": "xml", "permission_count": 3, "dex_count": 2, "native_library_count": 1}],
+            [{"PackageName": "com.example.spy", "FilePath": "suspicious.apk", "Manifest": "xml", "Permissions": 3, "DexCount": 2, "NativeLibraries": 1}],
+            trusted_tool="apkanalyzer",
+        )
+
+        self.assertEqual(app_data_diff["status"], "pass")
+        self.assertEqual(apk_diff["status"], "pass")
+        app_data_gate = android_core_accuracy_gates(
+            29,
+            {
+                "source_path": "Android/data/com.example.spy/files/messages.db",
+                "source_format": "android-export-file",
+                "package": "com.example.spy",
+                "risk_flags": ["communication-store-candidate", "browser-store-candidate", "media-store-candidate"],
+                "validation_checks": {"secret_values_extracted": False, "app_specific_schema_version_tracked": True},
+                "app_schema_profile": {"schema_version": "unknown"},
+                "commercial_grade_blockers": ["app-specific-schema-required"],
+                "android_trusted_diff": app_data_diff,
+            },
+        )[0]
+        self.assertIn("trusted Android artifact export diff pass", app_data_gate["satisfied_checks"])
+        apk_gate = android_core_accuracy_gates(
+            30,
+            {
+                "source_path": "suspicious.apk",
+                "source_format": "apk",
+                "package": "com.example.spy",
+                "manifest_format": "xml",
+                "permissions": ["android.permission.SEND_SMS"],
+                "component_counts": {"service": 1},
+                "certificate_entries": ["META-INF/CERT.RSA"],
+                "dex_count": 2,
+                "native_library_count": 1,
+                "string_pivots": [{"type": "url", "value": "https://c2.example.test"}],
+                "legal_warning": "triage only",
+                "commercial_grade_blockers": ["signature-chain-required"],
+                "android_trusted_diff": apk_diff,
+            },
+        )[0]
+        self.assertIn("trusted APK/tool analysis diff pass", apk_gate["satisfied_checks"])
+
+    def test_android_trusted_diff_blocks_unknown_tools_and_mismatches(self) -> None:
+        diff = build_android_trusted_diff(
+            30,
+            [{"package": "com.example.spy", "source_path": "suspicious.apk", "manifest_format": "xml", "dex_count": 2}],
+            [{"Package": "com.example.spy", "Path": "suspicious.apk", "Manifest": "xml", "DexCount": 3}],
+            trusted_tool="unknown-tool",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["trusted_tool_recognized"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertIn("apk-tool-analysis-trusted-diff-required", diff["reportability_decision"]["blockers"])
 
 
 def write_apk_fixture(path: Path) -> None:

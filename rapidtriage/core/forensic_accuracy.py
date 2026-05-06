@@ -395,6 +395,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "duplicate/deleted semantics",
             "source hash and acquisition linkage",
             "schema version compatibility warning",
+            "trusted vendor mobile export diff pass",
         ),
     },
     {
@@ -409,6 +410,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "encrypted backup authority gate",
             "app database schema detection",
             "deleted-record limitation warning",
+            "trusted iOS backup manifest diff pass",
         ),
     },
     {
@@ -423,6 +425,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "authority gate before reveal/decrypt",
             "record count/table inventory",
             "audit log for any controlled reveal",
+            "trusted iOS keychain inventory diff pass",
         ),
     },
     {
@@ -437,6 +440,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "browser/media source linkage",
             "encrypted-store limitation",
             "app-specific schema version tracking",
+            "trusted Android artifact export diff pass",
         ),
     },
     {
@@ -451,6 +455,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "signature chain validation",
             "DEX/native string pivot bounds",
             "app-data schema and secret-handling warnings",
+            "trusted APK/tool analysis diff pass",
         ),
     },
     {

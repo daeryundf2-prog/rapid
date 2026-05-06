@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from rapidtriage.artifacts.mobile import build_mobile_trusted_diff, mobile_core_accuracy_gates
 from rapidtriage.cli import build_parser, main
 
 
@@ -378,6 +379,107 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             source_rows = [artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-export-source"]
             self.assertGreaterEqual(len(source_rows), 4)
             self.assertTrue(all("#26" in row["details"]["commercial_gap_ids"] for row in source_rows))
+
+    def test_mobile_trusted_diffs_gate_vendor_ios_and_keychain_claims(self) -> None:
+        vendor_diff = build_mobile_trusted_diff(
+            26,
+            [
+                {
+                    "artifact_type": "mobile-message",
+                    "source_record_id": "m-1",
+                    "timestamp": "2026-04-26T01:02:03Z",
+                    "sender": "+15550100",
+                    "recipient": "+15550200",
+                    "message_text_sha256": "a" * 64,
+                }
+            ],
+            [
+                {
+                    "Type": "mobile-message",
+                    "RecordID": "m-1",
+                    "Date": "2026-04-26T01:02:03Z",
+                    "From": "+15550100",
+                    "To": "+15550200",
+                    "BodySHA256": "a" * 64,
+                }
+            ],
+            trusted_tool="Cellebrite",
+        )
+        ios_diff = build_mobile_trusted_diff(
+            27,
+            [{"event_type": "ios-backup-file", "file_id": "abc123", "domain": "AppDomain-com.apple.MobileSMS", "logical_path": "AppDomain-com.apple.MobileSMS/Library/SMS/sms.db"}],
+            [{"Type": "ios-backup-file", "FileID": "abc123", "Domain": "AppDomain-com.apple.MobileSMS", "Path": "AppDomain-com.apple.MobileSMS/Library/SMS/sms.db"}],
+            trusted_tool="iLEAPP",
+        )
+        keychain_diff = build_mobile_trusted_diff(
+            28,
+            [{"event_type": "ios-keychain-inventory", "table": "genp", "row_count": 3}],
+            [{"Type": "ios-keychain-inventory", "Table": "genp", "Count": 3}],
+            trusted_tool="keychain-dumper",
+        )
+
+        self.assertEqual(vendor_diff["status"], "pass")
+        self.assertEqual(ios_diff["status"], "pass")
+        self.assertEqual(keychain_diff["status"], "pass")
+        vendor_gate = mobile_core_accuracy_gates(
+            artifact_type="mobile-message",
+            source_tool="cellebrite",
+            source_format="csv",
+            source_index=0,
+            source_hashes={"sha256": "a" * 64},
+            details={
+                "source_path": "Messages.csv",
+                "message_id": "m-1",
+                "deleted_state": "false",
+                "mobile_trusted_diff": vendor_diff,
+                "commercial_grade_blockers": ["schema-version-required"],
+            },
+        )[0]
+        self.assertIn("trusted vendor mobile export diff pass", vendor_gate["satisfied_checks"])
+        ios_gate = mobile_core_accuracy_gates(
+            artifact_type="ios-backup-file",
+            source_tool="ios-backup",
+            source_format="ios-manifest-db",
+            source_index=0,
+            source_hashes={"sha256": "b" * 64},
+            details={
+                "file_id": "abc123",
+                "domain": "AppDomain-com.apple.MobileSMS",
+                "logical_path": "AppDomain-com.apple.MobileSMS/Library/SMS/sms.db",
+                "commercial_grade_blockers": ["deleted-record-validation-required"],
+                "mobile_trusted_diff": ios_diff,
+            },
+        )[0]
+        self.assertIn("trusted iOS backup manifest diff pass", ios_gate["satisfied_checks"])
+        keychain_gate = mobile_core_accuracy_gates(
+            artifact_type="ios-keychain-inventory",
+            source_tool="ios-backup",
+            source_format="ios-keychain-db",
+            source_index=0,
+            source_hashes={"sha256": "c" * 64},
+            details={
+                "table_summaries": [{"table": "genp", "row_count": 3}],
+                "validation_checks": {"values_redacted": True, "secrets_extracted": False},
+                "protected_data_class_handling": {"status": "redacted"},
+                "controlled_reveal_audit": {"reveal_performed": False},
+                "legal_warning": "redacted",
+                "mobile_trusted_diff": keychain_diff,
+            },
+        )[0]
+        self.assertIn("trusted iOS keychain inventory diff pass", keychain_gate["satisfied_checks"])
+
+    def test_mobile_trusted_diff_blocks_unknown_tools_and_mismatches(self) -> None:
+        diff = build_mobile_trusted_diff(
+            26,
+            [{"artifact_type": "mobile-message", "source_record_id": "m-1", "message_text_sha256": "a" * 64}],
+            [{"Type": "mobile-message", "RecordID": "m-1", "BodySHA256": "b" * 64}],
+            trusted_tool="unknown-tool",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["trusted_tool_recognized"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertIn("vendor-mobile-export-trusted-diff-required", diff["reportability_decision"]["blockers"])
 
 
 def write_mobile_export_fixtures(root: Path) -> None:
