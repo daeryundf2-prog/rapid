@@ -43,36 +43,36 @@
       "item": 96,
       "title": "Write-blocker/acquisition metadata recording",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Case DB report exports preserve operator/source metadata, write-blocker fields, whole-source hash fields, missing-field checks, readiness flag, and #96 core_accuracy_gates."],
-      "remaining_external_validation": ["Integrated write-blocker device metadata and signed handoff forms."]
+      "assertions": ["Case DB report exports preserve operator/source metadata, write-blocker fields, whole-source hash fields, missing-field checks, readiness flag, trusted acquisition-handoff diff helpers/gates, and #96 core_accuracy_gates."],
+      "remaining_external_validation": ["Integrated write-blocker device metadata, trusted handoff manifests, and signed handoff forms."]
     },
     {
       "item": 97,
       "title": "Timezone normalization validation",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report exports preserve timezone inventory, missing timezone counts, timestamp samples, UTC assumption, review-required flag, and #97 core_accuracy_gates."],
-      "remaining_external_validation": ["Parser-specific timezone assumption matrix and multi-source reconciliation."]
+      "assertions": ["Report exports preserve timezone inventory, missing timezone counts, timestamp samples, UTC assumption, review-required flag, trusted timezone-matrix diff helpers/gates, and #97 core_accuracy_gates."],
+      "remaining_external_validation": ["Parser-specific timezone assumption matrix, trusted normalization manifests, and multi-source reconciliation."]
     },
     {
       "item": 98,
       "title": "Clock skew analysis",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report exports preserve parsed timestamp ranges, skew warnings, warning counts, baseline requirement, heuristic caveat, and #98 core_accuracy_gates."],
-      "remaining_external_validation": ["Host/device baseline model and multi-device skew validation."]
+      "assertions": ["Report exports preserve parsed timestamp ranges, skew warnings, warning counts, baseline requirement, heuristic caveat, trusted clock-skew baseline diff helpers/gates, and #98 core_accuracy_gates."],
+      "remaining_external_validation": ["Host/device baseline model, trusted baseline manifests, and multi-device skew validation."]
     },
     {
       "item": 99,
       "title": "Evidence contamination warning",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report exports preserve contamination warning records, warning counts, output-under-evidence checks, write-blocker limitation, review-required flag, and #99 core_accuracy_gates."],
-      "remaining_external_validation": ["Persistent acquisition-time mtime comparison and write-blocker integration."]
+      "assertions": ["Report exports preserve contamination warning records, warning counts, output-under-evidence checks, write-blocker limitation, review-required flag, trusted contamination-checklist diff helpers/gates, and #99 core_accuracy_gates."],
+      "remaining_external_validation": ["Persistent acquisition-time mtime comparison, trusted contamination checklist, and write-blocker integration."]
     },
     {
       "item": 100,
       "title": "Tamper-evident audit bundle",
       "test_files": ["tests/test_rapidtriage_final_roadmap.py"],
-      "assertions": ["Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, external signing limitation, and #100 core_accuracy_gates."],
-      "remaining_external_validation": ["External signing/notarization."]
+      "assertions": ["Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, external signing limitation, trusted signature-attestation diff helpers/gates, and #100 core_accuracy_gates."],
+      "remaining_external_validation": ["External signing/notarization and trusted signature attestations."]
     }
   ]
 }

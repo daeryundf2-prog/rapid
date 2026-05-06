@@ -1445,6 +1445,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "whole-source hash field recorded",
             "missing required fields listed",
             "submission readiness flag emitted",
+            "trusted acquisition handoff diff pass",
         ),
     },
     {
@@ -1459,6 +1460,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "timestamp samples preserved",
             "UTC assumption disclosed",
             "review-required flag emitted",
+            "trusted timezone normalization matrix diff pass",
         ),
     },
     {
@@ -1473,6 +1475,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "warning count summarized",
             "baseline requirement disclosed",
             "heuristic limitation emitted",
+            "trusted clock-skew baseline diff pass",
         ),
     },
     {
@@ -1487,6 +1490,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "output-under-evidence checks emitted",
             "write-blocker integration limitation emitted",
             "review-required flag emitted",
+            "trusted contamination checklist diff pass",
         ),
     },
     {
@@ -1501,6 +1505,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "entry hashes emitted",
             "head hash recorded",
             "external signing limitation emitted",
+            "trusted tamper signature attestation diff pass",
         ),
     },
     {

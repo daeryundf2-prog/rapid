@@ -66,8 +66,8 @@
       "status": "pass",
       "backlog_items": [96],
       "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report exports preserve operator/source metadata, write-blocker field, whole-source hash field, missing required fields, readiness flag, and #96 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; write-blocker device integration and signed handoff forms remain blockers."
+      "expected": {"required_assertions": ["Case DB report exports preserve operator/source metadata, write-blocker field, whole-source hash field, missing required fields, readiness flag, trusted acquisition-handoff diff helpers/gates, and #96 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; write-blocker device integration, trusted handoff manifests, and signed handoff forms remain blockers."
     },
     {
       "id": "core-forensics-097-timezone-validation",
@@ -77,8 +77,8 @@
       "status": "pass",
       "backlog_items": [97],
       "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Report exports preserve timezone inventory, missing timezone counts, timestamp samples, UTC assumption, review-required flag, and #97 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; parser-specific timezone matrix remains blocker."
+      "expected": {"required_assertions": ["Report exports preserve timezone inventory, missing timezone counts, timestamp samples, UTC assumption, review-required flag, trusted timezone-matrix diff helpers/gates, and #97 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; parser-specific timezone matrix and trusted normalization manifests remain blocker."
     },
     {
       "id": "core-forensics-098-clock-skew",
@@ -88,8 +88,8 @@
       "status": "pass",
       "backlog_items": [98],
       "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Report exports preserve parsed timestamp range, skew warning records, warning count, baseline requirement, heuristic limitation, and #98 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; host/device baseline comparison remains blocker."
+      "expected": {"required_assertions": ["Report exports preserve parsed timestamp range, skew warning records, warning count, baseline requirement, heuristic limitation, trusted clock-skew baseline diff helpers/gates, and #98 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; host/device baseline comparison and trusted baseline manifests remain blocker."
     },
     {
       "id": "core-forensics-099-contamination-warning",
@@ -99,8 +99,8 @@
       "status": "pass",
       "backlog_items": [99],
       "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Report exports preserve contamination warnings, warning count, output-under-evidence checks, write-blocker limitation, review-required flag, and #99 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; acquisition-time mtime and write-blocker integration remain blockers."
+      "expected": {"required_assertions": ["Report exports preserve contamination warnings, warning count, output-under-evidence checks, write-blocker limitation, review-required flag, trusted contamination-checklist diff helpers/gates, and #99 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; acquisition-time mtime, trusted contamination checklist, and write-blocker integration remain blockers."
     },
     {
       "id": "core-forensics-100-tamper-evident-bundle",
@@ -110,8 +110,8 @@
       "status": "pass",
       "backlog_items": [100],
       "evidence_paths": ["docs/validation/core-forensics-091-100-fixture-evidence.json", "tests/test_rapidtriage_final_roadmap.py"],
-      "expected": {"required_assertions": ["Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, external signing limitation, and #100 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; external signing/notarization remains blocker."
+      "expected": {"required_assertions": ["Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, external signing limitation, trusted signature-attestation diff helpers/gates, and #100 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; external signing/notarization and trusted signature attestations remain blocker."
     }
   ]
 }

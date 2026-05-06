@@ -14,8 +14,12 @@ from rapidtriage.core.case_db import (
     CaseDatabase,
     CaseDatabaseError,
     acquisition_hash_core_accuracy_gates,
+    acquisition_metadata_core_accuracy_gates,
     build_acquisition_hash_trusted_diff,
+    build_acquisition_metadata_trusted_diff,
     build_case_db_fts_trusted_diff,
+    build_clock_skew_trusted_diff,
+    build_contamination_warning_trusted_diff,
     build_citation_manager_trusted_diff,
     build_custody_workflow_trusted_diff,
     build_evidence_history_trusted_diff,
@@ -24,9 +28,12 @@ from rapidtriage.core.case_db import (
     build_parser_confidence_trusted_diff,
     build_report_provenance_trusted_diff,
     build_report_reproducibility_trusted_diff,
+    build_timezone_validation_trusted_diff,
     build_validation_warning_trusted_diff,
     build_reviewer_workflow_trusted_diff,
+    clock_skew_core_accuracy_gates,
     citation_manager_core_accuracy_gates,
+    contamination_warning_core_accuracy_gates,
     custody_workflow_core_accuracy_gates,
     evidence_selection_core_accuracy_gates,
     immutable_audit_core_accuracy_gates,
@@ -38,6 +45,7 @@ from rapidtriage.core.case_db import (
     report_reproducibility_core_accuracy_gates,
     review_workflow_assessment,
     table_columns,
+    timezone_validation_core_accuracy_gates,
     validation_warning_ux_core_accuracy_gates,
 )
 from rapidtriage.core.sample_case import run_sample_workflow
@@ -1027,21 +1035,69 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("#96", export["acquisition_metadata"]["commercial_gap_ids"])
             self.assertIn("#96", export["acquisition_metadata"]["validation_assessment"]["commercial_gap_ids"])
             self.assertEqual(export["acquisition_metadata"]["validation_assessment"]["core_accuracy_gates"][0]["gap_id"], "#96")
+            self.assertEqual(export["acquisition_metadata"]["trusted_acquisition_metadata_diff"]["status"], "missing")
+            self.assertIn("trusted-acquisition-metadata-handoff-diff-missing", export["acquisition_metadata"]["blockers"])
+            acquisition_diff = build_acquisition_metadata_trusted_diff(
+                export["acquisition_metadata"],
+                export["acquisition_metadata"],
+            )
+            acquisition_gates = acquisition_metadata_core_accuracy_gates(
+                records=export["acquisition_metadata"]["records"],
+                missing_required_fields=export["acquisition_metadata"]["missing_required_fields"],
+                trusted_diff=acquisition_diff,
+            )
+            self.assertEqual(acquisition_diff["status"], "pass")
+            self.assertIn("trusted acquisition handoff diff pass", acquisition_gates[0]["satisfied_checks"])
             self.assertIn("timezone_validation", export)
             self.assertIn("#97", export["summary"]["timezone_validation_gap_ids"])
             self.assertIn("#97", export["timezone_validation"]["commercial_gap_ids"])
             self.assertIn("#97", export["timezone_validation"]["validation_assessment"]["commercial_gap_ids"])
             self.assertEqual(export["timezone_validation"]["validation_assessment"]["core_accuracy_gates"][0]["gap_id"], "#97")
+            self.assertEqual(export["timezone_validation"]["trusted_timezone_validation_diff"]["status"], "missing")
+            self.assertIn("trusted-timezone-normalization-matrix-diff-missing", export["timezone_validation"]["blockers"])
+            timezone_diff = build_timezone_validation_trusted_diff(export["timezone_validation"], export["timezone_validation"])
+            timezone_gates = timezone_validation_core_accuracy_gates(
+                event_count=export["timezone_validation"]["summary"]["event_count"],
+                missing_timezone_count=export["timezone_validation"]["summary"]["missing_timezone_count"],
+                samples=export["timezone_validation"]["samples"],
+                trusted_diff=timezone_diff,
+            )
+            self.assertEqual(timezone_diff["status"], "pass")
+            self.assertIn("trusted timezone normalization matrix diff pass", timezone_gates[0]["satisfied_checks"])
             self.assertIn("clock_skew_analysis", export)
             self.assertIn("#98", export["summary"]["clock_skew_gap_ids"])
             self.assertIn("#98", export["clock_skew_analysis"]["commercial_gap_ids"])
             self.assertIn("#98", export["clock_skew_analysis"]["validation_assessment"]["commercial_gap_ids"])
             self.assertEqual(export["clock_skew_analysis"]["validation_assessment"]["core_accuracy_gates"][0]["gap_id"], "#98")
+            self.assertEqual(export["clock_skew_analysis"]["trusted_clock_skew_diff"]["status"], "missing")
+            self.assertIn("trusted-clock-skew-baseline-diff-missing", export["clock_skew_analysis"]["blockers"])
+            clock_diff = build_clock_skew_trusted_diff(export["clock_skew_analysis"], export["clock_skew_analysis"])
+            clock_gates = clock_skew_core_accuracy_gates(
+                parsed_timestamp_count=export["clock_skew_analysis"]["summary"]["parsed_timestamp_count"],
+                warnings=export["clock_skew_analysis"]["warnings"],
+                earliest=export["clock_skew_analysis"]["summary"]["earliest_timestamp"],
+                latest=export["clock_skew_analysis"]["summary"]["latest_timestamp"],
+                trusted_diff=clock_diff,
+            )
+            self.assertEqual(clock_diff["status"], "pass")
+            self.assertIn("trusted clock-skew baseline diff pass", clock_gates[0]["satisfied_checks"])
             self.assertIn("contamination_warnings", export)
             self.assertIn("#99", export["summary"]["contamination_warning_gap_ids"])
             self.assertIn("#99", export["contamination_warnings"]["commercial_gap_ids"])
             self.assertIn("#99", export["contamination_warnings"]["validation_assessment"]["commercial_gap_ids"])
             self.assertEqual(export["contamination_warnings"]["validation_assessment"]["core_accuracy_gates"][0]["gap_id"], "#99")
+            self.assertEqual(export["contamination_warnings"]["trusted_contamination_warning_diff"]["status"], "missing")
+            self.assertIn("trusted-contamination-checklist-diff-missing", export["contamination_warnings"]["blockers"])
+            contamination_diff = build_contamination_warning_trusted_diff(
+                export["contamination_warnings"],
+                export["contamination_warnings"],
+            )
+            contamination_gates = contamination_warning_core_accuracy_gates(
+                warnings=export["contamination_warnings"]["warnings"],
+                trusted_diff=contamination_diff,
+            )
+            self.assertEqual(contamination_diff["status"], "pass")
+            self.assertIn("trusted contamination checklist diff pass", contamination_gates[0]["satisfied_checks"])
 
             output_path = root / "case-db-report.json"
             stdout = io.StringIO()

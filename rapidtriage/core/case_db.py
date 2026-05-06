@@ -50,6 +50,17 @@ WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID = "#96"
 TIMEZONE_NORMALIZATION_GAP_ID = "#97"
 CLOCK_SKEW_ANALYSIS_GAP_ID = "#98"
 EVIDENCE_CONTAMINATION_WARNING_GAP_ID = "#99"
+ACQUISITION_METADATA_TRUSTED_DIFF_BLOCKER_96 = "trusted-acquisition-metadata-handoff-diff-missing"
+TIMEZONE_VALIDATION_TRUSTED_DIFF_BLOCKER_97 = "trusted-timezone-normalization-matrix-diff-missing"
+CLOCK_SKEW_TRUSTED_DIFF_BLOCKER_98 = "trusted-clock-skew-baseline-diff-missing"
+CONTAMINATION_WARNING_TRUSTED_DIFF_BLOCKER_99 = "trusted-contamination-checklist-diff-missing"
+ACQUISITION_QUALITY_TRUSTED_TOOLS = {
+    "signed-acquisition-handoff",
+    "write-blocker-log",
+    "timezone-normalization-matrix",
+    "clock-skew-baseline",
+    "contamination-checklist",
+}
 REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER = "review-workflow-trusted-audit-diff-required"
 REVIEW_WORKFLOW_TRUSTED_TOOLS = {
     "analyst-review-log",
@@ -3453,7 +3464,12 @@ def build_legal_limitations_assessment(
     }
 
 
-def build_acquisition_metadata_record(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+def build_acquisition_metadata_record(
+    connection: sqlite3.Connection,
+    case_id: str,
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     case = connection.execute("SELECT * FROM case_record WHERE case_id = ?", (case_id,)).fetchone()
     evidence_rows = connection.execute(
         """
@@ -3518,6 +3534,11 @@ def build_acquisition_metadata_record(connection: sqlite3.Connection, case_id: s
         for row in evidence_rows
     ]
     status = "metadata-recorded" if acquisition_records and not missing else "metadata-check-required"
+    if trusted_diff is None:
+        trusted_diff = missing_acquisition_metadata_trusted_diff()
+    blockers = []
+    if trusted_diff.get("status") != "pass":
+        blockers.append(ACQUISITION_METADATA_TRUSTED_DIFF_BLOCKER_96)
     return {
         "status": status,
         "commercial_gap_ids": [WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID],
@@ -3527,6 +3548,8 @@ def build_acquisition_metadata_record(connection: sqlite3.Connection, case_id: s
         "missing_by_record": missing_by_record,
         "required_fields": required_fields,
         "missing_required_fields": missing,
+        "trusted_acquisition_metadata_diff": trusted_diff,
+        "blockers": blockers,
         "summary": {
             "evidence_source_count": len(evidence_sources),
             "metadata_record_count": len(acquisition_records),
@@ -3544,13 +3567,21 @@ def build_acquisition_metadata_record(connection: sqlite3.Connection, case_id: s
             "core_accuracy_gates": acquisition_metadata_core_accuracy_gates(
                 records=acquisition_records,
                 missing_required_fields=missing,
+                trusted_diff=trusted_diff,
             ),
+            "trusted_acquisition_metadata_diff": trusted_diff,
+            "blockers": blockers,
         },
         "guidance": "Record acquisition operator, device/source identifier, write-blocker details, acquisition timestamps, and whole-source hashes before final submission.",
     }
 
 
-def build_timezone_validation(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+def build_timezone_validation(
+    connection: sqlite3.Connection,
+    case_id: str,
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     rows = connection.execute(
         """
         SELECT timestamp, timezone, timestamp_kind, source, event_type
@@ -3579,6 +3610,11 @@ def build_timezone_validation(connection: sqlite3.Connection, case_id: str) -> d
                     "event_type": str(row["event_type"] or ""),
                 }
             )
+    if trusted_diff is None:
+        trusted_diff = missing_timezone_validation_trusted_diff()
+    blockers = []
+    if trusted_diff.get("status") != "pass":
+        blockers.append(TIMEZONE_VALIDATION_TRUSTED_DIFF_BLOCKER_97)
     return {
         "status": "timezone-review-required" if missing else "timezone-fields-present",
         "commercial_gap_ids": [TIMEZONE_NORMALIZATION_GAP_ID],
@@ -3589,6 +3625,8 @@ def build_timezone_validation(connection: sqlite3.Connection, case_id: str) -> d
             "commercial_gap_ids": [TIMEZONE_NORMALIZATION_GAP_ID],
         },
         "samples": samples,
+        "trusted_timezone_validation_diff": trusted_diff,
+        "blockers": blockers,
         "validation_assessment": {
             "commercial_gap_ids": [TIMEZONE_NORMALIZATION_GAP_ID],
             "original_timestamp_preserved": True,
@@ -3598,13 +3636,21 @@ def build_timezone_validation(connection: sqlite3.Connection, case_id: str) -> d
                 event_count=len(rows),
                 missing_timezone_count=missing,
                 samples=samples,
+                trusted_diff=trusted_diff,
             ),
+            "trusted_timezone_validation_diff": trusted_diff,
+            "blockers": blockers,
         },
         "guidance": "Preserve original timestamp, source timezone, normalized UTC assumption, and parser-specific timezone notes in final reports.",
     }
 
 
-def build_clock_skew_analysis(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+def build_clock_skew_analysis(
+    connection: sqlite3.Connection,
+    case_id: str,
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     rows = connection.execute(
         """
         SELECT timestamp, source, event_type, description
@@ -3626,6 +3672,11 @@ def build_clock_skew_analysis(connection: sqlite3.Connection, case_id: str) -> d
             warnings.append({"type": "timestamp-before-1980", "timestamp": str(row["timestamp"]), "source": str(row["source"] or "")})
         if parsed > now + dt.timedelta(days=2):
             warnings.append({"type": "timestamp-in-future", "timestamp": str(row["timestamp"]), "source": str(row["source"] or "")})
+    if trusted_diff is None:
+        trusted_diff = missing_clock_skew_trusted_diff()
+    blockers = []
+    if trusted_diff.get("status") != "pass":
+        blockers.append(CLOCK_SKEW_TRUSTED_DIFF_BLOCKER_98)
     return {
         "status": "warnings-present" if warnings else "no-obvious-clock-skew",
         "commercial_gap_ids": [CLOCK_SKEW_ANALYSIS_GAP_ID],
@@ -3638,6 +3689,8 @@ def build_clock_skew_analysis(connection: sqlite3.Connection, case_id: str) -> d
             "commercial_gap_ids": [CLOCK_SKEW_ANALYSIS_GAP_ID],
         },
         "warnings": warnings[:100],
+        "trusted_clock_skew_diff": trusted_diff,
+        "blockers": blockers,
         "validation_assessment": {
             "commercial_gap_ids": [CLOCK_SKEW_ANALYSIS_GAP_ID],
             "heuristic_only": True,
@@ -3648,13 +3701,21 @@ def build_clock_skew_analysis(connection: sqlite3.Connection, case_id: str) -> d
                 warnings=warnings,
                 earliest=min((value.isoformat() for value in parsed_times), default=""),
                 latest=max((value.isoformat() for value in parsed_times), default=""),
+                trusted_diff=trusted_diff,
             ),
+            "trusted_clock_skew_diff": trusted_diff,
+            "blockers": blockers,
         },
         "guidance": "Clock skew detection is heuristic; compare against acquisition notes, system timezone, and trusted external timestamps.",
     }
 
 
-def build_evidence_contamination_warnings(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+def build_evidence_contamination_warnings(
+    connection: sqlite3.Connection,
+    case_id: str,
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     rows = connection.execute(
         """
         SELECT citation_id, original_path, staged_path
@@ -3677,6 +3738,11 @@ def build_evidence_contamination_warnings(connection: sqlite3.Connection, case_i
                 warnings.append({"type": "zero-byte-source", "citation_id": str(row["citation_id"]), "path": str(original)})
         except OSError:
             warnings.append({"type": "source-path-stat-failed", "citation_id": str(row["citation_id"]), "path": str(original)})
+    if trusted_diff is None:
+        trusted_diff = missing_contamination_warning_trusted_diff()
+    blockers = []
+    if trusted_diff.get("status") != "pass":
+        blockers.append(CONTAMINATION_WARNING_TRUSTED_DIFF_BLOCKER_99)
     return {
         "status": "warnings-present" if warnings else "no-obvious-contamination",
         "commercial_gap_ids": [EVIDENCE_CONTAMINATION_WARNING_GAP_ID],
@@ -3685,6 +3751,8 @@ def build_evidence_contamination_warnings(connection: sqlite3.Connection, case_i
             "commercial_gap_ids": [EVIDENCE_CONTAMINATION_WARNING_GAP_ID],
         },
         "warnings": warnings,
+        "trusted_contamination_warning_diff": trusted_diff,
+        "blockers": blockers,
         "validation_assessment": {
             "commercial_gap_ids": [EVIDENCE_CONTAMINATION_WARNING_GAP_ID],
             "write_blocker_integration": "not-connected",
@@ -3695,7 +3763,12 @@ def build_evidence_contamination_warnings(connection: sqlite3.Connection, case_i
                 "zero-byte-source",
                 "source-path-stat-failed",
             ],
-            "core_accuracy_gates": contamination_warning_core_accuracy_gates(warnings=warnings),
+            "core_accuracy_gates": contamination_warning_core_accuracy_gates(
+                warnings=warnings,
+                trusted_diff=trusted_diff,
+            ),
+            "trusted_contamination_warning_diff": trusted_diff,
+            "blockers": blockers,
         },
         "guidance": "Use write-blocked sources and keep RapidTriage outputs outside evidence roots whenever possible.",
     }
@@ -4295,6 +4368,153 @@ def report_quality_trusted_diff_result(
     }
 
 
+def missing_acquisition_quality_trusted_diff(gap_id: str, blocker: str, *, trusted_tool: str) -> dict[str, object]:
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [gap_id],
+        "blocker": blocker,
+        "required_trusted_tool": trusted_tool,
+    }
+
+
+def missing_acquisition_metadata_trusted_diff() -> dict[str, object]:
+    return missing_acquisition_quality_trusted_diff(
+        WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID,
+        ACQUISITION_METADATA_TRUSTED_DIFF_BLOCKER_96,
+        trusted_tool="signed-acquisition-handoff",
+    )
+
+
+def missing_timezone_validation_trusted_diff() -> dict[str, object]:
+    return missing_acquisition_quality_trusted_diff(
+        TIMEZONE_NORMALIZATION_GAP_ID,
+        TIMEZONE_VALIDATION_TRUSTED_DIFF_BLOCKER_97,
+        trusted_tool="timezone-normalization-matrix",
+    )
+
+
+def missing_clock_skew_trusted_diff() -> dict[str, object]:
+    return missing_acquisition_quality_trusted_diff(
+        CLOCK_SKEW_ANALYSIS_GAP_ID,
+        CLOCK_SKEW_TRUSTED_DIFF_BLOCKER_98,
+        trusted_tool="clock-skew-baseline",
+    )
+
+
+def missing_contamination_warning_trusted_diff() -> dict[str, object]:
+    return missing_acquisition_quality_trusted_diff(
+        EVIDENCE_CONTAMINATION_WARNING_GAP_ID,
+        CONTAMINATION_WARNING_TRUSTED_DIFF_BLOCKER_99,
+        trusted_tool="contamination-checklist",
+    )
+
+
+def build_acquisition_metadata_trusted_diff(
+    rapid_record: Mapping[str, object],
+    trusted_record: Mapping[str, object],
+    *,
+    trusted_tool: str = "signed-acquisition-handoff",
+) -> dict[str, object]:
+    compared_fields = ["records", "missing_required_fields"]
+    mismatches = build_acquisition_quality_mismatches(rapid_record, trusted_record, compared_fields)
+    return acquisition_quality_trusted_diff_result(
+        status="pass" if not mismatches and trusted_tool in ACQUISITION_QUALITY_TRUSTED_TOOLS else "fail",
+        gap_id=WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID,
+        blocker=ACQUISITION_METADATA_TRUSTED_DIFF_BLOCKER_96,
+        trusted_tool=trusted_tool,
+        compared_fields=compared_fields,
+        mismatches=mismatches,
+    )
+
+
+def build_timezone_validation_trusted_diff(
+    rapid_validation: Mapping[str, object],
+    trusted_validation: Mapping[str, object],
+    *,
+    trusted_tool: str = "timezone-normalization-matrix",
+) -> dict[str, object]:
+    compared_fields = ["summary", "samples"]
+    mismatches = build_acquisition_quality_mismatches(rapid_validation, trusted_validation, compared_fields)
+    return acquisition_quality_trusted_diff_result(
+        status="pass" if not mismatches and trusted_tool in ACQUISITION_QUALITY_TRUSTED_TOOLS else "fail",
+        gap_id=TIMEZONE_NORMALIZATION_GAP_ID,
+        blocker=TIMEZONE_VALIDATION_TRUSTED_DIFF_BLOCKER_97,
+        trusted_tool=trusted_tool,
+        compared_fields=compared_fields,
+        mismatches=mismatches,
+    )
+
+
+def build_clock_skew_trusted_diff(
+    rapid_analysis: Mapping[str, object],
+    trusted_analysis: Mapping[str, object],
+    *,
+    trusted_tool: str = "clock-skew-baseline",
+) -> dict[str, object]:
+    compared_fields = ["summary", "warnings"]
+    mismatches = build_acquisition_quality_mismatches(rapid_analysis, trusted_analysis, compared_fields)
+    return acquisition_quality_trusted_diff_result(
+        status="pass" if not mismatches and trusted_tool in ACQUISITION_QUALITY_TRUSTED_TOOLS else "fail",
+        gap_id=CLOCK_SKEW_ANALYSIS_GAP_ID,
+        blocker=CLOCK_SKEW_TRUSTED_DIFF_BLOCKER_98,
+        trusted_tool=trusted_tool,
+        compared_fields=compared_fields,
+        mismatches=mismatches,
+    )
+
+
+def build_contamination_warning_trusted_diff(
+    rapid_warnings: Mapping[str, object],
+    trusted_warnings: Mapping[str, object],
+    *,
+    trusted_tool: str = "contamination-checklist",
+) -> dict[str, object]:
+    compared_fields = ["summary", "warnings"]
+    mismatches = build_acquisition_quality_mismatches(rapid_warnings, trusted_warnings, compared_fields)
+    return acquisition_quality_trusted_diff_result(
+        status="pass" if not mismatches and trusted_tool in ACQUISITION_QUALITY_TRUSTED_TOOLS else "fail",
+        gap_id=EVIDENCE_CONTAMINATION_WARNING_GAP_ID,
+        blocker=CONTAMINATION_WARNING_TRUSTED_DIFF_BLOCKER_99,
+        trusted_tool=trusted_tool,
+        compared_fields=compared_fields,
+        mismatches=mismatches,
+    )
+
+
+def build_acquisition_quality_mismatches(
+    rapid_payload: Mapping[str, object],
+    trusted_payload: Mapping[str, object],
+    compared_fields: Sequence[str],
+) -> list[dict[str, object]]:
+    mismatches = []
+    for field in compared_fields:
+        rapid_value = normalize_integrity_value(rapid_payload.get(field))
+        trusted_value = normalize_integrity_value(trusted_payload.get(field))
+        if rapid_value != trusted_value:
+            mismatches.append({"field": field, "rapid": rapid_value, "trusted": trusted_value})
+    return mismatches
+
+
+def acquisition_quality_trusted_diff_result(
+    *,
+    status: str,
+    gap_id: str,
+    blocker: str,
+    trusted_tool: str,
+    compared_fields: Sequence[str],
+    mismatches: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [gap_id],
+        "compared_fields": list(compared_fields),
+        "mismatches": [dict(item) for item in mismatches],
+        "blocker": None if status == "pass" else blocker,
+    }
+
+
 def parser_confidence_core_accuracy_gates(
     *,
     parser_confidence: object,
@@ -4382,6 +4602,7 @@ def acquisition_metadata_core_accuracy_gates(
     *,
     records: Sequence[Mapping[str, object]],
     missing_required_fields: Sequence[str],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["missing required fields listed", "submission readiness flag emitted"]
     if any(record.get("operator") or record.get("source_identifier") for record in records):
@@ -4390,6 +4611,8 @@ def acquisition_metadata_core_accuracy_gates(
         satisfied.append("write-blocker field recorded")
     if any(record.get("whole_source_sha256") for record in records):
         satisfied.append("whole-source hash field recorded")
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted acquisition handoff diff pass")
     return [
         build_accuracy_gate(
             96,
@@ -4407,17 +4630,21 @@ def timezone_validation_core_accuracy_gates(
     event_count: int,
     missing_timezone_count: int,
     samples: Sequence[Mapping[str, object]],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
+    satisfied = [
+        "event timezone inventory emitted",
+        "missing timezone count emitted",
+        "timestamp samples preserved",
+        "UTC assumption disclosed",
+        "review-required flag emitted",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted timezone normalization matrix diff pass")
     return [
         build_accuracy_gate(
             97,
-            satisfied_checks=[
-                "event timezone inventory emitted",
-                "missing timezone count emitted",
-                "timestamp samples preserved",
-                "UTC assumption disclosed",
-                "review-required flag emitted",
-            ],
+            satisfied_checks=satisfied,
             evidence_refs=[
                 f"event_count:{event_count}",
                 f"missing_timezone_count:{missing_timezone_count}",
@@ -4433,17 +4660,21 @@ def clock_skew_core_accuracy_gates(
     warnings: Sequence[Mapping[str, object]],
     earliest: str,
     latest: str,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
+    satisfied = [
+        "parsed timestamp range emitted",
+        "skew warning records emitted",
+        "warning count summarized",
+        "baseline requirement disclosed",
+        "heuristic limitation emitted",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted clock-skew baseline diff pass")
     return [
         build_accuracy_gate(
             98,
-            satisfied_checks=[
-                "parsed timestamp range emitted",
-                "skew warning records emitted",
-                "warning count summarized",
-                "baseline requirement disclosed",
-                "heuristic limitation emitted",
-            ],
+            satisfied_checks=satisfied,
             evidence_refs=[
                 f"parsed_timestamp_count:{parsed_timestamp_count}",
                 f"warning_count:{len(warnings)}",
@@ -4454,17 +4685,24 @@ def clock_skew_core_accuracy_gates(
     ]
 
 
-def contamination_warning_core_accuracy_gates(*, warnings: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+def contamination_warning_core_accuracy_gates(
+    *,
+    warnings: Sequence[Mapping[str, object]],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
+    satisfied = [
+        "contamination warning records emitted",
+        "warning count summarized",
+        "output-under-evidence checks emitted",
+        "write-blocker integration limitation emitted",
+        "review-required flag emitted",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted contamination checklist diff pass")
     return [
         build_accuracy_gate(
             99,
-            satisfied_checks=[
-                "contamination warning records emitted",
-                "warning count summarized",
-                "output-under-evidence checks emitted",
-                "write-blocker integration limitation emitted",
-                "review-required flag emitted",
-            ],
+            satisfied_checks=satisfied,
             evidence_refs=[f"warning_count:{len(warnings)}"],
         )
     ]

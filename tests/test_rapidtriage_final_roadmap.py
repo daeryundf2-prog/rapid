@@ -9,7 +9,12 @@ import zipfile
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
-from rapidtriage.core.bundle import build_court_exhibit_trusted_diff, court_exhibit_core_accuracy_gates
+from rapidtriage.core.bundle import (
+    build_court_exhibit_trusted_diff,
+    build_tamper_evident_trusted_diff,
+    court_exhibit_core_accuracy_gates,
+    tamper_evident_bundle_core_accuracy_gates,
+)
 from rapidtriage.core.normalize import normalize_artifacts
 from rapidtriage.core.sample_case import run_sample_workflow
 
@@ -283,6 +288,16 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertIn("#100", tamper_bundle["summary"]["commercial_gap_ids"])
             self.assertEqual(tamper_bundle["core_accuracy_gates"][0]["gap_id"], "#100")
             self.assertTrue(tamper_bundle["summary"]["head_hash"])
+            self.assertEqual(tamper_bundle["trusted_tamper_evident_diff"]["status"], "missing")
+            self.assertIn("trusted-tamper-signature-attestation-diff-missing", tamper_bundle["blockers"])
+            tamper_diff = build_tamper_evident_trusted_diff(tamper_bundle, tamper_bundle)
+            tamper_gates = tamper_evident_bundle_core_accuracy_gates(
+                entries=tamper_bundle["entries"],
+                head_hash=tamper_bundle["summary"]["head_hash"],
+                trusted_diff=tamper_diff,
+            )
+            self.assertEqual(tamper_diff["status"], "pass")
+            self.assertIn("trusted tamper signature attestation diff pass", tamper_gates[0]["satisfied_checks"])
             self.assertIn("reviewer", payload["outputs"])
             selected = json.loads((bundle_dir / "rapidtriage-selected-evidence.json").read_text(encoding="utf-8"))
             self.assertEqual(selected["items"][0]["hash_status"], "hashed")

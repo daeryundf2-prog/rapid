@@ -18,7 +18,9 @@ from .submission import build_submission_manifest, compute_hashes
 COURT_EXHIBIT_EXPORT_GAP_ID = "#94"
 TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID = "#100"
 COURT_EXHIBIT_TRUSTED_DIFF_BLOCKER_94 = "trusted-court-exhibit-manifest-diff-missing"
+TAMPER_EVIDENT_TRUSTED_DIFF_BLOCKER_100 = "trusted-tamper-signature-attestation-diff-missing"
 COURT_EXHIBIT_TRUSTED_TOOLS = {"court-exhibit-checklist", "selected-evidence-manifest", "signed-exhibit-index"}
+TAMPER_EVIDENT_TRUSTED_TOOLS = {"external-signature-attestation", "notarization-log", "tamper-bundle-recompute"}
 
 
 class BundleError(ValueError):
@@ -363,7 +365,11 @@ def build_court_exhibit_index(
     }
 
 
-def build_tamper_evident_audit_bundle(*, output_paths: Sequence[tuple[str, Path]]) -> dict[str, object]:
+def build_tamper_evident_audit_bundle(
+    *,
+    output_paths: Sequence[tuple[str, Path]],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     entries = []
     previous_hash = ""
     for label, path in output_paths:
@@ -382,6 +388,11 @@ def build_tamper_evident_audit_bundle(*, output_paths: Sequence[tuple[str, Path]
         entry["entry_hash"] = entry_hash
         previous_hash = entry_hash
         entries.append(entry)
+    if trusted_diff is None:
+        trusted_diff = missing_tamper_evident_trusted_diff()
+    blockers = []
+    if trusted_diff.get("status") != "pass":
+        blockers.append(TAMPER_EVIDENT_TRUSTED_DIFF_BLOCKER_100)
     return {
         "command": "tamper-evident-audit-bundle",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -392,7 +403,13 @@ def build_tamper_evident_audit_bundle(*, output_paths: Sequence[tuple[str, Path]
             "commercial_gap_ids": [TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID],
         },
         "entries": entries,
-        "core_accuracy_gates": tamper_evident_bundle_core_accuracy_gates(entries=entries, head_hash=previous_hash),
+        "trusted_tamper_evident_diff": trusted_diff,
+        "blockers": blockers,
+        "core_accuracy_gates": tamper_evident_bundle_core_accuracy_gates(
+            entries=entries,
+            head_hash=previous_hash,
+            trusted_diff=trusted_diff,
+        ),
         "verification_steps": [
             "Recompute each output hash.",
             "Recompute each entry_hash in order using previous_entry_hash.",
@@ -472,10 +489,53 @@ def normalize_court_exhibit_value(value: object) -> object:
     return value
 
 
+def missing_tamper_evident_trusted_diff() -> dict[str, object]:
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID],
+        "blocker": TAMPER_EVIDENT_TRUSTED_DIFF_BLOCKER_100,
+        "required_trusted_tools": sorted(TAMPER_EVIDENT_TRUSTED_TOOLS),
+    }
+
+
+def build_tamper_evident_trusted_diff(
+    rapid_bundle: Mapping[str, object],
+    trusted_bundle: Mapping[str, object],
+    *,
+    trusted_tool: str = "external-signature-attestation",
+) -> dict[str, object]:
+    compared_fields = ["summary", "entries"]
+    mismatches = []
+    for field in compared_fields:
+        rapid_value = normalize_tamper_evident_value(rapid_bundle.get(field))
+        trusted_value = normalize_tamper_evident_value(trusted_bundle.get(field))
+        if rapid_value != trusted_value:
+            mismatches.append({"field": field, "rapid": rapid_value, "trusted": trusted_value})
+    status = "pass" if not mismatches and trusted_tool in TAMPER_EVIDENT_TRUSTED_TOOLS else "fail"
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID],
+        "compared_fields": compared_fields,
+        "mismatches": mismatches,
+        "blocker": None if status == "pass" else TAMPER_EVIDENT_TRUSTED_DIFF_BLOCKER_100,
+    }
+
+
+def normalize_tamper_evident_value(value: object) -> object:
+    if isinstance(value, list):
+        return sorted(json.dumps(item, ensure_ascii=False, sort_keys=True, default=str) for item in value)
+    if isinstance(value, Mapping):
+        return json.dumps(dict(value), ensure_ascii=False, sort_keys=True, default=str)
+    return value
+
+
 def tamper_evident_bundle_core_accuracy_gates(
     *,
     entries: Sequence[Mapping[str, object]],
     head_hash: str,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["external signing limitation emitted"]
     if entries:
@@ -486,6 +546,8 @@ def tamper_evident_bundle_core_accuracy_gates(
         satisfied.append("entry hashes emitted")
     if head_hash:
         satisfied.append("head hash recorded")
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted tamper signature attestation diff pass")
     return [
         build_accuracy_gate(
             100,
