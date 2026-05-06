@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
 from ...core.audit import compute_sha256
 from ...core.forensic_accuracy import build_accuracy_gate
@@ -76,7 +76,9 @@ PREFETCH_REPORT_GRADE_BLOCKERS = [
     "authoritative-volume-table-decoding-not-implemented",
     "trace-chain-directory-section-validation-required",
     "known-answer-prefetch-corpus-required",
+    "prefetch-trusted-parser-diff-required",
 ]
+PREFETCH_TRUSTED_TOOLS = {"pecmd", "winprefetchview", "velociraptor", "prefetchparser"}
 
 
 class WindowsPrefetchProvider:
@@ -569,6 +571,11 @@ def prefetch_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    trusted_diff = (
+        details.get("prefetch_trusted_diff")
+        if isinstance(details.get("prefetch_trusted_diff"), Mapping)
+        else {"status": "not-attached"}
+    )
     reportability_decision = prefetch_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-016-020",
@@ -590,6 +597,7 @@ def prefetch_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
         "report_grade_status": str(report_grade.get("status") or ""),
         "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
+        "prefetch_trusted_diff": trusted_diff,
         "large_data_controls": {
             "bounded_prefetch_scan": True,
             "scan_limit_bytes": MAX_PREFETCH_SCAN_BYTES,
@@ -609,6 +617,7 @@ def prefetch_reportability_decision(
     blockers = set(str(item) for item in report_grade.get("blockers") or [])
     blockers.add("prefetch-file-metrics-and-volume-table-validation-required")
     blockers.add("prefetch-cross-tool-execution-correlation-required")
+    blockers.add("prefetch-trusted-parser-diff-required")
     return {
         "profile_version": "prefetch-reportability-decision-v1",
         "commercial_gap_id": "#16",
@@ -632,6 +641,11 @@ def prefetch_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    trusted_diff = (
+        details.get("prefetch_trusted_diff")
+        if isinstance(details.get("prefetch_trusted_diff"), Mapping)
+        else {}
+    )
     evidence_refs = [
         f"source_path:{details.get('source_path', '')}",
         f"source_index:{details.get('source_index', '')}",
@@ -648,7 +662,99 @@ def prefetch_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str
         satisfied.append("run count and last-run timestamps")
     if details.get("volume_candidates") or details.get("file_reference_candidates") or details.get("referenced_path"):
         satisfied.append("volume/file metrics")
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted Prefetch parser diff pass")
     return [build_accuracy_gate(16, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
+
+
+def build_prefetch_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    return build_prefetch_diff_payload(
+        index_prefetch_rows(rapid_rows),
+        index_prefetch_rows(trusted_rows),
+        trusted_tool=trusted_tool,
+    )
+
+
+def index_prefetch_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        executable = normalized_diff_value(first_alias(row, "executable_hint", "executable", "filename", "application_name"))
+        pf_hash = normalized_diff_value(first_alias(row, "prefetch_hash", "hash"))
+        key = "|".join(item for item in (executable, pf_hash) if item)
+        if not key:
+            continue
+        indexed[key] = {
+            "executable": executable,
+            "prefetch_hash": pf_hash,
+            "run_count": normalized_diff_value(first_alias(row, "run_count", "runcount")),
+            "last_run": normalized_diff_value(first_alias(row, "last_run_at", "last_run", "lastrun")),
+            "referenced_path": normalized_diff_value(first_alias(row, "referenced_path", "file_name", "path")),
+        }
+    return indexed
+
+
+def build_prefetch_diff_payload(
+    rapid_index: Mapping[str, Mapping[str, str]],
+    trusted_index: Mapping[str, Mapping[str, str]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    recognized = trusted_tool.strip().lower().replace(" ", "") in {
+        item.replace(" ", "").lower() for item in PREFETCH_TRUSTED_TOOLS
+    }
+    common = sorted(set(rapid_index) & set(trusted_index))
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in common:
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append({"prefetch_key": key, "field": field, "rapid_value": rapid_value, "trusted_value": trusted_value})
+                break
+    status = "pass" if recognized and common and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": "prefetch-trusted-parser-diff-v1",
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(common) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-prefetch-output-as-final",
+            "blockers": [] if status == "pass" else ["prefetch-trusted-parser-diff-required"],
+        },
+    }
+
+
+def first_alias(row: Mapping[str, object], *aliases: str) -> object:
+    normalized = {normalize_key(key): value for key, value in row.items()}
+    for alias in aliases:
+        value = normalized.get(normalize_key(alias))
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalize_key(value: object) -> str:
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
+
+
+def normalized_diff_value(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
 
 
 def read_prefetch_executable_name(blob: bytes) -> str:

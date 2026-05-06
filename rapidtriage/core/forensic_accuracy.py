@@ -245,6 +245,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "run count and last-run timestamps",
             "volume/file metrics",
             "compressed PF handling",
+            "trusted Prefetch parser diff pass",
         ),
     },
     {
@@ -259,6 +260,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "drive/network metadata",
             "tracker GUID validation",
             "timestamp/source field provenance",
+            "trusted LNK parser diff pass",
         ),
     },
     {
@@ -273,6 +275,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "Defender/Firewall field normalization",
             "WER dump/cab linkage",
             "WMI consumer/filter binding validation",
+            "trusted system artifact diff pass",
         ),
     },
     {
@@ -287,6 +290,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "extension ID/source mapping",
             "secret/cookie opt-in legal gate",
             "deleted/synced content warning",
+            "trusted browser storage diff pass",
         ),
     },
     {
@@ -301,6 +305,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "download target/source URL linkage",
             "multi-profile deduplication",
             "Safari scope limitation disclosure",
+            "trusted browser timeline diff pass",
         ),
     },
     {

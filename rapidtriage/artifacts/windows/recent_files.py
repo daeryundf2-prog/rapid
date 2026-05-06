@@ -35,6 +35,7 @@ JUMPLIST_COMMERCIAL_BLOCKERS = [
     "jumplist-destlist-trusted-diff-required",
 ]
 JUMPLIST_TRUSTED_TOOLS = {"jlecmd", "lnkecmd", "lecmd", "jumplistexplorer", "velociraptor"}
+LNK_TRUSTED_TOOLS = {"lecmd", "lnkecmd", "windows shell", "shell properties", "velociraptor"}
 JUMPLIST_CAPABILITIES = {
     "lnk_header_decode": True,
     "lnk_linkinfo_decode": True,
@@ -340,6 +341,11 @@ def lnk_core_accuracy_gates(details: dict[str, object]) -> list[dict[str, object
     link_info = details.get("link_info") if isinstance(details.get("link_info"), dict) else {}
     tracker_data = details.get("tracker_data") if isinstance(details.get("tracker_data"), dict) else {}
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), dict) else {}
+    trusted_diff = (
+        details.get("lnk_trusted_diff")
+        if isinstance(details.get("lnk_trusted_diff"), Mapping)
+        else {}
+    )
     evidence_refs = [f"source_path:{details.get('source_path', '')}"]
     if hashes.get("sha256"):
         evidence_refs.append(f"source_sha256:{hashes['sha256']}")
@@ -355,6 +361,8 @@ def lnk_core_accuracy_gates(details: dict[str, object]) -> list[dict[str, object
         satisfied.append("tracker GUID validation")
     if details.get("target_created_at") or details.get("target_accessed_at") or details.get("target_modified_at"):
         satisfied.append("timestamp/source field provenance")
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted LNK parser diff pass")
     return [build_accuracy_gate(17, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
@@ -1048,6 +1056,11 @@ def lnk_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, o
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    trusted_diff = (
+        details.get("lnk_trusted_diff")
+        if isinstance(details.get("lnk_trusted_diff"), Mapping)
+        else {"status": "not-attached"}
+    )
     reportability_decision = lnk_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-016-020",
@@ -1069,6 +1082,7 @@ def lnk_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[str, o
         "report_grade_status": str(report_grade.get("status") or ""),
         "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
+        "lnk_trusted_diff": trusted_diff,
         "large_data_controls": {
             "bounded_extra_data_blocks": True,
             "max_extra_data_blocks": MAX_LNK_EXTRA_DATA_BLOCKS,
@@ -1087,6 +1101,7 @@ def lnk_reportability_decision(
     blockers = set(str(item) for item in report_grade.get("blockers") or [])
     blockers.add("lnk-shell-item-property-store-validation-required")
     blockers.add("lnk-tracker-and-linkinfo-cross-tool-diff-required")
+    blockers.add("lnk-trusted-parser-diff-required")
     return {
         "profile_version": "lnk-reportability-decision-v1",
         "commercial_gap_id": "#17",
@@ -1200,6 +1215,77 @@ def build_jumplist_trusted_diff(
         index_jumplist_rows(trusted_rows),
         trusted_tool=trusted_tool,
     )
+
+
+def build_lnk_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    return build_lnk_diff_payload(index_lnk_rows(rapid_rows), index_lnk_rows(trusted_rows), trusted_tool=trusted_tool)
+
+
+def index_lnk_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        target = normalized_diff_value(first_alias(row, "target_path", "target", "local_base_path", "path"))
+        working_dir = normalized_diff_value(first_alias(row, "working_dir", "working_directory"))
+        arguments = normalized_diff_value(first_alias(row, "command_line_arguments", "arguments"))
+        key = target or normalized_diff_value(first_alias(row, "source_path", "entry_name", "filename"))
+        if not key:
+            continue
+        indexed[key] = {
+            "target_path": target,
+            "working_dir": working_dir,
+            "arguments": arguments,
+            "created": normalized_diff_value(first_alias(row, "target_created_at", "created", "creation_time")),
+            "modified": normalized_diff_value(first_alias(row, "target_modified_at", "modified", "modified_time")),
+            "tracker_machine": normalized_diff_value(first_alias(row, "machine_id", "tracker_machine_id")),
+        }
+    return indexed
+
+
+def build_lnk_diff_payload(
+    rapid_index: Mapping[str, Mapping[str, str]],
+    trusted_index: Mapping[str, Mapping[str, str]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    recognized = trusted_tool.strip().lower().replace(" ", "") in {
+        item.replace(" ", "").lower() for item in LNK_TRUSTED_TOOLS
+    }
+    common = sorted(set(rapid_index) & set(trusted_index))
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in common:
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append({"lnk_key": key, "field": field, "rapid_value": rapid_value, "trusted_value": trusted_value})
+                break
+    status = "pass" if recognized and common and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": "lnk-trusted-parser-diff-v1",
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(common) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-lnk-output-as-final",
+            "blockers": [] if status == "pass" else ["lnk-trusted-parser-diff-required"],
+        },
+    }
 
 
 def index_jumplist_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:

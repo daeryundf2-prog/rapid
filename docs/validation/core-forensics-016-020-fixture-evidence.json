@@ -18,7 +18,8 @@
       "number": 16,
       "title": "Prefetch full version parser",
       "assertions": [
-        "prefetch-file and prefetch-reference rows preserve SCCA/header validation, version-specific offsets, run count, last-run timestamps, volume/file reference candidates, source hashes, #16 core_accuracy_gates, and execution-pivot reportability decisions."
+        "prefetch-file and prefetch-reference rows preserve SCCA/header validation, version-specific offsets, run count, last-run timestamps, volume/file reference candidates, source hashes, #16 core_accuracy_gates, and execution-pivot reportability decisions.",
+        "trusted Prefetch parser diff helpers compare executable, hash, run count, last-run, and referenced path fields against PECmd/WinPrefetchView-style rows."
       ],
       "blockers_kept": [
         "compressed PF handling",
@@ -30,7 +31,8 @@
       "number": 17,
       "title": "LNK full metadata parser",
       "assertions": [
-        "recent-shortcut rows preserve Shell Link header flags, target path, working directory, StringData, LinkInfo, tracker candidate GUIDs, timestamps, source hashes, #17 core_accuracy_gates, and shortcut-context reportability decisions."
+        "recent-shortcut rows preserve Shell Link header flags, target path, working directory, StringData, LinkInfo, tracker candidate GUIDs, timestamps, source hashes, #17 core_accuracy_gates, and shortcut-context reportability decisions.",
+        "trusted LNK parser diff helpers compare target, working directory, arguments, timestamps, and tracker machine fields against LECmd-style rows."
       ],
       "blockers_kept": [
         "full shell item property store semantics",
@@ -42,7 +44,8 @@
       "number": 18,
       "title": "WER/Defender/Firewall/Task Scheduler/WMI deep parser",
       "assertions": [
-        "Task, Defender, Firewall, WER, and WMI rows preserve normalized fields, risk rules where available, source hashes, report-grade blockers, #18 core_accuracy_gates, and system-correlation reportability decisions."
+        "Task, Defender, Firewall, WER, and WMI rows preserve normalized fields, risk rules where available, source hashes, report-grade blockers, #18 core_accuracy_gates, and system-correlation reportability decisions.",
+        "trusted system artifact diff helpers compare artifact family, name, command/path, timestamp, and risk/action fields against Velociraptor/Chainsaw/Autoruns-style rows."
       ],
       "blockers_kept": [
         "TaskCache registry correlation",
@@ -55,7 +58,8 @@
       "number": 19,
       "title": "Browser cache/session/extension/sync artifacts",
       "assertions": [
-        "browser-storage-inventory rows preserve profile attribution, cache/session/extension/sync/cookie inventory, sample hashes, strict legal warning, secret opt-in gate, #19 core_accuracy_gates, and secret-redacted reportability decisions."
+        "browser-storage-inventory rows preserve profile attribution, cache/session/extension/sync/cookie inventory, sample hashes, strict legal warning, secret opt-in gate, #19 core_accuracy_gates, and secret-redacted reportability decisions.",
+        "trusted browser storage diff helpers compare browser, profile, storage type/name, and sensitive-store markers against Hindsight/BrowserHistoryView/native-query rows."
       ],
       "blockers_kept": [
         "full cache-entry decoding",
@@ -67,7 +71,8 @@
       "number": 20,
       "title": "Chrome/Edge/Firefox/Safari unified browser timeline",
       "assertions": [
-        "browser-history-downloads rows preserve timestamp-normalized timeline rows, source indices, profile attribution, browser limitation disclosure, #20 core_accuracy_gates, and browser timeline reportability decisions."
+        "browser-history-downloads rows preserve timestamp-normalized timeline rows, source indices, profile attribution, browser limitation disclosure, #20 core_accuracy_gates, and browser timeline reportability decisions.",
+        "trusted browser timeline diff helpers compare browser, profile, timestamp, URL, transition, and download target fields against Hindsight/BrowserHistoryView/native-query rows."
       ],
       "blockers_kept": [
         "multi-profile deduplication validation",

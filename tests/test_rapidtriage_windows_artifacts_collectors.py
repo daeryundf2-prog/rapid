@@ -26,7 +26,18 @@ from rapidtriage.artifacts.windows.filesystem import (
     build_usn_trusted_diff,
     ntfs_core_accuracy_gates,
 )
-from rapidtriage.artifacts.windows.recent_files import build_jumplist_trusted_diff, jumplist_core_accuracy_gates
+from rapidtriage.artifacts.windows.browser import (
+    browser_core_accuracy_gates,
+    build_browser_storage_trusted_diff,
+    build_browser_timeline_trusted_diff,
+)
+from rapidtriage.artifacts.windows.prefetch import build_prefetch_trusted_diff, prefetch_core_accuracy_gates
+from rapidtriage.artifacts.windows.recent_files import (
+    build_jumplist_trusted_diff,
+    build_lnk_trusted_diff,
+    jumplist_core_accuracy_gates,
+    lnk_core_accuracy_gates,
+)
 from rapidtriage.artifacts.windows.search_index import (
     build_windows_edb_trusted_diff,
     windows_search_core_accuracy_gates,
@@ -36,6 +47,7 @@ from rapidtriage.artifacts.windows.shellbags import (
     build_shellbag_trusted_diff,
     shellbag_core_accuracy_gates,
 )
+from rapidtriage.artifacts.windows.system import build_system_trusted_diff, system_core_accuracy_gates
 from rapidtriage.cli import main
 from tests.windows_artifact_fixtures import build_minimal_registry_hive, build_minimal_shellbags_registry_hive
 
@@ -218,6 +230,106 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(mft_diff["status"], "diffs-present")
         self.assertFalse(mft_diff["trusted_tool_recognized"])
         self.assertIn("mft-trusted-record-diff-required", mft_diff["reportability_decision"]["blockers"])
+
+    def test_prefetch_lnk_system_and_browser_trusted_diffs_gate_commercial_claims(self) -> None:
+        prefetch_diff = build_prefetch_trusted_diff(
+            [{"executable_hint": "POWERSHELL.EXE", "prefetch_hash": "12345678", "run_count": "3"}],
+            [{"Executable": "POWERSHELL.EXE", "Hash": "12345678", "RunCount": "3"}],
+            trusted_tool="PECmd",
+        )
+        self.assertEqual(prefetch_diff["status"], "pass")
+        prefetch_gate = prefetch_core_accuracy_gates(
+            {
+                "binary_format_detected": True,
+                "prefetch_version_metadata": {"supported_common_layout": True},
+                "last_run_times": ["2024-04-01T09:10:11+00:00"],
+                "volume_candidates": [{"volume_device_path": r"\DEVICE\HARDDISKVOLUME3"}],
+                "prefetch_trusted_diff": prefetch_diff,
+            }
+        )[0]
+        self.assertIn("trusted Prefetch parser diff pass", prefetch_gate["satisfied_checks"])
+
+        lnk_diff = build_lnk_trusted_diff(
+            [{"target_path": r"C:\Users\alice\case.txt", "working_dir": r"C:\Users\alice"}],
+            [{"TargetPath": r"C:\Users\alice\case.txt", "WorkingDirectory": r"C:\Users\alice"}],
+            trusted_tool="LECmd",
+        )
+        self.assertEqual(lnk_diff["status"], "pass")
+        lnk_gate = lnk_core_accuracy_gates(
+            {
+                "validation_checks": {"has_valid_header": True},
+                "link_flag_names": ["IsUnicode"],
+                "target_path": r"C:\Users\alice\case.txt",
+                "working_dir": r"C:\Users\alice",
+                "target_modified_at": "2024-04-01T09:10:11+00:00",
+                "lnk_trusted_diff": lnk_diff,
+            }
+        )[0]
+        self.assertIn("trusted LNK parser diff pass", lnk_gate["satisfied_checks"])
+
+        system_diff = build_system_trusted_diff(
+            [{"artifact_family": "task-scheduler", "task_uri": r"\SecurityUpdater", "command": "powershell.exe"}],
+            [{"Family": "task-scheduler", "TaskURI": r"\SecurityUpdater", "Command": "powershell.exe"}],
+            trusted_tool="Velociraptor",
+        )
+        self.assertEqual(system_diff["status"], "pass")
+        system_gate = system_core_accuracy_gates(
+            "task-scheduler",
+            {
+                "risk_flags": ["task-string:powershell"],
+                "validation_checks": {"taskcache_registry_validated": True},
+                "system_trusted_diff": system_diff,
+            },
+        )[0]
+        self.assertIn("trusted system artifact diff pass", system_gate["satisfied_checks"])
+
+        storage_diff = build_browser_storage_trusted_diff(
+            [{"browser": "chrome", "profile": "Default", "storage_type": "cache", "storage_name": "Cache_Data"}],
+            [{"Browser": "chrome", "Profile": "Default", "Type": "cache", "Name": "Cache_Data"}],
+            trusted_tool="Hindsight",
+        )
+        timeline_diff = build_browser_timeline_trusted_diff(
+            [{"browser": "chrome", "profile": "Default", "timestamp": "2024-04-01T09:10:11+00:00", "url": "https://example.test"}],
+            [{"Browser": "chrome", "Profile": "Default", "VisitTime": "2024-04-01T09:10:11+00:00", "URL": "https://example.test"}],
+            trusted_tool="BrowserHistoryView",
+        )
+        self.assertEqual(storage_diff["status"], "pass")
+        self.assertEqual(timeline_diff["status"], "pass")
+        browser_gates = {
+            gate["gap_id"]: gate
+            for gate in browser_core_accuracy_gates(
+                {
+                    "browser": "chrome",
+                    "profile": "Default",
+                    "storage_inventory": [{"storage_type": "cache", "storage_name": "Cache_Data"}],
+                    "unified_timeline": [{"timestamp": "2024-04-01T09:10:11+00:00", "url": "https://example.test", "transition": "typed"}],
+                    "download_rows": [{"target_path": r"C:\Users\alice\Downloads\a.zip", "source_url": "https://example.test/a.zip"}],
+                    "browser_storage_trusted_diff": storage_diff,
+                    "browser_timeline_trusted_diff": timeline_diff,
+                }
+            )
+        }
+        self.assertIn("trusted browser storage diff pass", browser_gates["#19"]["satisfied_checks"])
+        self.assertIn("trusted browser timeline diff pass", browser_gates["#20"]["satisfied_checks"])
+
+    def test_prefetch_lnk_system_and_browser_trusted_diffs_block_mismatches(self) -> None:
+        prefetch_diff = build_prefetch_trusted_diff(
+            [{"executable_hint": "POWERSHELL.EXE", "prefetch_hash": "12345678", "run_count": "3"}],
+            [{"Executable": "POWERSHELL.EXE", "Hash": "12345678", "RunCount": "99"}],
+            trusted_tool="PECmd",
+        )
+        self.assertEqual(prefetch_diff["status"], "diffs-present")
+        self.assertFalse(prefetch_diff["commercial_grade_evidence"])
+        self.assertEqual(prefetch_diff["mismatch_count"], 1)
+
+        browser_diff = build_browser_timeline_trusted_diff(
+            [{"browser": "chrome", "profile": "Default", "timestamp": "2024-04-01T09:10:11+00:00", "url": "https://example.test"}],
+            [{"Browser": "chrome", "Profile": "Default", "VisitTime": "2024-04-01T09:10:11+00:00", "URL": "https://example.test"}],
+            trusted_tool="unknown-browser-tool",
+        )
+        self.assertEqual(browser_diff["status"], "diffs-present")
+        self.assertFalse(browser_diff["trusted_tool_recognized"])
+        self.assertIn("browser-timeline-trusted-diff-required", browser_diff["reportability_decision"]["blockers"])
 
     def test_native_evtx_binxml_promotes_duplicate_event_data_without_losing_order(self) -> None:
         value_fields = [

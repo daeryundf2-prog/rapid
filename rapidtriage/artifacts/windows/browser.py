@@ -126,7 +126,10 @@ BROWSER_REPORT_GRADE_BLOCKERS = [
     "sync-engine-state-validation-required",
     "cross-browser-session-restore-decoding-incomplete",
     "cross-browser-timeline-known-answer-corpus-required",
+    "browser-storage-trusted-diff-required",
+    "browser-timeline-trusted-diff-required",
 ]
+BROWSER_TRUSTED_TOOLS = {"browserhistoryview", "hindsight", "sqlite", "browser native query", "velociraptor"}
 AI_TRANSCRIPT_BLOCKERS = [
     "service-side-transcript-export-not-validated",
     "browser-storage-snippet-pairing-is-order-based",
@@ -865,6 +868,16 @@ def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[st
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    storage_diff = (
+        details.get("browser_storage_trusted_diff")
+        if isinstance(details.get("browser_storage_trusted_diff"), Mapping)
+        else {"status": "not-attached"}
+    )
+    timeline_diff = (
+        details.get("browser_timeline_trusted_diff")
+        if isinstance(details.get("browser_timeline_trusted_diff"), Mapping)
+        else {"status": "not-attached"}
+    )
     reportability_decision = browser_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-016-020",
@@ -887,6 +900,8 @@ def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[st
         "report_grade_status": str(report_grade.get("status") or ""),
         "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
+        "browser_storage_trusted_diff": storage_diff,
+        "browser_timeline_trusted_diff": timeline_diff,
         "large_data_controls": {
             "max_browser_timeline_rows": MAX_BROWSER_TIMELINE_ROWS,
             "max_storage_inventory_files": MAX_BROWSER_INVENTORY_FILES,
@@ -907,6 +922,8 @@ def browser_reportability_decision(
     blockers = set(str(item) for item in report_grade.get("blockers") or [])
     blockers.add("browser-secret-legal-opt-in-and-audit-required")
     blockers.add("browser-deleted-history-and-cache-schema-validation-required")
+    blockers.add("browser-storage-trusted-diff-required")
+    blockers.add("browser-timeline-trusted-diff-required")
     return {
         "profile_version": "browser-reportability-decision-v1",
         "commercial_gap_ids": ["#19", "#20"],
@@ -1027,6 +1044,16 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
         if isinstance(details.get("secret_validation_checks"), Mapping)
         else {}
     )
+    storage_diff = (
+        details.get("browser_storage_trusted_diff")
+        if isinstance(details.get("browser_storage_trusted_diff"), Mapping)
+        else {}
+    )
+    timeline_diff = (
+        details.get("browser_timeline_trusted_diff")
+        if isinstance(details.get("browser_timeline_trusted_diff"), Mapping)
+        else {}
+    )
     evidence_refs = [
         f"source_path:{details.get('source_path', '')}",
         f"browser:{details.get('browser', '')}",
@@ -1046,6 +1073,8 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
         item19.append("secret/cookie opt-in legal gate")
     if any(str(row.get("storage_type") or "") in {"sync", "session"} for row in storage_inventory) or not BROWSER_NATIVE_CAPABILITIES["cross_browser_deleted_session_recovery"]:
         item19.append("deleted/synced content warning")
+    if storage_diff.get("status") == "pass":
+        item19.append("trusted browser storage diff pass")
 
     item20: list[str] = []
     if timeline:
@@ -1056,6 +1085,8 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
         item20.append("download target/source URL linkage")
     if not BROWSER_NATIVE_CAPABILITIES["safari_windows_profile_support"]:
         item20.append("Safari scope limitation disclosure")
+    if timeline_diff.get("status") == "pass":
+        item20.append("trusted browser timeline diff pass")
 
     gates = [
         build_accuracy_gate(19, satisfied_checks=item19, evidence_refs=evidence_refs),
@@ -1075,6 +1106,141 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
             item42.append("audit and scope review requirement")
         gates.append(build_accuracy_gate(42, satisfied_checks=item42, evidence_refs=evidence_refs))
     return gates
+
+
+def build_browser_storage_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> Dict[str, object]:
+    return build_browser_diff_payload(
+        index_browser_storage_rows(rapid_rows),
+        index_browser_storage_rows(trusted_rows),
+        trusted_tool=trusted_tool,
+        mode="browser-storage-trusted-diff-v1",
+        blocker="browser-storage-trusted-diff-required",
+        key_label="storage_key",
+    )
+
+
+def build_browser_timeline_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> Dict[str, object]:
+    return build_browser_diff_payload(
+        index_browser_timeline_rows(rapid_rows),
+        index_browser_timeline_rows(trusted_rows),
+        trusted_tool=trusted_tool,
+        mode="browser-timeline-trusted-diff-v1",
+        blocker="browser-timeline-trusted-diff-required",
+        key_label="timeline_key",
+    )
+
+
+def index_browser_storage_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, str]]:
+    indexed: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        browser = normalized_diff_value(first_alias(row, "browser"))
+        profile = normalized_diff_value(first_alias(row, "profile"))
+        storage_type = normalized_diff_value(first_alias(row, "storage_type", "type"))
+        storage_name = normalized_diff_value(first_alias(row, "storage_name", "name", "path"))
+        key = "|".join(item for item in (browser, profile, storage_type, storage_name) if item)
+        if not key:
+            continue
+        indexed[key] = {
+            "browser": browser,
+            "profile": profile,
+            "storage_type": storage_type,
+            "storage_name": storage_name,
+            "sensitive": normalized_diff_value(first_alias(row, "sensitive", "contains_secrets", "scope_sensitive")),
+        }
+    return indexed
+
+
+def index_browser_timeline_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, str]]:
+    indexed: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        browser = normalized_diff_value(first_alias(row, "browser"))
+        profile = normalized_diff_value(first_alias(row, "profile"))
+        url = normalized_diff_value(first_alias(row, "url", "source_url", "target_url"))
+        timestamp = normalized_diff_value(first_alias(row, "timestamp", "visit_time", "start_time"))
+        key = "|".join(item for item in (browser, profile, timestamp, url) if item)
+        if not key:
+            continue
+        indexed[key] = {
+            "browser": browser,
+            "profile": profile,
+            "url": url,
+            "timestamp": timestamp,
+            "transition": normalized_diff_value(first_alias(row, "transition", "transition_type")),
+            "target_path": normalized_diff_value(first_alias(row, "target_path", "download_path", "filename")),
+        }
+    return indexed
+
+
+def build_browser_diff_payload(
+    rapid_index: Mapping[str, Mapping[str, str]],
+    trusted_index: Mapping[str, Mapping[str, str]],
+    *,
+    trusted_tool: str,
+    mode: str,
+    blocker: str,
+    key_label: str,
+) -> Dict[str, object]:
+    recognized = trusted_tool.strip().lower().replace(" ", "") in {
+        item.replace(" ", "").lower() for item in BROWSER_TRUSTED_TOOLS
+    }
+    common = sorted(set(rapid_index) & set(trusted_index))
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: List[Dict[str, object]] = []
+    for key in common:
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append({key_label: key, "field": field, "rapid_value": rapid_value, "trusted_value": trusted_value})
+                break
+    status = "pass" if recognized and common and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": mode,
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(common) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-browser-output-as-final",
+            "blockers": [] if status == "pass" else [blocker],
+        },
+    }
+
+
+def first_alias(row: Mapping[str, object], *aliases: str) -> object:
+    normalized = {normalize_key(key): value for key, value in row.items()}
+    for alias in aliases:
+        value = normalized.get(normalize_key(alias))
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalize_key(value: object) -> str:
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
+
+
+def normalized_diff_value(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
 
 
 def ai_transcript_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:
