@@ -22,6 +22,7 @@
         "windows-search-edb-file rows preserve ESE header/page-map/table-family metadata, source hashes, path/URL/content pivots, and #11 core_accuracy_gates.",
         "windows-search-edb-page-candidate rows preserve page index, page offset, page hash, table marker hits, page-local path/content candidates, and page-level source citation.",
         "windows-search-edb-row-candidate rows correlate path/content/deleted-state markers and retain validation-required blockers.",
+        "trusted Windows.edb parser diff helpers compare path/URL/content/deleted-state/table fields and keep report-grade blocked when mismatches, missing rows, extra rows, or unrecognized tools are present.",
         "Windows.edb reportability decisions keep native rows as search-index triage pivots until ESE row validation is attached."
       ],
       "blockers_kept": [
@@ -36,6 +37,7 @@
       "assertions": [
         "mft-record rows preserve FILE header, USA validation, standard information timestamps, filename parent reference, resident data evidence, source hashes, and #12 core_accuracy_gates.",
         "mft-file inventory rows preserve bounded native record counts, sequence validation counts, timestamp validation counts, and attribute type counts.",
+        "trusted MFT parser record diff helpers compare record number, parent reference, path, timestamp, and deleted-state fields against MFTECmd/TSK-style rows.",
         "$MFT reportability decisions block complete path/content claims until attribute-list, runlist, and full-volume diffs are attached."
       ],
       "blockers_kept": [
@@ -50,6 +52,7 @@
       "assertions": [
         "usn-record rows preserve record-size bounds, cursor progression, v2/v3 identity decoding, reason flags, rename/delete hints, timestamps, source hashes, and #13 core_accuracy_gates.",
         "usn-journal-file inventory rows preserve scan metadata, next-cursor state, record-version counts, large-record counts, and timestamp ranges.",
+        "trusted USN parser timeline diff helpers compare USN, FRN, parent FRN, filename/path, reason flags, and timestamp fields against MFTECmd/UsnJrnl2Csv-style rows.",
         "$UsnJrnl reportability decisions block full timeline replay claims until FRN path-cache and large-journal validation are attached."
       ],
       "blockers_kept": [
@@ -64,6 +67,7 @@
       "assertions": [
         "jumplist-automatic rows preserve CFB stream inventory, DestList header/entry candidates, embedded LNK linkage, AppID hash provenance, deleted-entry warning, source hashes, and #14 core_accuracy_gates.",
         "jumplist_evidence links destination target paths back to stream and DestList candidate metadata.",
+        "trusted JumpList DestList diff helpers compare AppID, entry/stream ID, target path, timestamp, and MRU/pin fields against JLECmd/LECmd-style rows.",
         "JumpList reportability decisions keep DestList semantics as recent-destination triage pivots."
       ],
       "blockers_kept": [
@@ -78,6 +82,7 @@
       "assertions": [
         "shellbag-native-candidate rows preserve BagMRU/Bags relationship candidates, bag/node IDs, timestamp source labeling, NTUSER/UsrClass scope, deleted/slack warning, source hashes, and #15 core_accuracy_gates.",
         "ShellBags native rows keep binary shell-item decode and transaction-log replay blockers explicit.",
+        "trusted ShellBags parser diff helpers compare source key/folder path, bag ID, node ID, timestamp, and hive fields against ShellBagsExplorer/SBECmd-style rows.",
         "ShellBags reportability decisions block final folder-access wording until shell-item, transaction-log, and deleted/slack validation is attached."
       ],
       "blockers_kept": [

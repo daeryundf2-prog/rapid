@@ -21,7 +21,21 @@ from rapidtriage.artifacts.windows.registry import (
     build_registry_key_tree_diff,
     collect_registry_hive,
 )
-from rapidtriage.artifacts.windows.shellbags import WindowsShellbagsProvider
+from rapidtriage.artifacts.windows.filesystem import (
+    build_mft_trusted_diff,
+    build_usn_trusted_diff,
+    ntfs_core_accuracy_gates,
+)
+from rapidtriage.artifacts.windows.recent_files import build_jumplist_trusted_diff, jumplist_core_accuracy_gates
+from rapidtriage.artifacts.windows.search_index import (
+    build_windows_edb_trusted_diff,
+    windows_search_core_accuracy_gates,
+)
+from rapidtriage.artifacts.windows.shellbags import (
+    WindowsShellbagsProvider,
+    build_shellbag_trusted_diff,
+    shellbag_core_accuracy_gates,
+)
 from rapidtriage.cli import main
 from tests.windows_artifact_fixtures import build_minimal_registry_hive, build_minimal_shellbags_registry_hive
 
@@ -29,6 +43,182 @@ FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rapidtriage" / "w
 
 
 class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
+    def test_core_filesystem_and_activity_trusted_diffs_gate_commercial_claims(self) -> None:
+        edb_diff = build_windows_edb_trusted_diff(
+            [
+                {
+                    "item_path": r"C:\Users\alice\Documents\case.txt",
+                    "content_snippet": "incident timeline",
+                    "deleted_state": "false",
+                }
+            ],
+            [
+                {
+                    "System.ItemPathDisplay": r"C:\Users\alice\Documents\case.txt",
+                    "System.Search.Contents": "incident timeline",
+                    "IsDeleted": "false",
+                }
+            ],
+            trusted_tool="libesedb",
+        )
+        self.assertEqual(edb_diff["status"], "pass")
+        edb_gate = windows_search_core_accuracy_gates(
+            "windows-search-edb-row-candidate",
+            {
+                "item_path": r"C:\Users\alice\Documents\case.txt",
+                "content_snippet": "incident timeline",
+                "deleted_state": "candidate-marker-present",
+                "page_offset": 4096,
+                "windows_edb_trusted_diff": edb_diff,
+            },
+        )[0]
+        self.assertIn("trusted Windows.edb parser diff pass", edb_gate["satisfied_checks"])
+        self.assertNotIn("trusted Windows.edb parser diff pass", edb_gate["missing_required_checks"])
+
+        mft_diff = build_mft_trusted_diff(
+            [
+                {
+                    "record_number": "42",
+                    "parent_reference": "5",
+                    "file_path": r"C:\Users\alice\case.txt",
+                    "timestamp": "2024-01-02T03:04:05Z",
+                }
+            ],
+            [
+                {
+                    "EntryNumber": "42",
+                    "ParentEntryNumber": "5",
+                    "FullPath": r"C:\Users\alice\case.txt",
+                    "Created0x10": "2024-01-02T03:04:05Z",
+                }
+            ],
+            trusted_tool="MFTECmd",
+        )
+        self.assertEqual(mft_diff["status"], "pass")
+        mft_gate = ntfs_core_accuracy_gates(
+            "mft-record",
+            {
+                "sequence_validation": {"status": "valid"},
+                "file_path": r"C:\Users\alice\case.txt",
+                "timestamp": "2024-01-02T03:04:05Z",
+                "mft_trusted_diff": mft_diff,
+            },
+        )[0]
+        self.assertIn("trusted MFT parser record diff pass", mft_gate["satisfied_checks"])
+
+        usn_diff = build_usn_trusted_diff(
+            [
+                {
+                    "usn": "9001",
+                    "file_reference_number": "42",
+                    "parent_file_reference_number": "5",
+                    "file_name": "case.txt",
+                    "reason": "FILE_CREATE|CLOSE",
+                }
+            ],
+            [
+                {
+                    "USN": "9001",
+                    "FRN": "42",
+                    "ParentFRN": "5",
+                    "FileName": "case.txt",
+                    "Reason": "FILE_CREATE|CLOSE",
+                }
+            ],
+            trusted_tool="UsnJrnl2Csv",
+        )
+        self.assertEqual(usn_diff["status"], "pass")
+        usn_gate = ntfs_core_accuracy_gates(
+            "usn-record",
+            {
+                "reason_flags": ["FILE_CREATE", "CLOSE"],
+                "file_reference_number_decoded": True,
+                "record_cursor": 128,
+                "usn_trusted_diff": usn_diff,
+            },
+        )[0]
+        self.assertIn("trusted USN parser timeline diff pass", usn_gate["satisfied_checks"])
+
+        jumplist_diff = build_jumplist_trusted_diff(
+            [
+                {
+                    "application_id_hash": "a1b2",
+                    "stream_path": "1",
+                    "target_path": r"C:\Users\alice\case.txt",
+                }
+            ],
+            [
+                {
+                    "AppID": "a1b2",
+                    "EntryNumber": "1",
+                    "TargetPath": r"C:\Users\alice\case.txt",
+                }
+            ],
+            trusted_tool="JLECmd",
+        )
+        self.assertEqual(jumplist_diff["status"], "pass")
+        jumplist_gate = jumplist_core_accuracy_gates(
+            {
+                "application_id_hash": "a1b2",
+                "ole_streams": [{"name": "DestList"}],
+                "destlist_metadata": {"destlist_header_candidates": [{}]},
+                "destinations": [{"stream_path": "1", "target_path": r"C:\Users\alice\case.txt"}],
+                "jumplist_trusted_diff": jumplist_diff,
+            }
+        )[0]
+        self.assertIn("trusted JumpList DestList diff pass", jumplist_gate["satisfied_checks"])
+
+        shellbag_diff = build_shellbag_trusted_diff(
+            [
+                {
+                    "source_key_path": r"Software\Microsoft\Windows\Shell\BagMRU\0",
+                    "bag_id": "42",
+                    "node_id": "0",
+                    "key_last_written_at": "2024-01-02T03:04:05Z",
+                }
+            ],
+            [
+                {
+                    "KeyPath": r"Software\Microsoft\Windows\Shell\BagMRU\0",
+                    "Bag": "42",
+                    "Node": "0",
+                    "LastWriteTime": "2024-01-02T03:04:05Z",
+                }
+            ],
+            trusted_tool="ShellBagsExplorer",
+        )
+        self.assertEqual(shellbag_diff["status"], "pass")
+        shellbag_gate = shellbag_core_accuracy_gates(
+            {
+                "shellbag_section": "bagmru",
+                "bag_id_candidates": ["42"],
+                "node_id_candidates": ["0"],
+                "timestamp_candidates": [{"timestamp": "2024-01-02T03:04:05Z"}],
+                "hive_name": "NTUSER.DAT",
+                "shellbag_trusted_diff": shellbag_diff,
+            }
+        )[0]
+        self.assertIn("trusted ShellBags parser diff pass", shellbag_gate["satisfied_checks"])
+
+    def test_core_filesystem_and_activity_trusted_diffs_block_mismatches(self) -> None:
+        edb_diff = build_windows_edb_trusted_diff(
+            [{"item_path": r"C:\a.txt", "content_snippet": "rapid"}],
+            [{"System.ItemPathDisplay": r"C:\a.txt", "System.Search.Contents": "trusted"}],
+            trusted_tool="libesedb",
+        )
+        self.assertEqual(edb_diff["status"], "diffs-present")
+        self.assertFalse(edb_diff["commercial_grade_evidence"])
+        self.assertEqual(edb_diff["mismatch_count"], 1)
+
+        mft_diff = build_mft_trusted_diff(
+            [{"record_number": "42", "file_path": r"C:\a.txt"}],
+            [{"EntryNumber": "43", "FullPath": r"C:\a.txt"}],
+            trusted_tool="unknown-tool",
+        )
+        self.assertEqual(mft_diff["status"], "diffs-present")
+        self.assertFalse(mft_diff["trusted_tool_recognized"])
+        self.assertIn("mft-trusted-record-diff-required", mft_diff["reportability_decision"]["blockers"])
+
     def test_native_evtx_binxml_promotes_duplicate_event_data_without_losing_order(self) -> None:
         value_fields = [
             {

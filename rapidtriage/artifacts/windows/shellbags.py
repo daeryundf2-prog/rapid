@@ -28,7 +28,9 @@ SHELLBAG_BLOCKERS = [
     "bag/node relationships require validation against a dedicated ShellBags parser",
     "registry transaction logs are not replayed",
     "deleted or slack ShellBag testimony is not validated",
+    "trusted ShellBags parser diff is required",
 ]
+SHELLBAG_TRUSTED_TOOLS = {"shellbagsexplorer", "sbecmd", "recmd", "registryexplorer", "regripper"}
 SHELLBAG_CAPABILITIES = {
     "reg_export_shellbag_key_mapping": True,
     "native_user_hive_key_tree_candidates": True,
@@ -483,6 +485,11 @@ def shellbag_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, o
 def shellbag_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:
     checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    trusted_diff = (
+        details.get("shellbag_trusted_diff")
+        if isinstance(details.get("shellbag_trusted_diff"), Mapping)
+        else {}
+    )
     evidence_refs = [
         f"source_path:{details.get('source_path', '')}",
         f"cell_offset:{details.get('cell_offset', '')}",
@@ -502,6 +509,8 @@ def shellbag_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str
         satisfied.append("UsrClass/NTUSER correlation")
     if not SHELLBAG_CAPABILITIES["deleted_slack_shellbag_validation"]:
         satisfied.append("deleted/slack validation warning")
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted ShellBags parser diff pass")
     return [build_accuracy_gate(15, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
@@ -534,6 +543,11 @@ def shellbag_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    trusted_diff = (
+        details.get("shellbag_trusted_diff")
+        if isinstance(details.get("shellbag_trusted_diff"), Mapping)
+        else {"status": "not-attached"}
+    )
     reportability_decision = shellbag_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-011-015",
@@ -556,6 +570,7 @@ def shellbag_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
         "report_grade_status": str(report_grade.get("status") or ""),
         "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
+        "shellbag_trusted_diff": trusted_diff,
         "large_data_controls": {
             "bounded_hive_scan": True,
             "max_hive_scan_bytes": MAX_HIVE_CELL_SCAN_BYTES,
@@ -575,6 +590,7 @@ def shellbag_reportability_decision(
     blockers = set(str(item) for item in report_grade.get("blockers") or [])
     blockers.add("shellbag-binary-shell-item-decode-required")
     blockers.add("shellbag-transaction-log-replay-required")
+    blockers.add("shellbags-trusted-diff-required")
     return {
         "profile_version": "shellbag-reportability-decision-v1",
         "commercial_gap_id": "#15",
@@ -589,6 +605,106 @@ def shellbag_reportability_decision(
             "deleted/slack ShellBag candidates validated before testimony",
         ],
     }
+
+
+def build_shellbag_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    return build_shellbag_diff_payload(
+        index_shellbag_rows(rapid_rows),
+        index_shellbag_rows(trusted_rows),
+        trusted_tool=trusted_tool,
+    )
+
+
+def index_shellbag_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        source_key_path = normalized_diff_value(first_alias(row, "source_key_path", "key_path", "registry_path"))
+        folder_path = normalized_diff_value(first_alias(row, "folder_path", "shellbag_path", "path", "target_path"))
+        bag_id = normalized_diff_value(first_alias(row, "bag_id", "bag", "bag_id_candidates"))
+        node_id = normalized_diff_value(first_alias(row, "node_id", "node", "node_id_candidates"))
+        key = source_key_path or "|".join(item for item in (folder_path, bag_id, node_id) if item)
+        if not key:
+            continue
+        indexed[key] = {
+            "source_key_path": source_key_path,
+            "folder_path": folder_path,
+            "bag_id": bag_id,
+            "node_id": node_id,
+            "timestamp": normalized_diff_value(first_alias(row, "timestamp", "key_last_written_at", "last_write_time")),
+            "hive": normalized_diff_value(first_alias(row, "hive_name", "hive", "source_hive")),
+        }
+    return indexed
+
+
+def build_shellbag_diff_payload(
+    rapid_index: Mapping[str, Mapping[str, str]],
+    trusted_index: Mapping[str, Mapping[str, str]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    recognized = trusted_tool.strip().lower().replace(" ", "") in {
+        item.replace(" ", "").lower() for item in SHELLBAG_TRUSTED_TOOLS
+    }
+    common = sorted(set(rapid_index) & set(trusted_index))
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in common:
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append(
+                    {
+                        "shellbag_key": key,
+                        "field": field,
+                        "rapid_value": rapid_value,
+                        "trusted_value": trusted_value,
+                    }
+                )
+                break
+    status = "pass" if recognized and common and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": "shellbags-trusted-diff-v1",
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(common) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-shellbags-output-as-final",
+            "blockers": [] if status == "pass" else ["shellbags-trusted-diff-required"],
+        },
+    }
+
+
+def first_alias(row: Mapping[str, object], *aliases: str) -> object:
+    normalized = {normalize_key(key): value for key, value in row.items()}
+    for alias in aliases:
+        value = normalized.get(normalize_key(alias))
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalize_key(value: object) -> str:
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
+
+
+def normalized_diff_value(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
 
 
 def shellbag_candidate_confidence(

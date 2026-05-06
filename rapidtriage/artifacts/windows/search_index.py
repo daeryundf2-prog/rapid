@@ -22,7 +22,17 @@ WINDOWS_SEARCH_EDB_BLOCKERS = [
     "windows-search-table-schema-decoding-required",
     "row-level-path-url-content-decoding-required",
     "row-level-timestamp-and-deleted-state-validation-required",
+    "windows-edb-trusted-parser-diff-required",
 ]
+WINDOWS_SEARCH_TRUSTED_TOOLS = {
+    "esentutl",
+    "libesedb",
+    "esedbexport",
+    "winsearchdbanalyzer",
+    "windowssearch",
+    "windows-search",
+    "velociraptor",
+}
 WINDOWS_SEARCH_CAPABILITIES = {
     "csv_json_export_import": True,
     "ese_header_probe": True,
@@ -1097,6 +1107,11 @@ def windows_search_commercial_uplift_evidence(details: Mapping[str, object]) -> 
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
     metadata = details.get("native_candidate_metadata") if isinstance(details.get("native_candidate_metadata"), Mapping) else {}
+    trusted_diff = (
+        details.get("windows_edb_trusted_diff")
+        if isinstance(details.get("windows_edb_trusted_diff"), Mapping)
+        else {"status": "not-attached"}
+    )
     reportability_decision = windows_search_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-011-015",
@@ -1118,6 +1133,7 @@ def windows_search_commercial_uplift_evidence(details: Mapping[str, object]) -> 
         "report_grade_status": str(report_grade.get("status") or ""),
         "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
+        "windows_edb_trusted_diff": trusted_diff,
         "large_data_controls": {
             "bounded_page_map": True,
             "page_count_scanned": int(metadata.get("page_count_scanned") or 0),
@@ -1158,6 +1174,11 @@ def windows_search_core_accuracy_gates(artifact_type: str, details: Mapping[str,
         return []
     checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    trusted_diff = (
+        details.get("windows_edb_trusted_diff")
+        if isinstance(details.get("windows_edb_trusted_diff"), Mapping)
+        else {}
+    )
     evidence_refs = [
         f"source_path:{details.get('source_path', '')}",
         f"source_index:{details.get('source_index', '')}",
@@ -1180,7 +1201,111 @@ def windows_search_core_accuracy_gates(artifact_type: str, details: Mapping[str,
         satisfied.append("deleted/index-state validation")
     if details.get("page_offset") not in (None, "") or details.get("page_sha256") or checks.get("ese_page_map_built") or hashes.get("sha256"):
         satisfied.append("page-level source citation")
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted Windows.edb parser diff pass")
     return [build_accuracy_gate(11, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
+
+
+def build_windows_edb_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    rapid_index = index_search_rows(rapid_rows)
+    trusted_index = index_search_rows(trusted_rows)
+    return build_simple_trusted_row_diff(
+        rapid_index,
+        trusted_index,
+        trusted_tool=trusted_tool,
+        recognized_tools=WINDOWS_SEARCH_TRUSTED_TOOLS,
+        mode="windows-edb-trusted-parser-diff-v1",
+        blocker="windows-edb-trusted-parser-diff-required",
+        key_label="search_key",
+    )
+
+
+def index_search_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        normalized = {
+            "path": normalized_diff_value(first_alias(row, "item_path", "path", "file_path", "system.itempathdisplay", "url")),
+            "url": normalized_diff_value(first_alias(row, "url", "item_url", "itemurl")),
+            "content": normalized_diff_value(first_alias(row, "content", "content_snippet", "system.search.contents", "text")),
+            "deleted_state": normalized_diff_value(first_alias(row, "deleted_state", "isdeleted", "deleted", "index_state")),
+            "table": normalized_diff_value(first_alias(row, "table", "table_family", "table_name")),
+        }
+        key = normalized["path"] or normalized["url"] or normalized["content"]
+        if key:
+            indexed[key] = normalized
+    return indexed
+
+
+def build_simple_trusted_row_diff(
+    rapid_index: Mapping[str, Mapping[str, str]],
+    trusted_index: Mapping[str, Mapping[str, str]],
+    *,
+    trusted_tool: str,
+    recognized_tools: set[str],
+    mode: str,
+    blocker: str,
+    key_label: str,
+) -> dict[str, object]:
+    tool_key = trusted_tool.strip().lower().replace(" ", "")
+    recognized = tool_key in {item.replace(" ", "") for item in recognized_tools}
+    common = sorted(set(rapid_index) & set(trusted_index))
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in common:
+        rapid = rapid_index[key]
+        trusted = trusted_index[key]
+        for field, rapid_value in rapid.items():
+            trusted_value = trusted.get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append(
+                    {
+                        key_label: key,
+                        "field": field,
+                        "rapid_value": rapid_value,
+                        "trusted_value": trusted_value,
+                    }
+                )
+                break
+    status = "pass" if recognized and common and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": mode,
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(common) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-native-output-as-final",
+            "blockers": [] if status == "pass" else [blocker],
+        },
+    }
+
+
+def first_alias(row: Mapping[str, object], *aliases: str) -> object:
+    normalized = {normalize_key(key): value for key, value in row.items()}
+    for alias in aliases:
+        value = normalized.get(normalize_key(alias))
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalized_diff_value(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
 
 
 def detect_search_table_families(pivots: Mapping[str, object]) -> list[str]:

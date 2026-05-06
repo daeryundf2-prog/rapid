@@ -101,12 +101,16 @@ MFT_REPORT_GRADE_BLOCKERS = [
     "bounded-native-mft-scan-not-full-volume-validated",
     "attribute-list-extension-record-resolution-not-implemented",
     "nonresident-data-run-decoding-not-report-grade-validated",
+    "mft-trusted-record-diff-required",
 ]
 USN_REPORT_GRADE_BLOCKERS = [
     "bounded-native-usn-scan-not-full-journal-validated",
     "full-usn-replay-correlation-not-implemented",
     "large-corpus-pagination-validation-required",
+    "usn-trusted-timeline-diff-required",
 ]
+MFT_TRUSTED_TOOLS = {"mftecmd", "tsk", "sleuthkit", "fls", "istat", "velociraptor"}
+USN_TRUSTED_TOOLS = {"mftecmd", "usnjrnl2csv", "usnparser", "velociraptor", "tsk", "sleuthkit"}
 FILE_NAME_NAMESPACE_NAMES = {
     0: "POSIX",
     1: "WIN32",
@@ -782,6 +786,12 @@ def ntfs_commercial_uplift_evidence(family: str, details: Mapping[str, object]) 
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
     item_number = 12 if family == "mft" else 13
+    trusted_diff_key = "mft_trusted_diff" if family == "mft" else "usn_trusted_diff"
+    trusted_diff = (
+        details.get(trusted_diff_key)
+        if isinstance(details.get(trusted_diff_key), Mapping)
+        else {"status": "not-attached"}
+    )
     reportability_decision = ntfs_reportability_decision(family, report_grade, details)
     return {
         "batch_id": "commercial-uplift-011-015",
@@ -803,6 +813,7 @@ def ntfs_commercial_uplift_evidence(family: str, details: Mapping[str, object]) 
         "report_grade_status": str(report_grade.get("status") or ""),
         "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
+        trusted_diff_key: trusted_diff,
         "large_data_controls": {
             "bounded_native_scan": True,
             "scan_limit_bytes": NATIVE_SCAN_LIMIT,
@@ -975,6 +986,11 @@ def ntfs_core_accuracy_gates(artifact_type: str, details: Mapping[str, object]) 
         evidence_refs.append(f"source_sha256:{hashes['sha256']}")
 
     if artifact_type in {"mft-file", "mft-record"}:
+        trusted_diff = (
+            details.get("mft_trusted_diff")
+            if isinstance(details.get("mft_trusted_diff"), Mapping)
+            else {}
+        )
         data_attributes = [item for item in details.get("data_attributes") or [] if isinstance(item, Mapping)]
         satisfied: list[str] = []
         if checks.get("sequence_fixup_valid") or checks.get("has_sequence_validation") or details.get("sequence_validation"):
@@ -987,9 +1003,16 @@ def ntfs_core_accuracy_gates(artifact_type: str, details: Mapping[str, object]) 
             satisfied.append("runlist decoding")
         if details.get("timestamp") or details.get("timestamp_source") or checks.get("timestamp_fields_present") or checks.get("has_timestamp_validation"):
             satisfied.append("timestamp/source field provenance")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted MFT parser record diff pass")
         return [build_accuracy_gate(12, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
     if artifact_type in {"usn-journal-file", "usn-record"}:
+        trusted_diff = (
+            details.get("usn_trusted_diff")
+            if isinstance(details.get("usn_trusted_diff"), Mapping)
+            else {}
+        )
         samples = [item for item in details.get("record_samples") or [] if isinstance(item, Mapping)]
         sample_reasons = [flag for item in samples for flag in list(item.get("reason_flags") or [])]
         satisfied = []
@@ -1003,6 +1026,8 @@ def ntfs_core_accuracy_gates(artifact_type: str, details: Mapping[str, object]) 
             satisfied.append("rename/delete ordering")
         if details.get("record_cursor") not in (None, "") or checks.get("cursor_progress_validated"):
             satisfied.append("cursor determinism at scale")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted USN parser timeline diff pass")
         return [build_accuracy_gate(13, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
     return []
@@ -1012,9 +1037,138 @@ def normalize_key(value: object) -> str:
     return "".join(ch for ch in str(value).lower() if ch.isalnum())
 
 
+def build_mft_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    return build_ntfs_trusted_diff(
+        index_mft_rows(rapid_rows),
+        index_mft_rows(trusted_rows),
+        trusted_tool=trusted_tool,
+        recognized_tools=MFT_TRUSTED_TOOLS,
+        mode="mft-trusted-record-diff-v1",
+        blocker="mft-trusted-record-diff-required",
+        key_label="file_reference",
+    )
+
+
+def build_usn_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    return build_ntfs_trusted_diff(
+        index_usn_rows(rapid_rows),
+        index_usn_rows(trusted_rows),
+        trusted_tool=trusted_tool,
+        recognized_tools=USN_TRUSTED_TOOLS,
+        mode="usn-trusted-timeline-diff-v1",
+        blocker="usn-trusted-timeline-diff-required",
+        key_label="usn_key",
+    )
+
+
+def index_mft_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        record_number = normalized_diff_value(first_value(row, "entry_number", "record_number", "file_record_number", "frn"))
+        path = normalized_diff_value(first_value(row, "file_path", "full_path", "path", "filename", "name"))
+        key = record_number or path
+        if not key:
+            continue
+        indexed[key] = {
+            "record_number": record_number,
+            "parent_reference": normalized_diff_value(first_value(row, "parent_reference", "parent_frn", "parent_entry_number")),
+            "file_path": path,
+            "timestamp": normalized_diff_value(first_value(row, "timestamp", "modified_at", "created_at", "si_time_created")),
+            "deleted": normalized_diff_value(first_value(row, "deleted_hint", "deleted", "in_use", "isinuse")),
+        }
+    return indexed
+
+
+def index_usn_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        usn = normalized_diff_value(first_value(row, "usn", "usn_number"))
+        frn = normalized_diff_value(first_value(row, "file_reference_number", "frn", "file_reference"))
+        name = normalized_diff_value(first_value(row, "file_name", "filename", "name", "file_path", "path"))
+        key = "|".join(item for item in (usn, frn, name) if item)
+        if not key:
+            continue
+        indexed[key] = {
+            "usn": usn,
+            "file_reference_number": frn,
+            "parent_reference": normalized_diff_value(first_value(row, "parent_file_reference_number", "parent_frn", "parent_reference")),
+            "file_name": name,
+            "reason": normalized_diff_value(first_value(row, "reason", "reason_flags", "usn_reason")),
+            "timestamp": normalized_diff_value(first_value(row, "timestamp", "event_time", "time_created")),
+        }
+    return indexed
+
+
+def build_ntfs_trusted_diff(
+    rapid_index: Mapping[str, Mapping[str, str]],
+    trusted_index: Mapping[str, Mapping[str, str]],
+    *,
+    trusted_tool: str,
+    recognized_tools: set[str],
+    mode: str,
+    blocker: str,
+    key_label: str,
+) -> dict[str, object]:
+    recognized_names = {item.replace(" ", "").lower() for item in recognized_tools}
+    recognized = trusted_tool.strip().lower().replace(" ", "") in recognized_names
+    common = sorted(set(rapid_index) & set(trusted_index))
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in common:
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append(
+                    {
+                        key_label: key,
+                        "field": field,
+                        "rapid_value": rapid_value,
+                        "trusted_value": trusted_value,
+                    }
+                )
+                break
+    status = "pass" if recognized and common and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": mode,
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(common) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-native-output-as-final",
+            "blockers": [] if status == "pass" else [blocker],
+        },
+    }
+
+
+def normalized_diff_value(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
+
+
 def first_value(row: Mapping[str, object], *keys: str) -> object:
+    normalized = {normalize_key(key): value for key, value in row.items()}
     for key in keys:
-        value = row.get(normalize_key(key))
+        value = normalized.get(normalize_key(key))
         if value not in (None, ""):
             return value
     return ""

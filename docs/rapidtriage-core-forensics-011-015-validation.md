@@ -12,6 +12,8 @@ This package records the current internal fixture validation for #11 through #15
 
 The internal fixtures assert that RapidTriage emits reviewable rows with source hashes, parser versions, row/page/record provenance, `forensic_review`, commercial blockers, and `core_accuracy_gates` for the implemented evidence surfaces.
 
+This batch now also includes trusted-diff helper gates for #11~#15. The helpers compare RapidTriage rows against recognized external/reference parsers and only satisfy the new commercial-readiness checks when there is a clean row-level match with no missing rows, no extra rows, no field mismatches, and a recognized trusted tool name. Fixture parsing alone intentionally leaves those checks missing.
+
 The #11~#15 rows also emit reportability decisions in their commercial-uplift evidence. Windows.edb native rows remain `search-index-triage-pivot` until ESE catalog/table/row and deleted-state validation exists. `$MFT` rows stay record-structure/timestamp pivots until attribute-list, runlist, and full-volume parent path reconstruction are diffed. `$UsnJrnl` rows stay change-record pivots until full FRN path-cache replay and large-journal cursor validation are complete. JumpList rows stay recent-destination pivots until DestList version semantics, deleted-entry recovery, and AppID mapping are validated. ShellBags rows stay folder-view-history pivots until binary shell item decoding, BagMRU/Bags relationship validation, transaction logs, and deleted/slack validation are attached.
 
 The manifest is:
@@ -40,6 +42,16 @@ Commercial-grade still needs:
 - Larger OS-version corpora and damaged/deleted/slack cases.
 - Independent reviewer sign-off.
 - Large-volume stress and repeatability evidence.
+
+## Trusted Diff Gates Added
+
+- #11: `build_windows_edb_trusted_diff` compares Windows.edb path, URL, content, deleted/index-state, and table-family fields against `esentutl`, `libesedb`, `esedbexport`, WinSearchDBAnalyzer, or equivalent exports.
+- #12: `build_mft_trusted_diff` compares MFT record number, parent reference, path, timestamp, and deleted-state fields against MFTECmd/TSK-style exports.
+- #13: `build_usn_trusted_diff` compares USN, FRN, parent FRN, filename/path, reason, and timestamp fields against MFTECmd/UsnJrnl2Csv-style exports.
+- #14: `build_jumplist_trusted_diff` compares AppID, DestList entry/stream ID, target path, timestamp, and MRU/pin fields against JLECmd/LECmd-style exports.
+- #15: `build_shellbag_trusted_diff` compares source key/folder path, bag ID, node ID, timestamp, and source hive fields against ShellBagsExplorer/SBECmd-style exports.
+
+These helpers are validation gates, not a shortcut to a commercial claim. They need real tool outputs, source hashes, tool versions, command lines, corpus scope, and reviewer sign-off before a release can call the related parser commercial-grade.
 
 ## Current Blockers Kept
 

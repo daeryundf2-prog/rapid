@@ -170,6 +170,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "path/URL/content correlation",
             "deleted/index-state validation",
             "page-level source citation",
+            "trusted Windows.edb parser diff pass",
         ),
     },
     {
@@ -184,6 +185,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "parent path reconstruction",
             "runlist decoding",
             "timestamp/source field provenance",
+            "trusted MFT parser record diff pass",
         ),
     },
     {
@@ -198,6 +200,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "FRN path cache replay",
             "rename/delete ordering",
             "cursor determinism at scale",
+            "trusted USN parser timeline diff pass",
         ),
     },
     {
@@ -212,6 +215,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "embedded LNK linkage",
             "AppID mapping provenance",
             "deleted-entry warning",
+            "trusted JumpList DestList diff pass",
         ),
     },
     {
@@ -226,6 +230,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "timestamp source labeling",
             "UsrClass/NTUSER correlation",
             "deleted/slack validation warning",
+            "trusted ShellBags parser diff pass",
         ),
     },
     {

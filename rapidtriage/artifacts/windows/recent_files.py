@@ -32,7 +32,9 @@ JUMPLIST_COMMERCIAL_BLOCKERS = [
     "destlist-deleted-entry-recovery-not-implemented",
     "destlist-account-metadata-not-fully-decoded",
     "application-id-hash-to-application-name-map-not-bundled",
+    "jumplist-destlist-trusted-diff-required",
 ]
+JUMPLIST_TRUSTED_TOOLS = {"jlecmd", "lnkecmd", "lecmd", "jumplistexplorer", "velociraptor"}
 JUMPLIST_CAPABILITIES = {
     "lnk_header_decode": True,
     "lnk_linkinfo_decode": True,
@@ -624,6 +626,11 @@ def jumplist_core_accuracy_gates(details: dict[str, object]) -> list[dict[str, o
         details.get("destlist_metadata") if isinstance(details.get("destlist_metadata"), dict) else {}
     )
     destinations = [item for item in details.get("destinations") or [] if isinstance(item, dict)]
+    trusted_diff = (
+        details.get("jumplist_trusted_diff")
+        if isinstance(details.get("jumplist_trusted_diff"), Mapping)
+        else {}
+    )
     evidence_refs = [
         f"source_path:{details.get('source_path', '')}",
         f"app_id_hash:{details.get('application_id_hash', '')}",
@@ -642,6 +649,8 @@ def jumplist_core_accuracy_gates(details: dict[str, object]) -> list[dict[str, o
         satisfied.append("AppID mapping provenance")
     if not JUMPLIST_CAPABILITIES["destlist_deleted_entry_recovery"]:
         satisfied.append("deleted-entry warning")
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted JumpList DestList diff pass")
     return [build_accuracy_gate(14, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 
@@ -1101,6 +1110,11 @@ def jumplist_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
         else {}
     )
     hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    trusted_diff = (
+        details.get("jumplist_trusted_diff")
+        if isinstance(details.get("jumplist_trusted_diff"), Mapping)
+        else {"status": "not-attached"}
+    )
     reportability_decision = jumplist_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-011-015",
@@ -1122,6 +1136,7 @@ def jumplist_commercial_uplift_evidence(details: Mapping[str, object]) -> dict[s
         "report_grade_status": str(report_grade.get("status") or ""),
         "reportability_decision": reportability_decision,
         "commercial_blockers": list(report_grade.get("blockers") or []),
+        "jumplist_trusted_diff": trusted_diff,
         "large_data_controls": {
             "bounded_ole_stream_inventory": True,
             "ole_stream_count": int(details.get("ole_stream_count") or 0),
@@ -1141,6 +1156,7 @@ def jumplist_reportability_decision(
     blockers = set(str(item) for item in report_grade.get("blockers") or [])
     blockers.add("jumplist-destlist-version-semantics-validation-required")
     blockers.add("jumplist-deleted-entry-recovery-validation-required")
+    blockers.add("jumplist-destlist-trusted-diff-required")
     return {
         "profile_version": "jumplist-reportability-decision-v1",
         "commercial_gap_id": "#14",
@@ -1171,6 +1187,104 @@ def jumplist_commercial_blockers(destlist_metadata: dict[str, object]) -> list[s
     if destlist_metadata.get("destlist_parse_status") != "parsed-candidate":
         blockers.insert(0, "destlist-stream-not-present-or-unrecoverable")
     return blockers
+
+
+def build_jumplist_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    return build_jumplist_diff_payload(
+        index_jumplist_rows(rapid_rows),
+        index_jumplist_rows(trusted_rows),
+        trusted_tool=trusted_tool,
+    )
+
+
+def index_jumplist_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        app_id = normalized_diff_value(first_alias(row, "application_id_hash", "appid", "app_id"))
+        entry_id = normalized_diff_value(first_alias(row, "entry_id", "entry_number", "destlist_entry_id", "stream_path"))
+        target_path = normalized_diff_value(first_alias(row, "target_path", "path", "file_path", "filename"))
+        key = "|".join(item for item in (app_id, entry_id, target_path) if item)
+        if not key:
+            continue
+        indexed[key] = {
+            "application_id_hash": app_id,
+            "entry_id": entry_id,
+            "target_path": target_path,
+            "timestamp": normalized_diff_value(first_alias(row, "timestamp", "last_modified", "last_accessed", "accessed_at")),
+            "mru": normalized_diff_value(first_alias(row, "mru", "rank", "pin_status", "pinned")),
+        }
+    return indexed
+
+
+def build_jumplist_diff_payload(
+    rapid_index: Mapping[str, Mapping[str, str]],
+    trusted_index: Mapping[str, Mapping[str, str]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    recognized = trusted_tool.strip().lower().replace(" ", "") in {
+        item.replace(" ", "").lower() for item in JUMPLIST_TRUSTED_TOOLS
+    }
+    common = sorted(set(rapid_index) & set(trusted_index))
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in common:
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append(
+                    {
+                        "destlist_key": key,
+                        "field": field,
+                        "rapid_value": rapid_value,
+                        "trusted_value": trusted_value,
+                    }
+                )
+                break
+    status = "pass" if recognized and common and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": "jumplist-destlist-trusted-diff-v1",
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(common) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-destlist-output-as-final",
+            "blockers": [] if status == "pass" else ["jumplist-destlist-trusted-diff-required"],
+        },
+    }
+
+
+def first_alias(row: Mapping[str, object], *aliases: str) -> object:
+    normalized = {normalize_key(key): value for key, value in row.items()}
+    for alias in aliases:
+        value = normalized.get(normalize_key(alias))
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalize_key(value: object) -> str:
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
+
+
+def normalized_diff_value(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
 
 
 def append_lnk_destinations(

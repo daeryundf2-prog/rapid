@@ -20,6 +20,7 @@
           "Windows.edb ESE header/page-map/table-family candidates are emitted",
           "path, URL, content, deleted-state marker, and page source citation evidence is preserved",
           "#11 core_accuracy_gates are present on native Windows.edb rows",
+          "trusted Windows.edb parser diff helpers pass exact matching rows and block mismatches",
           "Windows.edb reportability decisions block decoded-row facts until ESE row and deleted-state validation is attached"
         ]
       },
@@ -41,6 +42,7 @@
         "required_assertions": [
           "Native FILE record header, USA validation, filename parent reference, timestamp provenance, and resident data evidence are emitted",
           "#12 core_accuracy_gates are present on native MFT rows",
+          "trusted MFT parser record diff helpers pass exact matching rows and block mismatches",
           "$MFT reportability decisions block complete path/content claims until attribute-list, runlist, and full-volume diffs are attached"
         ]
       },
@@ -62,6 +64,7 @@
         "required_assertions": [
           "USN v2/v3 records, cursor bounds, reason flags, rename/delete hints, and timestamp evidence are emitted",
           "#13 core_accuracy_gates are present on native USN rows",
+          "trusted USN parser timeline diff helpers pass exact matching rows and block mismatches",
           "$UsnJrnl reportability decisions block full timeline claims until FRN path-cache replay and large-journal validation are attached"
         ]
       },
@@ -83,6 +86,7 @@
         "required_assertions": [
           "CFB streams, DestList header/entry candidates, embedded LNK linkage, and AppID hash provenance are emitted",
           "#14 core_accuracy_gates are present on JumpList rows",
+          "trusted JumpList DestList diff helpers pass exact matching rows and block mismatches",
           "JumpList reportability decisions block final DestList semantics until version-specific and deleted-entry validation is attached"
         ]
       },
@@ -104,6 +108,7 @@
         "required_assertions": [
           "Native ShellBags key-tree candidates preserve BagMRU/Bags relationship, bag/node IDs, timestamp source, and user-hive scope",
           "#15 core_accuracy_gates are present on native ShellBags rows",
+          "trusted ShellBags parser diff helpers pass exact matching rows and block mismatches",
           "ShellBags reportability decisions block final folder-access claims until shell-item, transaction-log, and deleted/slack validation is attached"
         ]
       },
