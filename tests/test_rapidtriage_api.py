@@ -24,6 +24,7 @@ from rapidtriage.api.app import (
 )
 from rapidtriage.cli import build_web_parser
 from rapidtriage.core.jobs import RunJobStore
+from rapidtriage.core.keyword_packs import build_keyword_pack_trusted_diff, keyword_pack_core_accuracy_gates
 from tests.schema_validation import validate
 from tests.test_rapidtriage_run import build_run_fixture
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
@@ -61,9 +62,23 @@ class RapidTriageApiTests(unittest.TestCase):
             keyword_packs["keyword_pack_library_assessment"]["commercial_uplift_evidence"]["reportability_decision"]["allowed_use"],
             "keyword-pack-expansion-triage-pivot",
         )
+        self.assertIn(
+            "trusted-keyword-pack-expansion-diff-missing",
+            keyword_packs["keyword_pack_library_assessment"]["commercial_uplift_evidence"]["failed_validation_check_ids"],
+        )
         self.assertIn("#62", keyword_packs["packs"][0]["commercial_gap_ids"])
         self.assertEqual(keyword_packs["packs"][0]["core_accuracy_gates"][0]["gap_id"], "#62")
         self.assertEqual(keyword_packs["packs"][0]["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-061-065")
+        trusted_pack = build_keyword_pack_trusted_diff(["Password", "token"], ["password", "TOKEN"])
+        pack_gates = keyword_pack_core_accuracy_gates(
+            pack_count=1,
+            keyword_count=2,
+            custom_file_count=1,
+            provenance_refs=["unit-pack"],
+            trusted_diff=trusted_pack,
+        )
+        self.assertEqual(trusted_pack["status"], "pass")
+        self.assertIn("trusted keyword-pack expansion diff pass", pack_gates[0]["satisfied_checks"])
         index_response = client.get("/")
 
         self.assertEqual(index_response.status_code, 200)

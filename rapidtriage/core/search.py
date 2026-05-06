@@ -26,7 +26,9 @@ SEARCH_REPORT_GRADE_BLOCKERS = [
     "fuzzy-and-stemmed-search-are-triage-aids-not-exact-source-proof",
     "regex-pattern-quality-is-analyst-controlled-and-must-be-documented",
     "proximity-window-results-require-source-row-verification-before-reporting",
+    "trusted-advanced-search-query-hit-diff-is-required-before-commercial-claim",
 ]
+SEARCH_TRUSTED_DIFF_BLOCKER_61 = "trusted-advanced-search-query-hit-diff-missing"
 
 
 class SearchError(ValueError):
@@ -164,6 +166,7 @@ def search_commercial_uplift_evidence(
                 "multilingual-relevance-corpus",
                 "query-builder-ux-validation",
                 "tuned-false-positive-false-negative-metrics",
+                SEARCH_TRUSTED_DIFF_BLOCKER_61,
             ],
             commercial_blockers=list(report_grade.get("blockers") or []),
             options=options,
@@ -174,6 +177,7 @@ def search_commercial_uplift_evidence(
             "multilingual-relevance-corpus",
             "query-builder-ux-validation",
             "tuned-false-positive-false-negative-metrics",
+            SEARCH_TRUSTED_DIFF_BLOCKER_61,
         ],
         "commercial_blockers": list(report_grade.get("blockers") or []),
         "large_data_controls": {
@@ -644,17 +648,78 @@ def build_search_match_metadata(
     return metadata
 
 
-def search_report_grade_assessment() -> dict[str, object]:
+def build_advanced_search_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str = "query-hit-manifest",
+) -> dict[str, object]:
+    rapid_index = {advanced_search_diff_key(row): advanced_search_diff_value(row) for row in rapid_rows}
+    trusted_index = {advanced_search_diff_key(row): advanced_search_diff_value(row) for row in trusted_rows}
+    missing = sorted(key for key in trusted_index if key not in rapid_index)
+    unexpected = sorted(key for key in rapid_index if key not in trusted_index)
+    mismatched = [
+        {"key": key, "rapid": rapid_index[key], "trusted": trusted_index[key]}
+        for key in sorted(set(rapid_index).intersection(trusted_index))
+        if rapid_index[key] != trusted_index[key]
+    ]
+    status = "pass" if not missing and not unexpected and not mismatched else "fail"
+    return {
+        "profile": "advanced-search-trusted-query-hit-diff-v1",
+        "item_number": 61,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "rapid_count": len(rapid_index),
+        "trusted_count": len(trusted_index),
+        "missing": missing,
+        "unexpected": unexpected,
+        "mismatched": mismatched,
+        "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def advanced_search_diff_key(row: Mapping[str, object]) -> str:
+    return "|".join(
+        [
+            str(row.get("source") or ""),
+            str(row.get("path") or row.get("title") or ""),
+            str(row.get("pointer") or row.get("offset") or ""),
+            ",".join(str(item) for item in row.get("matched_keywords") or row.get("keywords") or []),
+        ]
+    )
+
+
+def advanced_search_diff_value(row: Mapping[str, object]) -> dict[str, object]:
+    search_match = row.get("search_match")
+    search_match_map = search_match if isinstance(search_match, Mapping) else {}
+    proximity = search_match_map.get("proximity")
+    return {
+        "mode": str(search_match_map.get("mode") or row.get("mode") or ""),
+        "matched_by": str(search_match_map.get("matched_by") or row.get("matched_by") or ""),
+        "proximity_matched": bool(proximity.get("matched")) if isinstance(proximity, Mapping) else bool(row.get("proximity_matched")),
+        "preview": str(row.get("preview") or "")[:160],
+    }
+
+
+def search_report_grade_assessment(*, trusted_diff: Mapping[str, object] | None = None) -> dict[str, object]:
+    blockers = list(SEARCH_REPORT_GRADE_BLOCKERS)
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(SEARCH_TRUSTED_DIFF_BLOCKER_61)
     return {
         "component": "fuzzy-regex-stemming-proximity-search",
         "status": "implemented-baseline-validation-required",
         "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
         "ready_for_court_report": False,
-        "blockers": list(SEARCH_REPORT_GRADE_BLOCKERS),
+        "blockers": blockers,
         "recommended_validation": [
             "Record the exact query mode/options with any cited hit.",
             "Open the source viewer and verify the row, offset, hash, and parser limitations before report inclusion.",
         ],
+        "trusted_diff": trusted_diff or {
+            "status": "missing",
+            "blocker": SEARCH_TRUSTED_DIFF_BLOCKER_61,
+        },
     }
 
 
@@ -662,6 +727,7 @@ def search_core_accuracy_gates(
     *,
     matches: Sequence[Mapping[str, object]],
     options: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["query mode and options recorded", "source verification limitation warning"]
     mode = normalize_search_mode(str(options.get("search_mode") or "exact"))
@@ -671,15 +737,19 @@ def search_core_accuracy_gates(
         satisfied.append("proximity metadata preserved")
     if any(match.get("pointer") for match in matches):
         satisfied.append("matched hit source pointers")
+    evidence_refs = [
+        f"search_mode:{mode}",
+        f"match_count:{len(matches)}",
+        f"proximity_window:{int(options.get('proximity_window') or 0)}",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted advanced-search query-hit diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return [
         build_accuracy_gate(
             61,
             satisfied_checks=satisfied,
-            evidence_refs=[
-                f"search_mode:{mode}",
-                f"match_count:{len(matches)}",
-                f"proximity_window:{int(options.get('proximity_window') or 0)}",
-            ],
+            evidence_refs=evidence_refs,
         )
     ]
 

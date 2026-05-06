@@ -86,7 +86,9 @@ KEYWORD_PACK_REPORT_GRADE_BLOCKERS = [
     "built-in-keyword-packs-are-starter-libraries-not-case-specific-legal-scope",
     "analyst-must-record-pack-name-version-and-added-case-specific-terms",
     "keyword-packs-do-not-replace-language-specific-or-domain-specific-review",
+    "trusted-keyword-pack-expansion-diff-is-required-before-commercial-claim",
 ]
+KEYWORD_PACK_TRUSTED_DIFF_BLOCKER_62 = "trusted-keyword-pack-expansion-diff-missing"
 
 
 class KeywordPackError(ValueError):
@@ -186,20 +188,25 @@ def keyword_pack_core_accuracy_gates(
     keyword_count: int,
     custom_file_count: int,
     provenance_refs: Sequence[str] | None = None,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["built-in pack inventory", "deduplicated keyword expansion", "pack provenance recorded", "case-specific validation warning"]
     if custom_file_count:
         satisfied.append("custom JSON pack support")
+    evidence_refs = [
+        f"pack_count:{pack_count}",
+        f"keyword_count:{keyword_count}",
+        f"custom_file_count:{custom_file_count}",
+        *(provenance_refs or []),
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted keyword-pack expansion diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return [
         build_accuracy_gate(
             62,
             satisfied_checks=satisfied,
-            evidence_refs=[
-                f"pack_count:{pack_count}",
-                f"keyword_count:{keyword_count}",
-                f"custom_file_count:{custom_file_count}",
-                *(provenance_refs or []),
-            ],
+            evidence_refs=evidence_refs,
         )
     ]
 
@@ -227,6 +234,7 @@ def keyword_pack_commercial_uplift_evidence(
                 "signed-pack-distribution",
                 "release-reviewed-pack-versioning",
                 "language-domain-specific-pack-corpus",
+                KEYWORD_PACK_TRUSTED_DIFF_BLOCKER_62,
             ],
             pack_count=pack_count,
             keyword_count=keyword_count,
@@ -238,6 +246,7 @@ def keyword_pack_commercial_uplift_evidence(
             "signed-pack-distribution",
             "release-reviewed-pack-versioning",
             "language-domain-specific-pack-corpus",
+            KEYWORD_PACK_TRUSTED_DIFF_BLOCKER_62,
         ],
         "commercial_blockers": list(KEYWORD_PACK_REPORT_GRADE_BLOCKERS),
         "large_data_controls": {
@@ -247,9 +256,41 @@ def keyword_pack_commercial_uplift_evidence(
             "deduplicated_expansion": True,
             "signed_pack_library": False,
             "case_pack_editor": False,
+            "trusted_expansion_diff": False,
         },
         "reporting_status": "implemented-baseline-validation-required",
     }
+
+
+def build_keyword_pack_trusted_diff(
+    rapid_keywords: Sequence[str],
+    trusted_keywords: Sequence[str],
+    *,
+    pack_name: str = "case-pack",
+    trusted_tool: str = "keyword-expansion-manifest",
+) -> dict[str, object]:
+    rapid = normalize_keyword_set(rapid_keywords)
+    trusted = normalize_keyword_set(trusted_keywords)
+    missing = sorted(trusted - rapid)
+    unexpected = sorted(rapid - trusted)
+    status = "pass" if not missing and not unexpected else "fail"
+    return {
+        "profile": "keyword-pack-trusted-expansion-diff-v1",
+        "item_number": 62,
+        "pack_name": pack_name,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "rapid_count": len(rapid),
+        "trusted_count": len(trusted),
+        "missing": missing,
+        "unexpected": unexpected,
+        "commercial_gap_ids": [KEYWORD_PACK_GAP_ID],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def normalize_keyword_set(values: Sequence[str]) -> set[str]:
+    return {str(value or "").strip().lower() for value in values if str(value or "").strip()}
 
 
 def keyword_pack_reportability_decision(

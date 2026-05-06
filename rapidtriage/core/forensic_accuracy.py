@@ -920,6 +920,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "proximity metadata preserved",
             "matched hit source pointers",
             "source verification limitation warning",
+            "trusted advanced-search query-hit diff pass",
         ),
     },
     {
@@ -934,6 +935,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "deduplicated keyword expansion",
             "pack provenance recorded",
             "case-specific validation warning",
+            "trusted keyword-pack expansion diff pass",
         ),
     },
     {
@@ -948,6 +950,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "offline feed provenance",
             "match mode recorded",
             "local-only/no-external-call warning",
+            "trusted IOC/TI enrichment diff pass",
         ),
     },
     {
@@ -962,6 +965,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "source reference preserved",
             "citation count summary",
             "report-use verification warning",
+            "trusted citation index diff pass",
         ),
     },
     {
@@ -976,6 +980,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "previous/current state captured",
             "report inclusion history",
             "multi-user/signing limitation warning",
+            "trusted evidence history diff pass",
         ),
     },
     {

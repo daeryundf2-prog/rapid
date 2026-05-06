@@ -31,7 +31,9 @@ IOC_TI_REPORT_GRADE_BLOCKERS = [
     "local-ti-feed-quality-and-timestamp-must-be-documented",
     "indicator-presence-is-a-pivot-not-proof-of-malicious-activity",
     "external-ti-api-enrichment-is-disabled-in-local-only-core",
+    "trusted-ioc-ti-enrichment-diff-is-required-before-commercial-claim",
 ]
+IOC_TI_TRUSTED_DIFF_BLOCKER_63 = "trusted-ioc-ti-enrichment-diff-missing"
 
 
 class IndicatorSummaryError(ValueError):
@@ -388,10 +390,57 @@ def ti_enrichment_assessment(*, ti_feed_sources: Sequence[Mapping[str, object]])
     }
 
 
+def build_ioc_ti_trusted_diff(
+    rapid_indicators: Sequence[Mapping[str, object]],
+    trusted_indicators: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str = "ioc-ti-ground-truth-manifest",
+) -> dict[str, object]:
+    rapid_index = {ioc_ti_diff_key(item): ioc_ti_diff_value(item) for item in rapid_indicators}
+    trusted_index = {ioc_ti_diff_key(item): ioc_ti_diff_value(item) for item in trusted_indicators}
+    missing = sorted(key for key in trusted_index if key not in rapid_index)
+    unexpected = sorted(key for key in rapid_index if key not in trusted_index)
+    mismatched = [
+        {"key": key, "rapid": rapid_index[key], "trusted": trusted_index[key]}
+        for key in sorted(set(rapid_index).intersection(trusted_index))
+        if rapid_index[key] != trusted_index[key]
+    ]
+    status = "pass" if not missing and not unexpected and not mismatched else "fail"
+    return {
+        "profile": "ioc-ti-trusted-enrichment-diff-v1",
+        "item_number": 63,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "rapid_count": len(rapid_index),
+        "trusted_count": len(trusted_index),
+        "missing": missing,
+        "unexpected": unexpected,
+        "mismatched": mismatched,
+        "commercial_gap_ids": [IOC_TI_GAP_ID],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def ioc_ti_diff_key(item: Mapping[str, object]) -> str:
+    return f"{str(item.get('type') or '').lower()}|{str(item.get('value') or '').lower()}"
+
+
+def ioc_ti_diff_value(item: Mapping[str, object]) -> dict[str, object]:
+    enrichment = item.get("ti_enrichment")
+    enrichment_map = enrichment if isinstance(enrichment, Mapping) else {}
+    return {
+        "matched_rules": sorted(str(rule) for rule in item.get("matched_rules") or []),
+        "matched_on": str(enrichment_map.get("matched_on") or item.get("matched_on") or ""),
+        "feed_name": str(enrichment_map.get("feed_name") or item.get("feed_name") or ""),
+        "severity": str(enrichment_map.get("severity") or item.get("severity") or ""),
+    }
+
+
 def ioc_ti_core_accuracy_gates(
     *,
     indicators: Sequence[Mapping[str, object]],
     ti_feed_sources: Sequence[Mapping[str, object]],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["local-only/no-external-call warning"]
     if any(item.get("sources") for item in indicators):
@@ -402,15 +451,19 @@ def ioc_ti_core_accuracy_gates(
         satisfied.append("offline feed provenance")
     if any(isinstance(item.get("ti_enrichment"), Mapping) and item["ti_enrichment"].get("matched_on") for item in indicators):
         satisfied.append("match mode recorded")
+    evidence_refs = [
+        f"indicator_count:{len(indicators)}",
+        f"ti_feed_count:{len(ti_feed_sources)}",
+        f"matched_rule_count:{sum(1 for item in indicators if item.get('matched_rules'))}",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted IOC/TI enrichment diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return [
         build_accuracy_gate(
             63,
             satisfied_checks=satisfied,
-            evidence_refs=[
-                f"indicator_count:{len(indicators)}",
-                f"ti_feed_count:{len(ti_feed_sources)}",
-                f"matched_rule_count:{sum(1 for item in indicators if item.get('matched_rules'))}",
-            ],
+            evidence_refs=evidence_refs,
         )
     ]
 
@@ -443,6 +496,7 @@ def ioc_ti_commercial_uplift_evidence(
                 "stix-taxii-import",
                 "confidence-decay-workflow",
                 "external-ti-api-governance",
+                IOC_TI_TRUSTED_DIFF_BLOCKER_63,
             ],
             commercial_blockers=list(assessment.get("blockers") or []),
             indicator_count=len(indicators),
@@ -454,6 +508,7 @@ def ioc_ti_commercial_uplift_evidence(
             "stix-taxii-import",
             "confidence-decay-workflow",
             "external-ti-api-governance",
+            IOC_TI_TRUSTED_DIFF_BLOCKER_63,
         ],
         "commercial_blockers": list(assessment.get("blockers") or []),
         "large_data_controls": {
@@ -464,6 +519,7 @@ def ioc_ti_commercial_uplift_evidence(
             "external_ti_api_calls": False,
             "local_only_enrichment": True,
             "signed_feed_packages": False,
+            "trusted_enrichment_diff": False,
         },
         "reporting_status": "offline-feed-enabled" if ti_feed_sources else "available-no-feed-loaded",
     }

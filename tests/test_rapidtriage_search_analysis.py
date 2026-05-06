@@ -8,7 +8,7 @@ from typing import Any
 
 from rapidtriage.core.analysis import build_analysis_trusted_diff, build_search_analysis
 from rapidtriage.core.keyword_packs import resolve_keyword_packs
-from rapidtriage.core.search import run_unified_search
+from rapidtriage.core.search import build_advanced_search_trusted_diff, run_unified_search, search_core_accuracy_gates
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -421,12 +421,23 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             )
             self.assertEqual(search_uplift["reportability_decision"]["allowed_use"], "advanced-search-triage-pivot")
             self.assertIn("check:query-builder-ux-validation", search_uplift["reportability_decision"]["blockers"])
+            self.assertIn("trusted-advanced-search-query-hit-diff-missing", search_uplift["failed_validation_check_ids"])
             self.assertTrue(fuzzy["search_native_capabilities"]["regex_search"])
             self.assertEqual(fuzzy["matches"][0]["search_match"]["mode"], "fuzzy")
             self.assertIn("#61", fuzzy["matches"][0]["search_match"]["commercial_gap_ids"])
             self.assertTrue(fuzzy["matches"][0]["search_match"]["proximity"]["matched"])
             self.assertEqual(regex["summary"]["match_count"], 1)
             self.assertIn("password", packed)
+
+            trusted_diff = build_advanced_search_trusted_diff(fuzzy["matches"], fuzzy["matches"])
+            gates = search_core_accuracy_gates(
+                matches=fuzzy["matches"],
+                options=fuzzy["options"],
+                trusted_diff=trusted_diff,
+            )
+
+            self.assertEqual(trusted_diff["status"], "pass")
+            self.assertIn("trusted advanced-search query-hit diff pass", gates[0]["satisfied_checks"])
 
 
 if __name__ == "__main__":

@@ -2725,6 +2725,7 @@ def build_report_citation_manager(citation_index: Sequence[Mapping[str, object]]
     blockers = [
         "citation-index-depends-on-imported-source-reference-completeness",
         "analyst-must-verify-source-hashes-parser-confidence-and-review-history-before-report-use",
+        "trusted-citation-index-diff-is-required-before-commercial-claim",
     ]
     return {
         "component": "report-citation-manager",
@@ -2767,6 +2768,7 @@ def build_evidence_selection_version_history(items: Sequence[Mapping[str, object
     blockers = [
         "selection-history-is-local-sqlite-not-multi-user-signed-collaboration",
         "review-inclusion-changes-still-require-source-verification-before-reporting",
+        "trusted-evidence-history-diff-is-required-before-commercial-claim",
     ]
     return {
         "component": "evidence-selection-version-history",
@@ -2870,22 +2872,129 @@ def case_report_reportability_decision(
     }
 
 
-def citation_manager_core_accuracy_gates(*, citation_count: int, has_source_reference: bool) -> list[dict[str, object]]:
+def build_citation_manager_trusted_diff(
+    rapid_citations: Sequence[Mapping[str, object]],
+    trusted_citations: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str = "citation-index-manifest",
+) -> dict[str, object]:
+    rapid_index = {citation_diff_key(item): citation_diff_value(item) for item in rapid_citations}
+    trusted_index = {citation_diff_key(item): citation_diff_value(item) for item in trusted_citations}
+    missing = sorted(key for key in trusted_index if key not in rapid_index)
+    unexpected = sorted(key for key in rapid_index if key not in trusted_index)
+    mismatched = [
+        {"key": key, "rapid": rapid_index[key], "trusted": trusted_index[key]}
+        for key in sorted(set(rapid_index).intersection(trusted_index))
+        if rapid_index[key] != trusted_index[key]
+    ]
+    status = "pass" if not missing and not unexpected and not mismatched else "fail"
+    return {
+        "profile": "citation-manager-trusted-index-diff-v1",
+        "item_number": 64,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "rapid_count": len(rapid_index),
+        "trusted_count": len(trusted_index),
+        "missing": missing,
+        "unexpected": unexpected,
+        "mismatched": mismatched,
+        "commercial_gap_ids": ["#64"],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def citation_diff_key(item: Mapping[str, object]) -> str:
+    return str(item.get("citation_id") or "")
+
+
+def citation_diff_value(item: Mapping[str, object]) -> dict[str, object]:
+    source_reference = item.get("source_reference")
+    return {
+        "role": str(item.get("role") or ""),
+        "target_type": str(item.get("target_type") or ""),
+        "target_id": str(item.get("target_id") or ""),
+        "has_source_reference": isinstance(source_reference, Mapping) and bool(source_reference),
+    }
+
+
+def build_evidence_history_trusted_diff(
+    rapid_history: Sequence[Mapping[str, object]],
+    trusted_history: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str = "review-history-manifest",
+) -> dict[str, object]:
+    rapid_index = {evidence_history_diff_key(item): evidence_history_diff_value(item) for item in rapid_history}
+    trusted_index = {evidence_history_diff_key(item): evidence_history_diff_value(item) for item in trusted_history}
+    missing = sorted(key for key in trusted_index if key not in rapid_index)
+    unexpected = sorted(key for key in rapid_index if key not in trusted_index)
+    mismatched = [
+        {"key": key, "rapid": rapid_index[key], "trusted": trusted_index[key]}
+        for key in sorted(set(rapid_index).intersection(trusted_index))
+        if rapid_index[key] != trusted_index[key]
+    ]
+    status = "pass" if not missing and not unexpected and not mismatched else "fail"
+    return {
+        "profile": "evidence-history-trusted-version-diff-v1",
+        "item_number": 65,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "rapid_count": len(rapid_index),
+        "trusted_count": len(trusted_index),
+        "missing": missing,
+        "unexpected": unexpected,
+        "mismatched": mismatched,
+        "commercial_gap_ids": ["#65"],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def evidence_history_diff_key(item: Mapping[str, object]) -> str:
+    return "|".join(
+        [
+            str(item.get("review_citation_id") or ""),
+            str(item.get("version") or ""),
+            str(item.get("changed_at") or ""),
+        ]
+    )
+
+
+def evidence_history_diff_value(item: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "changed_fields": sorted(str(field) for field in item.get("changed_fields") or []),
+        "previous": item.get("previous") or {},
+        "current": item.get("current") or {},
+    }
+
+
+def citation_manager_core_accuracy_gates(
+    *,
+    citation_count: int,
+    has_source_reference: bool,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
     satisfied = ["citation count summary", "report-use verification warning"]
     if citation_count:
         satisfied.extend(["review citation IDs", "source-record citation IDs"])
     if has_source_reference:
         satisfied.append("source reference preserved")
+    evidence_refs = [f"citation_count:{citation_count}", f"has_source_reference:{has_source_reference}"]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted citation index diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return [
         build_accuracy_gate(
             64,
             satisfied_checks=satisfied,
-            evidence_refs=[f"citation_count:{citation_count}", f"has_source_reference:{has_source_reference}"],
+            evidence_refs=evidence_refs,
         )
     ]
 
 
-def evidence_selection_core_accuracy_gates(*, history_rows: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+def evidence_selection_core_accuracy_gates(
+    *,
+    history_rows: Sequence[Mapping[str, object]],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
     satisfied = ["multi-user/signing limitation warning"]
     if history_rows:
         satisfied.append("versioned review history rows")
@@ -2898,11 +3007,15 @@ def evidence_selection_core_accuracy_gates(*, history_rows: Sequence[Mapping[str
         for item in history_rows
     ):
         satisfied.append("report inclusion history")
+    evidence_refs = [f"review_history_count:{len(history_rows)}"]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted evidence history diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return [
         build_accuracy_gate(
             65,
             satisfied_checks=satisfied,
-            evidence_refs=[f"review_history_count:{len(history_rows)}"],
+            evidence_refs=evidence_refs,
         )
     ]
 

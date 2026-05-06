@@ -13,7 +13,11 @@ from rapidtriage.core.case_db import (
     SCHEMA_VERSION,
     CaseDatabase,
     CaseDatabaseError,
+    build_citation_manager_trusted_diff,
+    build_evidence_history_trusted_diff,
     build_reviewer_workflow_trusted_diff,
+    citation_manager_core_accuracy_gates,
+    evidence_selection_core_accuracy_gates,
     list_tables,
     open_case_database,
     review_workflow_assessment,
@@ -820,11 +824,20 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(citation_uplift["batch_id"], "commercial-uplift-061-065")
             self.assertEqual(citation_uplift["item_numbers"], [64])
             self.assertIn("citation count summary", citation_uplift["passed_validation_check_ids"])
+            self.assertIn("trusted-citation-index-diff-is-required-before-commercial-claim", citation_uplift["failed_validation_check_ids"])
             self.assertFalse(citation_uplift["large_data_controls"]["exhibit_numbering_ui"])
             self.assertEqual(
                 citation_uplift["reportability_decision"]["decision"],
                 "do-not-report-citation-index-as-court-exhibit-complete",
             )
+            citation_diff = build_citation_manager_trusted_diff(export["citation_index"], export["citation_index"])
+            citation_gates = citation_manager_core_accuracy_gates(
+                citation_count=len(export["citation_index"]),
+                has_source_reference=True,
+                trusted_diff=citation_diff,
+            )
+            self.assertEqual(citation_diff["status"], "pass")
+            self.assertIn("trusted citation index diff pass", citation_gates[0]["satisfied_checks"])
             self.assertGreaterEqual(len(export["items"][0]["review_history"]), 1)
             self.assertIn("#65", export["items"][0]["review_history"][0]["commercial_gap_ids"])
             self.assertEqual(export["items"][0]["review_history"][0]["core_accuracy_gates"][0]["gap_id"], "#65")
@@ -833,11 +846,21 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             history_uplift = export["evidence_selection_version_history"]["commercial_uplift_evidence"]
             self.assertEqual(history_uplift["item_numbers"], [65])
             self.assertIn("versioned review history rows", history_uplift["passed_validation_check_ids"])
+            self.assertIn("trusted-evidence-history-diff-is-required-before-commercial-claim", history_uplift["failed_validation_check_ids"])
             self.assertFalse(history_uplift["large_data_controls"]["multi_user_signed_history"])
             self.assertEqual(
                 history_uplift["reportability_decision"]["allowed_use"],
                 "evidence-selection-history-triage-pivot",
             )
+            history_rows = [
+                row
+                for item in export["items"]
+                for row in item.get("review_history", [])
+            ]
+            history_diff = build_evidence_history_trusted_diff(history_rows, history_rows)
+            history_gates = evidence_selection_core_accuracy_gates(history_rows=history_rows, trusted_diff=history_diff)
+            self.assertEqual(history_diff["status"], "pass")
+            self.assertIn("trusted evidence history diff pass", history_gates[0]["satisfied_checks"])
             self.assertIn("#65", export["items"][0]["commercial_gap_ids"])
             self.assertIn("custody_workflow", export)
             self.assertGreaterEqual(export["custody_workflow"]["summary"]["evidence_source_count"], 1)

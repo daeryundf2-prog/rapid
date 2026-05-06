@@ -7,6 +7,7 @@ from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.case_db import open_case_database
+from rapidtriage.core.indicators import build_ioc_ti_trusted_diff, ioc_ti_core_accuracy_gates
 from tests.test_rapidtriage_rule_engine import sha256_hex
 from tests.test_rapidtriage_run import build_run_fixture
 
@@ -82,6 +83,7 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             self.assertEqual(ioc_uplift["batch_id"], "commercial-uplift-061-065")
             self.assertEqual(ioc_uplift["item_numbers"], [63])
             self.assertIn("offline feed provenance", ioc_uplift["passed_validation_check_ids"])
+            self.assertIn("trusted-ioc-ti-enrichment-diff-missing", ioc_uplift["failed_validation_check_ids"])
             self.assertFalse(ioc_uplift["large_data_controls"]["external_ti_api_calls"])
             self.assertEqual(
                 ioc_uplift["reportability_decision"]["decision"],
@@ -94,6 +96,14 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             self.assertIn("#63", manual_payload["ti_feed_sources"][0]["commercial_gap_ids"])
             self.assertGreaterEqual(manual_payload["summary"]["indicator_count"], 3)
             self.assertGreaterEqual(manual_payload["summary"]["enriched_indicator_count"], 1)
+            trusted_diff = build_ioc_ti_trusted_diff(manual_payload["indicators"], manual_payload["indicators"])
+            trusted_gates = ioc_ti_core_accuracy_gates(
+                indicators=manual_payload["indicators"],
+                ti_feed_sources=manual_payload["ti_feed_sources"],
+                trusted_diff=trusted_diff,
+            )
+            self.assertEqual(trusted_diff["status"], "pass")
+            self.assertIn("trusted IOC/TI enrichment diff pass", trusted_gates[0]["satisfied_checks"])
 
             search_output = Path(tmp_dir) / "search.json"
             self.assertEqual(
