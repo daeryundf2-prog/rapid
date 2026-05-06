@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.core.cloud_api import build_cloud_api_trusted_diff, cloud_api_core_accuracy_gates
 
 
 class RapidTriageCloudCollectTests(unittest.TestCase):
@@ -70,6 +71,10 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                     "provider-scope-inventory-not-captured",
                     api_uplift["reportability_decision"]["blockers"],
                 )
+                self.assertIn(
+                    "cloud-api-provider-response-diff-required",
+                    api_uplift["reportability_decision"]["blockers"],
+                )
                 api_gate = payload["core_accuracy_gates"][0]
                 self.assertEqual(api_gate["gap_id"], "#40")
                 self.assertIn("manifest request validation", api_gate["satisfied_checks"])
@@ -77,6 +82,7 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertIn("response hash/provenance", api_gate["satisfied_checks"])
                 self.assertIn("pagination/backoff limitation warning", api_gate["satisfied_checks"])
                 self.assertIn("provider OAuth/scope/legal warning", api_gate["satisfied_checks"])
+                self.assertNotIn("trusted cloud API/provider response diff pass", api_gate["satisfied_checks"])
                 self.assertIn("#41", payload["credential_handling"]["commercial_gap_ids"])
                 self.assertIn("#41", payload["credential_handling"]["credential_security_assessment"]["commercial_gap_ids"])
                 self.assertEqual(payload["credential_handling"]["forensic_review"]["gap_id"], "#41")
@@ -153,6 +159,51 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertTrue(payload["credential_handling"]["headers_redacted"])
                 self.assertTrue(payload["requests"][0]["credential_handling"]["sensitive_values_redacted"])
                 self.assertEqual(server.handler_class.request_count, 0)
+
+    def test_cloud_api_trusted_diff_controls_provider_accuracy_gate(self) -> None:
+        rapid = [
+            {
+                "name": "google-activity",
+                "service": "google",
+                "method": "GET",
+                "url_sha256": "url-hash",
+                "status": 200,
+                "response_sha256": "response-hash",
+                "response_size": 42,
+            }
+        ]
+        diff = build_cloud_api_trusted_diff(
+            rapid,
+            [dict(rapid[0])],
+            trusted_tool="google-provider-api",
+        )
+
+        self.assertEqual(diff["status"], "pass")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({"requests": []}), encoding="utf-8")
+            gate = cloud_api_core_accuracy_gates(
+                manifest_path=manifest,
+                output_dir=root / "out",
+                summary={"request_count": 1, "collected_count": 1, "cloud_api_trusted_diff": diff},
+                credential_handling={
+                    "headers_redacted": True,
+                    "tokens_written_to_output": False,
+                    "legal_warning": "authorized scope required",
+                },
+                requests=rapid,
+            )[0]
+        self.assertIn("trusted cloud API/provider response diff pass", gate["satisfied_checks"])
+
+        mismatch = build_cloud_api_trusted_diff(
+            rapid,
+            [{**rapid[0], "response_sha256": "changed"}],
+            trusted_tool="google-provider-api",
+        )
+        self.assertEqual(mismatch["status"], "fail")
+        self.assertEqual(mismatch["blocker_id"], "cloud-api-provider-response-diff-required")
+        self.assertEqual(mismatch["mismatched_fields"][0]["field"], "response_sha256")
 
 
 class CloudApiHandler(BaseHTTPRequestHandler):

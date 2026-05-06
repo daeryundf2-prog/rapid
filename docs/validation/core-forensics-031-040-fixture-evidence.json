@@ -85,7 +85,8 @@
       "number": 36,
       "title": "Email PST/OST full mailbox parser",
       "assertions": [
-        "EML/MBOX/Maildir/PST/OST/MSG rows preserve source profiles, source hashes, message/body/attachment inventory, PST/OST limitations, threading/dedup warnings, legal privilege boundary, #36 core_accuracy_gates, and native/deleted-complete reportability blockers."
+        "EML/MBOX/Maildir/PST/OST/MSG rows preserve source profiles, source hashes, message/body/attachment inventory, PST/OST limitations, threading/dedup warnings, legal privilege boundary, #36 core_accuracy_gates, and native/deleted-complete reportability blockers.",
+        "build_email_trusted_diff compares Rapid email rows against libpff/readpst/Outlook/native mailbox rows before satisfying the #36 trusted diff gate."
       ],
       "blockers_kept": [
         "native PST/OST/MSG object decoding",
@@ -97,7 +98,8 @@
       "number": 37,
       "title": "Gmail/Google Takeout deep parser",
       "assertions": [
-        "Google/Gmail/Takeout rows preserve provider profile detection, Gmail/Drive/Activity/Location normalization, source hashes, export-scope warnings, sidecar/linkage limitations, provider schema/timezone warnings, #37 core_accuracy_gates, and product-matrix reportability blockers."
+        "Google/Gmail/Takeout rows preserve provider profile detection, Gmail/Drive/Activity/Location normalization, source hashes, export-scope warnings, sidecar/linkage limitations, provider schema/timezone warnings, #37 core_accuracy_gates, and product-matrix reportability blockers.",
+        "build_cloud_export_trusted_diff compares Google rows against Takeout/provider/API rows before satisfying the #37 trusted diff gate."
       ],
       "blockers_kept": [
         "full Takeout product matrix",
@@ -109,7 +111,8 @@
       "number": 38,
       "title": "Apple iCloud export parser",
       "assertions": [
-        "Apple/iCloud rows preserve provider profile detection, account/file/photo metadata normalization, source hashes, export-scope warnings, ADP/shared-album warnings, retention/schema warnings, #38 core_accuracy_gates, and account/photo-complete reportability blockers."
+        "Apple/iCloud rows preserve provider profile detection, account/file/photo metadata normalization, source hashes, export-scope warnings, ADP/shared-album warnings, retention/schema warnings, #38 core_accuracy_gates, and account/photo-complete reportability blockers.",
+        "build_cloud_export_trusted_diff compares Apple/iCloud rows against Apple privacy export, iCloud web export, or native export rows before satisfying the #38 trusted diff gate."
       ],
       "blockers_kept": [
         "Advanced Data Protection limitations",
@@ -121,7 +124,8 @@
       "number": 39,
       "title": "Microsoft 365/OneDrive/Teams export parser",
       "assertions": [
-        "Microsoft 365/OneDrive/Teams rows preserve provider profile detection, mail/file/message/audit normalization, source hashes, eDiscovery/export warnings, permissions/retention/deleted warnings, provider schema/timestamp warnings, #39 core_accuracy_gates, and tenant/permission-complete reportability blockers."
+        "Microsoft 365/OneDrive/Teams rows preserve provider profile detection, mail/file/message/audit normalization, source hashes, eDiscovery/export warnings, permissions/retention/deleted warnings, provider schema/timestamp warnings, #39 core_accuracy_gates, and tenant/permission-complete reportability blockers.",
+        "build_cloud_export_trusted_diff compares Microsoft rows against Purview/eDiscovery/Graph provider rows before satisfying the #39 trusted diff gate."
       ],
       "blockers_kept": [
         "Graph/eDiscovery version matrix",
@@ -133,7 +137,8 @@
       "number": 40,
       "title": "Cloud API acquisition workflow",
       "assertions": [
-        "Cloud API collection payloads preserve manifest validation, credential redaction, response hash/provenance, pagination/backoff limitations, OAuth/scope/legal warnings, #40 core_accuracy_gates, and provider-complete acquisition reportability blockers."
+        "Cloud API collection payloads preserve manifest validation, credential redaction, response hash/provenance, pagination/backoff limitations, OAuth/scope/legal warnings, #40 core_accuracy_gates, and provider-complete acquisition reportability blockers.",
+        "build_cloud_api_trusted_diff compares collected API response rows against provider native/admin/API rows before satisfying the #40 trusted diff gate."
       ],
       "blockers_kept": [
         "provider-specific OAuth/device flow",

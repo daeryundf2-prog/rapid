@@ -32,6 +32,38 @@ CLOUD_REPORT_GRADE_BLOCKERS = [
     "tenant-permission-sharing-graph-not-complete",
     "known-answer-cloud-export-corpus-required",
 ]
+CLOUD_TRUSTED_DIFF_BLOCKERS = {
+    37: "google-takeout-provider-diff-required",
+    38: "icloud-provider-export-diff-required",
+    39: "m365-ediscovery-provider-diff-required",
+}
+CLOUD_TRUSTED_DIFF_CHECKS = {
+    37: "trusted Google Takeout/provider diff pass",
+    38: "trusted iCloud/provider export diff pass",
+    39: "trusted M365/eDiscovery export diff pass",
+}
+CLOUD_TRUSTED_DIFF_TOOLS = {
+    37: {
+        "google-takeout-native",
+        "google-admin-export",
+        "google-provider-api",
+        "gmail-native-export",
+        "provider-known-answer",
+    },
+    38: {
+        "apple-privacy-export",
+        "icloud-web-export",
+        "apple-native-export",
+        "provider-known-answer",
+    },
+    39: {
+        "microsoft-purview-ediscovery",
+        "microsoft-graph-api",
+        "exchange-ediscovery-export",
+        "teams-admin-export",
+        "provider-known-answer",
+    },
+}
 CLOUD_PROVIDER_PROFILES = {
     "google": {
         "services": ("google-takeout", "gmail-takeout", "google-drive", "google-photos", "google-activity"),
@@ -509,6 +541,15 @@ def cloud_gap_ids(service: str, artifact_type: str) -> CloudGap:
     return ["#37", "#38", "#39"], "cloud-export"
 
 
+def _gap_numbers(gap_ids: Iterable[str]) -> list[int]:
+    numbers: list[int] = []
+    for gap_id in gap_ids:
+        text = str(gap_id).lstrip("#")
+        if text.isdigit():
+            numbers.append(int(text))
+    return numbers
+
+
 def cloud_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, object]]:
     return [
         {
@@ -545,12 +586,17 @@ def cloud_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, obje
 
 
 def cloud_report_grade_assessment(gap_ids: list[str], family: str, service: str) -> dict[str, object]:
+    trusted_diff_blockers = [
+        CLOUD_TRUSTED_DIFF_BLOCKERS[number]
+        for number in _gap_numbers(gap_ids)
+        if number in CLOUD_TRUSTED_DIFF_BLOCKERS
+    ]
     return {
         "status": "validation-required",
         "commercial_gap_ids": list(gap_ids),
         "cloud_family": family,
         "service": service,
-        "blockers": list(CLOUD_REPORT_GRADE_BLOCKERS),
+        "blockers": [*CLOUD_REPORT_GRADE_BLOCKERS, *trusted_diff_blockers],
         "ready_for_court_report": False,
         "recommended_validation": [
             "Preserve provider export/API scope, account ownership proof, timestamps/timezone notes, and original export hashes.",
@@ -574,6 +620,7 @@ def cloud_commercial_uplift_evidence(
     source_path: str,
 ) -> dict[str, object]:
     matrix = cloud_validation_matrix(validation_checks)
+    trusted_diff = details.get("cloud_trusted_diff") if isinstance(details.get("cloud_trusted_diff"), Mapping) else {}
     item_numbers = sorted(
         int(gap_id.lstrip("#"))
         for gap_id in gap_ids
@@ -614,12 +661,26 @@ def cloud_commercial_uplift_evidence(
             failed_issue_matrix_ids=failed_issue_matrix_ids,
             report_grade=report_grade,
             details=details,
+            trusted_diff=trusted_diff,
         ),
         "source_refs": source_refs,
         "passed_validation_matrix_ids": passed_validation_matrix_ids,
         "failed_validation_matrix_ids": failed_validation_matrix_ids,
         "passed_issue_matrix_ids": passed_issue_matrix_ids,
         "failed_issue_matrix_ids": failed_issue_matrix_ids,
+        "trusted_diff": dict(trusted_diff) if trusted_diff else {
+            "status": "missing",
+            "blocker_ids": [
+                CLOUD_TRUSTED_DIFF_BLOCKERS[number]
+                for number in item_numbers
+                if number in CLOUD_TRUSTED_DIFF_BLOCKERS
+            ],
+            "required_tools": {
+                str(number): sorted(CLOUD_TRUSTED_DIFF_TOOLS[number])
+                for number in item_numbers
+                if number in CLOUD_TRUSTED_DIFF_TOOLS
+            },
+        },
         "report_grade_status": str(report_grade.get("status") or ""),
         "commercial_blockers": list(report_grade.get("blockers") or CLOUD_REPORT_GRADE_BLOCKERS),
         "large_data_controls": {
@@ -644,6 +705,7 @@ def cloud_reportability_decision(
     failed_issue_matrix_ids: list[str],
     report_grade: Mapping[str, object],
     details: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in report_grade.get("blockers") or CLOUD_REPORT_GRADE_BLOCKERS if str(item)}
     blockers.update(f"matrix:{item}" for item in failed_validation_matrix_ids)
@@ -654,6 +716,12 @@ def cloud_reportability_decision(
         blockers.add("original-cloud-export-hash-not-verified")
     if not validation_checks.get("provider_known_answer_validated"):
         blockers.add("provider-known-answer-corpus-not-attached")
+    trusted_diff = trusted_diff or {}
+    if trusted_diff.get("status") != "pass":
+        for number in item_numbers:
+            blocker = CLOUD_TRUSTED_DIFF_BLOCKERS.get(number)
+            if blocker:
+                blockers.add(blocker)
     primary = item_numbers[0] if item_numbers else 37
     decisions = {
         37: ("do-not-report-google-takeout-as-product-matrix-complete", "google-export-triage-pivot"),
@@ -678,6 +746,7 @@ def cloud_reportability_decision(
         "required_before_report": [
             "attach provider export/API scope, account ownership proof, timestamps/timezone notes, and original export hashes",
             "validate rows against provider-native views or known-answer exports",
+            "attach a passing trusted provider/export diff for every claimed Google, iCloud, or Microsoft row family",
             "document retention/deleted-state, sharing/permission, sidecar, and product-scope limitations",
         ],
     }
@@ -703,6 +772,10 @@ def cloud_core_accuracy_gates(
     ]
     if source_hashes.get("sha256"):
         evidence_refs.append(f"source_sha256:{source_hashes['sha256']}")
+    trusted_diff = details.get("cloud_trusted_diff") if isinstance(details.get("cloud_trusted_diff"), Mapping) else {}
+    if trusted_diff:
+        evidence_refs.append(f"trusted_diff_status:{trusted_diff.get('status', '')}")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     gates: list[dict[str, object]] = []
     for gap_id in gap_ids:
         number = int(gap_id.strip("#"))
@@ -717,6 +790,8 @@ def cloud_core_accuracy_gates(
             if details.get("commercial_grade_blockers"):
                 satisfied.append("sidecar/media/linkage limitation")
                 satisfied.append("provider schema/timezone warning")
+            if trusted_diff.get("status") == "pass" and int(trusted_diff.get("gap_number") or 0) == 37:
+                satisfied.append("trusted Google Takeout/provider diff pass")
         elif number == 38:
             if family == "apple-icloud" or "icloud" in service or "apple" in service:
                 satisfied.append("Apple/iCloud service profile detection")
@@ -727,6 +802,8 @@ def cloud_core_accuracy_gates(
             if details.get("commercial_grade_blockers"):
                 satisfied.append("ADP/shared-album limitation warning")
                 satisfied.append("provider retention/schema warning")
+            if trusted_diff.get("status") == "pass" and int(trusted_diff.get("gap_number") or 0) == 38:
+                satisfied.append("trusted iCloud/provider export diff pass")
         elif number == 39:
             if family == "microsoft-365" or "microsoft" in service or "teams" in service or "onedrive" in service:
                 satisfied.append("Microsoft 365 service profile detection")
@@ -737,8 +814,114 @@ def cloud_core_accuracy_gates(
             if details.get("commercial_grade_blockers"):
                 satisfied.append("permissions/retention/deleted limitation")
                 satisfied.append("provider schema/timestamp warning")
+            if trusted_diff.get("status") == "pass" and int(trusted_diff.get("gap_number") or 0) == 39:
+                satisfied.append("trusted M365/eDiscovery export diff pass")
         gates.append(build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs))
     return gates
+
+
+def build_cloud_export_trusted_diff(
+    gap_number: int,
+    rapid_rows: Iterable[Mapping[str, object]],
+    trusted_rows: Iterable[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+    comparison_id: str = "cloud-export-trusted-diff",
+) -> dict[str, object]:
+    accepted_tools = CLOUD_TRUSTED_DIFF_TOOLS.get(gap_number, set())
+    rapid_index = {_cloud_diff_key(row): _cloud_diff_values(row) for row in rapid_rows}
+    trusted_index = {_cloud_diff_key(row): _cloud_diff_values(row) for row in trusted_rows}
+    rapid_index.pop("", None)
+    trusted_index.pop("", None)
+    missing_in_trusted = sorted(key for key in rapid_index if key not in trusted_index)
+    unexpected_in_trusted = sorted(key for key in trusted_index if key not in rapid_index)
+    mismatches: list[dict[str, object]] = []
+    for key in sorted(set(rapid_index).intersection(trusted_index)):
+        rapid = rapid_index[key]
+        trusted = trusted_index[key]
+        for field in (
+            "service",
+            "event_type",
+            "timestamp",
+            "subject",
+            "message_id",
+            "file_id",
+            "file_name",
+            "chat_id",
+            "operation",
+            "account_email",
+            "body_sha256",
+            "message_text_sha256",
+            "url_sha256",
+        ):
+            left = rapid.get(field)
+            right = trusted.get(field)
+            if left not in (None, "") and right not in (None, "") and str(left) != str(right):
+                mismatches.append({"row_key": key, "field": field, "rapid": str(left), "trusted": str(right)})
+    tool_key = trusted_tool.strip().lower()
+    tool_accepted = tool_key in accepted_tools
+    status = (
+        "pass"
+        if tool_accepted
+        and rapid_index
+        and trusted_index
+        and not missing_in_trusted
+        and not unexpected_in_trusted
+        and not mismatches
+        else "fail"
+    )
+    return {
+        "profile_version": "cloud-export-trusted-diff-v1",
+        "comparison_id": comparison_id,
+        "gap_number": gap_number,
+        "status": status,
+        "blocker_id": "" if status == "pass" else CLOUD_TRUSTED_DIFF_BLOCKERS.get(gap_number, "cloud-provider-diff-required"),
+        "trusted_tool": trusted_tool,
+        "trusted_tool_accepted": tool_accepted,
+        "accepted_trusted_tools": sorted(accepted_tools),
+        "rapid_row_count": len(rapid_index),
+        "trusted_row_count": len(trusted_index),
+        "matched_row_count": len(set(rapid_index).intersection(trusted_index)),
+        "missing_in_trusted": missing_in_trusted[:200],
+        "unexpected_in_trusted": unexpected_in_trusted[:200],
+        "mismatched_fields": mismatches[:200],
+        "evidence_summary": "Rapid cloud rows match trusted provider/export rows" if status == "pass" else "Trusted provider/export diff is missing or mismatched",
+    }
+
+
+def _cloud_diff_key(row: Mapping[str, object]) -> str:
+    values = _cloud_diff_values(row)
+    for field in ("message_id", "file_id", "chat_id", "account_email"):
+        if values.get(field):
+            return f"{field}:{values[field]}"
+    parts = [
+        str(values.get("service") or ""),
+        str(values.get("event_type") or ""),
+        str(values.get("timestamp") or ""),
+        str(values.get("subject") or values.get("file_name") or values.get("operation") or ""),
+        str(values.get("source_index") or ""),
+    ]
+    return "cloud-fingerprint:" + sha256_text("|".join(parts))
+
+
+def _cloud_diff_values(row: Mapping[str, object]) -> dict[str, object]:
+    source = row.get("details") if isinstance(row.get("details"), Mapping) else row
+    return {
+        "source_index": source.get("source_index"),
+        "service": source.get("service"),
+        "event_type": source.get("event_type"),
+        "timestamp": source.get("timestamp"),
+        "subject": source.get("subject"),
+        "message_id": source.get("message_id"),
+        "file_id": source.get("file_id"),
+        "file_name": source.get("file_name"),
+        "chat_id": source.get("chat_id"),
+        "operation": source.get("operation"),
+        "account_email": source.get("account_email"),
+        "body_sha256": source.get("body_sha256"),
+        "message_text_sha256": source.get("message_text_sha256"),
+        "url_sha256": source.get("url_sha256"),
+    }
 
 
 def cloud_provider_profile(family: str, service: str) -> dict[str, object]:

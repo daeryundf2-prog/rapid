@@ -6,7 +6,7 @@ import re
 from email.message import EmailMessage
 from email import policy
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
@@ -38,6 +38,19 @@ EMAIL_REPORT_GRADE_BLOCKERS = [
     "conversation-threading-and-dedup-validation-required",
     "broad-mailbox-known-answer-corpus-required",
 ]
+EMAIL_TRUSTED_DIFF_BLOCKER = "email-mailbox-trusted-diff-required"
+EMAIL_TRUSTED_DIFF_TOOLS = {
+    "libpff",
+    "pffexport",
+    "readpst",
+    "outlook-export",
+    "microsoft-purview-export",
+    "thunderbird-export",
+    "eml-ground-truth",
+    "mbox-ground-truth",
+    "maildir-ground-truth",
+    "vendor-mailbox-export",
+}
 EMAIL_FORMAT_PROFILES = {
     "eml": {
         "family": "internet-message",
@@ -511,7 +524,7 @@ def email_report_grade_assessment(source_format: str) -> dict[str, object]:
         "status": "validation-required",
         "commercial_gap_ids": ["#36"],
         "source_format": source_format,
-        "blockers": list(EMAIL_REPORT_GRADE_BLOCKERS),
+        "blockers": [*EMAIL_REPORT_GRADE_BLOCKERS, EMAIL_TRUSTED_DIFF_BLOCKER],
         "ready_for_court_report": False,
         "recommended_validation": [
             "Validate PST/OST/MSG content with a dedicated mailbox parser before report-grade conclusions.",
@@ -527,6 +540,7 @@ def email_commercial_uplift_evidence(
     details: dict[str, object],
 ) -> dict[str, object]:
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
+    trusted_diff = details.get("email_trusted_diff") if isinstance(details.get("email_trusted_diff"), Mapping) else {}
     matrix = email_validation_matrix(source_format, validation)
     issue_matrix = email_issue_matrix(source_format)
     passed_validation_matrix_ids = [str(item.get("id")) for item in matrix if item.get("passed")]
@@ -544,6 +558,7 @@ def email_commercial_uplift_evidence(
             failed_validation_matrix_ids=failed_validation_matrix_ids,
             failed_issue_matrix_ids=failed_issue_matrix_ids,
             details=details,
+            trusted_diff=trusted_diff,
         ),
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
@@ -556,6 +571,11 @@ def email_commercial_uplift_evidence(
         "failed_validation_matrix_ids": failed_validation_matrix_ids,
         "passed_issue_matrix_ids": passed_issue_matrix_ids,
         "failed_issue_matrix_ids": failed_issue_matrix_ids,
+        "trusted_diff": dict(trusted_diff) if trusted_diff else {
+            "status": "missing",
+            "blocker_id": EMAIL_TRUSTED_DIFF_BLOCKER,
+            "required_tools": sorted(EMAIL_TRUSTED_DIFF_TOOLS),
+        },
         "commercial_blockers": email_blockers(source_format),
         "large_data_controls": {
             "max_mbox_messages": MAX_MBOX_MESSAGES,
@@ -578,6 +598,7 @@ def email_reportability_decision(
     failed_validation_matrix_ids: list[str],
     failed_issue_matrix_ids: list[str],
     details: dict[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = set(email_blockers(source_format))
     blockers.update(f"matrix:{item}" for item in failed_validation_matrix_ids)
@@ -586,6 +607,9 @@ def email_reportability_decision(
         blockers.add("native-mapi-container-decoding-not-validated")
     if not validation_checks.get("commercial_parser_validated"):
         blockers.add("mailbox-known-answer-corpus-not-attached")
+    trusted_diff = trusted_diff or {}
+    if trusted_diff.get("status") != "pass":
+        blockers.add(EMAIL_TRUSTED_DIFF_BLOCKER)
     return {
         "profile_version": "email-reportability-decision-v1",
         "commercial_gap_ids": ["#36"],
@@ -601,6 +625,7 @@ def email_reportability_decision(
         "required_before_report": [
             "validate native PST/OST/MSG object and folder decoding where applicable",
             "validate deleted item recovery, threading, duplicates, timezone, and attachments with known-answer mailboxes",
+            "attach a passing trusted email mailbox export diff from libpff/readpst/Outlook/native ground truth",
             "review privilege, legal scope, and search/export limitations before reporting message content",
         ],
     }
@@ -619,6 +644,10 @@ def email_core_accuracy_gates(
     ]
     if source_hashes.get("sha256"):
         evidence_refs.append(f"source_sha256:{source_hashes['sha256']}")
+    trusted_diff = details.get("email_trusted_diff") if isinstance(details.get("email_trusted_diff"), Mapping) else {}
+    if trusted_diff:
+        evidence_refs.append(f"trusted_diff_status:{trusted_diff.get('status', '')}")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     satisfied: list[str] = []
     if source_format and (details.get("message_id") is not None or details.get("mailbox_name")):
         satisfied.append("mailbox/message source profile detection")
@@ -630,7 +659,106 @@ def email_core_accuracy_gates(
         satisfied.append("threading/dedup validation warning")
     if source_hashes.get("sha256"):
         satisfied.append("legal privilege boundary")
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted email mailbox export diff pass")
     return [build_accuracy_gate(36, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
+
+
+def build_email_trusted_diff(
+    rapid_rows: Iterable[Mapping[str, object]],
+    trusted_rows: Iterable[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+    comparison_id: str = "email-mailbox-trusted-diff",
+) -> dict[str, object]:
+    rapid_index = {_email_diff_key(row): _email_diff_values(row) for row in rapid_rows}
+    trusted_index = {_email_diff_key(row): _email_diff_values(row) for row in trusted_rows}
+    rapid_index.pop("", None)
+    trusted_index.pop("", None)
+    missing_in_trusted = sorted(key for key in rapid_index if key not in trusted_index)
+    unexpected_in_trusted = sorted(key for key in trusted_index if key not in rapid_index)
+    mismatches: list[dict[str, object]] = []
+    for key in sorted(set(rapid_index).intersection(trusted_index)):
+        rapid = rapid_index[key]
+        trusted = trusted_index[key]
+        for field in (
+            "source_format",
+            "message_id",
+            "subject",
+            "from",
+            "to",
+            "date",
+            "body_sha256",
+            "attachment_count",
+            "mailbox_name",
+            "message_count",
+        ):
+            left = rapid.get(field)
+            right = trusted.get(field)
+            if left not in (None, "") and right not in (None, "") and str(left) != str(right):
+                mismatches.append({"row_key": key, "field": field, "rapid": str(left), "trusted": str(right)})
+    tool_key = trusted_tool.strip().lower()
+    tool_accepted = tool_key in EMAIL_TRUSTED_DIFF_TOOLS
+    status = (
+        "pass"
+        if tool_accepted
+        and rapid_index
+        and trusted_index
+        and not missing_in_trusted
+        and not unexpected_in_trusted
+        and not mismatches
+        else "fail"
+    )
+    return {
+        "profile_version": "email-trusted-diff-v1",
+        "comparison_id": comparison_id,
+        "status": status,
+        "blocker_id": "" if status == "pass" else EMAIL_TRUSTED_DIFF_BLOCKER,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_accepted": tool_accepted,
+        "accepted_trusted_tools": sorted(EMAIL_TRUSTED_DIFF_TOOLS),
+        "rapid_row_count": len(rapid_index),
+        "trusted_row_count": len(trusted_index),
+        "matched_row_count": len(set(rapid_index).intersection(trusted_index)),
+        "missing_in_trusted": missing_in_trusted[:200],
+        "unexpected_in_trusted": unexpected_in_trusted[:200],
+        "mismatched_fields": mismatches[:200],
+        "evidence_summary": "Rapid email rows match trusted mailbox export rows" if status == "pass" else "Trusted mailbox export diff is missing or mismatched",
+    }
+
+
+def _email_diff_key(row: Mapping[str, object]) -> str:
+    values = _email_diff_values(row)
+    if values.get("message_id"):
+        return f"message:{values['message_id']}"
+    if values.get("mailbox_name"):
+        return f"mailbox:{values.get('mailbox_name')}:{values.get('message_count', '')}"
+    parts = [
+        str(values.get("subject") or ""),
+        str(values.get("from") or ""),
+        str(values.get("to") or ""),
+        str(values.get("date") or ""),
+        str(values.get("source_index") or ""),
+    ]
+    return "message-fingerprint:" + sha256_text("|".join(parts))
+
+
+def _email_diff_values(row: Mapping[str, object]) -> dict[str, object]:
+    source = row.get("details") if isinstance(row.get("details"), Mapping) else row
+    attachments = source.get("attachments") if isinstance(source.get("attachments"), list) else []
+    return {
+        "source_format": source.get("source_format"),
+        "source_index": source.get("source_index"),
+        "message_id": source.get("message_id"),
+        "subject": source.get("subject"),
+        "from": source.get("from"),
+        "to": source.get("to"),
+        "date": source.get("date"),
+        "body_sha256": source.get("body_sha256"),
+        "attachment_count": source.get("attachment_count", len(attachments)),
+        "mailbox_name": source.get("mailbox_name"),
+        "message_count": source.get("message_count"),
+    }
 
 
 def email_format_profile(source_format: str) -> dict[str, object]:

@@ -117,6 +117,7 @@
       "expected": {
         "required_assertions": [
           "Email rows preserve mailbox/message profile, header/body/attachment inventory, PST/OST limitations, threading warnings, legal boundary, and #36 core_accuracy_gates",
+          "Email trusted diff helper requires libpff/readpst/Outlook/native mailbox row equality before satisfying the #36 trusted email mailbox export diff pass gate",
           "Email reportability decisions block native/deleted-complete mailbox claims until PST/OST/MSG, deleted item, threading, and privilege validation exists"
         ]
       },
@@ -136,6 +137,7 @@
       "expected": {
         "required_assertions": [
           "Google cloud rows preserve profile detection, Gmail/Drive/Activity/Location normalization, export warnings, schema/timezone warnings, and #37 core_accuracy_gates",
+          "Google trusted diff helper requires Takeout/provider/API row equality before satisfying the #37 trusted Google Takeout/provider diff pass gate",
           "Google export reportability decisions block product-matrix-complete claims until Takeout scope, sidecars, timezone, and provider-native validation exists"
         ]
       },
@@ -155,6 +157,7 @@
       "expected": {
         "required_assertions": [
           "Apple/iCloud rows preserve profile detection, account/file/photo normalization, ADP/shared-album limitations, retention/schema warnings, and #38 core_accuracy_gates",
+          "iCloud trusted diff helper requires Apple privacy export/iCloud web/native export row equality before satisfying the #38 trusted iCloud/provider export diff pass gate",
           "iCloud reportability decisions block account/photo-complete claims until ADP/shared-album, retention, and schema validation exists"
         ]
       },
@@ -174,6 +177,7 @@
       "expected": {
         "required_assertions": [
           "Microsoft cloud rows preserve profile detection, file/message/audit normalization, eDiscovery warnings, permission/retention limitations, and #39 core_accuracy_gates",
+          "Microsoft 365 trusted diff helper requires Purview/eDiscovery/Graph/API row equality before satisfying the #39 trusted M365/eDiscovery export diff pass gate",
           "Microsoft 365 reportability decisions block tenant/permission-complete claims until eDiscovery, permission graph, retention, and Teams/SharePoint validation exists"
         ]
       },
@@ -193,6 +197,7 @@
       "expected": {
         "required_assertions": [
           "Cloud API collection preserves manifest validation, credential redaction, response hash/provenance, API limitation warnings, and #40 core_accuracy_gates",
+          "Cloud API trusted diff helper requires provider native/admin/API row equality before satisfying the #40 trusted cloud API/provider response diff pass gate",
           "Cloud API reportability decisions block provider-complete acquisition claims until OAuth scope/consent, pagination/delta, legal hold, and provider schema validation exists"
         ]
       },

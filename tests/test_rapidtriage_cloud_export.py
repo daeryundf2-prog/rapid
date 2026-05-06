@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.artifacts.cloud import build_cloud_export_trusted_diff, cloud_core_accuracy_gates
 
 
 class RapidTriageCloudExportTests(unittest.TestCase):
@@ -83,6 +84,11 @@ class RapidTriageCloudExportTests(unittest.TestCase):
                 "provider-export-scope-not-verified",
                 mail_uplift["reportability_decision"]["blockers"],
             )
+            self.assertIn(
+                "google-takeout-provider-diff-required",
+                mail_uplift["reportability_decision"]["blockers"],
+            )
+            self.assertNotIn("trusted Google Takeout/provider diff pass", google_gate["satisfied_checks"])
 
             apple_gate = account["details"]["core_accuracy_gates"][0]
             self.assertEqual(apple_gate["gap_id"], "#38")
@@ -141,6 +147,109 @@ class RapidTriageCloudExportTests(unittest.TestCase):
             self.assertIn("identity-security-event", audit["details"]["risk_flags"])
             self.assertIn("#39", audit["details"]["commercial_gap_ids"])
             self.assertEqual(audit["details"]["forensic_review"]["gap_id"], "#39")
+
+    def test_cloud_trusted_diff_controls_provider_accuracy_gates(self) -> None:
+        google_row = {
+            "service": "gmail-takeout",
+            "event_type": "mail",
+            "timestamp": "2026-04-26T04:00:00Z",
+            "subject": "Invoice password review",
+            "message_id": "gmail-msg-1",
+            "body_sha256": "body-hash",
+        }
+        google_diff = build_cloud_export_trusted_diff(
+            37,
+            [google_row],
+            [dict(google_row)],
+            trusted_tool="google-takeout-native",
+        )
+        self.assertEqual(google_diff["status"], "pass")
+        google_gate = cloud_core_accuracy_gates(
+            gap_ids=["#37"],
+            family="google",
+            service="gmail-takeout",
+            artifact_type="cloud-mail",
+            source_hashes={"sha256": "source-hash"},
+            details={
+                **google_row,
+                "commercial_grade_blockers": ["fixture"],
+                "validation_checks": {},
+                "cloud_trusted_diff": google_diff,
+            },
+            source_index=0,
+            source_path="gmail-export.json",
+        )[0]
+        self.assertIn("trusted Google Takeout/provider diff pass", google_gate["satisfied_checks"])
+
+        apple_row = {
+            "service": "apple-icloud-export",
+            "event_type": "account",
+            "timestamp": "2026-04-26T04:00:00Z",
+            "account_email": "alice@example.com",
+        }
+        apple_diff = build_cloud_export_trusted_diff(
+            38,
+            [apple_row],
+            [dict(apple_row)],
+            trusted_tool="apple-privacy-export",
+        )
+        apple_gate = cloud_core_accuracy_gates(
+            gap_ids=["#38"],
+            family="apple-icloud",
+            service="apple-icloud-export",
+            artifact_type="cloud-account",
+            source_hashes={"sha256": "source-hash"},
+            details={
+                **apple_row,
+                "commercial_grade_blockers": ["fixture"],
+                "validation_checks": {},
+                "cloud_trusted_diff": apple_diff,
+            },
+            source_index=0,
+            source_path="icloud-export.json",
+        )[0]
+        self.assertIn("trusted iCloud/provider export diff pass", apple_gate["satisfied_checks"])
+
+        m365_row = {
+            "service": "microsoft-teams",
+            "event_type": "message",
+            "timestamp": "2026-04-26T06:00:00Z",
+            "chat_id": "chat-1",
+            "message_id": "teams-msg-1",
+            "message_text_sha256": "text-hash",
+        }
+        m365_diff = build_cloud_export_trusted_diff(
+            39,
+            [m365_row],
+            [dict(m365_row)],
+            trusted_tool="microsoft-purview-ediscovery",
+        )
+        m365_gate = cloud_core_accuracy_gates(
+            gap_ids=["#39"],
+            family="microsoft-365",
+            service="microsoft-teams",
+            artifact_type="cloud-message",
+            source_hashes={"sha256": "source-hash"},
+            details={
+                **m365_row,
+                "commercial_grade_blockers": ["fixture"],
+                "validation_checks": {},
+                "cloud_trusted_diff": m365_diff,
+            },
+            source_index=0,
+            source_path="teams.json",
+        )[0]
+        self.assertIn("trusted M365/eDiscovery export diff pass", m365_gate["satisfied_checks"])
+
+        mismatch = build_cloud_export_trusted_diff(
+            39,
+            [m365_row],
+            [{**m365_row, "message_text_sha256": "changed"}],
+            trusted_tool="microsoft-purview-ediscovery",
+        )
+        self.assertEqual(mismatch["status"], "fail")
+        self.assertEqual(mismatch["blocker_id"], "m365-ediscovery-provider-diff-required")
+        self.assertEqual(mismatch["mismatched_fields"][0]["field"], "message_text_sha256")
 
 
 def write_cloud_export_fixtures(root: Path) -> None:

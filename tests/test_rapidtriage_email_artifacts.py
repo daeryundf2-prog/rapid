@@ -7,6 +7,7 @@ from email.message import EmailMessage
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.artifacts.email import build_email_trusted_diff, email_core_accuracy_gates
 
 
 class RapidTriageEmailArtifactsTests(unittest.TestCase):
@@ -67,6 +68,11 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
                 "mailbox-known-answer-corpus-not-attached",
                 eml_uplift["reportability_decision"]["blockers"],
             )
+            self.assertIn(
+                "email-mailbox-trusted-diff-required",
+                eml_uplift["reportability_decision"]["blockers"],
+            )
+            self.assertNotIn("trusted email mailbox export diff pass", eml_gate["satisfied_checks"])
 
             emlx = next(artifact for artifact in messages if artifact["details"]["source_format"] == "emlx")
             self.assertEqual(emlx["details"]["email_format_profile"]["family"], "apple-mail-message")
@@ -92,6 +98,45 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
                 "native-mapi-container-decoding-not-validated",
                 pst_uplift["reportability_decision"]["blockers"],
             )
+
+    def test_email_trusted_diff_controls_core_accuracy_gate(self) -> None:
+        rapid = [
+            {
+                "source_format": "eml",
+                "message_id": "<m1@example.test>",
+                "subject": "Case mail",
+                "from": "alice@example.test",
+                "to": "bob@example.test",
+                "date": "Mon, 1 Apr 2024 00:00:00 +0000",
+                "body_sha256": "abc",
+                "attachment_count": 1,
+            }
+        ]
+        trusted = [dict(rapid[0])]
+
+        diff = build_email_trusted_diff(rapid, trusted, trusted_tool="eml-ground-truth")
+
+        self.assertEqual(diff["status"], "pass")
+        gate = email_core_accuracy_gates(
+            source_format="eml",
+            source_hashes={"sha256": "source-hash"},
+            details={
+                **rapid[0],
+                "source_path": "fixture.eml",
+                "validation_checks": {"headers_parsed": True},
+                "email_trusted_diff": diff,
+            },
+        )[0]
+        self.assertIn("trusted email mailbox export diff pass", gate["satisfied_checks"])
+
+        mismatch = build_email_trusted_diff(
+            rapid,
+            [{**rapid[0], "subject": "Changed"}],
+            trusted_tool="eml-ground-truth",
+        )
+        self.assertEqual(mismatch["status"], "fail")
+        self.assertEqual(mismatch["blocker_id"], "email-mailbox-trusted-diff-required")
+        self.assertEqual(mismatch["mismatched_fields"][0]["field"], "subject")
 
 
 def write_email_fixture(root: Path) -> None:

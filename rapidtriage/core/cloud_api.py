@@ -9,7 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Mapping
+from typing import Iterable, Mapping
 
 from .audit import compute_sha256
 from .forensic_accuracy import build_accuracy_gate
@@ -37,6 +37,16 @@ CLOUD_API_REPORT_GRADE_BLOCKERS = [
     "legal-hold-export-workflow-not-implemented",
     "known-answer-cloud-api-corpus-required",
 ]
+CLOUD_API_TRUSTED_DIFF_BLOCKER = "cloud-api-provider-response-diff-required"
+CLOUD_API_TRUSTED_DIFF_TOOLS = {
+    "provider-native-export",
+    "provider-admin-console",
+    "provider-api-known-answer",
+    "google-provider-api",
+    "microsoft-graph-api",
+    "apple-provider-export",
+    "purview-ediscovery-export",
+}
 CLOUD_CREDENTIAL_SECURITY_BLOCKERS = [
     "provider-oauth-consent-record-not-captured",
     "provider-scope-inventory-not-captured",
@@ -419,7 +429,7 @@ def cloud_api_report_grade_assessment() -> dict[str, object]:
     return {
         "status": "validation-required",
         "commercial_gap_ids": ["#40"],
-        "blockers": list(CLOUD_API_REPORT_GRADE_BLOCKERS),
+        "blockers": [*CLOUD_API_REPORT_GRADE_BLOCKERS, CLOUD_API_TRUSTED_DIFF_BLOCKER],
         "ready_for_court_report": False,
         "recommended_validation": [
             "Capture account authorization, provider scopes, consent/legal-hold context, and API version metadata.",
@@ -438,6 +448,7 @@ def cloud_api_commercial_uplift_evidence(
     report_grade: Mapping[str, object],
 ) -> dict[str, object]:
     matrix = cloud_api_validation_matrix(summary, credential_handling)
+    trusted_diff = summary.get("cloud_api_trusted_diff") if isinstance(summary.get("cloud_api_trusted_diff"), Mapping) else {}
     passed_validation_matrix_ids = [str(item.get("id")) for item in matrix if item.get("passed")]
     failed_validation_matrix_ids = [str(item.get("id")) for item in matrix if not item.get("passed")]
     return {
@@ -450,6 +461,7 @@ def cloud_api_commercial_uplift_evidence(
             credential_handling=credential_handling,
             failed_validation_matrix_ids=failed_validation_matrix_ids,
             report_grade=report_grade,
+            trusted_diff=trusted_diff,
         ),
         "source_refs": [
             f"manifest_path:{manifest_path.resolve()}",
@@ -460,6 +472,11 @@ def cloud_api_commercial_uplift_evidence(
         "passed_validation_matrix_ids": passed_validation_matrix_ids,
         "failed_validation_matrix_ids": failed_validation_matrix_ids,
         "report_grade_status": str(report_grade.get("status") or ""),
+        "trusted_diff": dict(trusted_diff) if trusted_diff else {
+            "status": "missing",
+            "blocker_id": CLOUD_API_TRUSTED_DIFF_BLOCKER,
+            "required_tools": sorted(CLOUD_API_TRUSTED_DIFF_TOOLS),
+        },
         "commercial_blockers": list(report_grade.get("blockers") or CLOUD_API_REPORT_GRADE_BLOCKERS),
         "large_data_controls": {
             "timeout_seconds": DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
@@ -482,6 +499,7 @@ def cloud_api_reportability_decision(
     credential_handling: Mapping[str, object],
     failed_validation_matrix_ids: list[str],
     report_grade: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in report_grade.get("blockers") or CLOUD_API_REPORT_GRADE_BLOCKERS if str(item)}
     blockers.update(f"matrix:{item}" for item in failed_validation_matrix_ids)
@@ -491,6 +509,9 @@ def cloud_api_reportability_decision(
         blockers.add("oauth-consent-record-not-captured")
     if not summary.get("provider_api_known_answer_validated"):
         blockers.add("provider-api-known-answer-corpus-not-attached")
+    trusted_diff = trusted_diff or {}
+    if trusted_diff.get("status") != "pass":
+        blockers.add(CLOUD_API_TRUSTED_DIFF_BLOCKER)
     return {
         "profile_version": "cloud-api-reportability-decision-v1",
         "commercial_gap_ids": ["#40"],
@@ -507,6 +528,7 @@ def cloud_api_reportability_decision(
             "capture provider OAuth/device-flow consent, scopes, legal hold, and account ownership evidence",
             "validate API pagination, delta, retry/backoff, and response schemas against provider known-answer data",
             "compare collected JSON with provider-native export or admin/eDiscovery views before testimony",
+            "attach a passing trusted provider response diff for sampled API responses",
         ],
     }
 
@@ -618,6 +640,10 @@ def cloud_api_core_accuracy_gates(
             evidence_refs.append(f"response_sha256:{request['response_sha256']}")
         if request.get("response_path"):
             evidence_refs.append(f"response_path:{request['response_path']}")
+    trusted_diff = summary.get("cloud_api_trusted_diff") if isinstance(summary.get("cloud_api_trusted_diff"), Mapping) else {}
+    if trusted_diff:
+        evidence_refs.append(f"trusted_diff_status:{trusted_diff.get('status', '')}")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     satisfied: list[str] = []
     if int(summary.get("request_count") or 0) > 0:
         satisfied.append("manifest request validation")
@@ -629,7 +655,88 @@ def cloud_api_core_accuracy_gates(
         satisfied.append("pagination/backoff limitation warning")
     if credential_handling.get("legal_warning") and not CLOUD_API_NATIVE_CAPABILITIES["provider_specific_oauth_flow"]:
         satisfied.append("provider OAuth/scope/legal warning")
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted cloud API/provider response diff pass")
     return [build_accuracy_gate(40, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
+
+
+def build_cloud_api_trusted_diff(
+    rapid_requests: Iterable[Mapping[str, object]],
+    trusted_rows: Iterable[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+    comparison_id: str = "cloud-api-provider-response-diff",
+) -> dict[str, object]:
+    rapid_index = {_cloud_api_diff_key(row): _cloud_api_diff_values(row) for row in rapid_requests}
+    trusted_index = {_cloud_api_diff_key(row): _cloud_api_diff_values(row) for row in trusted_rows}
+    rapid_index.pop("", None)
+    trusted_index.pop("", None)
+    missing_in_trusted = sorted(key for key in rapid_index if key not in trusted_index)
+    unexpected_in_trusted = sorted(key for key in trusted_index if key not in rapid_index)
+    mismatches: list[dict[str, object]] = []
+    for key in sorted(set(rapid_index).intersection(trusted_index)):
+        rapid = rapid_index[key]
+        trusted = trusted_index[key]
+        for field in ("service", "method", "url_sha256", "status", "response_sha256", "response_size"):
+            left = rapid.get(field)
+            right = trusted.get(field)
+            if left not in (None, "") and right not in (None, "") and str(left) != str(right):
+                mismatches.append({"row_key": key, "field": field, "rapid": str(left), "trusted": str(right)})
+    tool_key = trusted_tool.strip().lower()
+    tool_accepted = tool_key in CLOUD_API_TRUSTED_DIFF_TOOLS
+    status = (
+        "pass"
+        if tool_accepted
+        and rapid_index
+        and trusted_index
+        and not missing_in_trusted
+        and not unexpected_in_trusted
+        and not mismatches
+        else "fail"
+    )
+    return {
+        "profile_version": "cloud-api-trusted-diff-v1",
+        "comparison_id": comparison_id,
+        "status": status,
+        "blocker_id": "" if status == "pass" else CLOUD_API_TRUSTED_DIFF_BLOCKER,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_accepted": tool_accepted,
+        "accepted_trusted_tools": sorted(CLOUD_API_TRUSTED_DIFF_TOOLS),
+        "rapid_row_count": len(rapid_index),
+        "trusted_row_count": len(trusted_index),
+        "matched_row_count": len(set(rapid_index).intersection(trusted_index)),
+        "missing_in_trusted": missing_in_trusted[:200],
+        "unexpected_in_trusted": unexpected_in_trusted[:200],
+        "mismatched_fields": mismatches[:200],
+        "evidence_summary": "Rapid API response rows match trusted provider rows" if status == "pass" else "Trusted provider response diff is missing or mismatched",
+    }
+
+
+def _cloud_api_diff_key(row: Mapping[str, object]) -> str:
+    values = _cloud_api_diff_values(row)
+    if values.get("name"):
+        return f"name:{values['name']}"
+    if values.get("url_sha256"):
+        return f"url:{values['url_sha256']}"
+    parts = [
+        str(values.get("service") or ""),
+        str(values.get("method") or ""),
+        str(values.get("status") or ""),
+        str(values.get("response_sha256") or ""),
+    ]
+    return "cloud-api-fingerprint:" + hashlib.sha256("|".join(parts).encode("utf-8", errors="replace")).hexdigest()
+
+
+def _cloud_api_diff_values(row: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "name": row.get("name"),
+        "service": row.get("service"),
+        "method": row.get("method"),
+        "url_sha256": row.get("url_sha256"),
+        "status": row.get("status"),
+        "response_sha256": row.get("response_sha256"),
+        "response_size": row.get("response_size"),
+    }
 
 
 def cloud_credential_core_accuracy_gates(

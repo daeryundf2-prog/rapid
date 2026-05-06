@@ -545,6 +545,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "PST/OST native limitation warning",
             "threading/dedup validation warning",
             "legal privilege boundary",
+            "trusted email mailbox export diff pass",
         ),
     },
     {
@@ -559,6 +560,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "source hash and export-scope warning",
             "sidecar/media/linkage limitation",
             "provider schema/timezone warning",
+            "trusted Google Takeout/provider diff pass",
         ),
     },
     {
@@ -573,6 +575,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "source hash and export-scope warning",
             "ADP/shared-album limitation warning",
             "provider retention/schema warning",
+            "trusted iCloud/provider export diff pass",
         ),
     },
     {
@@ -587,6 +590,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "source hash and eDiscovery/export warning",
             "permissions/retention/deleted limitation",
             "provider schema/timestamp warning",
+            "trusted M365/eDiscovery export diff pass",
         ),
     },
     {
@@ -601,6 +605,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "response hash/provenance",
             "pagination/backoff limitation warning",
             "provider OAuth/scope/legal warning",
+            "trusted cloud API/provider response diff pass",
         ),
     },
     {
