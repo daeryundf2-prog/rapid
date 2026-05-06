@@ -9,6 +9,12 @@ from datetime import datetime
 from pathlib import Path
 
 from rapidtriage.cli import main
+from rapidtriage.core.files import (
+    build_duplicate_content_trusted_diff,
+    duplicate_content_core_accuracy_gates,
+    duplicate_detection_assessment,
+)
+from rapidtriage.core.hash_cache import build_hash_cache_trusted_diff, hash_cache_assessment
 
 
 def candidate_categories(candidate: dict[str, object]) -> list[str]:
@@ -50,7 +56,20 @@ class RapidTriageFilesTests(unittest.TestCase):
             self.assertIn("#76", payload["hash_cache_assessment"]["commercial_gap_ids"])
             self.assertIn("#77", payload["duplicate_detection_assessment"]["commercial_gap_ids"])
             self.assertEqual(payload["hash_cache_assessment"]["core_accuracy_gates"][0]["gap_id"], "#76")
+            self.assertEqual(payload["hash_cache_assessment"]["trusted_hash_cache_diff"]["status"], "missing")
+            self.assertIn(
+                "trusted-hash-cache-manifest-diff-missing",
+                payload["hash_cache_assessment"]["blockers"],
+            )
             self.assertEqual(payload["duplicate_detection_assessment"]["core_accuracy_gates"][0]["gap_id"], "#77")
+            self.assertEqual(
+                payload["duplicate_detection_assessment"]["trusted_duplicate_content_diff"]["status"],
+                "missing",
+            )
+            self.assertIn(
+                "trusted-duplicate-file-manifest-diff-missing",
+                payload["duplicate_detection_assessment"]["blockers"],
+            )
             self.assertEqual({gate["gap_id"] for gate in payload["core_accuracy_gates"]}, {"#76", "#77"})
             category_counts = payload["summary"]["category_counts"]
             self.assertGreaterEqual(category_counts["documents"], 1)
@@ -140,6 +159,36 @@ class RapidTriageFilesTests(unittest.TestCase):
                 "duplicate group counts",
                 payload["duplicate_detection_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
+
+    def test_hash_cache_and_duplicate_trusted_diffs_promote_core_gates(self) -> None:
+        hash_assessment = hash_cache_assessment()
+        hash_diff = build_hash_cache_trusted_diff(hash_assessment, hash_assessment)
+        promoted_hash = hash_cache_assessment(trusted_diff=hash_diff)
+
+        self.assertEqual(hash_diff["status"], "pass")
+        self.assertIn(
+            "trusted hash-cache manifest diff pass",
+            promoted_hash["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+
+        groups = [
+            {
+                "sha256": "a" * 64,
+                "file_count": 2,
+                "size": 12,
+                "paths": ["/case/a.txt", "/case/b.txt"],
+            }
+        ]
+        duplicate_diff = build_duplicate_content_trusted_diff(groups, groups)
+        promoted_duplicate = duplicate_detection_assessment(groups, trusted_diff=duplicate_diff)
+        promoted_gates = duplicate_content_core_accuracy_gates(groups, trusted_diff=duplicate_diff)
+
+        self.assertEqual(duplicate_diff["status"], "pass")
+        self.assertIn(
+            "trusted duplicate file manifest diff pass",
+            promoted_duplicate["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn("trusted duplicate file manifest diff pass", promoted_gates[0]["satisfied_checks"])
 
 
 if __name__ == "__main__":

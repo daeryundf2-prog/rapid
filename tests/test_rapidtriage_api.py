@@ -16,15 +16,19 @@ from rapidtriage.api.app import (
     build_hex_viewer_trusted_diff,
     build_large_sqlite_fts_trusted_diff,
     build_media_transcript_trusted_diff,
+    build_pagination_trusted_diff,
     build_preview_sandbox_trusted_diff,
     build_sqlite_viewer_trusted_diff,
+    build_ui_virtualization_trusted_diff,
     email_viewer_core_accuracy_gates,
     create_app,
     hex_viewer_core_accuracy_gates,
     large_sqlite_fts_core_accuracy_gates,
     media_viewer_core_accuracy_gates,
+    pagination_core_accuracy_gates,
     preview_sandbox_core_accuracy_gates,
     sqlite_viewer_core_accuracy_gates,
+    ui_virtualization_core_accuracy_gates,
 )
 from rapidtriage.cli import build_web_parser
 from rapidtriage.core.jobs import RunJobStore
@@ -558,6 +562,37 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(paged_files["pagination"]["core_accuracy_gates"][0]["gap_id"], "#78")
             self.assertEqual(paged_files["pagination"]["core_accuracy_gates"][1]["gap_id"], "#79")
             self.assertEqual(paged_files["pagination"]["ui_virtualization"]["core_accuracy_gates"][0]["gap_id"], "#79")
+            self.assertEqual(
+                paged_files["pagination"]["pagination_assessment"]["trusted_pagination_diff"]["status"],
+                "missing",
+            )
+            self.assertEqual(
+                paged_files["pagination"]["ui_virtualization"]["trusted_ui_virtualization_diff"]["status"],
+                "missing",
+            )
+            pagination_diff = build_pagination_trusted_diff(paged_files["pagination"], paged_files["pagination"])
+            pagination_gates = pagination_core_accuracy_gates(
+                "candidates",
+                total=paged_files["pagination"]["total"],
+                returned=paged_files["pagination"]["returned"],
+                has_more=paged_files["pagination"]["has_more"],
+                trusted_diff=pagination_diff,
+            )
+            ui_diff = build_ui_virtualization_trusted_diff(
+                paged_files["pagination"]["ui_virtualization"],
+                paged_files["pagination"]["ui_virtualization"],
+            )
+            ui_gates = ui_virtualization_core_accuracy_gates(
+                label="candidates",
+                total=paged_files["pagination"]["ui_virtualization"]["total_rows"],
+                visible=paged_files["pagination"]["ui_virtualization"]["visible_rows"],
+                api_pagination=True,
+                trusted_diff=ui_diff,
+            )
+            self.assertEqual(pagination_diff["status"], "pass")
+            self.assertIn("trusted pagination cursor manifest diff pass", pagination_gates[0]["satisfied_checks"])
+            self.assertEqual(ui_diff["status"], "pass")
+            self.assertIn("trusted UI virtualization manifest diff pass", ui_gates[0]["satisfied_checks"])
             cursor_files_response = client.get(
                 f"/api/runs/{run_id}/files",
                 params={"cursor": paged_files["pagination"]["cursor"], "limit": 2},

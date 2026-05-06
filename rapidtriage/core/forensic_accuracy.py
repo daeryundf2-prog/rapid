@@ -1145,6 +1145,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "hit/miss counters emitted",
             "hash cache assessment attached",
             "persistent cache limitation warning",
+            "trusted hash-cache manifest diff pass",
         ),
     },
     {
@@ -1159,6 +1160,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "duplicate group counts",
             "representative paths listed",
             "suppression verification warning",
+            "trusted duplicate file manifest diff pass",
         ),
     },
     {
@@ -1173,6 +1175,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "next/previous cursor support",
             "bounded row return",
             "snapshot isolation limitation warning",
+            "trusted pagination cursor manifest diff pass",
         ),
     },
     {
@@ -1187,6 +1190,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "keyboard/filter workflow preserved",
             "API pagination link preserved",
             "true virtual scroller limitation warning",
+            "trusted UI virtualization manifest diff pass",
         ),
     },
     {
@@ -1201,6 +1205,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "failed/canceled retry support",
             "state-file cancel flag persisted",
             "partial output cleanup limitation warning",
+            "trusted cancellation/retry transition diff pass",
         ),
     },
     {

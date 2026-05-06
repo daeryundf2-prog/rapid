@@ -22,7 +22,14 @@ from rapidtriage.core.benchmark import (
     build_stress_run_trusted_diff,
     stress_core_accuracy_gates,
 )
-from rapidtriage.core.jobs import RunJobStore, RunRequest, build_job_queue_trusted_diff, job_queue_core_accuracy_gates
+from rapidtriage.core.jobs import (
+    RunJobStore,
+    RunRequest,
+    build_cancellation_retry_trusted_diff,
+    build_job_queue_trusted_diff,
+    cancellation_retry_assessment,
+    job_queue_core_accuracy_gates,
+)
 from rapidtriage.core.sample_case import run_sample_workflow
 
 
@@ -959,6 +966,14 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "failed/canceled retry support",
                 canceled.to_dict()["cancellation_retry_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            self.assertEqual(
+                canceled.to_dict()["cancellation_retry_assessment"]["trusted_cancellation_retry_diff"]["status"],
+                "missing",
+            )
+            self.assertIn(
+                "trusted-cancellation-retry-transition-diff-missing",
+                canceled.to_dict()["cancellation_retry_assessment"]["blockers"],
+            )
             self.assertTrue(all("#69" in step["commercial_gap_ids"] for step in canceled.to_dict()["steps"]))
             self.assertTrue(all(step["core_accuracy_gates"][0]["gap_id"] == "#69" for step in canceled.to_dict()["steps"]))
             self.assertTrue(all("#80" in step["operational_gap_ids"] for step in canceled.to_dict()["steps"]))
@@ -982,6 +997,13 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertEqual(job_diff["status"], "pass")
             self.assertIn("trusted job transition-log diff pass", job_gates[0]["satisfied_checks"])
+            cancel_diff = build_cancellation_retry_trusted_diff(job_payload, job_payload)
+            cancel_assessment = cancellation_retry_assessment(canceled, trusted_diff=cancel_diff)
+            self.assertEqual(cancel_diff["status"], "pass")
+            self.assertIn(
+                "trusted cancellation/retry transition diff pass",
+                cancel_assessment["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertTrue(
                 all(step["commercial_uplift_evidence"]["batch_id"] == "commercial-uplift-066-070" for step in canceled.to_dict()["steps"])
             )

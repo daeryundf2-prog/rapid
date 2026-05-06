@@ -86,6 +86,10 @@ PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER = "preview-sandbox-trusted-no-exec-manifest
 PREVIEW_SANDBOX_TRUSTED_TOOLS = {"no-exec-preview-manifest", "browser-sandbox-review", "active-content-test-corpus"}
 SQLITE_FTS_TRUSTED_DIFF_BLOCKER = "large-sqlite-fts-trusted-query-plan-diff-required"
 SQLITE_FTS_TRUSTED_TOOLS = {"sqlite-query-plan-manifest", "large-db-profile-oracle", "fts-benchmark-manifest"}
+PAGINATION_TRUSTED_DIFF_BLOCKER_78 = "trusted-pagination-cursor-manifest-diff-missing"
+PAGINATION_TRUSTED_TOOLS = {"pagination-cursor-manifest", "api-pagination-oracle", "known-answer-page-window-export"}
+UI_VIRTUALIZATION_TRUSTED_DIFF_BLOCKER_79 = "trusted-ui-virtualization-manifest-diff-missing"
+UI_VIRTUALIZATION_TRUSTED_TOOLS = {"ui-virtualization-manifest", "browser-e2e-row-window-export", "large-table-render-oracle"}
 
 
 class RunCreateRequest(BaseModel):
@@ -1029,13 +1033,26 @@ def paginate_payload(
     return page
 
 
-def pagination_assessment(collection_name: str, *, total: int, returned: int) -> dict[str, object]:
+def pagination_assessment(
+    collection_name: str,
+    *,
+    total: int,
+    returned: int,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     core_gates = pagination_core_accuracy_gates(
         collection_name,
         total=total,
         returned=returned,
         has_more=returned < total,
+        trusted_diff=trusted_diff,
     )
+    blockers = [
+        "cursor-is-offset-token-not-snapshot-isolated-database-cursor",
+        "search-endpoints-still-return-bounded-result-sets-before-case-db-pagination",
+    ]
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(PAGINATION_TRUSTED_DIFF_BLOCKER_78)
     return {
         "component": "artifact-pagination-cursor-api",
         "status": "offset-compatible-cursor-pagination",
@@ -1044,11 +1061,9 @@ def pagination_assessment(collection_name: str, *, total: int, returned: int) ->
         "total": total,
         "returned": returned,
         "ready_for_court_report": False,
+        "trusted_pagination_diff": dict(trusted_diff) if trusted_diff else missing_pagination_trusted_diff(),
         "core_accuracy_gates": core_gates,
-        "blockers": [
-            "cursor-is-offset-token-not-snapshot-isolated-database-cursor",
-            "search-endpoints-still-return-bounded-result-sets-before-case-db-pagination",
-        ],
+        "blockers": blockers,
     }
 
 
@@ -1058,23 +1073,40 @@ def pagination_core_accuracy_gates(
     total: int,
     returned: int,
     has_more: bool,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
+    satisfied = [
+        "cursor token emitted",
+        "offset/limit/total recorded",
+        "next/previous cursor support",
+        "bounded row return",
+        "snapshot isolation limitation warning",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted pagination cursor manifest diff pass")
     return [
         build_accuracy_gate(
             78,
-            satisfied_checks=[
-                "cursor token emitted",
-                "offset/limit/total recorded",
-                "next/previous cursor support",
-                "bounded row return",
-                "snapshot isolation limitation warning",
-            ],
+            satisfied_checks=satisfied,
             evidence_refs=[f"collection:{collection_name}", f"total:{total}", f"returned:{returned}", f"has_more:{has_more}"],
         )
     ]
 
 
-def ui_virtualization_metadata(*, label: str, total: int, visible: int, api_pagination: bool) -> dict[str, object]:
+def ui_virtualization_metadata(
+    *,
+    label: str,
+    total: int,
+    visible: int,
+    api_pagination: bool,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    blockers = [
+        "web-ui-uses-bounded-row-windows-and-api-pagination-not-a-full-recycling-virtual-scroller",
+        "viewport-persistence-and-keyboard-navigation-require-browser-e2e-validation",
+    ]
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(UI_VIRTUALIZATION_TRUSTED_DIFF_BLOCKER_79)
     return {
         "component": "ui-virtualization",
         "status": "bounded-visible-row-window",
@@ -1084,16 +1116,15 @@ def ui_virtualization_metadata(*, label: str, total: int, visible: int, api_pagi
         "visible_rows": visible,
         "api_pagination": api_pagination,
         "ready_for_court_report": False,
+        "trusted_ui_virtualization_diff": dict(trusted_diff) if trusted_diff else missing_ui_virtualization_trusted_diff(),
         "core_accuracy_gates": ui_virtualization_core_accuracy_gates(
             label=label,
             total=total,
             visible=visible,
             api_pagination=api_pagination,
+            trusted_diff=trusted_diff,
         ),
-        "blockers": [
-            "web-ui-uses-bounded-row-windows-and-api-pagination-not-a-full-recycling-virtual-scroller",
-            "viewport-persistence-and-keyboard-navigation-require-browser-e2e-validation",
-        ],
+        "blockers": blockers,
     }
 
 
@@ -1103,6 +1134,7 @@ def ui_virtualization_core_accuracy_gates(
     total: int,
     visible: int,
     api_pagination: bool,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
         "bounded DOM row window",
@@ -1112,6 +1144,8 @@ def ui_virtualization_core_accuracy_gates(
     ]
     if api_pagination:
         satisfied.append("API pagination link preserved")
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted UI virtualization manifest diff pass")
     return [
         build_accuracy_gate(
             79,
@@ -1119,6 +1153,81 @@ def ui_virtualization_core_accuracy_gates(
             evidence_refs=[f"label:{label}", f"total_rows:{total}", f"visible_rows:{visible}"],
         )
     ]
+
+
+def missing_pagination_trusted_diff() -> dict[str, object]:
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["pagination"]],
+        "blocker": PAGINATION_TRUSTED_DIFF_BLOCKER_78,
+        "required_trusted_tools": sorted(PAGINATION_TRUSTED_TOOLS),
+    }
+
+
+def missing_ui_virtualization_trusted_diff() -> dict[str, object]:
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["ui_virtualization"]],
+        "blocker": UI_VIRTUALIZATION_TRUSTED_DIFF_BLOCKER_79,
+        "required_trusted_tools": sorted(UI_VIRTUALIZATION_TRUSTED_TOOLS),
+    }
+
+
+def build_pagination_trusted_diff(
+    rapid_page: Mapping[str, object],
+    trusted_page: Mapping[str, object],
+    *,
+    trusted_tool: str = "pagination-cursor-manifest",
+) -> dict[str, object]:
+    rapid_pagination = extract_pagination_manifest(rapid_page)
+    trusted_pagination = extract_pagination_manifest(trusted_page)
+    compared_fields = ["collection", "offset", "limit", "returned", "total", "next_cursor", "previous_cursor", "has_more"]
+    mismatches = [
+        {"field": field, "rapid": rapid_pagination.get(field), "trusted": trusted_pagination.get(field)}
+        for field in compared_fields
+        if rapid_pagination.get(field) != trusted_pagination.get(field)
+    ]
+    status = "pass" if not mismatches and trusted_tool in PAGINATION_TRUSTED_TOOLS else "fail"
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["pagination"]],
+        "compared_fields": compared_fields,
+        "mismatches": mismatches,
+        "blocker": None if status == "pass" else PAGINATION_TRUSTED_DIFF_BLOCKER_78,
+    }
+
+
+def build_ui_virtualization_trusted_diff(
+    rapid_metadata: Mapping[str, object],
+    trusted_metadata: Mapping[str, object],
+    *,
+    trusted_tool: str = "ui-virtualization-manifest",
+) -> dict[str, object]:
+    compared_fields = ["label", "total_rows", "visible_rows", "api_pagination"]
+    mismatches = [
+        {"field": field, "rapid": rapid_metadata.get(field), "trusted": trusted_metadata.get(field)}
+        for field in compared_fields
+        if rapid_metadata.get(field) != trusted_metadata.get(field)
+    ]
+    status = "pass" if not mismatches and trusted_tool in UI_VIRTUALIZATION_TRUSTED_TOOLS else "fail"
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["ui_virtualization"]],
+        "compared_fields": compared_fields,
+        "mismatches": mismatches,
+        "blocker": None if status == "pass" else UI_VIRTUALIZATION_TRUSTED_DIFF_BLOCKER_79,
+    }
+
+
+def extract_pagination_manifest(page: Mapping[str, object]) -> Mapping[str, object]:
+    pagination = page.get("pagination")
+    if isinstance(pagination, Mapping):
+        return pagination
+    return page
 
 
 def encode_pagination_cursor(offset: int) -> str:

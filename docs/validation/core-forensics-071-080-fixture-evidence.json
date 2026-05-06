@@ -54,45 +54,45 @@
       "title": "File hash cache",
       "test_files": ["tests/test_rapidtriage_files.py", "tests/test_rapidtriage_api.py"],
       "assertions": [
-        "File scan and source metadata outputs preserve MD5/SHA1/SHA256 support, path-size-mtime cache metadata, hit/miss counters, and #76 core_accuracy_gates."
+        "File scan and source metadata outputs preserve MD5/SHA1/SHA256 support, path-size-mtime cache metadata, hit/miss counters, trusted hash-cache manifest diff helpers/gates, and #76 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Persistent content-addressed cache and large-case hit-ratio validation."]
+      "remaining_external_validation": ["Persistent content-addressed cache, trusted hash-cache manifests, and large-case hit-ratio validation."]
     },
     {
       "item": 77,
       "title": "Duplicate file/content detection",
       "test_files": ["tests/test_rapidtriage_files.py"],
       "assertions": [
-        "File scans preserve same-size candidate bucketing, bounded SHA256 confirmation, duplicate group counts, representative paths, and #77 core_accuracy_gates."
+        "File scans preserve same-size candidate bucketing, bounded SHA256 confirmation, duplicate group counts, representative paths, trusted duplicate file manifest diff helpers/gates, and #77 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Fuzzy text/media duplicate grouping and analyst suppression workflow validation."]
+      "remaining_external_validation": ["Fuzzy text/media duplicate grouping, trusted duplicate group manifests, and analyst suppression workflow validation."]
     },
     {
       "item": 78,
       "title": "Artifact pagination/cursor API",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "API output preserves cursor tokens, offset/limit/total metadata, next/previous cursors, bounded rows, and #78 core_accuracy_gates."
+        "API output preserves cursor tokens, offset/limit/total metadata, next/previous cursors, bounded rows, trusted pagination cursor manifest diff helpers/gates, and #78 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Snapshot-isolated database cursors and endpoint-wide compatibility validation."]
+      "remaining_external_validation": ["Snapshot-isolated database cursors, trusted pagination manifests, and endpoint-wide compatibility validation."]
     },
     {
       "item": 79,
       "title": "UI virtualization for massive result tables",
       "test_files": ["tests/test_rapidtriage_api.py", "rapidtriage/web/static/app.js"],
       "assertions": [
-        "API pagination and web UI metadata preserve bounded visible row windows, visible-row disclosure, keyboard/filter workflow, API pagination links, and #79 core_accuracy_gates."
+        "API pagination and web UI metadata preserve bounded visible row windows, visible-row disclosure, keyboard/filter workflow, API pagination links, trusted UI virtualization manifest diff helpers/gates, and #79 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Full recycling virtual scroller, persisted viewport restoration, and browser e2e performance evidence."]
+      "remaining_external_validation": ["Full recycling virtual scroller, trusted browser row-window manifests, persisted viewport restoration, and browser e2e performance evidence."]
     },
     {
       "item": 80,
       "title": "Long-running job cancellation/retry",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Job payloads preserve queued/running cancellation, failed/canceled retry support, persisted cancel flags, partial-output warnings, and #80 core_accuracy_gates."
+        "Job payloads preserve queued/running cancellation, failed/canceled retry support, persisted cancel flags, partial-output warnings, trusted cancellation/retry transition diff helpers/gates, and #80 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Parser-level cancellation under load and partial-output cleanup/resume validation."]
+      "remaining_external_validation": ["Parser-level cancellation under load, trusted cancellation/retry transition manifests, and partial-output cleanup/resume validation."]
     }
   ]
 }

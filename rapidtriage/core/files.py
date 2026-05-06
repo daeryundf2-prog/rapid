@@ -25,6 +25,8 @@ DEFAULT_FILE_CATEGORIES: Tuple[str, ...] = (
     "images",
 )
 DEDUPLICATE_CONTENT_GAP_ID = "#77"
+DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77 = "trusted-duplicate-file-manifest-diff-missing"
+DUPLICATE_CONTENT_TRUSTED_TOOLS = {"duplicate-file-manifest", "known-answer-duplicate-group-export", "content-hash-oracle"}
 EXECUTABLE_BITS = stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOTH
 
 CATEGORY_RULES: Dict[str, Dict[str, Tuple[str, ...]]] = {
@@ -553,7 +555,11 @@ def build_duplicate_content_groups(
     return groups
 
 
-def duplicate_detection_assessment(groups: Sequence[Mapping[str, object]]) -> dict[str, object]:
+def duplicate_detection_assessment(
+    groups: Sequence[Mapping[str, object]],
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     satisfied = [
         "same-size candidate bucketing",
         "bounded SHA256 confirmation",
@@ -561,6 +567,15 @@ def duplicate_detection_assessment(groups: Sequence[Mapping[str, object]]) -> di
         "representative paths listed",
         "suppression verification warning",
     ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted duplicate file manifest diff pass")
+    blockers = [
+        "near-duplicate-text-and-media-similarity-are-not-full-file-deduplication",
+        "hashing-is-bounded-to-protect-large-case-responsiveness",
+        "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports",
+    ]
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77)
     return {
         "component": "duplicate-file-content-detection",
         "status": "bounded-sha256-same-size-grouping",
@@ -568,17 +583,18 @@ def duplicate_detection_assessment(groups: Sequence[Mapping[str, object]]) -> di
         "duplicate_group_count": len(groups),
         "duplicate_file_count": sum(int(group.get("file_count") or 0) for group in groups),
         "ready_for_court_report": False,
-        "core_accuracy_gates": duplicate_content_core_accuracy_gates(groups, satisfied_checks=satisfied),
+        "trusted_duplicate_content_diff": dict(trusted_diff) if trusted_diff else missing_duplicate_content_trusted_diff(),
+        "core_accuracy_gates": duplicate_content_core_accuracy_gates(
+            groups,
+            satisfied_checks=satisfied,
+            trusted_diff=trusted_diff,
+        ),
         "supports": [
             "same-size-candidate-bucketing",
             "bounded-content-sha256-confirmation",
             "representative-path-lists",
         ],
-        "blockers": [
-            "near-duplicate-text-and-media-similarity-are-not-full-file-deduplication",
-            "hashing-is-bounded-to-protect-large-case-responsiveness",
-            "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports",
-        ],
+        "blockers": blockers,
     }
 
 
@@ -586,6 +602,7 @@ def duplicate_content_core_accuracy_gates(
     groups: Sequence[Mapping[str, object]],
     *,
     satisfied_checks: Sequence[str] | None = None,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = list(
         satisfied_checks
@@ -597,6 +614,8 @@ def duplicate_content_core_accuracy_gates(
             "suppression verification warning",
         )
     )
+    if trusted_diff and trusted_diff.get("status") == "pass" and "trusted duplicate file manifest diff pass" not in satisfied:
+        satisfied.append("trusted duplicate file manifest diff pass")
     return [
         build_accuracy_gate(
             77,
@@ -607,3 +626,59 @@ def duplicate_content_core_accuracy_gates(
             ],
         )
     ]
+
+
+def missing_duplicate_content_trusted_diff() -> dict[str, object]:
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [DEDUPLICATE_CONTENT_GAP_ID],
+        "blocker": DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77,
+        "required_trusted_tools": sorted(DUPLICATE_CONTENT_TRUSTED_TOOLS),
+    }
+
+
+def build_duplicate_content_trusted_diff(
+    rapid_groups: Sequence[Mapping[str, object]],
+    trusted_groups: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str = "duplicate-file-manifest",
+) -> dict[str, object]:
+    rapid_index = index_duplicate_groups(rapid_groups)
+    trusted_index = index_duplicate_groups(trusted_groups)
+    mismatches: list[dict[str, object]] = []
+    for sha256, trusted_group in trusted_index.items():
+        rapid_group = rapid_index.get(sha256)
+        if rapid_group is None:
+            mismatches.append({"sha256": sha256, "field": "group", "rapid": None, "trusted": "present"})
+            continue
+        for field in ("file_count", "size", "paths"):
+            rapid_value = rapid_group.get(field)
+            trusted_value = trusted_group.get(field)
+            if field == "paths":
+                rapid_value = sorted(str(path) for path in rapid_value or [])
+                trusted_value = sorted(str(path) for path in trusted_value or [])
+            if rapid_value != trusted_value:
+                mismatches.append({"sha256": sha256, "field": field, "rapid": rapid_value, "trusted": trusted_value})
+    for sha256 in sorted(set(rapid_index) - set(trusted_index)):
+        mismatches.append({"sha256": sha256, "field": "group", "rapid": "present", "trusted": None})
+    status = "pass" if not mismatches and trusted_tool in DUPLICATE_CONTENT_TRUSTED_TOOLS else "fail"
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [DEDUPLICATE_CONTENT_GAP_ID],
+        "rapid_group_count": len(rapid_index),
+        "trusted_group_count": len(trusted_index),
+        "mismatches": mismatches,
+        "blocker": None if status == "pass" else DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77,
+    }
+
+
+def index_duplicate_groups(groups: Sequence[Mapping[str, object]]) -> dict[str, Mapping[str, object]]:
+    indexed: dict[str, Mapping[str, object]] = {}
+    for group in groups:
+        sha256 = str(group.get("sha256") or "")
+        if not sha256:
+            continue
+        indexed[sha256] = group
+    return indexed

@@ -21,6 +21,12 @@ BACKGROUND_JOB_GAP_ID = "#69"
 LONG_RUNNING_JOB_GAP_ID = "#80"
 PERFORMANCE_BATCH_ID = "commercial-uplift-066-070"
 JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69 = "trusted-job-transition-log-diff-missing"
+CANCELLATION_RETRY_TRUSTED_DIFF_BLOCKER_80 = "trusted-cancellation-retry-transition-diff-missing"
+CANCELLATION_RETRY_TRUSTED_TOOLS = {
+    "cancellation-retry-transition-manifest",
+    "job-store-transition-oracle",
+    "long-running-job-control-export",
+}
 
 
 def now_iso() -> str:
@@ -673,7 +679,7 @@ def job_queue_reportability_decision(
     }
 
 
-def cancellation_retry_assessment(job: RunJob) -> Dict[str, object]:
+def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, object] | None = None) -> Dict[str, object]:
     satisfied = [
         "queued job cancellation",
         "running cancel request recorded",
@@ -681,6 +687,14 @@ def cancellation_retry_assessment(job: RunJob) -> Dict[str, object]:
         "state-file cancel flag persisted",
         "partial output cleanup limitation warning",
     ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted cancellation/retry transition diff pass")
+    blockers = [
+        "running-parser-cancel-is-cooperative-and-stage-boundary-limited",
+        "partial-output-cleanup-and-resume-policy-still-needs-large-case-validation",
+    ]
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(CANCELLATION_RETRY_TRUSTED_DIFF_BLOCKER_80)
     return {
         "component": "long-running-job-cancellation-retry",
         "status": "cooperative-cancel-and-failed-canceled-retry-enabled",
@@ -689,6 +703,7 @@ def cancellation_retry_assessment(job: RunJob) -> Dict[str, object]:
         "cancellation_requested": job.cancellation_requested,
         "retry_supported_for": ["failed", "canceled"],
         "ready_for_court_report": False,
+        "trusted_cancellation_retry_diff": dict(trusted_diff) if trusted_diff else missing_cancellation_retry_trusted_diff(),
         "core_accuracy_gates": [
             build_accuracy_gate(
                 80,
@@ -706,10 +721,64 @@ def cancellation_retry_assessment(job: RunJob) -> Dict[str, object]:
             "failed-or-canceled-run-retry",
             "state-file-persisted-cancel-flag",
         ],
-        "blockers": [
-            "running-parser-cancel-is-cooperative-and-stage-boundary-limited",
-            "partial-output-cleanup-and-resume-policy-still-needs-large-case-validation",
-        ],
+        "blockers": blockers,
+    }
+
+
+def missing_cancellation_retry_trusted_diff() -> Dict[str, object]:
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [LONG_RUNNING_JOB_GAP_ID],
+        "blocker": CANCELLATION_RETRY_TRUSTED_DIFF_BLOCKER_80,
+        "required_trusted_tools": sorted(CANCELLATION_RETRY_TRUSTED_TOOLS),
+    }
+
+
+def build_cancellation_retry_trusted_diff(
+    rapid_job: Mapping[str, object],
+    trusted_job: Mapping[str, object],
+    *,
+    trusted_tool: str = "cancellation-retry-transition-manifest",
+) -> Dict[str, object]:
+    rapid_manifest = cancellation_retry_manifest(rapid_job)
+    trusted_manifest = cancellation_retry_manifest(trusted_job)
+    compared_fields = ["status", "cancellation_requested", "retry_supported_for", "step_statuses"]
+    mismatches = [
+        {"field": field, "rapid": rapid_manifest.get(field), "trusted": trusted_manifest.get(field)}
+        for field in compared_fields
+        if rapid_manifest.get(field) != trusted_manifest.get(field)
+    ]
+    status = "pass" if not mismatches and trusted_tool in CANCELLATION_RETRY_TRUSTED_TOOLS else "fail"
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [LONG_RUNNING_JOB_GAP_ID],
+        "compared_fields": compared_fields,
+        "mismatches": mismatches,
+        "blocker": None if status == "pass" else CANCELLATION_RETRY_TRUSTED_DIFF_BLOCKER_80,
+    }
+
+
+def cancellation_retry_manifest(job: Mapping[str, object]) -> Dict[str, object]:
+    assessment = job.get("cancellation_retry_assessment")
+    retry_supported = []
+    if isinstance(assessment, Mapping):
+        retry_value = assessment.get("retry_supported_for")
+        if isinstance(retry_value, list):
+            retry_supported = sorted(str(value) for value in retry_value)
+    steps = job.get("steps")
+    step_statuses: list[str] = []
+    if isinstance(steps, list):
+        for step in steps:
+            if not isinstance(step, Mapping):
+                continue
+            step_statuses.append(f"{step.get('name')}:{step.get('status')}")
+    return {
+        "status": job.get("status"),
+        "cancellation_requested": bool(job.get("cancellation_requested")),
+        "retry_supported_for": retry_supported,
+        "step_statuses": step_statuses,
     }
 
 
