@@ -18,6 +18,7 @@
       "expected": {
         "required_assertions": [
           "AI browser storage transcript candidates preserve Q/A pairing, orphan counts, source hashes, storage provenance, and #21 core_accuracy_gates",
+          "AI transcript trusted export diff helper requires service/export row equality before satisfying the #21 trusted AI transcript export diff pass gate",
           "AI transcript reportability decisions block complete-transcript claims until service-side export/schema/deleted-fragment validation exists"
         ]
       },
@@ -38,6 +39,7 @@
       "expected": {
         "required_assertions": [
           "E01 adapter and extraction metadata preserve source integrity, tool/command evidence, partition offset, read-only recovery, limitations, and #22 core_accuracy_gates",
+          "E01/Ex01 trusted workflow diff helper requires trusted image workflow equality before satisfying the #22 trusted E01/Ex01 workflow diff pass gate",
           "E01/Ex01 reportability decisions block native-complete image claims until trusted-tool and corrupt/encrypted corpus validation exists"
         ]
       },
@@ -58,6 +60,7 @@
       "expected": {
         "required_assertions": [
           "RAW/split adapter and extraction metadata preserve split ordering/gap checks, partition parsing, tsk_recover audit, deleted-file expectations, encrypted warnings, and #23 core_accuracy_gates",
+          "RAW/split trusted recovery diff helper requires recovered path/hash equality before satisfying the #23 trusted RAW/split image recovery diff pass gate",
           "RAW/split reportability decisions block native-complete filesystem claims until large split-set, native parser, and encrypted-volume validation exists"
         ]
       },
@@ -78,6 +81,7 @@
       "expected": {
         "required_assertions": [
           "Virtual disk adapter and extraction metadata preserve qemu-img evidence, converted raw hash/provenance, nested extraction, VM limitations, and #24 core_accuracy_gates",
+          "Virtual disk trusted conversion diff helper requires converted raw/provenance equality before satisfying the #24 trusted virtual disk conversion diff pass gate",
           "Virtual disk reportability decisions block chain-complete VM claims until snapshot/differencing/hypervisor validation exists"
         ]
       },
@@ -97,6 +101,7 @@
       "expected": {
         "required_assertions": [
           "Forensic container detection preserves type, source integrity, export-first disclosure, metadata/deleted blockers, encrypted/compressed warnings, #25 core_accuracy_gates, and #25 commercial_uplift_evidence implemented/usable/validated flags",
+          "Forensic container trusted manifest diff helper requires vendor export/source manifest equality before satisfying the #25 verified vendor export manifest diff pass gate",
           "Forensic container reportability decisions block native proprietary-container claims until native parser or verified vendor export manifests exist"
         ]
       },

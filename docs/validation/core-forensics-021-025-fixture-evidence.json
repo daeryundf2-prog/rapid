@@ -21,7 +21,8 @@
       "number": 21,
       "title": "AI service transcript parser for ChatGPT/Claude/Gemini/Perplexity",
       "assertions": [
-        "browser-ai-conversation rows preserve service labels, Q/A pairing confidence, orphan counts, storage/source provenance, privacy/completeness warnings, #21 core_accuracy_gates, and complete-transcript reportability blockers."
+        "browser-ai-conversation rows preserve service labels, Q/A pairing confidence, orphan counts, storage/source provenance, privacy/completeness warnings, #21 core_accuracy_gates, and complete-transcript reportability blockers.",
+        "build_ai_transcript_trusted_diff compares RapidTriage Q/A candidates against service/export rows and only clears the #21 trusted diff gate on recognized-tool row equality."
       ],
       "blockers_kept": [
         "service-side export completeness validation",
@@ -33,7 +34,8 @@
       "number": 22,
       "title": "E01/Ex01 fully integrated workflow",
       "assertions": [
-        "E01 evidence adapter and extraction metadata preserve source integrity, tool preflight/commands, partition selection, read-only recovery provenance, limitation reporting, #22 core_accuracy_gates, and native-complete reportability blockers."
+        "E01 evidence adapter and extraction metadata preserve source integrity, tool preflight/commands, partition selection, read-only recovery provenance, limitation reporting, #22 core_accuracy_gates, and native-complete reportability blockers.",
+        "build_image_workflow_trusted_diff compares E01/Ex01 source hash, partition, recovery workflow, and recovered-file provenance against trusted image workflow rows before satisfying the #22 trusted diff gate."
       ],
       "blockers_kept": [
         "native E01 segment metadata parsing",
@@ -45,7 +47,8 @@
       "number": 23,
       "title": "RAW/split image robust partition/filesystem handling",
       "assertions": [
-        "RAW/split evidence adapter and extraction metadata preserve split discovery, source hashes, partition parsing, tsk_recover audit commands, deleted-file recovery expectations, encrypted-volume warnings, #23 core_accuracy_gates, and native-filesystem reportability blockers."
+        "RAW/split evidence adapter and extraction metadata preserve split discovery, source hashes, partition parsing, tsk_recover audit commands, deleted-file recovery expectations, encrypted-volume warnings, #23 core_accuracy_gates, and native-filesystem reportability blockers.",
+        "build_image_workflow_trusted_diff compares RAW/split source, partition, recovery mode, and recovered path/hash rows against TSK/known-answer output before satisfying the #23 trusted diff gate."
       ],
       "blockers_kept": [
         "native partition/filesystem parser",
@@ -57,7 +60,8 @@
       "number": 24,
       "title": "VHD/VHDX/VMDK/VDI/QCOW direct handling polish",
       "assertions": [
-        "Virtual disk adapter and extraction metadata preserve qemu-img preflight/commands, snapshot-chain limitation disclosure, converted raw hash/provenance, nested raw extraction metadata, unsupported/encrypted warnings, #24 core_accuracy_gates, and chain-complete reportability blockers."
+        "Virtual disk adapter and extraction metadata preserve qemu-img preflight/commands, snapshot-chain limitation disclosure, converted raw hash/provenance, nested raw extraction metadata, unsupported/encrypted warnings, #24 core_accuracy_gates, and chain-complete reportability blockers.",
+        "build_image_workflow_trusted_diff compares virtual disk source, qemu-img converted raw hash, and downstream recovery rows before satisfying the #24 trusted diff gate."
       ],
       "blockers_kept": [
         "snapshot/differencing chain resolution",
@@ -69,7 +73,8 @@
       "number": 25,
       "title": "AD1/L01/Lx01/AFF/AFF4/XVA support",
       "assertions": [
-        "Forensic container adapter preserves container type detection, source integrity, native-vs-export workflow disclosure, metadata/deleted-entry validation blockers, encrypted/compressed limitation warnings, #25 core_accuracy_gates, #25 commercial_uplift_evidence implemented/usable/validated flags, and native-parser reportability blockers."
+        "Forensic container adapter preserves container type detection, source integrity, native-vs-export workflow disclosure, metadata/deleted-entry validation blockers, encrypted/compressed limitation warnings, #25 core_accuracy_gates, #25 commercial_uplift_evidence implemented/usable/validated flags, and native-parser reportability blockers.",
+        "build_image_workflow_trusted_diff compares container type, source hash, vendor export manifest hash, and exported file rows before satisfying the #25 trusted manifest diff gate."
       ],
       "blockers_kept": [
         "native AD1/L01/Lx01/AFF/AFF4 parser",

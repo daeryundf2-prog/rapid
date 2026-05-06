@@ -31,6 +31,29 @@ E01_REPORT_GRADE_BLOCKERS = [
     "deleted-corrupt-filesystem-recovery-delegated-to-sleuthkit",
     "large-known-answer-e01-ex01-corpus-required",
 ]
+IMAGE_WORKFLOW_TRUSTED_TOOLS = {
+    "ewfverify",
+    "libewf",
+    "mmls",
+    "fls",
+    "tsk_recover",
+    "sleuth kit",
+    "qemu-img",
+    "ftk imager",
+    "encase",
+    "x-ways",
+    "magnet axiom",
+    "axiom",
+    "afflib",
+    "aff4imager",
+    "vendor export manifest",
+}
+IMAGE_WORKFLOW_TRUSTED_DIFF_BLOCKERS = {
+    22: "e01-ex01-trusted-workflow-diff-required",
+    23: "raw-split-trusted-recovery-diff-required",
+    24: "virtual-disk-trusted-conversion-diff-required",
+    25: "forensic-container-verified-export-manifest-required",
+}
 CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 ToolResolver = Callable[[str], Optional[str]]
 
@@ -343,6 +366,128 @@ def image_report_grade_assessment(gap_id: str, blockers: Sequence[str]) -> dict[
     }
 
 
+def build_image_workflow_trusted_diff(
+    number: int,
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    blocker = IMAGE_WORKFLOW_TRUSTED_DIFF_BLOCKERS.get(number, "image-workflow-trusted-diff-required")
+    rapid_index = index_image_workflow_rows(rapid_rows)
+    trusted_index = index_image_workflow_rows(trusted_rows)
+    recognized = trusted_tool.strip().lower().replace(" ", "") in {
+        item.replace(" ", "").lower() for item in IMAGE_WORKFLOW_TRUSTED_TOOLS
+    }
+    common = sorted(set(rapid_index) & set(trusted_index))
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in common:
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append(
+                    {
+                        "image_workflow_key": key,
+                        "field": field,
+                        "rapid_value": rapid_value,
+                        "trusted_value": trusted_value,
+                    }
+                )
+                break
+    status = "pass" if recognized and common and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": "image-workflow-trusted-diff-v1",
+        "gap_id": f"#{number}",
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(common) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-image-workflow-output-as-final",
+            "blockers": [] if status == "pass" else [blocker],
+        },
+    }
+
+
+def index_image_workflow_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        source_path = normalized_image_diff_value(
+            first_image_alias(row, "source_path", "source", "source_file", "image_path", "container_path")
+        )
+        source_sha256 = normalized_image_diff_value(first_image_alias(row, "source_sha256", "sha256", "source_hash"))
+        partition_start = normalized_image_diff_value(
+            first_image_alias(row, "partition_start_sector", "start_sector", "offset_sector")
+        )
+        recovery_mode = normalized_image_diff_value(first_image_alias(row, "recovery_mode", "mode", "workflow"))
+        converted_raw_sha256 = normalized_image_diff_value(
+            first_image_alias(row, "converted_raw_sha256", "converted_sha256", "raw_sha256")
+        )
+        container_type = normalized_image_diff_value(first_image_alias(row, "container_type", "detected_format", "format"))
+        export_manifest_sha256 = normalized_image_diff_value(
+            first_image_alias(row, "export_manifest_sha256", "manifest_sha256", "vendor_manifest_sha256")
+        )
+        extracted_path = normalized_image_diff_value(
+            first_image_alias(row, "extracted_file_path", "file_path", "path", "name")
+        )
+        extracted_sha256 = normalized_image_diff_value(
+            first_image_alias(row, "extracted_sha256", "file_sha256", "recovered_sha256")
+        )
+        key = "|".join(
+            item
+            for item in (
+                source_path,
+                partition_start,
+                recovery_mode,
+                container_type,
+                extracted_path,
+            )
+            if item
+        )
+        if not key:
+            continue
+        indexed[key] = {
+            "source_path": source_path,
+            "source_sha256": source_sha256,
+            "partition_start_sector": partition_start,
+            "recovery_mode": recovery_mode,
+            "converted_raw_sha256": converted_raw_sha256,
+            "container_type": container_type,
+            "export_manifest_sha256": export_manifest_sha256,
+            "extracted_file_path": extracted_path,
+            "extracted_sha256": extracted_sha256,
+        }
+    return indexed
+
+
+def first_image_alias(row: Mapping[str, object], *aliases: str) -> object:
+    normalized = {normalize_image_key(key): value for key, value in row.items()}
+    for alias in aliases:
+        value = normalized.get(normalize_image_key(alias))
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalize_image_key(value: object) -> str:
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
+
+
+def normalized_image_diff_value(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
+
+
 def image_reportability_decision(
     number: int,
     *,
@@ -358,6 +503,7 @@ def image_reportability_decision(
     }
     decision, allowed_use = decisions.get(number, ("do-not-report-image-workflow-as-commercial-grade", "image-workflow-triage-pivot"))
     source_integrity = details.get("source_integrity")
+    trusted_diff = details.get("image_trusted_diff") if isinstance(details.get("image_trusted_diff"), Mapping) else {}
     if isinstance(source_integrity, Mapping):
         source_hash_statuses = [str(source_integrity.get("hash_status") or "")]
     elif isinstance(source_integrity, list):
@@ -388,12 +534,17 @@ def image_reportability_decision(
             "validate embedded metadata, deleted entries, compression, and encryption behavior for the format",
         ],
     }
+    decision_blockers = sorted({str(item) for item in blockers if str(item)})
+    if trusted_diff.get("status") != "pass":
+        trusted_blocker = IMAGE_WORKFLOW_TRUSTED_DIFF_BLOCKERS.get(number)
+        if trusted_blocker:
+            decision_blockers = sorted({*decision_blockers, trusted_blocker})
     return {
         "profile_version": "image-workflow-reportability-decision-v1",
         "commercial_gap_ids": [f"#{number}"],
         "decision": decision,
         "allowed_use": allowed_use,
-        "blockers": sorted({str(item) for item in blockers if str(item)}),
+        "blockers": decision_blockers,
         "failed_validation_matrix_ids": list(failed_validation_matrix_ids),
         "source_hash_statuses": [status for status in source_hash_statuses if status],
         "native_parser_complete": False,
@@ -462,6 +613,11 @@ def image_commercial_uplift_evidence(number: int, details: Mapping[str, object])
         failed_validation_matrix_ids=failed_validation_matrix_ids,
         details=details,
     )
+    trusted_diff = (
+        details.get("image_trusted_diff")
+        if isinstance(details.get("image_trusted_diff"), Mapping)
+        else {"status": "not-attached", "commercial_grade_evidence": False}
+    )
     return {
         "batch_id": "commercial-uplift-021-025",
         "item_numbers": [number],
@@ -472,6 +628,7 @@ def image_commercial_uplift_evidence(number: int, details: Mapping[str, object])
         "commercial_grade_ready": False,
         "objective": objectives.get(number, "Expose evidence-image validation evidence without overclaiming commercial-grade readiness."),
         "reportability_decision": reportability_decision,
+        "image_trusted_diff": trusted_diff,
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             *[f"source_sha256:{value}" for value in source_hashes[:5] if value and value != "None"],
@@ -513,6 +670,7 @@ def image_core_accuracy_gates(number: int, details: dict[str, object]) -> list[d
     warnings = [str(item) for item in details.get("warnings") or [] if str(item)]
     limitations = [str(item) for item in details.get("limitations") or [] if str(item)]
     native_capabilities = details.get("native_capabilities") if isinstance(details.get("native_capabilities"), dict) else {}
+    trusted_diff = details.get("image_trusted_diff") if isinstance(details.get("image_trusted_diff"), Mapping) else {}
 
     evidence_refs = [f"source_path:{details.get('source_path', '')}"]
     for value in source_hashes[:5]:
@@ -535,6 +693,8 @@ def image_core_accuracy_gates(number: int, details: dict[str, object]) -> list[d
             satisfied.append("read-only extraction provenance")
         if warnings or limitations:
             satisfied.append("corrupt/encrypted limitation reporting")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted E01/Ex01 workflow diff pass")
     elif number == 23:
         if source_parts or details.get("split_part_warnings") is not None:
             satisfied.append("split-set order and gap validation")
@@ -546,6 +706,8 @@ def image_core_accuracy_gates(number: int, details: dict[str, object]) -> list[d
             satisfied.append("deleted-file recovery expectations")
         if warnings or limitations or not native_capabilities.get("encrypted_volume_unlock_workflow", True):
             satisfied.append("encrypted volume limitation warning")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted RAW/split image recovery diff pass")
     elif number == 24:
         if any(str(item.get("tool") or "") == "qemu-img" for item in tool_preflight) or any("qemu-img" in " ".join(map(str, row.get("command", []))) for row in command_history):
             satisfied.append("qemu-img version/command capture")
@@ -557,6 +719,8 @@ def image_core_accuracy_gates(number: int, details: dict[str, object]) -> list[d
             satisfied.append("nested partition extraction")
         if warnings or limitations or not native_capabilities.get("xva_direct_extraction", True):
             satisfied.append("unsupported/encrypted VM warning")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("trusted virtual disk conversion diff pass")
     elif number == 25:
         if details.get("detected_format") or details.get("container_type"):
             satisfied.append("container type detection")
@@ -568,6 +732,8 @@ def image_core_accuracy_gates(number: int, details: dict[str, object]) -> list[d
             satisfied.append("metadata/deleted-entry validation")
         if warnings or limitations:
             satisfied.append("encrypted/compressed limitation warning")
+        if trusted_diff.get("status") == "pass":
+            satisfied.append("verified vendor export manifest diff pass")
 
     return [build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 

@@ -13,7 +13,14 @@ from rapidtriage.core.disk_image import (
     discover_split_image_parts,
     extract_raw_image_to_directory,
 )
-from rapidtriage.core.e01 import E01ExtractionError, E01ExtractionResult, extract_e01_to_directory, mmls_first_filesystem
+from rapidtriage.core.e01 import (
+    E01ExtractionError,
+    E01ExtractionResult,
+    build_image_workflow_trusted_diff,
+    extract_e01_to_directory,
+    image_core_accuracy_gates,
+    mmls_first_filesystem,
+)
 from rapidtriage.core.run import run_triage_mode
 from rapidtriage.core.virtual_disk import VirtualDiskExtractionResult, extract_virtual_disk_to_directory
 from tests.test_rapidtriage_run import build_run_fixture
@@ -325,6 +332,88 @@ DOS Partition Table
                 "do-not-report-virtual-disk-workflow-as-chain-complete",
             )
             self.assertFalse(vm_uplift["reportability_decision"]["native_parser_complete"])
+
+    def test_image_workflow_trusted_diffs_gate_e01_raw_vm_and_container_claims(self) -> None:
+        e01_diff = build_image_workflow_trusted_diff(
+            22,
+            [
+                {
+                    "source_path": "case.E01",
+                    "source_sha256": "a" * 64,
+                    "partition_start_sector": 2048,
+                    "recovery_mode": "partition-offset",
+                }
+            ],
+            [
+                {
+                    "SourcePath": "case.E01",
+                    "SHA256": "a" * 64,
+                    "StartSector": 2048,
+                    "Workflow": "partition-offset",
+                }
+            ],
+            trusted_tool="ewfverify",
+        )
+        raw_diff = build_image_workflow_trusted_diff(
+            23,
+            [{"source_path": "case.001", "source_sha256": "b" * 64, "extracted_file_path": "/evidence.txt", "extracted_sha256": "c" * 64}],
+            [{"ImagePath": "case.001", "SourceHash": "b" * 64, "Path": "/evidence.txt", "FileSHA256": "c" * 64}],
+            trusted_tool="tsk_recover",
+        )
+        vm_diff = build_image_workflow_trusted_diff(
+            24,
+            [{"source_path": "vm.vmdk", "converted_raw_sha256": "d" * 64, "partition_start_sector": 2048}],
+            [{"Source": "vm.vmdk", "ConvertedSHA256": "d" * 64, "OffsetSector": 2048}],
+            trusted_tool="qemu-img",
+        )
+        container_diff = build_image_workflow_trusted_diff(
+            25,
+            [{"container_type": "ad1", "source_sha256": "e" * 64, "export_manifest_sha256": "f" * 64}],
+            [{"Format": "ad1", "SHA256": "e" * 64, "VendorManifestSHA256": "f" * 64}],
+            trusted_tool="vendor export manifest",
+        )
+
+        self.assertEqual(e01_diff["status"], "pass")
+        self.assertEqual(raw_diff["status"], "pass")
+        self.assertEqual(vm_diff["status"], "pass")
+        self.assertEqual(container_diff["status"], "pass")
+        self.assertIn(
+            "trusted E01/Ex01 workflow diff pass",
+            image_core_accuracy_gates(22, {"source_integrity": {"sha256": "a" * 64}, "image_trusted_diff": e01_diff})[0][
+                "satisfied_checks"
+            ],
+        )
+        self.assertIn(
+            "trusted RAW/split image recovery diff pass",
+            image_core_accuracy_gates(23, {"source_integrity": [{"sha256": "b" * 64}], "image_trusted_diff": raw_diff})[0][
+                "satisfied_checks"
+            ],
+        )
+        self.assertIn(
+            "trusted virtual disk conversion diff pass",
+            image_core_accuracy_gates(24, {"converted_raw_integrity": {"sha256": "d" * 64}, "image_trusted_diff": vm_diff})[0][
+                "satisfied_checks"
+            ],
+        )
+        self.assertIn(
+            "verified vendor export manifest diff pass",
+            image_core_accuracy_gates(25, {"container_type": "ad1", "image_trusted_diff": container_diff})[0][
+                "satisfied_checks"
+            ],
+        )
+
+    def test_image_workflow_trusted_diff_blocks_unknown_tools_and_mismatches(self) -> None:
+        diff = build_image_workflow_trusted_diff(
+            23,
+            [{"source_path": "case.001", "extracted_file_path": "/a.txt", "extracted_sha256": "a" * 64}],
+            [{"SourcePath": "case.001", "Path": "/a.txt", "FileSHA256": "b" * 64}],
+            trusted_tool="unknown-tool",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["trusted_tool_recognized"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertIn("raw-split-trusted-recovery-diff-required", diff["reportability_decision"]["blockers"])
 
     def test_run_triage_accepts_e01_image_and_analyzes_extracted_filesystem(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

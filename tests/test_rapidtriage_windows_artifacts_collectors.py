@@ -27,7 +27,9 @@ from rapidtriage.artifacts.windows.filesystem import (
     ntfs_core_accuracy_gates,
 )
 from rapidtriage.artifacts.windows.browser import (
+    ai_transcript_core_accuracy_gates,
     browser_core_accuracy_gates,
+    build_ai_transcript_trusted_diff,
     build_browser_storage_trusted_diff,
     build_browser_timeline_trusted_diff,
 )
@@ -312,6 +314,54 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertIn("trusted browser storage diff pass", browser_gates["#19"]["satisfied_checks"])
         self.assertIn("trusted browser timeline diff pass", browser_gates["#20"]["satisfied_checks"])
 
+    def test_ai_transcript_trusted_export_diff_gates_report_grade_claims(self) -> None:
+        rapid_rows = [
+            {
+                "ai_service": "ChatGPT",
+                "question": "Summarize this timeline",
+                "answer": "The login happened before the download.",
+                "timestamp": "2024-04-01T09:10:11+00:00",
+                "source_path": "Local Storage/leveldb/000003.log",
+                "source_sha256": "a" * 64,
+            }
+        ]
+        trusted_rows = [
+            {
+                "Service": "ChatGPT",
+                "Question": "Summarize this timeline",
+                "Answer": "The login happened before the download.",
+                "CreatedAt": "2024-04-01T09:10:11+00:00",
+                "Source": "Local Storage/leveldb/000003.log",
+            }
+        ]
+
+        transcript_diff = build_ai_transcript_trusted_diff(
+            rapid_rows,
+            trusted_rows,
+            trusted_tool="ChatGPT export",
+        )
+
+        self.assertEqual(transcript_diff["status"], "pass")
+        self.assertTrue(transcript_diff["commercial_grade_evidence"])
+        gate = ai_transcript_core_accuracy_gates(
+            {
+                "source_path": r"C:\Users\alice",
+                "browser": "chrome",
+                "profile": "Default",
+                "conversation_rows": rapid_rows,
+                "transcript": {
+                    "pair_count": 1,
+                    "complete_pair_count": 1,
+                    "orphan_question_count": 0,
+                    "orphan_answer_count": 0,
+                },
+                "source_summary": {"source_sha256s": ["a" * 64]},
+                "ai_transcript_trusted_diff": transcript_diff,
+            }
+        )[0]
+        self.assertIn("trusted AI transcript export diff pass", gate["satisfied_checks"])
+        self.assertNotIn("trusted AI transcript export diff pass", gate["missing_required_checks"])
+
     def test_prefetch_lnk_system_and_browser_trusted_diffs_block_mismatches(self) -> None:
         prefetch_diff = build_prefetch_trusted_diff(
             [{"executable_hint": "POWERSHELL.EXE", "prefetch_hash": "12345678", "run_count": "3"}],
@@ -330,6 +380,15 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(browser_diff["status"], "diffs-present")
         self.assertFalse(browser_diff["trusted_tool_recognized"])
         self.assertIn("browser-timeline-trusted-diff-required", browser_diff["reportability_decision"]["blockers"])
+
+        ai_diff = build_ai_transcript_trusted_diff(
+            [{"ai_service": "Claude", "question": "Q", "answer": "rapid"}],
+            [{"Service": "Claude", "Question": "Q", "Answer": "trusted"}],
+            trusted_tool="unknown-ai-tool",
+        )
+        self.assertEqual(ai_diff["status"], "diffs-present")
+        self.assertFalse(ai_diff["trusted_tool_recognized"])
+        self.assertIn("ai-transcript-trusted-export-diff-required", ai_diff["reportability_decision"]["blockers"])
 
     def test_native_evtx_binxml_promotes_duplicate_event_data_without_losing_order(self) -> None:
         value_fields = [

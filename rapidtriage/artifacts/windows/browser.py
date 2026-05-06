@@ -130,11 +130,23 @@ BROWSER_REPORT_GRADE_BLOCKERS = [
     "browser-timeline-trusted-diff-required",
 ]
 BROWSER_TRUSTED_TOOLS = {"browserhistoryview", "hindsight", "sqlite", "browser native query", "velociraptor"}
+AI_TRANSCRIPT_TRUSTED_TOOLS = {
+    "chatgpt export",
+    "claude export",
+    "gemini export",
+    "perplexity export",
+    "service export",
+    "google takeout",
+    "browser native query",
+    "hindsight",
+    "velociraptor",
+}
 AI_TRANSCRIPT_BLOCKERS = [
     "service-side-transcript-export-not-validated",
     "browser-storage-snippet-pairing-is-order-based",
     "deleted-fragment-recovery-and-schema-versioning-incomplete",
     "known-answer-validation-corpus-required",
+    "ai-transcript-trusted-export-diff-required",
 ]
 
 
@@ -949,11 +961,17 @@ def ai_transcript_commercial_uplift_evidence(details: Mapping[str, object]) -> D
     transcript = details.get("transcript") if isinstance(details.get("transcript"), Mapping) else {}
     source_summary = details.get("source_summary") if isinstance(details.get("source_summary"), Mapping) else {}
     conversation_rows = [row for row in details.get("conversation_rows") or [] if isinstance(row, Mapping)]
+    trusted_diff = (
+        details.get("ai_transcript_trusted_diff")
+        if isinstance(details.get("ai_transcript_trusted_diff"), Mapping)
+        else {"status": "not-attached", "commercial_grade_evidence": False}
+    )
     reportability_decision = ai_transcript_reportability_decision(
         details,
         checks=checks,
         transcript=transcript,
         conversation_rows=conversation_rows,
+        trusted_diff=trusted_diff,
     )
     return {
         "batch_id": "commercial-uplift-021-025",
@@ -961,6 +979,7 @@ def ai_transcript_commercial_uplift_evidence(details: Mapping[str, object]) -> D
         "implementation_track": "ai-transcript-parser-validation",
         "objective": "Expose AI service question/answer candidate pairing evidence, source storage provenance, and validation blockers without claiming complete transcript recovery.",
         "reportability_decision": reportability_decision,
+        "ai_transcript_trusted_diff": trusted_diff,
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             f"browser:{details.get('browser', '')}",
@@ -998,6 +1017,7 @@ def ai_transcript_reportability_decision(
     checks: Mapping[str, object],
     transcript: Mapping[str, object],
     conversation_rows: Sequence[Mapping[str, object]],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> Dict[str, object]:
     blockers = set(AI_TRANSCRIPT_BLOCKERS)
     if not checks.get("service_side_export_validated"):
@@ -1010,6 +1030,8 @@ def ai_transcript_reportability_decision(
         blockers.add("orphan-question-answer-candidates-present")
     if not transcript.get("complete_pair_count"):
         blockers.add("no-complete-question-answer-pairs")
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.add("ai-transcript-trusted-export-diff-required")
     source_summary = details.get("source_summary") if isinstance(details.get("source_summary"), Mapping) else {}
     return {
         "profile_version": "ai-transcript-reportability-decision-v1",
@@ -1140,6 +1162,24 @@ def build_browser_timeline_trusted_diff(
     )
 
 
+def build_ai_transcript_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> Dict[str, object]:
+    return build_browser_diff_payload(
+        index_ai_transcript_rows(rapid_rows),
+        index_ai_transcript_rows(trusted_rows),
+        trusted_tool=trusted_tool,
+        mode="ai-transcript-trusted-diff-v1",
+        blocker="ai-transcript-trusted-export-diff-required",
+        key_label="conversation_key",
+        trusted_tools=AI_TRANSCRIPT_TRUSTED_TOOLS,
+        fail_decision="do-not-use-ai-transcript-output-as-final",
+    )
+
+
 def index_browser_storage_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, str]]:
     indexed: Dict[str, Dict[str, str]] = {}
     for row in rows:
@@ -1156,6 +1196,27 @@ def index_browser_storage_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str
             "storage_type": storage_type,
             "storage_name": storage_name,
             "sensitive": normalized_diff_value(first_alias(row, "sensitive", "contains_secrets", "scope_sensitive")),
+        }
+    return indexed
+
+
+def index_ai_transcript_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, str]]:
+    indexed: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        service = normalized_diff_value(first_alias(row, "ai_service", "service", "provider"))
+        question = normalized_diff_value(first_alias(row, "question", "prompt", "user_text", "user_message"))
+        answer = normalized_diff_value(first_alias(row, "answer", "response", "assistant_text", "assistant_message"))
+        timestamp = normalized_diff_value(first_alias(row, "timestamp", "created_at", "message_time"))
+        source = normalized_diff_value(first_alias(row, "source_path", "source", "export_path"))
+        key = "|".join(item for item in (service, timestamp, question[:160], answer[:160]) if item)
+        if not key:
+            continue
+        indexed[key] = {
+            "ai_service": service,
+            "question": question,
+            "answer": answer,
+            "timestamp": timestamp,
+            "source_path": source,
         }
     return indexed
 
@@ -1189,9 +1250,12 @@ def build_browser_diff_payload(
     mode: str,
     blocker: str,
     key_label: str,
+    trusted_tools: set[str] | None = None,
+    fail_decision: str = "do-not-use-browser-output-as-final",
 ) -> Dict[str, object]:
+    trusted_tool_set = trusted_tools or BROWSER_TRUSTED_TOOLS
     recognized = trusted_tool.strip().lower().replace(" ", "") in {
-        item.replace(" ", "").lower() for item in BROWSER_TRUSTED_TOOLS
+        item.replace(" ", "").lower() for item in trusted_tool_set
     }
     common = sorted(set(rapid_index) & set(trusted_index))
     missing = sorted(set(rapid_index) - set(trusted_index))
@@ -1220,7 +1284,7 @@ def build_browser_diff_payload(
         "extra_in_trusted_sample": extra[:25],
         "commercial_grade_evidence": status == "pass",
         "reportability_decision": {
-            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-browser-output-as-final",
+            "decision": "trusted-diff-passed" if status == "pass" else fail_decision,
             "blockers": [] if status == "pass" else [blocker],
         },
     }
@@ -1247,6 +1311,11 @@ def ai_transcript_core_accuracy_gates(details: Mapping[str, object]) -> list[dic
     rows = [item for item in details.get("conversation_rows") or [] if isinstance(item, Mapping)]
     transcript = details.get("transcript") if isinstance(details.get("transcript"), Mapping) else {}
     source_summary = details.get("source_summary") if isinstance(details.get("source_summary"), Mapping) else {}
+    trusted_diff = (
+        details.get("ai_transcript_trusted_diff")
+        if isinstance(details.get("ai_transcript_trusted_diff"), Mapping)
+        else {}
+    )
     evidence_refs = [
         f"source_path:{details.get('source_path', '')}",
         f"browser:{details.get('browser', '')}",
@@ -1265,6 +1334,8 @@ def ai_transcript_core_accuracy_gates(details: Mapping[str, object]) -> list[dic
     if rows and all(row.get("source_path") and row.get("source_sha256") for row in rows):
         satisfied.append("source offset/storage provenance")
     satisfied.append("privacy and completeness warnings")
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted AI transcript export diff pass")
     return [build_accuracy_gate(21, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
 
 

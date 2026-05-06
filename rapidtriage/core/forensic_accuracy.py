@@ -320,6 +320,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "orphan prompt/answer tracking",
             "source offset/storage provenance",
             "privacy and completeness warnings",
+            "trusted AI transcript export diff pass",
         ),
     },
     {
@@ -334,6 +335,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "partition offset correctness",
             "read-only extraction provenance",
             "corrupt/encrypted limitation reporting",
+            "trusted E01/Ex01 workflow diff pass",
         ),
     },
     {
@@ -348,6 +350,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "filesystem extraction audit",
             "deleted-file recovery expectations",
             "encrypted volume limitation warning",
+            "trusted RAW/split image recovery diff pass",
         ),
     },
     {
@@ -362,6 +365,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "converted raw hash/provenance",
             "nested partition extraction",
             "unsupported/encrypted VM warning",
+            "trusted virtual disk conversion diff pass",
         ),
     },
     {
@@ -376,6 +380,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "native-vs-export workflow disclosure",
             "metadata/deleted-entry validation",
             "encrypted/compressed limitation warning",
+            "verified vendor export manifest diff pass",
         ),
     },
     {
