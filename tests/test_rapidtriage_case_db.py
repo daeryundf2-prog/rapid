@@ -13,6 +13,7 @@ from rapidtriage.core.case_db import (
     SCHEMA_VERSION,
     CaseDatabase,
     CaseDatabaseError,
+    build_case_db_fts_trusted_diff,
     build_citation_manager_trusted_diff,
     build_evidence_history_trusted_diff,
     build_reviewer_workflow_trusted_diff,
@@ -91,6 +92,15 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("#74", second["large_sqlite_fts_optimization"]["commercial_gap_ids"])
             self.assertEqual(second["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["gap_id"], "#74")
             self.assertIn("artifact_fts", second["large_sqlite_fts_optimization"]["fts_tables"])
+            self.assertIn(
+                "trusted-case-db-sqlite-fts-query-plan-diff-missing",
+                second["large_sqlite_fts_optimization"]["blockers"],
+            )
+            fts_diff = build_case_db_fts_trusted_diff(
+                second["large_sqlite_fts_optimization"],
+                second["large_sqlite_fts_optimization"],
+            )
+            self.assertEqual(fts_diff["status"], "pass")
 
             with contextlib.closing(sqlite3.connect(db_path)) as connection:
                 connection.row_factory = sqlite3.Row

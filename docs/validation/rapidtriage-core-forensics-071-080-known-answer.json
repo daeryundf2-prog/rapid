@@ -11,8 +11,8 @@
       "status": "pass",
       "backlog_items": [71],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Parser failures preserve isolated parser_errors, failed parser JSON output, run continuation warnings, summary counts, and #71 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; native process sandboxing and corrupt-input fuzz corpus remain blockers."
+      "expected": {"required_assertions": ["Parser failures preserve isolated parser_errors, failed parser JSON output, run continuation warnings, summary counts, trusted crash-corpus diff status, and #71 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; native process sandboxing, trusted crash-corpus manifests, and corrupt-input fuzz corpus remain blockers."
     },
     {
       "id": "core-forensics-072-memory-cap-fixture",
@@ -22,8 +22,8 @@
       "status": "pass",
       "backlog_items": [72],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Run summaries preserve memory cap configuration, RSS readings, stage-boundary enforcement, fail-fast warnings, hard-limit caveats, and #72 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; hard OS memory controls and platform RSS validation remain blockers."
+      "expected": {"required_assertions": ["Run summaries preserve memory cap configuration, RSS readings, stage-boundary enforcement, fail-fast warnings, hard-limit caveats, trusted RSS diff status, and #72 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; hard OS memory controls, trusted RSS manifests, and platform RSS validation remain blockers."
     },
     {
       "id": "core-forensics-073-preview-sandbox-fixture",
@@ -33,8 +33,8 @@
       "status": "pass",
       "backlog_items": [73],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Source previews preserve read-only bounded preview metadata, active-content blocking, no network execution, cap metadata, OS sandbox warning, and #73 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; renderer/codecs/macros still require external sandbox validation."
+      "expected": {"required_assertions": ["Source previews preserve read-only bounded preview metadata, active-content blocking, no network execution, cap metadata, OS sandbox warning, trusted no-exec diff status, and #73 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; renderer/codecs/macros and trusted no-exec preview manifests still require external sandbox validation."
     },
     {
       "id": "core-forensics-074-sqlite-fts-fixture",
@@ -44,8 +44,8 @@
       "status": "pass",
       "backlog_items": [74],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["SQLite outputs preserve performance pragmas, table profiles, searchable text column counts, bounded row previews, large-corpus warnings, and #74 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; 10M-row query-plan and WAL/deleted-row validation remain blockers."
+      "expected": {"required_assertions": ["SQLite outputs preserve performance pragmas, table profiles, searchable text column counts, bounded row previews, large-corpus warnings, trusted query-plan diff status, and #74 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; trusted query-plan manifests, 10M-row query-plan, and WAL/deleted-row validation remain blockers."
     },
     {
       "id": "core-forensics-075-parser-scheduler-fixture",
@@ -55,8 +55,8 @@
       "status": "pass",
       "backlog_items": [75],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Run summaries preserve bounded worker count, deterministic outputs, per-parser capture, resume-aware scheduling, local-threadpool warning, and #75 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; distributed scheduling and TB-scale backpressure validation remain blockers."
+      "expected": {"required_assertions": ["Run summaries preserve bounded worker count, deterministic outputs, per-parser capture, resume-aware scheduling, local-threadpool warning, trusted scheduler diff status, and #75 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; trusted scheduler manifests, distributed scheduling, and TB-scale backpressure validation remain blockers."
     },
     {
       "id": "core-forensics-076-hash-cache-fixture",

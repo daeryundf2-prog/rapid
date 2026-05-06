@@ -82,6 +82,10 @@ EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER = "email-viewer-trusted-thread-export-required
 EMAIL_VIEWER_TRUSTED_TOOLS = {"mail-client-thread-export", "eml-ground-truth", "mbox-ground-truth", "vendor-mailbox-export"}
 MEDIA_TRANSCRIPT_TRUSTED_DIFF_BLOCKER = "media-transcript-trusted-cue-diff-required"
 MEDIA_TRANSCRIPT_TRUSTED_TOOLS = {"transcript-cue-manifest", "asr-alignment-export", "manual-playback-review"}
+PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER = "preview-sandbox-trusted-no-exec-manifest-required"
+PREVIEW_SANDBOX_TRUSTED_TOOLS = {"no-exec-preview-manifest", "browser-sandbox-review", "active-content-test-corpus"}
+SQLITE_FTS_TRUSTED_DIFF_BLOCKER = "large-sqlite-fts-trusted-query-plan-diff-required"
+SQLITE_FTS_TRUSTED_TOOLS = {"sqlite-query-plan-manifest", "large-db-profile-oracle", "fts-benchmark-manifest"}
 
 
 class RunCreateRequest(BaseModel):
@@ -1665,26 +1669,87 @@ def source_viewer_sandbox(source_path: Path, *, suffix: str, mime_type: str, max
             [
                 "preview-is-application-level-bounded-rendering-not-a-separate-os-sandbox",
                 "malicious-codecs-and-office-macros-require-external-sandboxed-tooling-before-opening-originals",
+                PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER,
             ],
         ),
-        "core_accuracy_gates": [
-            build_accuracy_gate(
-                73,
-                satisfied_checks=[
-                    "read-only bounded preview",
-                    "active content execution blocked",
-                    "external network access disabled",
-                    "preview caps recorded",
-                    "OS sandbox limitation warning",
-                ],
-                evidence_refs=[
-                    f"source_path:{source_path}",
-                    f"active_content_blocked:{active_content}",
-                    f"max_inline_text_chars:{max_chars}",
-                ],
-            )
-        ],
+        "trusted_preview_sandbox_diff": {
+            "status": "missing",
+            "blocker_id": PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER,
+            "required_tools": sorted(PREVIEW_SANDBOX_TRUSTED_TOOLS),
+        },
+        "core_accuracy_gates": preview_sandbox_core_accuracy_gates(
+            source_path=source_path,
+            active_content_blocked=active_content,
+            max_chars=max_chars,
+        ),
     }
+
+
+def build_preview_sandbox_trusted_diff(
+    rapid_sandbox: Mapping[str, object],
+    trusted_sandbox: Mapping[str, object],
+    *,
+    trusted_tool: str = "no-exec-preview-manifest",
+) -> dict[str, object]:
+    rapid = preview_sandbox_diff_value(rapid_sandbox)
+    trusted = preview_sandbox_diff_value(trusted_sandbox)
+    mismatched = [
+        {"field": key, "rapid": rapid.get(key), "trusted": trusted.get(key)}
+        for key in sorted(set(rapid).union(trusted))
+        if rapid.get(key) != trusted.get(key)
+    ]
+    status = "pass" if not mismatched else "fail"
+    return {
+        "profile": "preview-sandbox-trusted-no-exec-diff-v1",
+        "item_number": 73,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "mismatched": mismatched,
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["preview_sandbox"]],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def preview_sandbox_diff_value(item: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "mode": str(item.get("mode") or ""),
+        "executes_content": bool(item.get("executes_content")),
+        "external_network_access": bool(item.get("external_network_access")),
+        "active_content_blocked": bool(item.get("active_content_blocked")),
+        "max_inline_text_chars": int(item.get("max_inline_text_chars") or 0),
+    }
+
+
+def preview_sandbox_core_accuracy_gates(
+    *,
+    source_path: Path,
+    active_content_blocked: bool,
+    max_chars: int,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
+    satisfied = [
+        "read-only bounded preview",
+        "active content execution blocked",
+        "external network access disabled",
+        "preview caps recorded",
+        "OS sandbox limitation warning",
+    ]
+    evidence_refs = [
+        f"source_path:{source_path}",
+        f"active_content_blocked:{active_content_blocked}",
+        f"max_inline_text_chars:{max_chars}",
+    ]
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted preview sandbox/no-exec diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
+    return [
+        build_accuracy_gate(
+            73,
+            satisfied_checks=satisfied,
+            evidence_refs=evidence_refs,
+        )
+    ]
 
 
 def source_viewer_limitations(source_path: Path, *, suffix: str, mime_type: str, max_chars: int) -> list[str]:
@@ -1813,6 +1878,7 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
                 [
                     "sqlite-source-preview-does-not-materialize-full-external-index",
                     "very-large-wal/journal-and-deleted-row-analysis-requires-dedicated-parser",
+                    SQLITE_FTS_TRUSTED_DIFF_BLOCKER,
                 ],
             ),
             "review_features": [
@@ -3195,6 +3261,11 @@ def sqlite_fts_optimization_metadata(
             searchable_text_column_count=text_column_count,
             preview_row_count=total_preview_rows,
         ),
+        "trusted_large_sqlite_fts_diff": {
+            "status": "missing",
+            "blocker_id": SQLITE_FTS_TRUSTED_DIFF_BLOCKER,
+            "required_tools": sorted(SQLITE_FTS_TRUSTED_TOOLS),
+        },
         "recommended_large_case_strategy": [
             "Use indexed case search for imported artifacts/documents instead of loading huge SQLite tables in the browser.",
             "Use current-file source-search for targeted keyword hits, then verify row/table context in the source viewer.",
@@ -3210,26 +3281,68 @@ def large_sqlite_fts_core_accuracy_gates(
     previews: Sequence[Mapping[str, object]],
     searchable_text_column_count: int,
     preview_row_count: int,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
+    satisfied = [
+        "SQLite performance pragmas applied",
+        "table profile emitted",
+        "searchable text columns counted",
+        "bounded row preview preserved",
+        "large corpus optimization limitation warning",
+    ]
+    evidence_refs = [
+        f"page_size:{database_metadata.get('page_size', '')}",
+        f"page_count:{database_metadata.get('page_count', '')}",
+        f"preview_table_count:{len(previews)}",
+        f"preview_row_count:{preview_row_count}",
+        f"searchable_text_column_count:{searchable_text_column_count}",
+    ]
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted large SQLite/FTS query-plan diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return [
         build_accuracy_gate(
             74,
-            satisfied_checks=[
-                "SQLite performance pragmas applied",
-                "table profile emitted",
-                "searchable text columns counted",
-                "bounded row preview preserved",
-                "large corpus optimization limitation warning",
-            ],
-            evidence_refs=[
-                f"page_size:{database_metadata.get('page_size', '')}",
-                f"page_count:{database_metadata.get('page_count', '')}",
-                f"preview_table_count:{len(previews)}",
-                f"preview_row_count:{preview_row_count}",
-                f"searchable_text_column_count:{searchable_text_column_count}",
-            ],
+            satisfied_checks=satisfied,
+            evidence_refs=evidence_refs,
         )
     ]
+
+
+def build_large_sqlite_fts_trusted_diff(
+    rapid_metadata: Mapping[str, object],
+    trusted_metadata: Mapping[str, object],
+    *,
+    trusted_tool: str = "sqlite-query-plan-manifest",
+) -> dict[str, object]:
+    rapid = large_sqlite_fts_diff_value(rapid_metadata)
+    trusted = large_sqlite_fts_diff_value(trusted_metadata)
+    mismatched = [
+        {"field": key, "rapid": rapid.get(key), "trusted": trusted.get(key)}
+        for key in sorted(set(rapid).union(trusted))
+        if rapid.get(key) != trusted.get(key)
+    ]
+    status = "pass" if not mismatched else "fail"
+    return {
+        "profile": "large-sqlite-fts-trusted-query-plan-diff-v1",
+        "item_number": 74,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "mismatched": mismatched,
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["sqlite_performance"]],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def large_sqlite_fts_diff_value(item: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "page_size": int(item.get("page_size") or 0),
+        "page_count": int(item.get("page_count") or 0),
+        "preview_table_count": int(item.get("preview_table_count") or 0),
+        "searchable_text_column_count": int(item.get("searchable_text_column_count") or 0),
+        "preview_row_count": int(item.get("preview_row_count") or 0),
+    }
 
 
 def quote_sqlite_identifier(value: str) -> str:

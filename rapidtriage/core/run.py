@@ -55,6 +55,9 @@ MEMORY_CAP_ENV = "RAPIDTRIAGE_MEMORY_CAP_BYTES"
 PERFORMANCE_BATCH_ID = "commercial-uplift-066-070"
 INCREMENTAL_TRUSTED_DIFF_BLOCKER_68 = "trusted-incremental-reuse-manifest-diff-missing"
 CHECKPOINT_TRUSTED_DIFF_BLOCKER_70 = "trusted-checkpoint-resume-manifest-diff-missing"
+PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71 = "trusted-parser-crash-corpus-diff-missing"
+MEMORY_CAP_TRUSTED_DIFF_BLOCKER_72 = "trusted-memory-cap-rss-diff-missing"
+SCHEDULER_TRUSTED_DIFF_BLOCKER_75 = "trusted-parser-scheduler-manifest-diff-missing"
 
 
 @dataclass(frozen=True)
@@ -609,7 +612,11 @@ def artifact_scheduler_workers(kinds: Sequence[str]) -> int:
     return max(1, min(4, len(tuple(kinds))))
 
 
-def parallel_parser_scheduler_assessment(kinds: Sequence[str]) -> dict[str, object]:
+def parallel_parser_scheduler_assessment(
+    kinds: Sequence[str],
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     scheduled = len(tuple(kinds))
     satisfied = ["distributed scheduler limitation warning"]
     if scheduled:
@@ -621,6 +628,10 @@ def parallel_parser_scheduler_assessment(kinds: Sequence[str]) -> dict[str, obje
                 "resume-aware scheduling",
             ]
         )
+    evidence_refs = [f"scheduled_count:{scheduled}", f"max_workers:{artifact_scheduler_workers(kinds)}"]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted scheduler manifest diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return {
         "component": "parallel-parser-scheduler",
         "status": "threaded-parser-stage-scheduler-enabled",
@@ -632,7 +643,7 @@ def parallel_parser_scheduler_assessment(kinds: Sequence[str]) -> dict[str, obje
             build_accuracy_gate(
                 75,
                 satisfied_checks=satisfied,
-                evidence_refs=[f"scheduled_count:{scheduled}", f"max_workers:{artifact_scheduler_workers(kinds)}"],
+                evidence_refs=evidence_refs,
             )
         ],
         "supports": [
@@ -645,6 +656,7 @@ def parallel_parser_scheduler_assessment(kinds: Sequence[str]) -> dict[str, obje
             "scheduler-is-local-threadpool-not-distributed-priority-queue",
             "parser-resource-telemetry-is-stage-level-not-live-per-worker",
             "fairness-and-backpressure-need-terabyte-scale-validation",
+            SCHEDULER_TRUSTED_DIFF_BLOCKER_75,
         ],
     }
 
@@ -683,7 +695,11 @@ def enforce_memory_cap(stage: str, memory_cap_bytes: int) -> None:
         )
 
 
-def memory_cap_enforcement_assessment(*, memory_cap_bytes: int) -> dict[str, object]:
+def memory_cap_enforcement_assessment(
+    *,
+    memory_cap_bytes: int,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     current_rss = current_memory_rss_bytes()
     satisfied = [
         "RSS reading captured",
@@ -693,6 +709,10 @@ def memory_cap_enforcement_assessment(*, memory_cap_bytes: int) -> dict[str, obj
     ]
     if memory_cap_bytes > 0:
         satisfied.append("memory cap configuration recorded")
+    evidence_refs = [f"memory_cap_bytes:{memory_cap_bytes}", f"current_rss_bytes:{current_rss}"]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted memory cap/RSS diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return {
         "component": "memory-cap-enforcement",
         "status": "stage-boundary-enforced" if memory_cap_bytes > 0 else "available-not-configured",
@@ -704,7 +724,7 @@ def memory_cap_enforcement_assessment(*, memory_cap_bytes: int) -> dict[str, obj
             build_accuracy_gate(
                 72,
                 satisfied_checks=satisfied,
-                evidence_refs=[f"memory_cap_bytes:{memory_cap_bytes}", f"current_rss_bytes:{current_rss}"],
+                evidence_refs=evidence_refs,
             )
         ],
         "supports": [
@@ -716,6 +736,7 @@ def memory_cap_enforcement_assessment(*, memory_cap_bytes: int) -> dict[str, obj
             "not-a-hard-os-cgroup-or-job-object-limit",
             "checks-occur-at-safe-stage-boundaries-not-every-allocation",
             "platform-rss-reporting-differs-across-windows-macos-linux",
+            MEMORY_CAP_TRUSTED_DIFF_BLOCKER_72,
         ],
     }
 
@@ -789,7 +810,91 @@ def isolated_parser_error_payload(kind: str, *, input_root: InputRoot, exc: Exce
     }
 
 
-def parser_crash_isolation_assessment(*, error_count: int) -> dict[str, object]:
+def build_parser_crash_trusted_diff(
+    rapid_payload: Mapping[str, object],
+    trusted_payload: Mapping[str, object],
+    *,
+    trusted_tool: str = "parser-crash-corpus-manifest",
+) -> dict[str, object]:
+    rapid_errors = parser_crash_diff_errors(rapid_payload)
+    trusted_errors = parser_crash_diff_errors(trusted_payload)
+    missing = sorted(key for key in trusted_errors if key not in rapid_errors)
+    unexpected = sorted(key for key in rapid_errors if key not in trusted_errors)
+    status = "pass" if not missing and not unexpected else "fail"
+    return {
+        "profile": "parser-crash-trusted-corpus-diff-v1",
+        "item_number": 71,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "missing": missing,
+        "unexpected": unexpected,
+        "commercial_gap_ids": [PARSER_CRASH_ISOLATION_GAP_ID],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def parser_crash_diff_errors(payload: Mapping[str, object]) -> set[str]:
+    errors = payload.get("parser_errors") if isinstance(payload.get("parser_errors"), Sequence) else []
+    return {
+        "|".join([str(error.get("kind") or ""), str(error.get("error_type") or ""), str(bool(error.get("isolated")))])
+        for error in errors
+        if isinstance(error, Mapping)
+    }
+
+
+def build_memory_cap_trusted_diff(
+    rapid_assessment: Mapping[str, object],
+    trusted_assessment: Mapping[str, object],
+    *,
+    trusted_tool: str = "memory-cap-rss-manifest",
+) -> dict[str, object]:
+    fields = ("memory_cap_bytes", "status")
+    mismatched = [
+        {"field": field, "rapid": rapid_assessment.get(field), "trusted": trusted_assessment.get(field)}
+        for field in fields
+        if rapid_assessment.get(field) != trusted_assessment.get(field)
+    ]
+    status = "pass" if not mismatched else "fail"
+    return {
+        "profile": "memory-cap-trusted-rss-diff-v1",
+        "item_number": 72,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "mismatched": mismatched,
+        "commercial_gap_ids": [MEMORY_CAP_GAP_ID],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def build_scheduler_trusted_diff(
+    rapid_assessment: Mapping[str, object],
+    trusted_assessment: Mapping[str, object],
+    *,
+    trusted_tool: str = "parser-scheduler-manifest",
+) -> dict[str, object]:
+    fields = ("scheduled_count", "max_workers", "status")
+    mismatched = [
+        {"field": field, "rapid": rapid_assessment.get(field), "trusted": trusted_assessment.get(field)}
+        for field in fields
+        if rapid_assessment.get(field) != trusted_assessment.get(field)
+    ]
+    status = "pass" if not mismatched else "fail"
+    return {
+        "profile": "parser-scheduler-trusted-manifest-diff-v1",
+        "item_number": 75,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "mismatched": mismatched,
+        "commercial_gap_ids": [PARALLEL_PARSER_SCHEDULER_GAP_ID],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def parser_crash_isolation_assessment(
+    *,
+    error_count: int,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     satisfied = [
         "per-parser exception capture",
         "failed parser JSON output",
@@ -797,6 +902,10 @@ def parser_crash_isolation_assessment(*, error_count: int) -> dict[str, object]:
         "summary warning surfaced",
         "native sandbox/fuzzing limitation warning",
     ]
+    evidence_refs = [f"parser_error_count:{error_count}", "run-summary:processing.parser_crash_isolation"]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted parser crash-corpus diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return {
         "component": "parser-crash-isolation",
         "status": "isolated-errors-captured" if error_count else "enabled-no-errors",
@@ -807,7 +916,7 @@ def parser_crash_isolation_assessment(*, error_count: int) -> dict[str, object]:
             build_accuracy_gate(
                 71,
                 satisfied_checks=satisfied,
-                evidence_refs=[f"parser_error_count:{error_count}", "run-summary:processing.parser_crash_isolation"],
+                evidence_refs=evidence_refs,
             )
         ],
         "supports": [
@@ -819,6 +928,7 @@ def parser_crash_isolation_assessment(*, error_count: int) -> dict[str, object]:
         "blockers": [
             "native-process-sandboxing-is-not-yet-used-for-every-parser",
             "corrupt-input-fuzzing-and-crash-corpus-validation-remain-required",
+            PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71,
         ],
     }
 

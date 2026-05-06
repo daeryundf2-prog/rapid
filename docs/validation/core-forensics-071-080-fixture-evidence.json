@@ -9,45 +9,45 @@
       "title": "Parser crash isolation",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Synthetic parser failures are isolated into parser_errors, failed parser JSON output remains machine-readable, summaries preserve parser error counts, and #71 core_accuracy_gates are attached."
+        "Synthetic parser failures are isolated into parser_errors, failed parser JSON output remains machine-readable, summaries preserve parser error counts, trusted crash-corpus diff helpers/gates, and #71 core_accuracy_gates are attached."
       ],
-      "remaining_external_validation": ["Native process sandboxing for all parsers and corrupt-input fuzz/crash corpus validation."]
+      "remaining_external_validation": ["Native process sandboxing for all parsers, trusted crash-corpus manifests, and corrupt-input fuzz/crash corpus validation."]
     },
     {
       "item": 72,
       "title": "Memory cap enforcement",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Run processing metadata records configured memory caps, RSS readings, stage-boundary checks, fail-fast warnings, and #72 core_accuracy_gates."
+        "Run processing metadata records configured memory caps, RSS readings, stage-boundary checks, fail-fast warnings, trusted RSS diff helpers/gates, and #72 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Hard OS resource limits and platform-specific RSS validation on Windows, macOS, and Linux."]
+      "remaining_external_validation": ["Hard OS resource limits, trusted RSS manifests, and platform-specific RSS validation on Windows, macOS, and Linux."]
     },
     {
       "item": 73,
       "title": "Preview sandboxing",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Source preview metadata records read-only bounded rendering, active-content blocking, no network execution, preview caps, and #73 core_accuracy_gates."
+        "Source preview metadata records read-only bounded rendering, active-content blocking, no network execution, preview caps, trusted no-exec diff helpers/gates, and #73 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Separate OS sandbox for risky renderers/codecs and malicious active-content corpus validation."]
+      "remaining_external_validation": ["Separate OS sandbox for risky renderers/codecs, trusted no-exec manifests, and malicious active-content corpus validation."]
     },
     {
       "item": 74,
       "title": "Large SQLite/FTS optimization",
       "test_files": ["tests/test_rapidtriage_api.py", "tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB and source-viewer SQLite outputs preserve WAL/cache pragmas, table profiles, searchable text column counts, bounded row previews, and #74 core_accuracy_gates."
+        "Case DB and source-viewer SQLite outputs preserve WAL/cache pragmas, table profiles, searchable text column counts, bounded row previews, trusted query-plan diff helpers/gates, and #74 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["10M-row benchmark, deleted-row/WAL replay validation, and query-plan regression gates."]
+      "remaining_external_validation": ["Trusted query-plan manifests, 10M-row benchmark, deleted-row/WAL replay validation, and query-plan regression gates."]
     },
     {
       "item": 75,
       "title": "Parallel parser scheduler",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Run summaries preserve bounded worker count, deterministic output paths, per-parser capture, resume-aware scheduling, and #75 core_accuracy_gates."
+        "Run summaries preserve bounded worker count, deterministic output paths, per-parser capture, resume-aware scheduling, trusted scheduler diff helpers/gates, and #75 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Distributed priority queue, live per-worker telemetry, and TB-scale fairness/backpressure validation."]
+      "remaining_external_validation": ["Trusted scheduler manifests, distributed priority queue, live per-worker telemetry, and TB-scale fairness/backpressure validation."]
     },
     {
       "item": 76,

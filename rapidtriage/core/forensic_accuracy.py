@@ -1070,6 +1070,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "run continuation after parser error",
             "summary warning surfaced",
             "native sandbox/fuzzing limitation warning",
+            "trusted parser crash-corpus diff pass",
         ),
     },
     {
@@ -1084,6 +1085,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "stage-boundary enforcement",
             "fail-fast corruption prevention warning",
             "hard OS limit limitation warning",
+            "trusted memory cap/RSS diff pass",
         ),
     },
     {
@@ -1098,6 +1100,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "external network access disabled",
             "preview caps recorded",
             "OS sandbox limitation warning",
+            "trusted preview sandbox/no-exec diff pass",
         ),
     },
     {
@@ -1112,6 +1115,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "searchable text columns counted",
             "bounded row preview preserved",
             "large corpus optimization limitation warning",
+            "trusted large SQLite/FTS query-plan diff pass",
         ),
     },
     {
@@ -1126,6 +1130,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "per-parser result capture",
             "resume-aware scheduling",
             "distributed scheduler limitation warning",
+            "trusted scheduler manifest diff pass",
         ),
     },
     {

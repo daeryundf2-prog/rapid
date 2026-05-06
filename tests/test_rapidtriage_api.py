@@ -14,12 +14,16 @@ from fastapi.testclient import TestClient
 from rapidtriage.api.app import (
     build_email_conversation_trusted_diff,
     build_hex_viewer_trusted_diff,
+    build_large_sqlite_fts_trusted_diff,
     build_media_transcript_trusted_diff,
+    build_preview_sandbox_trusted_diff,
     build_sqlite_viewer_trusted_diff,
     email_viewer_core_accuracy_gates,
     create_app,
     hex_viewer_core_accuracy_gates,
+    large_sqlite_fts_core_accuracy_gates,
     media_viewer_core_accuracy_gates,
+    preview_sandbox_core_accuracy_gates,
     sqlite_viewer_core_accuracy_gates,
 )
 from rapidtriage.cli import build_web_parser
@@ -257,6 +261,19 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertFalse(preview_payload["viewer_sandbox"]["executes_content"])
             self.assertEqual(preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["gap_id"], "#73")
             self.assertIn("read-only bounded preview", preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(preview_payload["viewer_sandbox"]["trusted_preview_sandbox_diff"]["status"], "missing")
+            sandbox_diff = build_preview_sandbox_trusted_diff(
+                preview_payload["viewer_sandbox"],
+                preview_payload["viewer_sandbox"],
+            )
+            sandbox_gates = preview_sandbox_core_accuracy_gates(
+                source_path=Path(document_match["path"]),
+                active_content_blocked=preview_payload["viewer_sandbox"]["active_content_blocked"],
+                max_chars=preview_payload["viewer_sandbox"]["max_inline_text_chars"],
+                trusted_diff=sandbox_diff,
+            )
+            self.assertEqual(sandbox_diff["status"], "pass")
+            self.assertIn("trusted preview sandbox/no-exec diff pass", sandbox_gates[0]["satisfied_checks"])
             self.assertIn("#51", preview_payload["review_workflow"]["commercial_gap_ids"])
             self.assertIn("#52", preview_payload["compare_workflow"]["commercial_gap_ids"])
             self.assertEqual(preview_payload["review_workflow"]["core_accuracy_gates"][0]["gap_id"], "#51")
@@ -345,6 +362,23 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("#74", sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["commercial_gap_ids"])
             self.assertEqual(sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["gap_id"], "#74")
             self.assertGreaterEqual(sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["searchable_text_column_count"], 1)
+            self.assertEqual(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["trusted_large_sqlite_fts_diff"]["status"],
+                "missing",
+            )
+            fts_diff = build_large_sqlite_fts_trusted_diff(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"],
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"],
+            )
+            fts_gates = large_sqlite_fts_core_accuracy_gates(
+                database_metadata=sqlite_preview["sqlite"]["database_metadata"],
+                previews=sqlite_preview["sqlite"]["tables"],
+                searchable_text_column_count=sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["searchable_text_column_count"],
+                preview_row_count=sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["preview_row_count"],
+                trusted_diff=fts_diff,
+            )
+            self.assertEqual(fts_diff["status"], "pass")
+            self.assertIn("trusted large SQLite/FTS query-plan diff pass", fts_gates[0]["satisfied_checks"])
             self.assertEqual(sqlite_preview["sqlite"]["table_profiles"][0]["name"], "notes")
             self.assertGreaterEqual(sqlite_preview["sqlite"]["table_profiles"][0]["searchable_text_column_count"], 1)
             self.assertTrue(any("SQLite previews show bounded" in item for item in sqlite_preview["viewer_limitations"]))

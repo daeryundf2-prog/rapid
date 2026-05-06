@@ -1652,7 +1652,41 @@ def case_db_fts_optimization_assessment(connection: sqlite3.Connection) -> dict[
         "blockers": [
             "10m-record-benchmark-and-query-plan-regression-gates-remain-required",
             "external-source-sqlite-wal/journal-replay-is-not-part-of-case-db-indexing",
+            "trusted-case-db-sqlite-fts-query-plan-diff-missing",
         ],
+    }
+
+
+def build_case_db_fts_trusted_diff(
+    rapid_assessment: Mapping[str, object],
+    trusted_assessment: Mapping[str, object],
+    *,
+    trusted_tool: str = "case-db-sqlite-query-plan-manifest",
+) -> dict[str, object]:
+    rapid = case_db_fts_diff_value(rapid_assessment)
+    trusted = case_db_fts_diff_value(trusted_assessment)
+    mismatched = [
+        {"field": key, "rapid": rapid.get(key), "trusted": trusted.get(key)}
+        for key in sorted(set(rapid).union(trusted))
+        if rapid.get(key) != trusted.get(key)
+    ]
+    status = "pass" if not mismatched else "fail"
+    return {
+        "profile": "case-db-sqlite-fts-trusted-query-plan-diff-v1",
+        "item_number": 74,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "mismatched": mismatched,
+        "commercial_gap_ids": [LARGE_SQLITE_FTS_GAP_ID],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def case_db_fts_diff_value(item: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "status": str(item.get("status") or ""),
+        "fts_tables": sorted(str(value) for value in item.get("fts_tables") or []),
+        "index_count": int(item.get("index_count") or 0),
     }
 
 

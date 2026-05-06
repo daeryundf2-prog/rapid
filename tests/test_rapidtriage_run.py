@@ -13,10 +13,15 @@ from rapidtriage.core.reporting import build_run_report_context, render_run_mark
 from rapidtriage.core.run import (
     build_checkpoint_resume_trusted_diff,
     build_incremental_indexing_trusted_diff,
+    build_memory_cap_trusted_diff,
+    build_parser_crash_trusted_diff,
+    build_scheduler_trusted_diff,
     checkpoint_resume_core_accuracy_gates,
     incremental_indexing_core_accuracy_gates,
     isolated_parser_error_payload,
     memory_cap_enforcement_assessment,
+    parallel_parser_scheduler_assessment,
+    parser_crash_isolation_assessment,
 )
 from rapidtriage.core.silent_failure import build_silent_failure_report
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
@@ -143,12 +148,27 @@ class RapidTriageRunTests(unittest.TestCase):
                 "per-parser exception capture",
                 payload["parser_crash_isolation"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            crash_diff = build_parser_crash_trusted_diff(payload, payload)
+            crash_gates = parser_crash_isolation_assessment(error_count=1, trusted_diff=crash_diff)
+            self.assertEqual(crash_diff["status"], "pass")
+            self.assertIn("trusted parser crash-corpus diff pass", crash_gates["core_accuracy_gates"][0]["satisfied_checks"])
 
         assessment = memory_cap_enforcement_assessment(memory_cap_bytes=123456)
         self.assertEqual(assessment["memory_cap_bytes"], 123456)
         self.assertIn("#72", assessment["commercial_gap_ids"])
         self.assertEqual(assessment["core_accuracy_gates"][0]["gap_id"], "#72")
         self.assertIn("memory cap configuration recorded", assessment["core_accuracy_gates"][0]["satisfied_checks"])
+        self.assertIn("trusted-memory-cap-rss-diff-missing", assessment["blockers"])
+        memory_diff = build_memory_cap_trusted_diff(assessment, assessment)
+        memory_assessment = memory_cap_enforcement_assessment(memory_cap_bytes=123456, trusted_diff=memory_diff)
+        self.assertEqual(memory_diff["status"], "pass")
+        self.assertIn("trusted memory cap/RSS diff pass", memory_assessment["core_accuracy_gates"][0]["satisfied_checks"])
+        scheduler = parallel_parser_scheduler_assessment(["browser", "windows"])
+        self.assertIn("trusted-parser-scheduler-manifest-diff-missing", scheduler["blockers"])
+        scheduler_diff = build_scheduler_trusted_diff(scheduler, scheduler)
+        scheduler_trusted = parallel_parser_scheduler_assessment(["browser", "windows"], trusted_diff=scheduler_diff)
+        self.assertEqual(scheduler_diff["status"], "pass")
+        self.assertIn("trusted scheduler manifest diff pass", scheduler_trusted["core_accuracy_gates"][0]["satisfied_checks"])
 
     def test_run_supports_read_only_extract_safety(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
