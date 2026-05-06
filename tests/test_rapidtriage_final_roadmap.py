@@ -9,6 +9,7 @@ import zipfile
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.core.bundle import build_court_exhibit_trusted_diff, court_exhibit_core_accuracy_gates
 from rapidtriage.core.normalize import normalize_artifacts
 from rapidtriage.core.sample_case import run_sample_workflow
 
@@ -268,6 +269,16 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertIn("#94", court_exhibit["commercial_gap_ids"])
             self.assertEqual(court_exhibit["core_accuracy_gates"][0]["gap_id"], "#94")
             self.assertTrue(court_exhibit["output_hashes"])
+            self.assertEqual(court_exhibit["trusted_court_exhibit_diff"]["status"], "missing")
+            self.assertIn("trusted-court-exhibit-manifest-diff-missing", court_exhibit["blockers"])
+            court_diff = build_court_exhibit_trusted_diff(court_exhibit, court_exhibit)
+            court_gates = court_exhibit_core_accuracy_gates(
+                exhibits=court_exhibit["exhibits"],
+                output_hashes=court_exhibit["output_hashes"],
+                trusted_diff=court_diff,
+            )
+            self.assertEqual(court_diff["status"], "pass")
+            self.assertIn("trusted court exhibit manifest diff pass", court_gates[0]["satisfied_checks"])
             self.assertIn("#100", tamper_bundle["commercial_gap_ids"])
             self.assertIn("#100", tamper_bundle["summary"]["commercial_gap_ids"])
             self.assertEqual(tamper_bundle["core_accuracy_gates"][0]["gap_id"], "#100")

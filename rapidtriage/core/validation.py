@@ -37,6 +37,8 @@ VALIDATION_TRUSTED_TOOLS = {
     "validation-package-manifest",
 }
 EXTERNAL_TOOL_VERSION_GAP_ID = "#95"
+EXTERNAL_TOOL_VERSION_TRUSTED_DIFF_BLOCKER_95 = "trusted-external-tool-version-transcript-diff-missing"
+EXTERNAL_TOOL_VERSION_TRUSTED_TOOLS = {"external-tool-transcript", "release-environment-inventory", "operator-tool-log"}
 DEPLOYMENT_OPERATIONS_GAP_IDS = [
     "#101",
     "#102",
@@ -1052,30 +1054,37 @@ def build_external_tool_versions() -> list[dict[str, object]]:
     return rows
 
 
-def build_external_tool_version_assessment() -> dict[str, object]:
+def build_external_tool_version_assessment(*, trusted_diff: Mapping[str, object] | None = None) -> dict[str, object]:
     tools = build_external_tool_versions()
+    satisfied = [
+        "tool inventory emitted",
+        "tool path captured when available",
+        "version command captured",
+        "capture error recorded",
+        "per-run limitation warning",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted external tool transcript diff pass")
+    blockers = [
+        "per-run-external-parser-version-capture-is-not-complete-for-every-import",
+        "operator-must-preserve-original-tool-logs-for-acquisition-and-parser-validation",
+    ]
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(EXTERNAL_TOOL_VERSION_TRUSTED_DIFF_BLOCKER_95)
     return {
         "component": "external-tool-version-capture",
         "status": "release-validation-tool-preflight",
         "commercial_gap_ids": [EXTERNAL_TOOL_VERSION_GAP_ID],
+        "trusted_external_tool_version_diff": dict(trusted_diff) if trusted_diff else missing_external_tool_version_trusted_diff(),
         "core_accuracy_gates": [
             build_accuracy_gate(
                 95,
-                satisfied_checks=[
-                    "tool inventory emitted",
-                    "tool path captured when available",
-                    "version command captured",
-                    "capture error recorded",
-                    "per-run limitation warning",
-                ],
+                satisfied_checks=satisfied,
                 evidence_refs=[f"tool_count:{len(tools)}"],
             )
         ],
         "ready_for_court_report": False,
-        "blockers": [
-            "per-run-external-parser-version-capture-is-not-complete-for-every-import",
-            "operator-must-preserve-original-tool-logs-for-acquisition-and-parser-validation",
-        ],
+        "blockers": blockers,
     }
 
 
@@ -1106,6 +1115,56 @@ def external_tool_version_core_accuracy_gates(
             ],
         )
     ]
+
+
+def missing_external_tool_version_trusted_diff() -> dict[str, object]:
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [EXTERNAL_TOOL_VERSION_GAP_ID],
+        "blocker": EXTERNAL_TOOL_VERSION_TRUSTED_DIFF_BLOCKER_95,
+        "required_trusted_tools": sorted(EXTERNAL_TOOL_VERSION_TRUSTED_TOOLS),
+    }
+
+
+def build_external_tool_version_trusted_diff(
+    rapid_tools: Sequence[Mapping[str, object]],
+    trusted_tools: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str = "external-tool-transcript",
+) -> dict[str, object]:
+    rapid_index = index_external_tool_rows(rapid_tools)
+    trusted_index = index_external_tool_rows(trusted_tools)
+    mismatches = compare_indexed_manifests(
+        rapid_index,
+        trusted_index,
+        fields=("available", "path", "command", "version_output", "capture_error"),
+    )
+    status = "pass" if not mismatches and trusted_tool in EXTERNAL_TOOL_VERSION_TRUSTED_TOOLS else "fail"
+    return validation_trusted_diff_result(
+        status=status,
+        gap_id=EXTERNAL_TOOL_VERSION_GAP_ID,
+        blocker=EXTERNAL_TOOL_VERSION_TRUSTED_DIFF_BLOCKER_95,
+        trusted_tool=trusted_tool,
+        compared_fields=["name", "available", "path", "command", "version_output", "capture_error"],
+        mismatches=mismatches,
+    )
+
+
+def index_external_tool_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, Mapping[str, object]]:
+    indexed: dict[str, Mapping[str, object]] = {}
+    for row in rows:
+        name = str(row.get("name") or "")
+        if not name:
+            continue
+        indexed[name] = {
+            "available": bool(row.get("available")),
+            "path": str(row.get("path") or ""),
+            "command": str(row.get("command") or ""),
+            "version_output": str(row.get("version_output") or ""),
+            "capture_error": str(row.get("capture_error") or ""),
+        }
+    return indexed
 
 
 def build_validation_checks() -> list[dict[str, object]]:

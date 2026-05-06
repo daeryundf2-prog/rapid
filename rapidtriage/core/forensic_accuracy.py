@@ -1370,6 +1370,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "coverage status recorded",
             "validation warnings derived",
             "evidence strength surfaced",
+            "trusted parser confidence calibration diff pass",
         ),
     },
     {
@@ -1384,6 +1385,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "report guidance emitted",
             "validation-required state preserved",
             "warning UX limitation disclosed",
+            "trusted validation warning checklist diff pass",
         ),
     },
     {
@@ -1398,6 +1400,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "jurisdiction caveat emitted",
             "analyst review blocker emitted",
             "limitation count summarized",
+            "trusted legal limitation wording diff pass",
         ),
     },
     {
@@ -1412,6 +1415,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "generated output hashes captured",
             "source references preserved",
             "verification steps emitted",
+            "trusted court exhibit manifest diff pass",
         ),
     },
     {
@@ -1426,6 +1430,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "version command captured",
             "capture error recorded",
             "per-run limitation warning",
+            "trusted external tool transcript diff pass",
         ),
     },
     {

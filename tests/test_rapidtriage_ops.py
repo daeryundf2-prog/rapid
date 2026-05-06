@@ -32,6 +32,8 @@ from rapidtriage.core.jobs import (
 )
 from rapidtriage.core.sample_case import run_sample_workflow
 from rapidtriage.core.validation import (
+    build_external_tool_version_assessment,
+    build_external_tool_version_trusted_diff,
     build_fixture_corpus_trusted_diff,
     build_fp_fn_trusted_diff,
     build_independent_validation_report,
@@ -273,8 +275,23 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("trusted-independent-validation-signoff-diff-missing", payload["independent_validation_report"]["blockers"])
             self.assertIn("#95", payload["external_tool_version_assessment"]["commercial_gap_ids"])
             self.assertEqual(payload["external_tool_version_assessment"]["core_accuracy_gates"][0]["gap_id"], "#95")
+            self.assertEqual(payload["external_tool_version_assessment"]["trusted_external_tool_version_diff"]["status"], "missing")
+            self.assertIn(
+                "trusted-external-tool-version-transcript-diff-missing",
+                payload["external_tool_version_assessment"]["blockers"],
+            )
             self.assertTrue(all("#95" in item["commercial_gap_ids"] for item in payload["external_tool_versions"]))
             self.assertTrue(all(item["core_accuracy_gates"][0]["gap_id"] == "#95" for item in payload["external_tool_versions"]))
+            tool_diff = build_external_tool_version_trusted_diff(
+                payload["external_tool_versions"],
+                payload["external_tool_versions"],
+            )
+            promoted_tools = build_external_tool_version_assessment(trusted_diff=tool_diff)
+            self.assertEqual(tool_diff["status"], "pass")
+            self.assertIn(
+                "trusted external tool transcript diff pass",
+                promoted_tools["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertIn("#101", payload["deployment_operations_gap_ids"])
             self.assertIn("#120", payload["deployment_operations_gap_ids"])
             self.assertIn("#101", payload["deployment_operations_assessment"]["commercial_gap_ids"])

@@ -38,6 +38,14 @@ FORENSIC_INTEGRITY_TRUSTED_TOOLS = {
 PARSER_CONFIDENCE_GAP_ID = "#91"
 VALIDATION_WARNING_UX_GAP_ID = "#92"
 LEGAL_LIMITATION_GAP_ID = "#93"
+PARSER_CONFIDENCE_TRUSTED_DIFF_BLOCKER_91 = "trusted-parser-confidence-calibration-diff-missing"
+VALIDATION_WARNING_TRUSTED_DIFF_BLOCKER_92 = "trusted-validation-warning-checklist-diff-missing"
+LEGAL_LIMITATION_TRUSTED_DIFF_BLOCKER_93 = "trusted-legal-limitation-wording-diff-missing"
+REPORT_QUALITY_TRUSTED_TOOLS = {
+    "parser-confidence-calibration",
+    "validation-warning-checklist",
+    "legal-limitation-wording-review",
+}
 WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID = "#96"
 TIMEZONE_NORMALIZATION_GAP_ID = "#97"
 CLOCK_SKEW_ANALYSIS_GAP_ID = "#98"
@@ -3332,7 +3340,12 @@ def build_report_reproducibility_manifest(
     }
 
 
-def build_report_item_validation_assessment(enriched: Mapping[str, object]) -> dict[str, object]:
+def build_report_item_validation_assessment(
+    enriched: Mapping[str, object],
+    *,
+    parser_confidence_trusted_diff: Mapping[str, object] | None = None,
+    validation_warning_trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     source_reference = enriched.get("source_reference") if isinstance(enriched.get("source_reference"), Mapping) else {}
     metadata = enriched.get("metadata") if isinstance(enriched.get("metadata"), Mapping) else {}
     warnings: list[str] = []
@@ -3358,6 +3371,28 @@ def build_report_item_validation_assessment(enriched: Mapping[str, object]) -> d
         "coverage_status": coverage_status,
         "validation_required": bool(warnings),
         "warnings": warnings,
+        "trusted_parser_confidence_diff": dict(parser_confidence_trusted_diff)
+        if parser_confidence_trusted_diff
+        else missing_report_quality_trusted_diff(
+            PARSER_CONFIDENCE_GAP_ID,
+            PARSER_CONFIDENCE_TRUSTED_DIFF_BLOCKER_91,
+            trusted_tool="parser-confidence-calibration",
+        ),
+        "trusted_validation_warning_diff": dict(validation_warning_trusted_diff)
+        if validation_warning_trusted_diff
+        else missing_report_quality_trusted_diff(
+            VALIDATION_WARNING_UX_GAP_ID,
+            VALIDATION_WARNING_TRUSTED_DIFF_BLOCKER_92,
+            trusted_tool="validation-warning-checklist",
+        ),
+        "blockers": [
+            blocker
+            for blocker, diff in (
+                (PARSER_CONFIDENCE_TRUSTED_DIFF_BLOCKER_91, parser_confidence_trusted_diff),
+                (VALIDATION_WARNING_TRUSTED_DIFF_BLOCKER_92, validation_warning_trusted_diff),
+            )
+            if not diff or diff.get("status") != "pass"
+        ],
         "core_accuracy_gates": [
             *parser_confidence_core_accuracy_gates(
                 parser_confidence=parser_confidence,
@@ -3365,8 +3400,9 @@ def build_report_item_validation_assessment(enriched: Mapping[str, object]) -> d
                 coverage_status=coverage_status,
                 warnings=warnings,
                 evidence_strength=str(source_reference.get("evidence_strength") or metadata.get("evidence_strength") or ""),
+                trusted_diff=parser_confidence_trusted_diff,
             ),
-            *validation_warning_ux_core_accuracy_gates(warnings=warnings),
+            *validation_warning_ux_core_accuracy_gates(warnings=warnings, trusted_diff=validation_warning_trusted_diff),
         ],
         "guidance": "Resolve validation warnings and verify source evidence before using this item as a final report conclusion.",
     }
@@ -3389,19 +3425,31 @@ def build_report_item_legal_limitations(enriched: Mapping[str, object]) -> list[
     return ["Review source evidence, hashes, and parser limitations before report use."]
 
 
-def build_legal_limitations_assessment(enriched: Mapping[str, object]) -> dict[str, object]:
+def build_legal_limitations_assessment(
+    enriched: Mapping[str, object],
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     limitations = build_report_item_legal_limitations(enriched)
+    blockers = [
+        "limitation-text-is-template-or-parser-provided-and-requires-analyst-review",
+        "jurisdiction-specific-admissibility-language-is-operator-owned",
+    ]
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(LEGAL_LIMITATION_TRUSTED_DIFF_BLOCKER_93)
     return {
         "component": "artifact-legal-limitation-statement",
         "status": "present" if limitations else "missing",
         "commercial_gap_ids": [LEGAL_LIMITATION_GAP_ID],
         "limitation_count": len(limitations),
-        "core_accuracy_gates": legal_limitation_core_accuracy_gates(limitations=limitations),
+        "trusted_legal_limitation_diff": dict(trusted_diff) if trusted_diff else missing_report_quality_trusted_diff(
+            LEGAL_LIMITATION_GAP_ID,
+            LEGAL_LIMITATION_TRUSTED_DIFF_BLOCKER_93,
+            trusted_tool="legal-limitation-wording-review",
+        ),
+        "core_accuracy_gates": legal_limitation_core_accuracy_gates(limitations=limitations, trusted_diff=trusted_diff),
         "ready_for_court_report": False,
-        "blockers": [
-            "limitation-text-is-template-or-parser-provided-and-requires-analyst-review",
-            "jurisdiction-specific-admissibility-language-is-operator-owned",
-        ],
+        "blockers": blockers,
     }
 
 
@@ -4149,6 +4197,104 @@ def index_provenance_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, Map
     return indexed
 
 
+def missing_report_quality_trusted_diff(gap_id: str, blocker: str, *, trusted_tool: str) -> dict[str, object]:
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [gap_id],
+        "blocker": blocker,
+        "required_trusted_tool": trusted_tool,
+    }
+
+
+def build_parser_confidence_trusted_diff(
+    rapid_assessment: Mapping[str, object],
+    trusted_assessment: Mapping[str, object],
+    *,
+    trusted_tool: str = "parser-confidence-calibration",
+) -> dict[str, object]:
+    compared_fields = ["parser_confidence", "reportability", "coverage_status"]
+    mismatches = [
+        {"field": field, "rapid": rapid_assessment.get(field), "trusted": trusted_assessment.get(field)}
+        for field in compared_fields
+        if rapid_assessment.get(field) != trusted_assessment.get(field)
+    ]
+    status = "pass" if not mismatches and trusted_tool in REPORT_QUALITY_TRUSTED_TOOLS else "fail"
+    return report_quality_trusted_diff_result(
+        status=status,
+        gap_id=PARSER_CONFIDENCE_GAP_ID,
+        blocker=PARSER_CONFIDENCE_TRUSTED_DIFF_BLOCKER_91,
+        trusted_tool=trusted_tool,
+        compared_fields=compared_fields,
+        mismatches=mismatches,
+    )
+
+
+def build_validation_warning_trusted_diff(
+    rapid_assessment: Mapping[str, object],
+    trusted_assessment: Mapping[str, object],
+    *,
+    trusted_tool: str = "validation-warning-checklist",
+) -> dict[str, object]:
+    compared_fields = ["validation_required", "warnings"]
+    mismatches = [
+        {"field": field, "rapid": normalize_integrity_value(rapid_assessment.get(field)), "trusted": normalize_integrity_value(trusted_assessment.get(field))}
+        for field in compared_fields
+        if normalize_integrity_value(rapid_assessment.get(field)) != normalize_integrity_value(trusted_assessment.get(field))
+    ]
+    status = "pass" if not mismatches and trusted_tool in REPORT_QUALITY_TRUSTED_TOOLS else "fail"
+    return report_quality_trusted_diff_result(
+        status=status,
+        gap_id=VALIDATION_WARNING_UX_GAP_ID,
+        blocker=VALIDATION_WARNING_TRUSTED_DIFF_BLOCKER_92,
+        trusted_tool=trusted_tool,
+        compared_fields=compared_fields,
+        mismatches=mismatches,
+    )
+
+
+def build_legal_limitation_trusted_diff(
+    rapid_assessment: Mapping[str, object],
+    trusted_assessment: Mapping[str, object],
+    *,
+    trusted_tool: str = "legal-limitation-wording-review",
+) -> dict[str, object]:
+    compared_fields = ["limitation_count", "status"]
+    mismatches = [
+        {"field": field, "rapid": rapid_assessment.get(field), "trusted": trusted_assessment.get(field)}
+        for field in compared_fields
+        if rapid_assessment.get(field) != trusted_assessment.get(field)
+    ]
+    status = "pass" if not mismatches and trusted_tool in REPORT_QUALITY_TRUSTED_TOOLS else "fail"
+    return report_quality_trusted_diff_result(
+        status=status,
+        gap_id=LEGAL_LIMITATION_GAP_ID,
+        blocker=LEGAL_LIMITATION_TRUSTED_DIFF_BLOCKER_93,
+        trusted_tool=trusted_tool,
+        compared_fields=compared_fields,
+        mismatches=mismatches,
+    )
+
+
+def report_quality_trusted_diff_result(
+    *,
+    status: str,
+    gap_id: str,
+    blocker: str,
+    trusted_tool: str,
+    compared_fields: Sequence[str],
+    mismatches: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [gap_id],
+        "compared_fields": list(compared_fields),
+        "mismatches": [dict(item) for item in mismatches],
+        "blocker": None if status == "pass" else blocker,
+    }
+
+
 def parser_confidence_core_accuracy_gates(
     *,
     parser_confidence: object,
@@ -4156,6 +4302,7 @@ def parser_confidence_core_accuracy_gates(
     coverage_status: str,
     warnings: Sequence[str],
     evidence_strength: str,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
     if parser_confidence not in (None, ""):
@@ -4168,6 +4315,8 @@ def parser_confidence_core_accuracy_gates(
         satisfied.append("validation warnings derived")
     if evidence_strength:
         satisfied.append("evidence strength surfaced")
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted parser confidence calibration diff pass")
     return [
         build_accuracy_gate(
             91,
@@ -4183,33 +4332,47 @@ def parser_confidence_core_accuracy_gates(
     ]
 
 
-def validation_warning_ux_core_accuracy_gates(*, warnings: Sequence[str]) -> list[dict[str, object]]:
+def validation_warning_ux_core_accuracy_gates(
+    *,
+    warnings: Sequence[str],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
+    satisfied = [
+        "validation warning reasons emitted",
+        "summary warning counts emitted",
+        "report guidance emitted",
+        "validation-required state preserved",
+        "warning UX limitation disclosed",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted validation warning checklist diff pass")
     return [
         build_accuracy_gate(
             92,
-            satisfied_checks=[
-                "validation warning reasons emitted",
-                "summary warning counts emitted",
-                "report guidance emitted",
-                "validation-required state preserved",
-                "warning UX limitation disclosed",
-            ],
+            satisfied_checks=satisfied,
             evidence_refs=[f"warning_count:{len(warnings)}"],
         )
     ]
 
 
-def legal_limitation_core_accuracy_gates(*, limitations: Sequence[str]) -> list[dict[str, object]]:
+def legal_limitation_core_accuracy_gates(
+    *,
+    limitations: Sequence[str],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
+    satisfied = [
+        "artifact limitation text emitted",
+        "parser-provided limitations preserved",
+        "jurisdiction caveat emitted",
+        "analyst review blocker emitted",
+        "limitation count summarized",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted legal limitation wording diff pass")
     return [
         build_accuracy_gate(
             93,
-            satisfied_checks=[
-                "artifact limitation text emitted",
-                "parser-provided limitations preserved",
-                "jurisdiction caveat emitted",
-                "analyst review blocker emitted",
-                "limitation count summarized",
-            ],
+            satisfied_checks=satisfied,
             evidence_refs=[f"limitation_count:{len(limitations)}"],
         )
     ]

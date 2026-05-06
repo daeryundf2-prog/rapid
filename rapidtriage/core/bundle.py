@@ -17,6 +17,8 @@ from .submission import build_submission_manifest, compute_hashes
 
 COURT_EXHIBIT_EXPORT_GAP_ID = "#94"
 TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID = "#100"
+COURT_EXHIBIT_TRUSTED_DIFF_BLOCKER_94 = "trusted-court-exhibit-manifest-diff-missing"
+COURT_EXHIBIT_TRUSTED_TOOLS = {"court-exhibit-checklist", "selected-evidence-manifest", "signed-exhibit-index"}
 
 
 class BundleError(ValueError):
@@ -297,6 +299,7 @@ def build_court_exhibit_index(
     manifest: Mapping[str, object],
     selected: Mapping[str, object],
     output_paths: Sequence[tuple[str, Path]],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     items = selected.get("items") if isinstance(selected.get("items"), list) else []
     exhibit_items = []
@@ -329,6 +332,9 @@ def build_court_exhibit_index(
                 "size_bytes": path.stat().st_size,
             }
         )
+    blockers = []
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(COURT_EXHIBIT_TRUSTED_DIFF_BLOCKER_94)
     return {
         "command": "court-exhibit-index",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -341,10 +347,13 @@ def build_court_exhibit_index(
         },
         "exhibits": exhibit_items,
         "output_hashes": output_hashes,
+        "trusted_court_exhibit_diff": dict(trusted_diff) if trusted_diff else missing_court_exhibit_trusted_diff(),
         "core_accuracy_gates": court_exhibit_core_accuracy_gates(
             exhibits=exhibit_items,
             output_hashes=output_hashes,
+            trusted_diff=trusted_diff,
         ),
+        "blockers": blockers,
         "custody_note": "This index documents selected report exhibits and generated bundle outputs. It does not include original evidence images.",
         "verification_steps": [
             "Verify archive SHA256 from rapidtriage-bundle-manifest.json.",
@@ -397,6 +406,7 @@ def court_exhibit_core_accuracy_gates(
     *,
     exhibits: Sequence[Mapping[str, object]],
     output_hashes: Sequence[Mapping[str, object]],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["verification steps emitted"]
     if exhibits and all(item.get("exhibit_id") for item in exhibits):
@@ -407,6 +417,8 @@ def court_exhibit_core_accuracy_gates(
         satisfied.append("generated output hashes captured")
     if any(item.get("source_reference") for item in exhibits):
         satisfied.append("source references preserved")
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted court exhibit manifest diff pass")
     return [
         build_accuracy_gate(
             94,
@@ -417,6 +429,47 @@ def court_exhibit_core_accuracy_gates(
             ],
         )
     ]
+
+
+def missing_court_exhibit_trusted_diff() -> dict[str, object]:
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [COURT_EXHIBIT_EXPORT_GAP_ID],
+        "blocker": COURT_EXHIBIT_TRUSTED_DIFF_BLOCKER_94,
+        "required_trusted_tools": sorted(COURT_EXHIBIT_TRUSTED_TOOLS),
+    }
+
+
+def build_court_exhibit_trusted_diff(
+    rapid_index: Mapping[str, object],
+    trusted_index: Mapping[str, object],
+    *,
+    trusted_tool: str = "court-exhibit-checklist",
+) -> dict[str, object]:
+    mismatches = []
+    for field in ("exhibits", "output_hashes"):
+        rapid_value = normalize_court_exhibit_value(rapid_index.get(field))
+        trusted_value = normalize_court_exhibit_value(trusted_index.get(field))
+        if rapid_value != trusted_value:
+            mismatches.append({"field": field, "rapid": rapid_value, "trusted": trusted_value})
+    status = "pass" if not mismatches and trusted_tool in COURT_EXHIBIT_TRUSTED_TOOLS else "fail"
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [COURT_EXHIBIT_EXPORT_GAP_ID],
+        "compared_fields": ["exhibits", "output_hashes"],
+        "mismatches": mismatches,
+        "blocker": None if status == "pass" else COURT_EXHIBIT_TRUSTED_DIFF_BLOCKER_94,
+    }
+
+
+def normalize_court_exhibit_value(value: object) -> object:
+    if isinstance(value, list):
+        return sorted(json.dumps(item, ensure_ascii=False, sort_keys=True, default=str) for item in value)
+    if isinstance(value, Mapping):
+        return json.dumps(dict(value), ensure_ascii=False, sort_keys=True, default=str)
+    return value
 
 
 def tamper_evident_bundle_core_accuracy_gates(

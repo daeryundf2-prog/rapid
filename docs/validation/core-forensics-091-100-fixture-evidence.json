@@ -8,36 +8,36 @@
       "item": 91,
       "title": "Parser confidence scoring",
       "test_files": ["tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_core_forensics_accuracy.py"],
-      "assertions": ["Case DB report items preserve parser confidence, reportability, coverage status, validation warning derivation, evidence strength, and #91 core_accuracy_gates."],
-      "remaining_external_validation": ["Parser-specific confidence calibration tables and cross-tool confidence validation."]
+      "assertions": ["Case DB report items preserve parser confidence, reportability, coverage status, validation warning derivation, evidence strength, trusted parser confidence calibration diff helpers/gates, and #91 core_accuracy_gates."],
+      "remaining_external_validation": ["Parser-specific confidence calibration tables, trusted calibration manifests, and cross-tool confidence validation."]
     },
     {
       "item": 92,
       "title": "Validation-required warning UX",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report exports preserve warning reasons, summary warning counts, guidance, validation-required state, warning UX limitation, and #92 core_accuracy_gates."],
-      "remaining_external_validation": ["End-to-end web badge checks across every large result table."]
+      "assertions": ["Report exports preserve warning reasons, summary warning counts, guidance, validation-required state, warning UX limitation, trusted validation warning checklist diff helpers/gates, and #92 core_accuracy_gates."],
+      "remaining_external_validation": ["End-to-end web badge checks and trusted warning checklists across every large result table."]
     },
     {
       "item": 93,
       "title": "Legal limitation statement per artifact",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report items preserve artifact limitation text, parser-provided limitations, jurisdiction caveat, analyst-review blockers, limitation counts, and #93 core_accuracy_gates."],
-      "remaining_external_validation": ["Jurisdiction-approved legal wording and formal signoff."]
+      "assertions": ["Report items preserve artifact limitation text, parser-provided limitations, jurisdiction caveat, analyst-review blockers, limitation counts, trusted legal limitation wording diff helpers/gates, and #93 core_accuracy_gates."],
+      "remaining_external_validation": ["Jurisdiction-approved legal wording, trusted wording manifests, and formal signoff."]
     },
     {
       "item": 94,
       "title": "Court exhibit export package",
       "test_files": ["tests/test_rapidtriage_final_roadmap.py"],
-      "assertions": ["Reviewer bundles preserve exhibit IDs, selected evidence hashes, generated output hashes, source references, verification steps, and #94 core_accuracy_gates."],
+      "assertions": ["Reviewer bundles preserve exhibit IDs, selected evidence hashes, generated output hashes, source references, verification steps, trusted court exhibit manifest diff helpers/gates, and #94 core_accuracy_gates."],
       "remaining_external_validation": ["Signed/notarized exhibit manifests and court-specific forms."]
     },
     {
       "item": 95,
       "title": "External tool version capture",
       "test_files": ["tests/test_rapidtriage_ops.py"],
-      "assertions": ["Validation packages preserve external tool inventory, availability/path/command/version/capture errors, limitation warnings, and #95 core_accuracy_gates."],
-      "remaining_external_validation": ["Per-run external parser/import command transcripts and original tool logs."]
+      "assertions": ["Validation packages preserve external tool inventory, availability/path/command/version/capture errors, limitation warnings, trusted external tool transcript diff helpers/gates, and #95 core_accuracy_gates."],
+      "remaining_external_validation": ["Per-run external parser/import command transcripts, trusted transcript manifests, and original tool logs."]
     },
     {
       "item": 96,

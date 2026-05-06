@@ -20,19 +20,25 @@ from rapidtriage.core.case_db import (
     build_custody_workflow_trusted_diff,
     build_evidence_history_trusted_diff,
     build_immutable_audit_trusted_diff,
+    build_legal_limitation_trusted_diff,
+    build_parser_confidence_trusted_diff,
     build_report_provenance_trusted_diff,
     build_report_reproducibility_trusted_diff,
+    build_validation_warning_trusted_diff,
     build_reviewer_workflow_trusted_diff,
     citation_manager_core_accuracy_gates,
     custody_workflow_core_accuracy_gates,
     evidence_selection_core_accuracy_gates,
     immutable_audit_core_accuracy_gates,
+    legal_limitation_core_accuracy_gates,
     list_tables,
     open_case_database,
+    parser_confidence_core_accuracy_gates,
     report_item_provenance_core_accuracy_gates,
     report_reproducibility_core_accuracy_gates,
     review_workflow_assessment,
     table_columns,
+    validation_warning_ux_core_accuracy_gates,
 )
 from rapidtriage.core.sample_case import run_sample_workflow
 from tests.test_rapidtriage_macos_artifacts import build_macos_fixture
@@ -974,10 +980,43 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertTrue(all("#92" in item["validation_assessment"]["commercial_gap_ids"] for item in export["items"]))
             self.assertTrue(all(item["validation_assessment"]["core_accuracy_gates"][0]["gap_id"] == "#91" for item in export["items"]))
             self.assertTrue(all(item["validation_assessment"]["core_accuracy_gates"][1]["gap_id"] == "#92" for item in export["items"]))
+            self.assertTrue(all(item["validation_assessment"]["trusted_parser_confidence_diff"]["status"] == "missing" for item in export["items"]))
+            self.assertTrue(all(item["validation_assessment"]["trusted_validation_warning_diff"]["status"] == "missing" for item in export["items"]))
+            self.assertTrue(all("trusted-parser-confidence-calibration-diff-missing" in item["validation_assessment"]["blockers"] for item in export["items"]))
+            self.assertTrue(all("trusted-validation-warning-checklist-diff-missing" in item["validation_assessment"]["blockers"] for item in export["items"]))
+            validation_assessment = export["items"][0]["validation_assessment"]
+            confidence_diff = build_parser_confidence_trusted_diff(validation_assessment, validation_assessment)
+            warning_diff = build_validation_warning_trusted_diff(validation_assessment, validation_assessment)
+            confidence_gate = parser_confidence_core_accuracy_gates(
+                parser_confidence=validation_assessment["parser_confidence"],
+                reportability=validation_assessment["reportability"],
+                coverage_status=validation_assessment["coverage_status"],
+                warnings=validation_assessment["warnings"],
+                evidence_strength=export["items"][0]["provenance"]["evidence_strength"],
+                trusted_diff=confidence_diff,
+            )
+            warning_gate = validation_warning_ux_core_accuracy_gates(
+                warnings=validation_assessment["warnings"],
+                trusted_diff=warning_diff,
+            )
+            self.assertEqual(confidence_diff["status"], "pass")
+            self.assertIn("trusted parser confidence calibration diff pass", confidence_gate[0]["satisfied_checks"])
+            self.assertEqual(warning_diff["status"], "pass")
+            self.assertIn("trusted validation warning checklist diff pass", warning_gate[0]["satisfied_checks"])
             self.assertGreaterEqual(export["summary"]["validation_warning_count"], 0)
             self.assertTrue(all(item["legal_limitations"] for item in export["items"]))
             self.assertTrue(all("#93" in item["legal_limitations_assessment"]["commercial_gap_ids"] for item in export["items"]))
             self.assertTrue(all(item["legal_limitations_assessment"]["core_accuracy_gates"][0]["gap_id"] == "#93" for item in export["items"]))
+            self.assertTrue(all(item["legal_limitations_assessment"]["trusted_legal_limitation_diff"]["status"] == "missing" for item in export["items"]))
+            self.assertTrue(all("trusted-legal-limitation-wording-diff-missing" in item["legal_limitations_assessment"]["blockers"] for item in export["items"]))
+            legal_assessment = export["items"][0]["legal_limitations_assessment"]
+            legal_diff = build_legal_limitation_trusted_diff(legal_assessment, legal_assessment)
+            legal_gate = legal_limitation_core_accuracy_gates(
+                limitations=export["items"][0]["legal_limitations"],
+                trusted_diff=legal_diff,
+            )
+            self.assertEqual(legal_diff["status"], "pass")
+            self.assertIn("trusted legal limitation wording diff pass", legal_gate[0]["satisfied_checks"])
             self.assertIn("#91", export["summary"]["parser_confidence_gap_ids"])
             self.assertIn("#92", export["summary"]["validation_warning_ux_gap_ids"])
             self.assertIn("#93", export["summary"]["legal_limitation_gap_ids"])
