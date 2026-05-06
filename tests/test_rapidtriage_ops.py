@@ -17,6 +17,14 @@ from rapidtriage.api.app import create_app
 from rapidtriage.cli import build_parser, main, run_web_server
 from rapidtriage.core.crash import build_crash_report_trusted_diff, crash_report_core_accuracy_gates, write_crash_report
 from rapidtriage.core.commercial_readiness import calculate_readiness_score
+from rapidtriage.core.enterprise import (
+    build_enterprise_trusted_diff,
+    collaboration_audit_core_accuracy_gates,
+    license_activation_core_accuracy_gates,
+    multi_user_case_server_core_accuracy_gates,
+    rbac_core_accuracy_gates,
+    telemetry_core_accuracy_gates,
+)
 from rapidtriage.core.benchmark import (
     benchmark_core_accuracy_gates,
     build_benchmark_trusted_diff,
@@ -109,24 +117,86 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("#106", payload["telemetry"]["commercial_gap_ids"])
         self.assertEqual(payload["telemetry"]["core_accuracy_gates"][0]["gap_id"], "#106")
         self.assertFalse(payload["telemetry"]["enabled"])
+        self.assertEqual(payload["telemetry"]["trusted_local_only_diff"]["status"], "missing")
+        self.assertIn("trusted-local-only-deployment-policy-diff-missing", payload["telemetry"]["blockers"])
+        local_diff = build_enterprise_trusted_diff(
+            106,
+            payload["telemetry"],
+            payload["telemetry"],
+            trusted_tool="local-only-deployment-policy",
+        )
+        local_gates = telemetry_core_accuracy_gates(trusted_diff=local_diff)
+        self.assertEqual(local_diff["status"], "pass")
+        self.assertIn("trusted local-only deployment policy diff pass", local_gates[0]["satisfied_checks"])
         self.assertIn("#107", payload["license_activation"]["commercial_gap_ids"])
         self.assertEqual(payload["license_activation"]["core_accuracy_gates"][0]["gap_id"], "#107")
         self.assertFalse(payload["license_activation"]["required"])
         self.assertEqual(payload["license_activation"]["status"], "operator-provided-file")
         self.assertEqual(len(payload["license_activation"]["license_sha256"]), 64)
         self.assertFalse(payload["license_activation"]["network_activation"])
+        self.assertEqual(payload["license_activation"]["trusted_license_diff"]["status"], "missing")
+        self.assertIn("trusted-license-authority-diff-missing", payload["license_activation"]["blockers"])
+        license_diff = build_enterprise_trusted_diff(
+            107,
+            payload["license_activation"],
+            payload["license_activation"],
+            trusted_tool="license-authority-review",
+        )
+        license_gates = license_activation_core_accuracy_gates(
+            payload["license_activation"],
+            trusted_diff=license_diff,
+        )
+        self.assertEqual(license_diff["status"], "pass")
+        self.assertIn("trusted license authority diff pass", license_gates[0]["satisfied_checks"])
         self.assertIn("#108", payload["rbac"]["commercial_gap_ids"])
         self.assertEqual(payload["rbac"]["core_accuracy_gates"][0]["gap_id"], "#108")
         self.assertEqual(payload["rbac"]["active_role"], "viewer")
         self.assertTrue(payload["rbac"]["active_role_supported"])
         self.assertNotIn("backup_restore", payload["rbac"]["active_permissions"])
+        self.assertEqual(payload["rbac"]["trusted_rbac_diff"]["status"], "missing")
+        self.assertIn("trusted-rbac-enforcement-diff-missing", payload["rbac"]["blockers"])
+        rbac_diff = build_enterprise_trusted_diff(
+            108,
+            payload["rbac"],
+            payload["rbac"],
+            trusted_tool="rbac-enforcement-test",
+        )
+        rbac_gates = rbac_core_accuracy_gates(
+            payload["rbac"]["active_role"],
+            payload["rbac"]["active_permissions"],
+            trusted_diff=rbac_diff,
+        )
+        self.assertEqual(rbac_diff["status"], "pass")
+        self.assertIn("trusted RBAC enforcement diff pass", rbac_gates[0]["satisfied_checks"])
         self.assertIn("#109", payload["multi_user_case_server"]["commercial_gap_ids"])
         self.assertEqual(payload["multi_user_case_server"]["core_accuracy_gates"][0]["gap_id"], "#109")
         self.assertTrue(payload["multi_user_case_server"]["required_before_enablement"])
+        self.assertEqual(payload["multi_user_case_server"]["trusted_multi_user_diff"]["status"], "missing")
+        self.assertIn("trusted-multi-user-server-review-diff-missing", payload["multi_user_case_server"]["blockers"])
+        multi_user_diff = build_enterprise_trusted_diff(
+            109,
+            payload["multi_user_case_server"],
+            payload["multi_user_case_server"],
+            trusted_tool="multi-user-server-security-review",
+        )
+        multi_user_gates = multi_user_case_server_core_accuracy_gates(trusted_diff=multi_user_diff)
+        self.assertEqual(multi_user_diff["status"], "pass")
+        self.assertIn("trusted multi-user server review diff pass", multi_user_gates[0]["satisfied_checks"])
         self.assertIn("#110", payload["collaboration_audit_trail"]["commercial_gap_ids"])
         self.assertEqual(payload["collaboration_audit_trail"]["core_accuracy_gates"][0]["gap_id"], "#110")
         self.assertEqual(payload["collaboration_audit_trail"]["status"], "case-db-audit-events-with-export-hash-chain")
         self.assertEqual(payload["multi_user_case_server"]["status"], "not-enabled")
+        self.assertEqual(payload["collaboration_audit_trail"]["trusted_collaboration_audit_diff"]["status"], "missing")
+        self.assertIn("trusted-collaboration-audit-diff-missing", payload["collaboration_audit_trail"]["blockers"])
+        collaboration_diff = build_enterprise_trusted_diff(
+            110,
+            payload["collaboration_audit_trail"],
+            payload["collaboration_audit_trail"],
+            trusted_tool="collaboration-audit-review",
+        )
+        collaboration_gates = collaboration_audit_core_accuracy_gates(trusted_diff=collaboration_diff)
+        self.assertEqual(collaboration_diff["status"], "pass")
+        self.assertIn("trusted collaboration audit diff pass", collaboration_gates[0]["satisfied_checks"])
         self.assertIn("#118", payload["security_hardening"]["commercial_gap_ids"])
         self.assertIn("#119", payload["security_hardening"]["commercial_gap_ids"])
         self.assertEqual(payload["security_hardening"]["core_accuracy_gates"][0]["gap_id"], "#118")

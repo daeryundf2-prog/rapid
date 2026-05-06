@@ -1595,6 +1595,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "localhost default recorded",
             "remote auth token requirement recorded",
             "local-only limitation disclosed",
+            "trusted local-only deployment policy diff pass",
         ),
     },
     {
@@ -1609,6 +1610,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "network activation disabled recorded",
             "evidence-touch false recorded",
             "paid activation blocker disclosed",
+            "trusted license authority diff pass",
         ),
     },
     {
@@ -1623,6 +1625,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "active permissions emitted",
             "export controls recorded",
             "per-action enforcement blocker disclosed",
+            "trusted RBAC enforcement diff pass",
         ),
     },
     {
@@ -1637,6 +1640,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "identity provider requirement recorded",
             "locking/conflict requirement recorded",
             "security review blocker disclosed",
+            "trusted multi-user server review diff pass",
         ),
     },
     {
@@ -1651,6 +1655,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "tamper evidence linkage recorded",
             "identity model caveat recorded",
             "multi-user conflict blocker disclosed",
+            "trusted collaboration audit diff pass",
         ),
     },
     {
