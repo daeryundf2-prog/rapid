@@ -66,8 +66,8 @@
       "status": "pass",
       "backlog_items": [86],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report export preserves evidence-source inventory, custody events, citation IDs, source status/hash fields, acquisition metadata warning, and #86 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; signed handoff/acquisition metadata remains blocker."
+      "expected": {"required_assertions": ["Case DB report export preserves evidence-source inventory, custody events, citation IDs, source status/hash fields, acquisition metadata warning, trusted custody event manifest diff helpers/gates, and #86 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; signed handoff/acquisition metadata and trusted custody event manifests remain blockers."
     },
     {
       "id": "core-forensics-087-acquisition-hash",
@@ -77,8 +77,8 @@
       "status": "pass",
       "backlog_items": [87],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report export preserves evidence-source hashes, hash records, algorithms, calculation timestamps, missing-hash warning, and #87 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; whole-device acquisition hash metadata remains blocker."
+      "expected": {"required_assertions": ["Case DB report export preserves evidence-source hashes, hash records, algorithms, calculation timestamps, missing-hash warning, trusted acquisition hash manifest diff helpers/gates, and #87 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; whole-device acquisition hash metadata and trusted acquisition hash manifests remain blockers."
     },
     {
       "id": "core-forensics-088-immutable-audit",
@@ -88,8 +88,8 @@
       "status": "pass",
       "backlog_items": [88],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report export preserves audit events, previous/event hash chain, actor/action/target/time fields, head hash, notarization warning, and #88 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; DB-level append-only enforcement and external notarization remain blockers."
+      "expected": {"required_assertions": ["Case DB report export preserves audit events, previous/event hash chain, actor/action/target/time fields, head hash, notarization warning, trusted audit hash-chain manifest diff helpers/gates, and #88 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; DB-level append-only enforcement, trusted audit chain manifests, and external notarization remain blockers."
     },
     {
       "id": "core-forensics-089-reproducibility",
@@ -99,8 +99,8 @@
       "status": "pass",
       "backlog_items": [89],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Report export preserves stable payload hash, deterministic sorting, item/citation counts, volatile-field disclosure, replay warning, and #89 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; cross-platform same-input replay validation remains blocker."
+      "expected": {"required_assertions": ["Report export preserves stable payload hash, deterministic sorting, item/citation counts, volatile-field disclosure, replay warning, trusted report replay manifest diff helpers/gates, and #89 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; cross-platform same-input replay validation and trusted report replay manifests remain blockers."
     },
     {
       "id": "core-forensics-090-provenance",
@@ -110,8 +110,8 @@
       "status": "pass",
       "backlog_items": [90],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Report items preserve source paths, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, and #90 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; completeness validation across every parser remains blocker."
+      "expected": {"required_assertions": ["Report items preserve source paths, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, trusted report provenance manifest diff helpers/gates, and #90 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; completeness validation across every parser and trusted provenance manifests remain blockers."
     }
   ]
 }

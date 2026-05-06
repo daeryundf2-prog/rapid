@@ -23,6 +23,18 @@ ACQUISITION_HASH_GAP_ID = "#87"
 IMMUTABLE_AUDIT_GAP_ID = "#88"
 REPORT_REPRODUCIBILITY_GAP_ID = "#89"
 SOURCE_PROVENANCE_GAP_ID = "#90"
+CUSTODY_TRUSTED_DIFF_BLOCKER_86 = "trusted-custody-event-manifest-diff-missing"
+ACQUISITION_HASH_TRUSTED_DIFF_BLOCKER_87 = "trusted-acquisition-hash-manifest-diff-missing"
+IMMUTABLE_AUDIT_TRUSTED_DIFF_BLOCKER_88 = "trusted-audit-hash-chain-manifest-diff-missing"
+REPORT_REPRODUCIBILITY_TRUSTED_DIFF_BLOCKER_89 = "trusted-report-replay-manifest-diff-missing"
+SOURCE_PROVENANCE_TRUSTED_DIFF_BLOCKER_90 = "trusted-report-provenance-manifest-diff-missing"
+FORENSIC_INTEGRITY_TRUSTED_TOOLS = {
+    "custody-event-manifest",
+    "acquisition-hash-manifest",
+    "audit-hash-chain-manifest",
+    "report-replay-manifest",
+    "report-provenance-manifest",
+}
 PARSER_CONFIDENCE_GAP_ID = "#91"
 VALIDATION_WARNING_UX_GAP_ID = "#92"
 LEGAL_LIMITATION_GAP_ID = "#93"
@@ -3054,7 +3066,12 @@ def evidence_selection_core_accuracy_gates(
     ]
 
 
-def build_custody_workflow(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+def build_custody_workflow(
+    connection: sqlite3.Connection,
+    case_id: str,
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     evidence_rows = connection.execute(
         """
         SELECT citation_id, display_name, source_type, original_path, staged_path,
@@ -3100,6 +3117,9 @@ def build_custody_workflow(connection: sqlite3.Connection, case_id: str) -> dict
         }
         for row in audit_rows
     ]
+    blockers = []
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(CUSTODY_TRUSTED_DIFF_BLOCKER_86)
     return {
         "status": "case-db-custody-export",
         "commercial_gap_ids": [CHAIN_OF_CUSTODY_GAP_ID],
@@ -3110,10 +3130,17 @@ def build_custody_workflow(connection: sqlite3.Connection, case_id: str) -> dict
         },
         "evidence_sources": evidence_sources,
         "custody_events": custody_events,
+        "trusted_custody_diff": dict(trusted_diff) if trusted_diff else missing_integrity_trusted_diff(
+            CHAIN_OF_CUSTODY_GAP_ID,
+            CUSTODY_TRUSTED_DIFF_BLOCKER_86,
+            trusted_tool="custody-event-manifest",
+        ),
         "core_accuracy_gates": custody_workflow_core_accuracy_gates(
             evidence_sources=evidence_sources,
             custody_events=custody_events,
+            trusted_diff=trusted_diff,
         ),
+        "blockers": blockers,
         "limitations": [
             "This is a Case DB custody export; acquisition device/write-blocker metadata must be recorded separately when available.",
             "Original evidence images are not copied into report exports.",
@@ -3121,7 +3148,12 @@ def build_custody_workflow(connection: sqlite3.Connection, case_id: str) -> dict
     }
 
 
-def build_acquisition_hash_workflow(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+def build_acquisition_hash_workflow(
+    connection: sqlite3.Connection,
+    case_id: str,
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     evidence_rows = connection.execute(
         """
         SELECT citation_id, display_name, original_path, size_bytes, hash_md5, hash_sha1, hash_sha256, added_at
@@ -3172,6 +3204,9 @@ def build_acquisition_hash_workflow(connection: sqlite3.Connection, case_id: str
                 "calculated_at": str(row["calculated_at"] or ""),
             }
         )
+    blockers = []
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(ACQUISITION_HASH_TRUSTED_DIFF_BLOCKER_87)
     return {
         "status": "case-db-hash-export",
         "commercial_gap_ids": [ACQUISITION_HASH_GAP_ID],
@@ -3181,7 +3216,13 @@ def build_acquisition_hash_workflow(connection: sqlite3.Connection, case_id: str
             "commercial_gap_ids": [ACQUISITION_HASH_GAP_ID],
         },
         "hashes": hashes,
-        "core_accuracy_gates": acquisition_hash_core_accuracy_gates(hashes=hashes),
+        "trusted_acquisition_hash_diff": dict(trusted_diff) if trusted_diff else missing_integrity_trusted_diff(
+            ACQUISITION_HASH_GAP_ID,
+            ACQUISITION_HASH_TRUSTED_DIFF_BLOCKER_87,
+            trusted_tool="acquisition-hash-manifest",
+        ),
+        "core_accuracy_gates": acquisition_hash_core_accuracy_gates(hashes=hashes, trusted_diff=trusted_diff),
+        "blockers": blockers,
         "limitations": [
             "Folder evidence hashes describe imported files/outputs when available; whole-device acquisition hashes require acquisition metadata.",
             "Missing hashes should be resolved before court exhibit export.",
@@ -3189,7 +3230,12 @@ def build_acquisition_hash_workflow(connection: sqlite3.Connection, case_id: str
     }
 
 
-def build_audit_integrity_chain(connection: sqlite3.Connection, case_id: str) -> dict[str, object]:
+def build_audit_integrity_chain(
+    connection: sqlite3.Connection,
+    case_id: str,
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     rows = connection.execute(
         """
         SELECT citation_id, actor, action, target_type, target_id, timestamp,
@@ -3221,6 +3267,9 @@ def build_audit_integrity_chain(connection: sqlite3.Connection, case_id: str) ->
         event["event_hash"] = event_hash
         previous_hash = event_hash
         events.append(event)
+    blockers = []
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(IMMUTABLE_AUDIT_TRUSTED_DIFF_BLOCKER_88)
     return {
         "status": "tamper-evident-export-chain",
         "commercial_gap_ids": [IMMUTABLE_AUDIT_GAP_ID],
@@ -3230,7 +3279,17 @@ def build_audit_integrity_chain(connection: sqlite3.Connection, case_id: str) ->
             "commercial_gap_ids": [IMMUTABLE_AUDIT_GAP_ID],
         },
         "events": events,
-        "core_accuracy_gates": immutable_audit_core_accuracy_gates(events=events, head_hash=previous_hash),
+        "trusted_audit_integrity_diff": dict(trusted_diff) if trusted_diff else missing_integrity_trusted_diff(
+            IMMUTABLE_AUDIT_GAP_ID,
+            IMMUTABLE_AUDIT_TRUSTED_DIFF_BLOCKER_88,
+            trusted_tool="audit-hash-chain-manifest",
+        ),
+        "core_accuracy_gates": immutable_audit_core_accuracy_gates(
+            events=events,
+            head_hash=previous_hash,
+            trusted_diff=trusted_diff,
+        ),
+        "blockers": blockers,
         "limitations": [
             "This hash chain is generated at export time from Case DB audit rows; external notarization/signing is still required for full immutability.",
         ],
@@ -3240,11 +3299,16 @@ def build_audit_integrity_chain(connection: sqlite3.Connection, case_id: str) ->
 def build_report_reproducibility_manifest(
     items: Sequence[Mapping[str, object]],
     citation_index: Sequence[Mapping[str, object]],
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     stable_payload = {
         "items": items,
         "citation_index": citation_index,
     }
+    blockers = []
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(REPORT_REPRODUCIBILITY_TRUSTED_DIFF_BLOCKER_89)
     return {
         "status": "deterministic-export-manifest",
         "commercial_gap_ids": [REPORT_REPRODUCIBILITY_GAP_ID],
@@ -3253,11 +3317,18 @@ def build_report_reproducibility_manifest(
         "citation_count": len(citation_index),
         "deterministic_sort": "review include flag, updated_at, id; citation index sorted by citation_id",
         "volatile_fields": ["generated_at", "database path", "case updated_at"],
+        "trusted_reproducibility_diff": dict(trusted_diff) if trusted_diff else missing_integrity_trusted_diff(
+            REPORT_REPRODUCIBILITY_GAP_ID,
+            REPORT_REPRODUCIBILITY_TRUSTED_DIFF_BLOCKER_89,
+            trusted_tool="report-replay-manifest",
+        ),
         "core_accuracy_gates": report_reproducibility_core_accuracy_gates(
             stable_hash=stable_payload_sha256(stable_payload),
             item_count=len(items),
             citation_count=len(citation_index),
+            trusted_diff=trusted_diff,
         ),
+        "blockers": blockers,
     }
 
 
@@ -3606,11 +3677,16 @@ def is_relative_to(child: Path, parent: Path) -> bool:
 def build_report_item_provenance(
     enriched: Mapping[str, object],
     review: Mapping[str, object],
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     source_reference = enriched.get("source_reference") if isinstance(enriched.get("source_reference"), Mapping) else {}
     metadata = enriched.get("metadata") if isinstance(enriched.get("metadata"), Mapping) else {}
     hashes = source_reference.get("source_hashes") if isinstance(source_reference.get("source_hashes"), Mapping) else {}
     record_hashes = source_reference.get("record_hashes") if isinstance(source_reference.get("record_hashes"), Mapping) else {}
+    blockers = []
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(SOURCE_PROVENANCE_TRUSTED_DIFF_BLOCKER_90)
     return {
         "commercial_gap_ids": [SOURCE_PROVENANCE_GAP_ID],
         "target_citation_id": str(enriched.get("citation_id") or ""),
@@ -3627,6 +3703,12 @@ def build_report_item_provenance(
         "verification_status": str(review.get("verification_status") or ""),
         "reportability": str(source_reference.get("reportability") or metadata.get("reportability") or ""),
         "evidence_strength": str(source_reference.get("evidence_strength") or metadata.get("evidence_strength") or ""),
+        "trusted_provenance_diff": dict(trusted_diff) if trusted_diff else missing_integrity_trusted_diff(
+            SOURCE_PROVENANCE_GAP_ID,
+            SOURCE_PROVENANCE_TRUSTED_DIFF_BLOCKER_90,
+            trusted_tool="report-provenance-manifest",
+        ),
+        "blockers": blockers,
         "core_accuracy_gates": report_item_provenance_core_accuracy_gates(
             source_path=str(source_reference.get("path") or enriched.get("path") or ""),
             hashes=hashes,
@@ -3638,6 +3720,7 @@ def build_report_item_provenance(
             source_index=source_reference.get("source_index"),
             review_status=str(review.get("status") or ""),
             reportability=str(source_reference.get("reportability") or metadata.get("reportability") or ""),
+            trusted_diff=trusted_diff,
         ),
     }
 
@@ -3646,6 +3729,7 @@ def custody_workflow_core_accuracy_gates(
     *,
     evidence_sources: Sequence[Mapping[str, object]],
     custody_events: Sequence[Mapping[str, object]],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["acquisition metadata limitation warning"]
     if evidence_sources:
@@ -3656,6 +3740,8 @@ def custody_workflow_core_accuracy_gates(
         satisfied.append("citation IDs preserved")
     if any(item.get("status") or item.get("sha256") for item in evidence_sources):
         satisfied.append("source status/hash fields preserved")
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted custody event manifest diff pass")
     return [
         build_accuracy_gate(
             86,
@@ -3668,7 +3754,11 @@ def custody_workflow_core_accuracy_gates(
     ]
 
 
-def acquisition_hash_core_accuracy_gates(*, hashes: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+def acquisition_hash_core_accuracy_gates(
+    *,
+    hashes: Sequence[Mapping[str, object]],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
     satisfied = ["missing hash limitation warning"]
     if any(item.get("target_type") == "evidence_source" for item in hashes):
         satisfied.append("evidence-source hashes exported")
@@ -3678,6 +3768,8 @@ def acquisition_hash_core_accuracy_gates(*, hashes: Sequence[Mapping[str, object
         satisfied.append("hash algorithms preserved")
     if any(item.get("calculated_at") for item in hashes):
         satisfied.append("calculation timestamps preserved")
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted acquisition hash manifest diff pass")
     return [
         build_accuracy_gate(
             87,
@@ -3691,6 +3783,7 @@ def immutable_audit_core_accuracy_gates(
     *,
     events: Sequence[Mapping[str, object]],
     head_hash: str,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["external notarization limitation warning"]
     if events:
@@ -3701,6 +3794,8 @@ def immutable_audit_core_accuracy_gates(
         satisfied.append("actor/action/target/time fields preserved")
     if head_hash:
         satisfied.append("head hash recorded")
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted audit hash-chain manifest diff pass")
     return [
         build_accuracy_gate(
             88,
@@ -3715,17 +3810,21 @@ def report_reproducibility_core_accuracy_gates(
     stable_hash: str,
     item_count: int,
     citation_count: int,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
+    satisfied = [
+        "stable payload hash generated",
+        "deterministic sorting documented",
+        "item/citation counts recorded",
+        "volatile fields disclosed",
+        "cross-platform replay limitation warning",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted report replay manifest diff pass")
     return [
         build_accuracy_gate(
             89,
-            satisfied_checks=[
-                "stable payload hash generated",
-                "deterministic sorting documented",
-                "item/citation counts recorded",
-                "volatile fields disclosed",
-                "cross-platform replay limitation warning",
-            ],
+            satisfied_checks=satisfied,
             evidence_refs=[
                 f"stable_payload_sha256:{stable_hash}",
                 f"stable_item_count:{item_count}",
@@ -3747,6 +3846,7 @@ def report_item_provenance_core_accuracy_gates(
     source_index: object,
     review_status: str,
     reportability: str,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
     if source_path:
@@ -3759,6 +3859,8 @@ def report_item_provenance_core_accuracy_gates(
         satisfied.append("offset or source index preserved when available")
     if review_status or reportability:
         satisfied.append("review/reportability fields preserved")
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted report provenance manifest diff pass")
     return [
         build_accuracy_gate(
             90,
@@ -3772,6 +3874,279 @@ def report_item_provenance_core_accuracy_gates(
             ],
         )
     ]
+
+
+def missing_integrity_trusted_diff(gap_id: str, blocker: str, *, trusted_tool: str) -> dict[str, object]:
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [gap_id],
+        "blocker": blocker,
+        "required_trusted_tool": trusted_tool,
+    }
+
+
+def build_custody_workflow_trusted_diff(
+    rapid_workflow: Mapping[str, object],
+    trusted_workflow: Mapping[str, object],
+    *,
+    trusted_tool: str = "custody-event-manifest",
+) -> dict[str, object]:
+    mismatches = compare_integrity_manifests(
+        custody_manifest(rapid_workflow),
+        custody_manifest(trusted_workflow),
+        fields=("evidence_sources", "custody_events"),
+    )
+    status = "pass" if not mismatches and trusted_tool in FORENSIC_INTEGRITY_TRUSTED_TOOLS else "fail"
+    return integrity_trusted_diff_result(
+        status=status,
+        gap_id=CHAIN_OF_CUSTODY_GAP_ID,
+        blocker=CUSTODY_TRUSTED_DIFF_BLOCKER_86,
+        trusted_tool=trusted_tool,
+        compared_fields=["evidence_sources", "custody_events"],
+        mismatches=mismatches,
+    )
+
+
+def build_acquisition_hash_trusted_diff(
+    rapid_workflow: Mapping[str, object],
+    trusted_workflow: Mapping[str, object],
+    *,
+    trusted_tool: str = "acquisition-hash-manifest",
+) -> dict[str, object]:
+    mismatches = compare_integrity_manifests(
+        acquisition_hash_manifest(rapid_workflow),
+        acquisition_hash_manifest(trusted_workflow),
+        fields=("hashes",),
+    )
+    status = "pass" if not mismatches and trusted_tool in FORENSIC_INTEGRITY_TRUSTED_TOOLS else "fail"
+    return integrity_trusted_diff_result(
+        status=status,
+        gap_id=ACQUISITION_HASH_GAP_ID,
+        blocker=ACQUISITION_HASH_TRUSTED_DIFF_BLOCKER_87,
+        trusted_tool=trusted_tool,
+        compared_fields=["hashes"],
+        mismatches=mismatches,
+    )
+
+
+def build_immutable_audit_trusted_diff(
+    rapid_workflow: Mapping[str, object],
+    trusted_workflow: Mapping[str, object],
+    *,
+    trusted_tool: str = "audit-hash-chain-manifest",
+) -> dict[str, object]:
+    mismatches = compare_integrity_manifests(
+        audit_integrity_manifest(rapid_workflow),
+        audit_integrity_manifest(trusted_workflow),
+        fields=("head_hash", "events"),
+    )
+    status = "pass" if not mismatches and trusted_tool in FORENSIC_INTEGRITY_TRUSTED_TOOLS else "fail"
+    return integrity_trusted_diff_result(
+        status=status,
+        gap_id=IMMUTABLE_AUDIT_GAP_ID,
+        blocker=IMMUTABLE_AUDIT_TRUSTED_DIFF_BLOCKER_88,
+        trusted_tool=trusted_tool,
+        compared_fields=["head_hash", "events"],
+        mismatches=mismatches,
+    )
+
+
+def build_report_reproducibility_trusted_diff(
+    rapid_manifest: Mapping[str, object],
+    trusted_manifest: Mapping[str, object],
+    *,
+    trusted_tool: str = "report-replay-manifest",
+) -> dict[str, object]:
+    mismatches = compare_integrity_manifests(
+        reproducibility_manifest(rapid_manifest),
+        reproducibility_manifest(trusted_manifest),
+        fields=("stable_payload_sha256", "stable_item_count", "citation_count"),
+    )
+    status = "pass" if not mismatches and trusted_tool in FORENSIC_INTEGRITY_TRUSTED_TOOLS else "fail"
+    return integrity_trusted_diff_result(
+        status=status,
+        gap_id=REPORT_REPRODUCIBILITY_GAP_ID,
+        blocker=REPORT_REPRODUCIBILITY_TRUSTED_DIFF_BLOCKER_89,
+        trusted_tool=trusted_tool,
+        compared_fields=["stable_payload_sha256", "stable_item_count", "citation_count"],
+        mismatches=mismatches,
+    )
+
+
+def build_report_provenance_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str = "report-provenance-manifest",
+) -> dict[str, object]:
+    mismatches = compare_indexed_integrity_rows(
+        index_provenance_rows(rapid_rows),
+        index_provenance_rows(trusted_rows),
+        fields=("source_path", "hashes", "record_hashes", "parser", "parser_version", "review_status", "reportability"),
+    )
+    status = "pass" if not mismatches and trusted_tool in FORENSIC_INTEGRITY_TRUSTED_TOOLS else "fail"
+    return integrity_trusted_diff_result(
+        status=status,
+        gap_id=SOURCE_PROVENANCE_GAP_ID,
+        blocker=SOURCE_PROVENANCE_TRUSTED_DIFF_BLOCKER_90,
+        trusted_tool=trusted_tool,
+        compared_fields=["target_citation_id", "source_path", "hashes", "parser", "review_status", "reportability"],
+        mismatches=mismatches,
+    )
+
+
+def integrity_trusted_diff_result(
+    *,
+    status: str,
+    gap_id: str,
+    blocker: str,
+    trusted_tool: str,
+    compared_fields: Sequence[str],
+    mismatches: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [gap_id],
+        "compared_fields": list(compared_fields),
+        "mismatches": [dict(item) for item in mismatches],
+        "blocker": None if status == "pass" else blocker,
+    }
+
+
+def compare_integrity_manifests(
+    rapid: Mapping[str, object],
+    trusted: Mapping[str, object],
+    *,
+    fields: Sequence[str],
+) -> list[dict[str, object]]:
+    return [
+        {"field": field, "rapid": normalize_integrity_value(rapid.get(field)), "trusted": normalize_integrity_value(trusted.get(field))}
+        for field in fields
+        if normalize_integrity_value(rapid.get(field)) != normalize_integrity_value(trusted.get(field))
+    ]
+
+
+def compare_indexed_integrity_rows(
+    rapid_index: Mapping[str, Mapping[str, object]],
+    trusted_index: Mapping[str, Mapping[str, object]],
+    *,
+    fields: Sequence[str],
+) -> list[dict[str, object]]:
+    mismatches: list[dict[str, object]] = []
+    for key, trusted_row in sorted(trusted_index.items()):
+        rapid_row = rapid_index.get(key)
+        if rapid_row is None:
+            mismatches.append({"id": key, "field": "row", "rapid": None, "trusted": "present"})
+            continue
+        for field in fields:
+            rapid_value = normalize_integrity_value(rapid_row.get(field))
+            trusted_value = normalize_integrity_value(trusted_row.get(field))
+            if rapid_value != trusted_value:
+                mismatches.append({"id": key, "field": field, "rapid": rapid_value, "trusted": trusted_value})
+    for key in sorted(set(rapid_index) - set(trusted_index)):
+        mismatches.append({"id": key, "field": "row", "rapid": "present", "trusted": None})
+    return mismatches
+
+
+def normalize_integrity_value(value: object) -> object:
+    if isinstance(value, list):
+        return sorted(json.dumps(item, ensure_ascii=False, sort_keys=True, default=str) for item in value)
+    if isinstance(value, tuple):
+        return sorted(json.dumps(item, ensure_ascii=False, sort_keys=True, default=str) for item in value)
+    if isinstance(value, Mapping):
+        return json.dumps(dict(value), ensure_ascii=False, sort_keys=True, default=str)
+    return value
+
+
+def custody_manifest(workflow: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "evidence_sources": [
+            {
+                "citation_id": item.get("citation_id"),
+                "sha256": item.get("sha256"),
+                "status": item.get("status"),
+                "original_path": item.get("original_path"),
+            }
+            for item in workflow.get("evidence_sources", [])
+            if isinstance(item, Mapping)
+        ],
+        "custody_events": [
+            {
+                "citation_id": item.get("citation_id"),
+                "actor": item.get("actor"),
+                "action": item.get("action"),
+                "target_type": item.get("target_type"),
+                "target_id": item.get("target_id"),
+                "timestamp": item.get("timestamp"),
+                "result": item.get("result"),
+            }
+            for item in workflow.get("custody_events", [])
+            if isinstance(item, Mapping)
+        ],
+    }
+
+
+def acquisition_hash_manifest(workflow: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "hashes": [
+            {
+                "citation_id": item.get("citation_id"),
+                "target_type": item.get("target_type"),
+                "target_id": item.get("target_id"),
+                "hash_scope": item.get("hash_scope"),
+                "hashes": item.get("hashes"),
+                "calculated_at": item.get("calculated_at"),
+            }
+            for item in workflow.get("hashes", [])
+            if isinstance(item, Mapping)
+        ],
+    }
+
+
+def audit_integrity_manifest(workflow: Mapping[str, object]) -> dict[str, object]:
+    summary = workflow.get("summary") if isinstance(workflow.get("summary"), Mapping) else {}
+    return {
+        "head_hash": summary.get("head_hash"),
+        "events": [
+            {
+                "citation_id": item.get("citation_id"),
+                "previous_event_hash": item.get("previous_event_hash"),
+                "event_hash": item.get("event_hash"),
+                "action": item.get("action"),
+                "timestamp": item.get("timestamp"),
+            }
+            for item in workflow.get("events", [])
+            if isinstance(item, Mapping)
+        ],
+    }
+
+
+def reproducibility_manifest(manifest: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "stable_payload_sha256": manifest.get("stable_payload_sha256"),
+        "stable_item_count": manifest.get("stable_item_count"),
+        "citation_count": manifest.get("citation_count"),
+    }
+
+
+def index_provenance_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, Mapping[str, object]]:
+    indexed: dict[str, Mapping[str, object]] = {}
+    for row in rows:
+        key = str(row.get("target_citation_id") or row.get("review_citation_id") or row.get("source_path") or "")
+        if not key:
+            continue
+        indexed[key] = {
+            "source_path": row.get("source_path"),
+            "hashes": row.get("hashes"),
+            "record_hashes": row.get("record_hashes"),
+            "parser": row.get("parser"),
+            "parser_version": row.get("parser_version"),
+            "review_status": row.get("review_status"),
+            "reportability": row.get("reportability"),
+        }
+    return indexed
 
 
 def parser_confidence_core_accuracy_gates(

@@ -13,14 +13,24 @@ from rapidtriage.core.case_db import (
     SCHEMA_VERSION,
     CaseDatabase,
     CaseDatabaseError,
+    acquisition_hash_core_accuracy_gates,
+    build_acquisition_hash_trusted_diff,
     build_case_db_fts_trusted_diff,
     build_citation_manager_trusted_diff,
+    build_custody_workflow_trusted_diff,
     build_evidence_history_trusted_diff,
+    build_immutable_audit_trusted_diff,
+    build_report_provenance_trusted_diff,
+    build_report_reproducibility_trusted_diff,
     build_reviewer_workflow_trusted_diff,
     citation_manager_core_accuracy_gates,
+    custody_workflow_core_accuracy_gates,
     evidence_selection_core_accuracy_gates,
+    immutable_audit_core_accuracy_gates,
     list_tables,
     open_case_database,
+    report_item_provenance_core_accuracy_gates,
+    report_reproducibility_core_accuracy_gates,
     review_workflow_assessment,
     table_columns,
 )
@@ -877,23 +887,88 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("#86", export["custody_workflow"]["commercial_gap_ids"])
             self.assertEqual(export["custody_workflow"]["core_accuracy_gates"][0]["gap_id"], "#86")
             self.assertIn("evidence source inventory", export["custody_workflow"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(export["custody_workflow"]["trusted_custody_diff"]["status"], "missing")
+            self.assertIn("trusted-custody-event-manifest-diff-missing", export["custody_workflow"]["blockers"])
+            custody_diff = build_custody_workflow_trusted_diff(export["custody_workflow"], export["custody_workflow"])
+            custody_gates = custody_workflow_core_accuracy_gates(
+                evidence_sources=export["custody_workflow"]["evidence_sources"],
+                custody_events=export["custody_workflow"]["custody_events"],
+                trusted_diff=custody_diff,
+            )
+            self.assertEqual(custody_diff["status"], "pass")
+            self.assertIn("trusted custody event manifest diff pass", custody_gates[0]["satisfied_checks"])
             self.assertIn("acquisition_hash_workflow", export)
             self.assertIn("#87", export["acquisition_hash_workflow"]["commercial_gap_ids"])
             self.assertEqual(export["acquisition_hash_workflow"]["core_accuracy_gates"][0]["gap_id"], "#87")
+            self.assertEqual(export["acquisition_hash_workflow"]["trusted_acquisition_hash_diff"]["status"], "missing")
+            self.assertIn("trusted-acquisition-hash-manifest-diff-missing", export["acquisition_hash_workflow"]["blockers"])
+            hash_diff = build_acquisition_hash_trusted_diff(
+                export["acquisition_hash_workflow"],
+                export["acquisition_hash_workflow"],
+            )
+            hash_gates = acquisition_hash_core_accuracy_gates(
+                hashes=export["acquisition_hash_workflow"]["hashes"],
+                trusted_diff=hash_diff,
+            )
+            self.assertEqual(hash_diff["status"], "pass")
+            self.assertIn("trusted acquisition hash manifest diff pass", hash_gates[0]["satisfied_checks"])
             self.assertIn("audit_integrity", export)
             self.assertIn("#88", export["audit_integrity"]["commercial_gap_ids"])
             self.assertEqual(export["audit_integrity"]["core_accuracy_gates"][0]["gap_id"], "#88")
             self.assertGreaterEqual(export["audit_integrity"]["summary"]["event_count"], 1)
             self.assertTrue(export["audit_integrity"]["summary"]["head_hash"])
+            self.assertEqual(export["audit_integrity"]["trusted_audit_integrity_diff"]["status"], "missing")
+            self.assertIn("trusted-audit-hash-chain-manifest-diff-missing", export["audit_integrity"]["blockers"])
+            audit_diff = build_immutable_audit_trusted_diff(export["audit_integrity"], export["audit_integrity"])
+            audit_gates = immutable_audit_core_accuracy_gates(
+                events=export["audit_integrity"]["events"],
+                head_hash=export["audit_integrity"]["summary"]["head_hash"],
+                trusted_diff=audit_diff,
+            )
+            self.assertEqual(audit_diff["status"], "pass")
+            self.assertIn("trusted audit hash-chain manifest diff pass", audit_gates[0]["satisfied_checks"])
             self.assertIn("reproducibility", export)
             self.assertIn("#89", export["reproducibility"]["commercial_gap_ids"])
             self.assertEqual(export["reproducibility"]["core_accuracy_gates"][0]["gap_id"], "#89")
             self.assertTrue(export["reproducibility"]["stable_payload_sha256"])
+            self.assertEqual(export["reproducibility"]["trusted_reproducibility_diff"]["status"], "missing")
+            self.assertIn("trusted-report-replay-manifest-diff-missing", export["reproducibility"]["blockers"])
+            reproducibility_diff = build_report_reproducibility_trusted_diff(
+                export["reproducibility"],
+                export["reproducibility"],
+            )
+            reproducibility_gates = report_reproducibility_core_accuracy_gates(
+                stable_hash=export["reproducibility"]["stable_payload_sha256"],
+                item_count=export["reproducibility"]["stable_item_count"],
+                citation_count=export["reproducibility"]["citation_count"],
+                trusted_diff=reproducibility_diff,
+            )
+            self.assertEqual(reproducibility_diff["status"], "pass")
+            self.assertIn("trusted report replay manifest diff pass", reproducibility_gates[0]["satisfied_checks"])
             self.assertTrue(all("provenance" in item for item in export["items"]))
             self.assertTrue(all("#90" in item["provenance"]["commercial_gap_ids"] for item in export["items"]))
             self.assertTrue(all(item["provenance"]["core_accuracy_gates"][0]["gap_id"] == "#90" for item in export["items"]))
+            self.assertTrue(all(item["provenance"]["trusted_provenance_diff"]["status"] == "missing" for item in export["items"]))
+            self.assertTrue(all("trusted-report-provenance-manifest-diff-missing" in item["provenance"]["blockers"] for item in export["items"]))
             self.assertIn("#90", export["summary"]["forensic_integrity_gap_ids"])
             self.assertTrue(all(item["provenance"]["review_citation_id"].startswith("CASE-75-REV-") for item in export["items"]))
+            provenance_rows = [item["provenance"] for item in export["items"]]
+            provenance_diff = build_report_provenance_trusted_diff(provenance_rows, provenance_rows)
+            provenance_gate = report_item_provenance_core_accuracy_gates(
+                source_path=provenance_rows[0]["source_path"],
+                hashes=provenance_rows[0]["hashes"],
+                record_hashes=provenance_rows[0]["record_hashes"],
+                parser=provenance_rows[0]["parser"],
+                parser_version=provenance_rows[0]["parser_version"],
+                parser_confidence=provenance_rows[0]["parser_confidence"],
+                record_offset=provenance_rows[0]["record_offset"],
+                source_index=provenance_rows[0]["source_index"],
+                review_status=provenance_rows[0]["review_status"],
+                reportability=provenance_rows[0]["reportability"],
+                trusted_diff=provenance_diff,
+            )
+            self.assertEqual(provenance_diff["status"], "pass")
+            self.assertIn("trusted report provenance manifest diff pass", provenance_gate[0]["satisfied_checks"])
             self.assertTrue(all("validation_assessment" in item for item in export["items"]))
             self.assertTrue(all("#91" in item["validation_assessment"]["commercial_gap_ids"] for item in export["items"]))
             self.assertTrue(all("#92" in item["validation_assessment"]["commercial_gap_ids"] for item in export["items"]))

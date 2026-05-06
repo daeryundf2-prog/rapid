@@ -1295,6 +1295,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "citation IDs preserved",
             "source status/hash fields preserved",
             "acquisition metadata limitation warning",
+            "trusted custody event manifest diff pass",
         ),
     },
     {
@@ -1309,6 +1310,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "hash algorithms preserved",
             "calculation timestamps preserved",
             "missing hash limitation warning",
+            "trusted acquisition hash manifest diff pass",
         ),
     },
     {
@@ -1323,6 +1325,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "actor/action/target/time fields preserved",
             "head hash recorded",
             "external notarization limitation warning",
+            "trusted audit hash-chain manifest diff pass",
         ),
     },
     {
@@ -1337,6 +1340,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "item/citation counts recorded",
             "volatile fields disclosed",
             "cross-platform replay limitation warning",
+            "trusted report replay manifest diff pass",
         ),
     },
     {
@@ -1351,6 +1355,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "parser/version/confidence preserved",
             "offset or source index preserved when available",
             "review/reportability fields preserved",
+            "trusted report provenance manifest diff pass",
         ),
     },
     {

@@ -54,45 +54,45 @@
       "title": "Chain-of-custody full workflow",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB report exports preserve evidence-source inventory, custody events, citation IDs, source status/hash fields, acquisition metadata limitations, and #86 core_accuracy_gates."
+        "Case DB report exports preserve evidence-source inventory, custody events, citation IDs, source status/hash fields, acquisition metadata limitations, trusted custody event manifest diff helpers/gates, and #86 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Signed custody handoff forms and acquisition-device/write-blocker metadata."]
+      "remaining_external_validation": ["Signed custody handoff forms, acquisition-device/write-blocker metadata, and trusted custody event manifests."]
     },
     {
       "item": 87,
       "title": "Evidence acquisition hash workflow",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB report exports preserve evidence-source hashes, hash records, algorithms, calculation timestamps, missing-hash warnings, and #87 core_accuracy_gates."
+        "Case DB report exports preserve evidence-source hashes, hash records, algorithms, calculation timestamps, missing-hash warnings, trusted acquisition hash manifest diff helpers/gates, and #87 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Whole-device acquisition hash workflow and operator metadata."]
+      "remaining_external_validation": ["Whole-device acquisition hash workflow, operator metadata, and trusted acquisition hash manifests."]
     },
     {
       "item": 88,
       "title": "Analyst action immutable audit log",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB report exports preserve audit events, previous/event hash chain, actor/action/target/time fields, head hash, notarization warning, and #88 core_accuracy_gates."
+        "Case DB report exports preserve audit events, previous/event hash chain, actor/action/target/time fields, head hash, notarization warning, trusted audit hash-chain manifest diff helpers/gates, and #88 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Database-level append-only enforcement and external notarization/signing."]
+      "remaining_external_validation": ["Database-level append-only enforcement, trusted audit chain manifests, and external notarization/signing."]
     },
     {
       "item": 89,
       "title": "Report reproducibility",
       "test_files": ["tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Report exports preserve stable payload hash, deterministic sorting, item/citation counts, volatile-field disclosure, replay warnings, and #89 core_accuracy_gates."
+        "Report exports preserve stable payload hash, deterministic sorting, item/citation counts, volatile-field disclosure, replay warnings, trusted report replay manifest diff helpers/gates, and #89 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Cross-platform same-input byte-level replay tests."]
+      "remaining_external_validation": ["Cross-platform same-input byte-level replay tests and trusted report replay manifests."]
     },
     {
       "item": 90,
       "title": "Report item source provenance completeness",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Report items preserve source path, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, and #90 core_accuracy_gates."
+        "Report items preserve source path, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, trusted report provenance manifest diff helpers/gates, and #90 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Completeness validation across every parser and final report template."]
+      "remaining_external_validation": ["Completeness validation across every parser, trusted provenance manifests, and final report template review."]
     }
   ]
 }
