@@ -129,7 +129,15 @@ BROWSER_REPORT_GRADE_BLOCKERS = [
     "browser-storage-trusted-diff-required",
     "browser-timeline-trusted-diff-required",
 ]
+BROWSER_SECRET_TRUSTED_DIFF_BLOCKER = "browser-secret-authority-diff-required"
 BROWSER_TRUSTED_TOOLS = {"browserhistoryview", "hindsight", "sqlite", "browser native query", "velociraptor"}
+BROWSER_SECRET_TRUSTED_TOOLS = {
+    "browser-native-store-inventory",
+    "dpapi-known-answer",
+    "keychain-known-answer",
+    "legal-authority-record",
+    "audit-log-export",
+}
 AI_TRANSCRIPT_TRUSTED_TOOLS = {
     "chatgpt export",
     "claude export",
@@ -1115,6 +1123,14 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
         build_accuracy_gate(20, satisfied_checks=item20, evidence_refs=evidence_refs),
     ]
     if storage_inventory or secret_checks:
+        secret_diff = (
+            details.get("browser_secret_trusted_diff")
+            if isinstance(details.get("browser_secret_trusted_diff"), Mapping)
+            else {}
+        )
+        if secret_diff:
+            evidence_refs.append(f"secret_trusted_diff_status:{secret_diff.get('status', '')}")
+            evidence_refs.append(f"secret_trusted_tool:{secret_diff.get('trusted_tool', '')}")
         item42: list[str] = []
         if storage_inventory or checks.get("sensitive_storage_inventory_present") is not None:
             item42.append("sensitive artifact inventory")
@@ -1126,8 +1142,28 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
             item42.append("opt-in reveal workflow warning")
         if secret_checks.get("scope_review_required") is not None:
             item42.append("audit and scope review requirement")
+        if secret_diff.get("status") == "pass":
+            item42.append("trusted browser secret authority diff pass")
         gates.append(build_accuracy_gate(42, satisfied_checks=item42, evidence_refs=evidence_refs))
     return gates
+
+
+def build_browser_secret_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> Dict[str, object]:
+    return build_browser_diff_payload(
+        index_browser_secret_rows(rapid_rows),
+        index_browser_secret_rows(trusted_rows),
+        trusted_tool=trusted_tool,
+        mode="browser-secret-trusted-diff-v1",
+        blocker=BROWSER_SECRET_TRUSTED_DIFF_BLOCKER,
+        key_label="secret_key",
+        trusted_tools=BROWSER_SECRET_TRUSTED_TOOLS,
+        fail_decision="do-not-use-browser-secret-output-as-final",
+    )
 
 
 def build_browser_storage_trusted_diff(
@@ -1196,6 +1232,30 @@ def index_browser_storage_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str
             "storage_type": storage_type,
             "storage_name": storage_name,
             "sensitive": normalized_diff_value(first_alias(row, "sensitive", "contains_secrets", "scope_sensitive")),
+        }
+    return indexed
+
+
+def index_browser_secret_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, str]]:
+    indexed: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        browser = normalized_diff_value(first_alias(row, "browser"))
+        profile = normalized_diff_value(first_alias(row, "profile"))
+        storage_type = normalized_diff_value(first_alias(row, "storage_type", "type"))
+        storage_name = normalized_diff_value(first_alias(row, "storage_name", "name", "path"))
+        legal_authority_id = normalized_diff_value(first_alias(row, "legal_authority_id", "authority_record_id"))
+        audit_event_id = normalized_diff_value(first_alias(row, "audit_event_id", "audit_id"))
+        key = "|".join(item for item in (browser, profile, storage_type, storage_name, legal_authority_id) if item)
+        if not key:
+            continue
+        indexed[key] = {
+            "browser": browser,
+            "profile": profile,
+            "storage_type": storage_type,
+            "storage_name": storage_name,
+            "raw_secret_values_extracted": normalized_diff_value(first_alias(row, "raw_secret_values_extracted", "secrets_extracted")),
+            "legal_authority_id": legal_authority_id,
+            "audit_event_id": audit_event_id,
         }
     return indexed
 
@@ -1361,6 +1421,7 @@ def browser_secret_handling_assessment(checks: Mapping[str, object]) -> Dict[str
             "password-cookie-session-secret-decryption-not-implemented",
             "case-scope-and-legal-authority-must-be-confirmed-before-secret-review",
             "browser-and-os-keychain-specific-known-answer-validation-required",
+            BROWSER_SECRET_TRUSTED_DIFF_BLOCKER,
         ],
         "recommended_validation": [
             "Use this inventory to identify candidate stores, then document legal authority before any external credential review.",
@@ -1379,6 +1440,11 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
     storage_inventory = details.get("storage_inventory")
     if not isinstance(storage_inventory, list):
         storage_inventory = []
+    trusted_diff = (
+        details.get("browser_secret_trusted_diff")
+        if isinstance(details.get("browser_secret_trusted_diff"), Mapping)
+        else {}
+    )
     passed_control_ids: List[str] = []
     failed_control_ids: List[str] = []
     if not checks.get("raw_secret_values_extracted"):
@@ -1408,6 +1474,7 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
             failed_control_ids=failed_control_ids,
             commercial_blockers=list(assessment.get("blockers") or []),
             details=details,
+            trusted_diff=trusted_diff,
         ),
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
@@ -1416,6 +1483,11 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
         ],
         "passed_control_ids": passed_control_ids,
         "failed_control_ids": failed_control_ids,
+        "trusted_diff": dict(trusted_diff) if trusted_diff else {
+            "status": "missing",
+            "blocker_id": BROWSER_SECRET_TRUSTED_DIFF_BLOCKER,
+            "required_tools": sorted(BROWSER_SECRET_TRUSTED_TOOLS),
+        },
         "commercial_blockers": list(assessment.get("blockers") or []),
         "large_data_controls": {
             "max_browser_inventory_files": MAX_BROWSER_INVENTORY_FILES,
@@ -1437,9 +1509,13 @@ def browser_secret_reportability_decision(
     failed_control_ids: Sequence[str],
     commercial_blockers: list[str],
     details: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> Dict[str, object]:
     blockers = set(commercial_blockers)
     blockers.update(f"control:{item}" for item in failed_control_ids)
+    trusted_diff = trusted_diff or {}
+    if trusted_diff.get("status") != "pass":
+        blockers.add(BROWSER_SECRET_TRUSTED_DIFF_BLOCKER)
     if not checks.get("scope_review_required"):
         blockers.add("case-scope-review-not-required-by-fixture-but-still-operator-owned")
     if not checks.get("inventory_only_mode"):
@@ -1460,6 +1536,7 @@ def browser_secret_reportability_decision(
             "document legal authority and case scope before any reveal workflow",
             "validate DPAPI/keychain/browser-version handling with known-answer fixtures",
             "record analyst audit events for each controlled secret reveal",
+            "attach a passing browser secret authority diff before reporting decrypted or revealed secret semantics",
         ],
     }
 

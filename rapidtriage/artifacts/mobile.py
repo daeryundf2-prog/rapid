@@ -67,6 +67,21 @@ MOBILE_TRUSTED_DIFF_BLOCKERS = {
     27: "ios-backup-manifest-trusted-diff-required",
     28: "ios-keychain-inventory-trusted-diff-required",
 }
+MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS = {
+    43: "mobile-correlation-vendor-timeline-diff-required",
+    44: "mobile-actor-vendor-report-diff-required",
+    45: "mobile-schema-migration-diff-required",
+}
+MOBILE_CORRELATION_TRUSTED_TOOLS = {
+    "cellebrite",
+    "xry",
+    "graykey",
+    "axiom",
+    "ileapp",
+    "native-mobile-export",
+    "hand-labeled-known-answer",
+    "schema-migration-fixture",
+}
 
 VENDOR_HINTS = {
     "cellebrite": ("cellebrite", "ufed", "ufdr", "ufdx", "physical analyzer"),
@@ -1431,6 +1446,82 @@ def build_schema_version_registry(rows: list[Mapping[str, object]], *, limit: in
     return values[:limit]
 
 
+def build_mobile_correlation_trusted_diff(
+    rapid_rows: list[Mapping[str, object]],
+    trusted_rows: list[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    rapid_index = index_mobile_correlation_rows(rapid_rows)
+    trusted_index = index_mobile_correlation_rows(trusted_rows)
+    recognized = trusted_tool.strip().lower().replace(" ", "") in {
+        item.replace(" ", "").lower() for item in MOBILE_CORRELATION_TRUSTED_TOOLS
+    }
+    common = sorted(set(rapid_index) & set(trusted_index))
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in common:
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append(
+                    {
+                        "mobile_correlation_key": key,
+                        "field": field,
+                        "rapid_value": rapid_value,
+                        "trusted_value": trusted_value,
+                    }
+                )
+                break
+    status = "pass" if recognized and common and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": "mobile-correlation-trusted-diff-v1",
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(common) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-mobile-correlation-output-as-final",
+            "blockers": [] if status == "pass" else list(MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS.values()),
+        },
+    }
+
+
+def index_mobile_correlation_rows(rows: list[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        kind = normalized_mobile_diff_value(first_mobile_alias(row, "kind", "artifact_type", "event_type", "type"))
+        service = normalized_mobile_diff_value(first_mobile_alias(row, "service", "app_identifier", "app"))
+        message_id = normalized_mobile_diff_value(first_mobile_alias(row, "message_id", "msg_id", "id"))
+        actor = normalized_mobile_diff_value(first_mobile_alias(row, "actor", "participant", "phone", "email"))
+        media_sha256 = normalized_mobile_diff_value(first_mobile_alias(row, "media_sha256", "sha256", "attachment_sha256"))
+        schema_version = normalized_mobile_diff_value(first_mobile_alias(row, "schema_or_app_version", "schema_version", "app_version", "version"))
+        timestamp = normalized_mobile_diff_value(first_mobile_alias(row, "timestamp", "message_timestamp", "date"))
+        key = "|".join(item for item in (kind, service, message_id, actor, media_sha256, schema_version, timestamp) if item)
+        if not key:
+            continue
+        indexed[key] = {
+            "kind": kind,
+            "service": service,
+            "message_id": message_id,
+            "actor": actor,
+            "media_sha256": media_sha256,
+            "schema_or_app_version": schema_version,
+            "timestamp": timestamp,
+        }
+    return indexed
+
+
 def mobile_correlation_report_grade_assessment() -> dict[str, object]:
     return {
         "status": "validation-required",
@@ -1440,6 +1531,7 @@ def mobile_correlation_report_grade_assessment() -> dict[str, object]:
             "media-message-links-are-candidate-matches-not-app-native-attachment-resolution",
             "contact-call-sms-view-is-export-scoped-not-device-wide-entity-resolution",
             "app-schema-version-registry-needs-known-answer-validation",
+            *MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS.values(),
         ],
         "recommended_validation": [
             "Validate message/media links against app-native databases and attachment tables for each supported service.",
@@ -1495,8 +1587,10 @@ def mobile_correlation_commercial_uplift_evidence(
     unified_actor_count: int,
     schema_version_count: int,
     validation_checks: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     report_grade = mobile_correlation_report_grade_assessment()
+    trusted_diff = trusted_diff or {}
     passed_validation_check_ids = [
         str(check_id)
         for check_id, passed in validation_checks.items()
@@ -1521,10 +1615,16 @@ def mobile_correlation_commercial_uplift_evidence(
             media_count=media_count,
             unified_actor_count=unified_actor_count,
             schema_version_count=schema_version_count,
+            trusted_diff=trusted_diff,
         ),
         "source_refs": [f"service:{service}" for service in services[:20]],
         "passed_validation_check_ids": sorted(set(passed_validation_check_ids)),
         "failed_validation_check_ids": sorted(set(failed_validation_check_ids)),
+        "trusted_diff": dict(trusted_diff) if trusted_diff else {
+            "status": "missing",
+            "blocker_ids": [MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS[number] for number in (43, 44, 45)],
+            "required_tools": sorted(MOBILE_CORRELATION_TRUSTED_TOOLS),
+        },
         "commercial_blockers": list(report_grade["blockers"]),
         "large_data_controls": {
             "max_rows_per_source": MAX_ROWS_PER_SOURCE,
@@ -1553,6 +1653,7 @@ def mobile_correlation_reportability_decision(
     media_count: int,
     unified_actor_count: int,
     schema_version_count: int,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in report_grade["blockers"] if str(item)}
     blockers.update(f"check:{item}" for item in failed_validation_check_ids)
@@ -1560,6 +1661,9 @@ def mobile_correlation_reportability_decision(
         blockers.add("device-wide-timeline-not-validated")
     if not validation_checks.get("schema_version_registry_known_answer_validated"):
         blockers.add("schema-version-registry-known-answer-not-attached")
+    trusted_diff = trusted_diff or {}
+    if trusted_diff.get("status") != "pass":
+        blockers.update(MOBILE_CORRELATION_TRUSTED_DIFF_BLOCKERS.values())
     return {
         "profile_version": "mobile-correlation-reportability-decision-v1",
         "commercial_gap_ids": ["#43", "#44", "#45"],
@@ -1576,6 +1680,7 @@ def mobile_correlation_reportability_decision(
             "validate device-wide timeline joins, timezone assumptions, and attachment recovery",
             "attach analyst-reviewed identity merge/split decisions for contacts/calls/SMS actors",
             "gate each app parser with schema migration fixtures and release-reviewed compatibility matrices",
+            "attach passing vendor/native known-answer diffs for mobile correlation, actor view, and schema registry claims",
         ],
     }
 
@@ -2314,6 +2419,14 @@ def mobile_correlation_core_accuracy_gates(
     ]
     if source_hashes.get("sha256"):
         evidence_refs.append(f"source_sha256:{source_hashes['sha256']}")
+    trusted_diff = (
+        details.get("mobile_correlation_trusted_diff")
+        if isinstance(details.get("mobile_correlation_trusted_diff"), Mapping)
+        else {}
+    )
+    if trusted_diff:
+        evidence_refs.append(f"trusted_diff_status:{trusted_diff.get('status', '')}")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
 
     item43: list[str] = []
     if validation.get("media_message_links_built") or details.get("message_media_links") is not None:
@@ -2326,6 +2439,8 @@ def mobile_correlation_core_accuracy_gates(
         item43.append("timeline correlation readiness")
     if not validation.get("correlation_validated_against_known_answer", False):
         item43.append("known-answer limitation warning")
+    if trusted_diff.get("status") == "pass":
+        item43.append("trusted mobile correlation diff pass")
 
     item44: list[str] = []
     if validation.get("unified_contact_call_sms_view_built") or details.get("unified_contact_call_sms_view") is not None:
@@ -2336,6 +2451,8 @@ def mobile_correlation_core_accuracy_gates(
         item44.append("participant attribution")
     item44.append("dedupe/entity limitation warning")
     item44.append("export-scope limitation warning")
+    if trusted_diff.get("status") == "pass":
+        item44.append("trusted mobile actor diff pass")
 
     item45: list[str] = []
     if validation.get("schema_version_registry_built") or details.get("schema_version_registry") is not None:
@@ -2346,6 +2463,8 @@ def mobile_correlation_core_accuracy_gates(
     if not validation.get("schema_version_registry_known_answer_validated", False):
         item45.append("migration fixture warning")
     item45.append("release-gate limitation disclosure")
+    if trusted_diff.get("status") == "pass":
+        item45.append("trusted app schema migration diff pass")
 
     return [
         build_accuracy_gate(43, satisfied_checks=item43, evidence_refs=evidence_refs),

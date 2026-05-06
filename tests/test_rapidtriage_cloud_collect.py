@@ -9,7 +9,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
-from rapidtriage.core.cloud_api import build_cloud_api_trusted_diff, cloud_api_core_accuracy_gates
+from rapidtriage.core.cloud_api import (
+    build_cloud_api_trusted_diff,
+    build_cloud_credential_trusted_diff,
+    cloud_api_core_accuracy_gates,
+    cloud_credential_core_accuracy_gates,
+)
 
 
 class RapidTriageCloudCollectTests(unittest.TestCase):
@@ -110,6 +115,7 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertIn("scope and consent capture warning", credential_gate["satisfied_checks"])
                 self.assertIn("rotation and revocation audit warning", credential_gate["satisfied_checks"])
                 self.assertIn("legal authority warning", credential_gate["satisfied_checks"])
+                self.assertNotIn("trusted credential authority/audit diff pass", credential_gate["satisfied_checks"])
                 self.assertFalse(payload["cloud_api_native_capabilities"]["provider_specific_oauth_flow"])
                 self.assertFalse(payload["credential_handling"]["tokens_written_to_output"])
                 self.assertFalse(payload["credential_handling"]["secure_token_vault_integrated"])
@@ -159,6 +165,45 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertTrue(payload["credential_handling"]["headers_redacted"])
                 self.assertTrue(payload["requests"][0]["credential_handling"]["sensitive_values_redacted"])
                 self.assertEqual(server.handler_class.request_count, 0)
+
+    def test_cloud_credential_trusted_diff_controls_authority_gate(self) -> None:
+        rapid = [
+            {
+                "bearer_token_env": "RAPIDTRIAGE_TEST_TOKEN",
+                "credential_storage": "environment-variable-only",
+                "scope": "https://graph.microsoft.com/.default",
+                "consent_record_id": "consent-1",
+                "legal_authority_id": "auth-1",
+            }
+        ]
+        diff = build_cloud_credential_trusted_diff(
+            rapid,
+            [dict(rapid[0])],
+            trusted_tool="provider-oauth-consent-record",
+        )
+        self.assertEqual(diff["status"], "pass")
+        gate = cloud_credential_core_accuracy_gates(
+            manifest_path=Path(__file__),
+            credential_handling={
+                "headers_redacted": True,
+                "tokens_written_to_output": False,
+                "credential_storage": "environment-variable-only",
+                "bearer_token_env": "RAPIDTRIAGE_TEST_TOKEN",
+                "legal_warning": "authorized only",
+                "audit_required": True,
+                "credential_trusted_diff": diff,
+            },
+            requests=[],
+        )[0]
+        self.assertIn("trusted credential authority/audit diff pass", gate["satisfied_checks"])
+
+        mismatch = build_cloud_credential_trusted_diff(
+            rapid,
+            [{**rapid[0], "legal_authority_id": "changed"}],
+            trusted_tool="provider-oauth-consent-record",
+        )
+        self.assertEqual(mismatch["status"], "fail")
+        self.assertEqual(mismatch["blocker_id"], "cloud-credential-authority-audit-diff-required")
 
     def test_cloud_api_trusted_diff_controls_provider_accuracy_gate(self) -> None:
         rapid = [

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
 from rapidtriage.cli import main
+from rapidtriage.artifacts.windows.browser import build_browser_secret_trusted_diff, browser_core_accuracy_gates
 from rapidtriage.artifacts.windows.eventlog import collect_native_evtx_events
 from rapidtriage.artifacts.windows.execution import build_execution_artifact_trusted_diff
 from rapidtriage.artifacts.windows.os_account import build_os_account_trusted_diff
@@ -239,6 +240,50 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("cache", inventory_types)
             self.assertIn("cookie", inventory_types)
             self.assertIn("extension", inventory_types)
+
+    def test_browser_secret_trusted_diff_controls_secret_authority_gate(self) -> None:
+        rapid = [
+            {
+                "browser": "chrome",
+                "profile": "Default",
+                "storage_type": "credential",
+                "storage_name": "Login Data",
+                "raw_secret_values_extracted": False,
+                "legal_authority_id": "auth-1",
+                "audit_event_id": "audit-1",
+            }
+        ]
+        diff = build_browser_secret_trusted_diff(
+            rapid,
+            [dict(rapid[0])],
+            trusted_tool="legal-authority-record",
+        )
+        self.assertEqual(diff["status"], "pass")
+        gate = browser_core_accuracy_gates(
+            {
+                "source_path": "Login Data",
+                "browser": "chrome",
+                "profile": "Default",
+                "storage_inventory": rapid,
+                "secret_validation_checks": {
+                    "inventory_only_mode": True,
+                    "raw_secret_values_extracted": False,
+                    "strict_legal_warning_present": True,
+                    "scope_review_required": True,
+                },
+                "browser_secret_trusted_diff": diff,
+            }
+        )[-1]
+        self.assertEqual(gate["gap_id"], "#42")
+        self.assertIn("trusted browser secret authority diff pass", gate["satisfied_checks"])
+
+        mismatch = build_browser_secret_trusted_diff(
+            rapid,
+            [{**rapid[0], "audit_event_id": "changed"}],
+            trusted_tool="legal-authority-record",
+        )
+        self.assertEqual(mismatch["status"], "diffs-present")
+        self.assertIn("browser-secret-authority-diff-required", mismatch["reportability_decision"]["blockers"])
 
     def test_recent_shortcut_collector_parses_lnk_header_and_target_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

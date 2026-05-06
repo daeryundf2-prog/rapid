@@ -620,6 +620,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "scope and consent capture warning",
             "rotation and revocation audit warning",
             "legal authority warning",
+            "trusted credential authority/audit diff pass",
         ),
     },
     {
@@ -634,6 +635,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "strict legal warning",
             "opt-in reveal workflow warning",
             "audit and scope review requirement",
+            "trusted browser secret authority diff pass",
         ),
     },
     {
@@ -648,6 +650,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "service attribution",
             "timeline correlation readiness",
             "known-answer limitation warning",
+            "trusted mobile correlation diff pass",
         ),
     },
     {
@@ -662,6 +665,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "participant attribution",
             "dedupe/entity limitation warning",
             "export-scope limitation warning",
+            "trusted mobile actor diff pass",
         ),
     },
     {
@@ -676,6 +680,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "schema compatibility warning",
             "migration fixture warning",
             "release-gate limitation disclosure",
+            "trusted app schema migration diff pass",
         ),
     },
     {

@@ -7,7 +7,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rapidtriage.artifacts.mobile import build_chat_app_trusted_diff, build_mobile_trusted_diff, chat_app_core_accuracy_gates, mobile_core_accuracy_gates
+from rapidtriage.artifacts.mobile import (
+    build_chat_app_trusted_diff,
+    build_mobile_correlation_trusted_diff,
+    build_mobile_trusted_diff,
+    chat_app_core_accuracy_gates,
+    mobile_core_accuracy_gates,
+    mobile_correlation_core_accuracy_gates,
+)
 from rapidtriage.cli import build_parser, main
 
 
@@ -375,10 +382,80 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             )
             self.assertFalse(correlation_uplift["large_data_controls"]["device_wide_timeline_ready"])
             self.assertTrue(correlation_uplift["large_data_controls"]["known_answer_correlation_required"])
+            self.assertIn(
+                "mobile-correlation-vendor-timeline-diff-required",
+                correlation_uplift["reportability_decision"]["blockers"],
+            )
 
             source_rows = [artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-export-source"]
             self.assertGreaterEqual(len(source_rows), 4)
             self.assertTrue(all("#26" in row["details"]["commercial_gap_ids"] for row in source_rows))
+
+    def test_mobile_correlation_trusted_diff_controls_correlation_actor_and_schema_gates(self) -> None:
+        rows = [
+            {
+                "kind": "message-media",
+                "service": "KakaoTalk",
+                "message_id": "m-1",
+                "media_sha256": "a" * 64,
+                "timestamp": "2026-04-26T01:02:03Z",
+            },
+            {
+                "kind": "actor",
+                "actor": "+15550100",
+                "service": "KakaoTalk",
+            },
+            {
+                "kind": "schema",
+                "service": "KakaoTalk",
+                "schema_or_app_version": "25.7.2",
+            },
+        ]
+        diff = build_mobile_correlation_trusted_diff(
+            rows,
+            [dict(row) for row in rows],
+            trusted_tool="hand-labeled-known-answer",
+        )
+        self.assertEqual(diff["status"], "pass")
+        gates = {
+            gate["gap_id"]: gate
+            for gate in mobile_correlation_core_accuracy_gates(
+                artifact_type="mobile-correlation-summary",
+                source_tool="cellebrite",
+                source_format="csv",
+                source_index=0,
+                source_hashes={"sha256": "d" * 64},
+                details={
+                    "message_count": 1,
+                    "media_count": 1,
+                    "contact_count": 1,
+                    "call_count": 0,
+                    "services": ["KakaoTalk"],
+                    "participants": ["+15550100"],
+                    "message_media_links": [{"message_id": "m-1"}],
+                    "unified_contact_call_sms_view": [{"actor": "+15550100"}],
+                    "schema_version_registry": [{"app_identifier": "KakaoTalk", "schema_or_app_version": "25.7.2"}],
+                    "timeline_correlation_ready": True,
+                    "validation_checks": {
+                        "media_message_links_built": True,
+                        "unified_contact_call_sms_view_built": True,
+                        "schema_version_registry_built": True,
+                    },
+                    "mobile_correlation_trusted_diff": diff,
+                },
+            )
+        }
+        self.assertIn("trusted mobile correlation diff pass", gates["#43"]["satisfied_checks"])
+        self.assertIn("trusted mobile actor diff pass", gates["#44"]["satisfied_checks"])
+        self.assertIn("trusted app schema migration diff pass", gates["#45"]["satisfied_checks"])
+
+        mismatch = build_mobile_correlation_trusted_diff(
+            rows,
+            [{**rows[0], "media_sha256": "b" * 64}, rows[1], rows[2]],
+            trusted_tool="hand-labeled-known-answer",
+        )
+        self.assertEqual(mismatch["status"], "diffs-present")
+        self.assertIn("mobile-correlation-vendor-timeline-diff-required", mismatch["reportability_decision"]["blockers"])
 
     def test_mobile_trusted_diffs_gate_vendor_ios_and_keychain_claims(self) -> None:
         vendor_diff = build_mobile_trusted_diff(

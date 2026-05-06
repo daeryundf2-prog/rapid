@@ -17,6 +17,7 @@
       "expected": {
         "required_assertions": [
           "Cloud collection preserves token redaction, environment/vault boundary metadata, scope/consent warnings, rotation audit warnings, legal warning, and #41 core_accuracy_gates.",
+          "Cloud credential trusted diff helper requires provider OAuth, vault, native audit, or legal authority row equality before satisfying the #41 trusted credential authority/audit diff pass gate.",
           "Cloud credential reportability decisions block enterprise-vaulted claims until OAuth consent, provider scope inventory, secure token vault, and token rotation audit evidence exists."
         ]
       },
@@ -36,6 +37,7 @@
       "expected": {
         "required_assertions": [
           "Browser storage inventory preserves sensitive artifact inventory, secret redaction, strict legal warning, opt-in reveal warning, audit/scope review requirement, and #42 core_accuracy_gates.",
+          "Browser secret trusted diff helper requires native store, DPAPI/keychain, legal authority, or audit-log row equality before satisfying the #42 trusted browser secret authority diff pass gate.",
           "Browser secret reportability decisions block decrypted or revealed secret claims until lawful reveal authority, DPAPI/keychain/browser-version validation, and audit evidence exists."
         ]
       },
@@ -55,6 +57,7 @@
       "expected": {
         "required_assertions": [
           "Mobile correlation summary preserves message-media links, row counts, service attribution, timeline readiness, known-answer warning, and #43 core_accuracy_gates.",
+          "Mobile correlation trusted diff helper requires vendor/native timeline row equality before satisfying the #43 trusted mobile correlation diff pass gate.",
           "Mobile correlation reportability decisions block device-wide timeline claims until timeline, timezone, attachment recovery, and vendor diff validation exists."
         ]
       },
@@ -74,6 +77,7 @@
       "expected": {
         "required_assertions": [
           "Mobile correlation summary preserves contact/call/SMS actor merge, source row links, participant attribution, dedupe/export-scope warnings, and #44 core_accuracy_gates.",
+          "Mobile actor trusted diff helper requires vendor/native actor row equality before satisfying the #44 trusted mobile actor diff pass gate.",
           "Mobile unified view reportability decisions block identity-complete actor claims until analyst merge/split and cross-app actor validation exists."
         ]
       },
@@ -93,6 +97,7 @@
       "expected": {
         "required_assertions": [
           "Mobile correlation summary preserves app/service schema registry, source app/version attribution, schema compatibility warnings, migration warnings, release-gate disclosure, and #45 core_accuracy_gates.",
+          "Mobile schema trusted diff helper requires schema migration fixture row equality before satisfying the #45 trusted app schema migration diff pass gate.",
           "Schema reportability decisions block release-safe schema claims until per-app compatibility, migration fixture, and release-gate evidence exists."
         ]
       },

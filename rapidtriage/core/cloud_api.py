@@ -54,6 +54,14 @@ CLOUD_CREDENTIAL_SECURITY_BLOCKERS = [
     "token-rotation-and-revocation-audit-not-captured",
     "legal-authority-review-required-before-cloud-collection",
 ]
+CLOUD_CREDENTIAL_TRUSTED_DIFF_BLOCKER = "cloud-credential-authority-audit-diff-required"
+CLOUD_CREDENTIAL_TRUSTED_TOOLS = {
+    "provider-oauth-consent-record",
+    "provider-native-audit-log",
+    "enterprise-vault-audit",
+    "security-admin-signoff",
+    "legal-authority-record",
+}
 
 
 class CloudApiCollectionError(ValueError):
@@ -417,7 +425,7 @@ def cloud_credential_security_assessment(credential_handling: Mapping[str, objec
         "secure_token_vault_integrated": bool(credential_handling.get("secure_token_vault_integrated")),
         "token_rotation_audit_present": bool(credential_handling.get("token_rotation_audit_present")),
         "ready_for_court_report": False,
-        "blockers": list(CLOUD_CREDENTIAL_SECURITY_BLOCKERS),
+        "blockers": [*CLOUD_CREDENTIAL_SECURITY_BLOCKERS, CLOUD_CREDENTIAL_TRUSTED_DIFF_BLOCKER],
         "recommended_validation": [
             "Record provider OAuth consent, granted scopes, account owner, legal authority, and API version before collection.",
             "Use an OS/enterprise secret vault or short-lived token broker before report-grade multi-user deployment.",
@@ -540,6 +548,11 @@ def cloud_credential_commercial_uplift_evidence(
     requests: list[dict[str, object]],
 ) -> dict[str, object]:
     assessment = cloud_credential_security_assessment(credential_handling)
+    trusted_diff = (
+        credential_handling.get("credential_trusted_diff")
+        if isinstance(credential_handling.get("credential_trusted_diff"), Mapping)
+        else {}
+    )
     request_sensitive_headers = [
         header
         for request in requests
@@ -563,6 +576,7 @@ def cloud_credential_commercial_uplift_evidence(
                 "token_rotation_audit",
             ],
             commercial_blockers=list(assessment.get("blockers") or CLOUD_CREDENTIAL_SECURITY_BLOCKERS),
+            trusted_diff=trusted_diff,
         ),
         "source_refs": [
             f"manifest_path:{manifest_path.resolve()}",
@@ -583,6 +597,11 @@ def cloud_credential_commercial_uplift_evidence(
             "token_rotation_audit",
         ],
         "request_sensitive_header_names": sorted(set(str(item) for item in request_sensitive_headers)),
+        "trusted_diff": dict(trusted_diff) if trusted_diff else {
+            "status": "missing",
+            "blocker_id": CLOUD_CREDENTIAL_TRUSTED_DIFF_BLOCKER,
+            "required_tools": sorted(CLOUD_CREDENTIAL_TRUSTED_TOOLS),
+        },
         "commercial_blockers": list(assessment.get("blockers") or CLOUD_CREDENTIAL_SECURITY_BLOCKERS),
         "large_data_controls": {
             "tokens_written_to_output": bool(credential_handling.get("tokens_written_to_output")),
@@ -600,9 +619,13 @@ def cloud_credential_reportability_decision(
     credential_handling: Mapping[str, object],
     failed_validation_check_ids: list[str],
     commercial_blockers: list[str],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = set(commercial_blockers)
     blockers.update(f"check:{item}" for item in failed_validation_check_ids)
+    trusted_diff = trusted_diff or {}
+    if trusted_diff.get("status") != "pass":
+        blockers.add(CLOUD_CREDENTIAL_TRUSTED_DIFF_BLOCKER)
     return {
         "profile_version": "cloud-credential-reportability-decision-v1",
         "commercial_gap_ids": ["#41"],
@@ -618,6 +641,7 @@ def cloud_credential_reportability_decision(
             "attach OAuth consent and provider scope evidence",
             "integrate or document enterprise token vault handling",
             "record token rotation/revocation audit and legal authority sign-off",
+            "attach a passing credential authority/audit diff from provider, vault, or legal sign-off records",
         ],
     }
 
@@ -767,7 +791,81 @@ def cloud_credential_core_accuracy_gates(
         satisfied.append("rotation and revocation audit warning")
     if credential_handling.get("legal_warning") or credential_handling.get("audit_required"):
         satisfied.append("legal authority warning")
+    trusted_diff = (
+        credential_handling.get("credential_trusted_diff")
+        if isinstance(credential_handling.get("credential_trusted_diff"), Mapping)
+        else {}
+    )
+    if trusted_diff:
+        evidence_refs.append(f"trusted_diff_status:{trusted_diff.get('status', '')}")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted credential authority/audit diff pass")
     return [build_accuracy_gate(41, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
+
+
+def build_cloud_credential_trusted_diff(
+    rapid_rows: Iterable[Mapping[str, object]],
+    trusted_rows: Iterable[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+    comparison_id: str = "cloud-credential-authority-diff",
+) -> dict[str, object]:
+    rapid_index = {_credential_diff_key(row): _credential_diff_values(row) for row in rapid_rows}
+    trusted_index = {_credential_diff_key(row): _credential_diff_values(row) for row in trusted_rows}
+    rapid_index.pop("", None)
+    trusted_index.pop("", None)
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in sorted(set(rapid_index).intersection(trusted_index)):
+        for field in ("credential_storage", "scope_hash", "consent_record_id", "vault_record_id", "legal_authority_id"):
+            left = rapid_index[key].get(field)
+            right = trusted_index[key].get(field)
+            if left and right and left != right:
+                mismatches.append({"row_key": key, "field": field, "rapid": left, "trusted": right})
+    tool_key = trusted_tool.strip().lower()
+    accepted = tool_key in CLOUD_CREDENTIAL_TRUSTED_TOOLS
+    status = "pass" if accepted and rapid_index and trusted_index and not missing and not extra and not mismatches else "fail"
+    return {
+        "profile_version": "cloud-credential-trusted-diff-v1",
+        "comparison_id": comparison_id,
+        "status": status,
+        "blocker_id": "" if status == "pass" else CLOUD_CREDENTIAL_TRUSTED_DIFF_BLOCKER,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_accepted": accepted,
+        "accepted_trusted_tools": sorted(CLOUD_CREDENTIAL_TRUSTED_TOOLS),
+        "rapid_row_count": len(rapid_index),
+        "trusted_row_count": len(trusted_index),
+        "matched_row_count": len(set(rapid_index).intersection(trusted_index)),
+        "missing_in_trusted": missing[:100],
+        "unexpected_in_trusted": extra[:100],
+        "mismatched_fields": mismatches[:100],
+    }
+
+
+def _credential_diff_key(row: Mapping[str, object]) -> str:
+    values = _credential_diff_values(row)
+    parts = [
+        values.get("bearer_token_env", ""),
+        values.get("credential_storage", ""),
+        values.get("scope_hash", ""),
+        values.get("consent_record_id", ""),
+        values.get("legal_authority_id", ""),
+    ]
+    return "credential:" + hashlib.sha256("|".join(parts).encode("utf-8", errors="replace")).hexdigest()
+
+
+def _credential_diff_values(row: Mapping[str, object]) -> dict[str, str]:
+    scope = text_value(row.get("scope") or row.get("scope_inventory") or row.get("provider_scope_inventory"))
+    return {
+        "bearer_token_env": text_value(row.get("bearer_token_env") or row.get("token_env")),
+        "credential_storage": text_value(row.get("credential_storage")),
+        "scope_hash": text_value(row.get("scope_hash") or (hashlib.sha256(scope.encode("utf-8")).hexdigest() if scope else "")),
+        "consent_record_id": text_value(row.get("consent_record_id") or row.get("provider_oauth_consent_record")),
+        "vault_record_id": text_value(row.get("vault_record_id") or row.get("secure_token_vault")),
+        "legal_authority_id": text_value(row.get("legal_authority_id") or row.get("authority_record_id")),
+    }
 
 
 def cloud_api_forensic_review(
