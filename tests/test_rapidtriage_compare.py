@@ -9,6 +9,7 @@ from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.case_report import build_case_report_markdown
+from rapidtriage.core.compare import build_compare_trusted_diff, compare_core_accuracy_gates
 from rapidtriage.core.submission import build_submission_manifest
 
 
@@ -167,6 +168,29 @@ class RapidTriageCompareTests(unittest.TestCase):
             self.assertEqual(payload["results"][1]["right"]["label"], "host-b")
             self.assertEqual(payload["summary"]["status_counts"]["same"], 1)
             self.assertEqual(payload["summary"]["status_counts"]["different"], 1)
+
+    def test_compare_trusted_diff_controls_core_accuracy_gate(self) -> None:
+        result = {
+            "comparison_id": "compare-0001",
+            "status": "different",
+            "fields": [{"name": "sha256", "status": "different"}],
+            "diff": {"included": True, "preview": ["--- baseline", "+++ suspect", "-a", "+b"]},
+            "left": {"label": "baseline", "path": "a.txt", "hashes": {"sha256": "left-hash"}},
+            "right": {"label": "suspect", "path": "b.txt", "hashes": {"sha256": "right-hash"}},
+        }
+        diff = build_compare_trusted_diff([result], [dict(result)], trusted_tool="expected-diff-manifest")
+
+        self.assertEqual(diff["status"], "pass")
+        gate = compare_core_accuracy_gates(results=[result], mode="pair", trusted_diff=diff)[0]
+        self.assertIn("trusted A/B/C comparison expected diff pass", gate["satisfied_checks"])
+
+        mismatch = build_compare_trusted_diff(
+            [result],
+            [{**result, "status": "same"}],
+            trusted_tool="expected-diff-manifest",
+        )
+        self.assertEqual(mismatch["status"], "fail")
+        self.assertEqual(mismatch["blocker_id"], "compare-trusted-expected-diff-required")
 
 
 if __name__ == "__main__":

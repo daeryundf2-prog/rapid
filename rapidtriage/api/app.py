@@ -74,6 +74,12 @@ VIEWER_WORKFLOW_GAP_IDS = {
     "pagination": "#78",
     "ui_virtualization": "#79",
 }
+HEX_VIEWER_TRUSTED_DIFF_BLOCKER = "hex-viewer-trusted-offset-manifest-required"
+HEX_VIEWER_TRUSTED_TOOLS = {"known-byte-offset-manifest", "hex-editor-ground-truth", "source-byte-citation-package"}
+SQLITE_VIEWER_TRUSTED_DIFF_BLOCKER = "sqlite-viewer-trusted-query-schema-diff-required"
+SQLITE_VIEWER_TRUSTED_TOOLS = {"sqlite3-cli-oracle", "db-browser-export", "known-answer-sqlite-manifest"}
+EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER = "email-viewer-trusted-thread-export-required"
+EMAIL_VIEWER_TRUSTED_TOOLS = {"mail-client-thread-export", "eml-ground-truth", "mbox-ground-truth", "vendor-mailbox-export"}
 
 
 class RunCreateRequest(BaseModel):
@@ -1444,6 +1450,7 @@ def source_review_workflow_metadata() -> dict[str, object]:
     blockers = [
         "single-user-local-workflow-until-role-based-case-server-is-enabled",
         "review-decisions-still-require-source-hash-and-parser-limitation-verification",
+        "review-workflow-trusted-audit-diff-required",
     ]
     core_accuracy_gates = [
         build_accuracy_gate(
@@ -1489,6 +1496,7 @@ def source_compare_workflow_metadata() -> dict[str, object]:
     blockers = [
         "binary-structure-aware-diff-not-implemented",
         "visual-diff-and-table-aware-diff-require-dedicated-viewers",
+        "compare-trusted-expected-diff-required",
     ]
     core_accuracy_gates = [
         build_accuracy_gate(
@@ -1767,6 +1775,11 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
                 database_metadata=database_metadata,
                 tables=previews,
             ),
+            "trusted_sqlite_viewer_diff": {
+                "status": "missing",
+                "blocker_id": SQLITE_VIEWER_TRUSTED_DIFF_BLOCKER,
+                "required_tools": sorted(SQLITE_VIEWER_TRUSTED_TOOLS),
+            },
             "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
                 item_number=54,
                 component="sqlite-table-specialized-viewer",
@@ -1780,6 +1793,7 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
                     "where-builder-ui-not-implemented",
                     "deleted-row-and-wal-recovery-not-implemented-in-viewer",
                     "export-selected-rows-workflow-not-implemented",
+                    SQLITE_VIEWER_TRUSTED_DIFF_BLOCKER,
                 ],
                 source_refs=[f"source_path:{source_path}", f"table_count:{len(tables)}"],
                 controls={
@@ -2002,6 +2016,11 @@ def build_email_preview(source_path: Path, suffix: str) -> Dict[str, object]:
                 messages=summaries,
                 conversation=conversation,
             ),
+            "trusted_email_conversation_diff": {
+                "status": "missing",
+                "blocker_id": EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER,
+                "required_tools": sorted(EMAIL_VIEWER_TRUSTED_TOOLS),
+            },
             "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
                 item_number=55,
                 component="email-conversation-viewer",
@@ -2015,6 +2034,7 @@ def build_email_preview(source_path: Path, suffix: str) -> Dict[str, object]:
                     "deleted-mailbox-item-recovery-not-implemented",
                     "attachment-extraction-and-citation-export-not-complete",
                     "message-id-graph-validation-required",
+                    EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER,
                 ],
                 source_refs=[f"source_path:{source_path}", f"message_count:{len(summaries)}", f"thread_count:{len(threads)}"],
                 controls={
@@ -2102,6 +2122,11 @@ def build_hex_preview(source_path: Path) -> Dict[str, object]:
                 preview_hashes=preview_hashes,
                 truncated=len(data) > HEX_PREVIEW_MAX_BYTES,
             ),
+            "trusted_hex_viewer_diff": {
+                "status": "missing",
+                "blocker_id": HEX_VIEWER_TRUSTED_DIFF_BLOCKER,
+                "required_tools": sorted(HEX_VIEWER_TRUSTED_TOOLS),
+            },
             "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
                 item_number=53,
                 component="raw-source-hex-viewer",
@@ -2116,6 +2141,7 @@ def build_hex_preview(source_path: Path) -> Dict[str, object]:
                     "copy-safe-byte-selection-ui-not-implemented",
                     "exported-hex-range-citation-package-not-implemented",
                     "sector-partition-aware-navigation-not-implemented",
+                    HEX_VIEWER_TRUSTED_DIFF_BLOCKER,
                 ],
                 source_refs=[f"source_path:{source_path}", f"preview_sha256:{preview_hashes['sha256']}"],
                 controls={
@@ -2254,6 +2280,7 @@ def hex_viewer_core_accuracy_gates(
     rows: Sequence[Mapping[str, object]],
     preview_hashes: Mapping[str, str],
     truncated: bool,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
     if rows:
@@ -2266,11 +2293,19 @@ def hex_viewer_core_accuracy_gates(
         satisfied.append("byte-search citation support")
     if truncated is not None:
         satisfied.append("full-source validation warning")
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted hex offset manifest diff pass")
     return [
         build_accuracy_gate(
             53,
             satisfied_checks=satisfied,
-            evidence_refs=[f"source_path:{source_path}", f"row_count:{len(rows)}", f"preview_sha256:{preview_hashes.get('sha256', '')}"],
+            evidence_refs=[
+                f"source_path:{source_path}",
+                f"row_count:{len(rows)}",
+                f"preview_sha256:{preview_hashes.get('sha256', '')}",
+                f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
+            ],
         )
     ]
 
@@ -2280,6 +2315,7 @@ def sqlite_viewer_core_accuracy_gates(
     source_path: Path,
     database_metadata: Mapping[str, object],
     tables: Sequence[Mapping[str, object]],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["read-only SQLite open"]
     if tables:
@@ -2289,6 +2325,9 @@ def sqlite_viewer_core_accuracy_gates(
     if any(table.get("rows") is not None for table in tables):
         satisfied.append("bounded row preview")
     satisfied.append("deleted/WAL limitation warning")
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted sqlite query/schema diff pass")
     return [
         build_accuracy_gate(
             54,
@@ -2298,6 +2337,7 @@ def sqlite_viewer_core_accuracy_gates(
                 f"table_count:{len(tables)}",
                 f"page_size:{database_metadata.get('page_size', '')}",
                 f"page_count:{database_metadata.get('page_count', '')}",
+                f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
             ],
         )
     ]
@@ -2308,6 +2348,7 @@ def email_viewer_core_accuracy_gates(
     source_path: Path,
     messages: Sequence[Mapping[str, object]],
     conversation: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     threads = conversation.get("threads") if isinstance(conversation.get("threads"), list) else []
     satisfied = []
@@ -2320,13 +2361,178 @@ def email_viewer_core_accuracy_gates(
     if any(int(message.get("attachment_count") or 0) >= 0 for message in messages):
         satisfied.append("attachment inventory")
     satisfied.append("mailbox threading limitation warning")
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted email thread/export diff pass")
     return [
         build_accuracy_gate(
             55,
             satisfied_checks=satisfied,
-            evidence_refs=[f"source_path:{source_path}", f"message_count:{len(messages)}", f"thread_count:{len(threads)}"],
+            evidence_refs=[
+                f"source_path:{source_path}",
+                f"message_count:{len(messages)}",
+                f"thread_count:{len(threads)}",
+                f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
+            ],
         )
     ]
+
+
+def build_hex_viewer_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+    comparison_id: str = "hex-viewer-trusted-offset-manifest",
+) -> dict[str, object]:
+    rapid_index = {_hex_viewer_diff_key(row): _hex_viewer_diff_values(row) for row in rapid_rows}
+    trusted_index = {_hex_viewer_diff_key(row): _hex_viewer_diff_values(row) for row in trusted_rows}
+    return build_viewer_trusted_diff_result(
+        profile_version="hex-viewer-trusted-offset-manifest-v1",
+        comparison_id=comparison_id,
+        rapid_index=rapid_index,
+        trusted_index=trusted_index,
+        trusted_tool=trusted_tool,
+        accepted_tools=HEX_VIEWER_TRUSTED_TOOLS,
+        blocker_id=HEX_VIEWER_TRUSTED_DIFF_BLOCKER,
+        compare_fields=("offset", "offset_hex", "hex", "ascii"),
+    )
+
+
+def build_sqlite_viewer_trusted_diff(
+    rapid_tables: Sequence[Mapping[str, object]],
+    trusted_tables: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+    comparison_id: str = "sqlite-viewer-trusted-query-schema-diff",
+) -> dict[str, object]:
+    rapid_index = {_sqlite_viewer_diff_key(row): _sqlite_viewer_diff_values(row) for row in rapid_tables}
+    trusted_index = {_sqlite_viewer_diff_key(row): _sqlite_viewer_diff_values(row) for row in trusted_tables}
+    return build_viewer_trusted_diff_result(
+        profile_version="sqlite-viewer-trusted-query-schema-diff-v1",
+        comparison_id=comparison_id,
+        rapid_index=rapid_index,
+        trusted_index=trusted_index,
+        trusted_tool=trusted_tool,
+        accepted_tools=SQLITE_VIEWER_TRUSTED_TOOLS,
+        blocker_id=SQLITE_VIEWER_TRUSTED_DIFF_BLOCKER,
+        compare_fields=("name", "row_count", "schema_sha256", "columns_sha256", "sample_rows_sha256"),
+    )
+
+
+def build_email_conversation_trusted_diff(
+    rapid_threads: Sequence[Mapping[str, object]],
+    trusted_threads: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+    comparison_id: str = "email-viewer-trusted-thread-export",
+) -> dict[str, object]:
+    rapid_index = {_email_thread_diff_key(row): _email_thread_diff_values(row) for row in rapid_threads}
+    trusted_index = {_email_thread_diff_key(row): _email_thread_diff_values(row) for row in trusted_threads}
+    return build_viewer_trusted_diff_result(
+        profile_version="email-viewer-trusted-thread-export-v1",
+        comparison_id=comparison_id,
+        rapid_index=rapid_index,
+        trusted_index=trusted_index,
+        trusted_tool=trusted_tool,
+        accepted_tools=EMAIL_VIEWER_TRUSTED_TOOLS,
+        blocker_id=EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER,
+        compare_fields=("subject", "message_count", "participants_sha256", "message_order_sha256", "attachment_count"),
+    )
+
+
+def build_viewer_trusted_diff_result(
+    *,
+    profile_version: str,
+    comparison_id: str,
+    rapid_index: Mapping[str, Mapping[str, object]],
+    trusted_index: Mapping[str, Mapping[str, object]],
+    trusted_tool: str,
+    accepted_tools: set[str],
+    blocker_id: str,
+    compare_fields: Sequence[str],
+) -> dict[str, object]:
+    rapid = {key: value for key, value in rapid_index.items() if key}
+    trusted = {key: value for key, value in trusted_index.items() if key}
+    missing_in_trusted = sorted(key for key in rapid if key not in trusted)
+    unexpected_in_trusted = sorted(key for key in trusted if key not in rapid)
+    mismatches: list[dict[str, object]] = []
+    for key in sorted(set(rapid) & set(trusted)):
+        for field in compare_fields:
+            left = rapid[key].get(field)
+            right = trusted[key].get(field)
+            if left != right:
+                mismatches.append({"row_key": key, "field": field, "rapid": left, "trusted": right})
+    tool_accepted = trusted_tool.strip().lower() in accepted_tools
+    status = "pass" if tool_accepted and rapid and trusted and not missing_in_trusted and not unexpected_in_trusted and not mismatches else "fail"
+    return {
+        "profile_version": profile_version,
+        "comparison_id": comparison_id,
+        "status": status,
+        "blocker_id": "" if status == "pass" else blocker_id,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_accepted": tool_accepted,
+        "accepted_trusted_tools": sorted(accepted_tools),
+        "rapid_row_count": len(rapid),
+        "trusted_row_count": len(trusted),
+        "matched_count": len(set(rapid) & set(trusted)),
+        "missing_in_trusted_count": len(missing_in_trusted),
+        "unexpected_in_trusted_count": len(unexpected_in_trusted),
+        "mismatch_count": len(mismatches),
+        "mismatched_fields": mismatches[:50],
+        "missing_in_trusted": missing_in_trusted[:50],
+        "unexpected_in_trusted": unexpected_in_trusted[:50],
+        "commercial_grade_evidence": status == "pass",
+    }
+
+
+def _hex_viewer_diff_key(row: Mapping[str, object]) -> str:
+    return str(row.get("offset_hex") or row.get("offset") or "")
+
+
+def _hex_viewer_diff_values(row: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "offset": optional_int_for_api(row.get("offset")) or 0,
+        "offset_hex": str(row.get("offset_hex") or ""),
+        "hex": str(row.get("hex") or ""),
+        "ascii": str(row.get("ascii") or ""),
+    }
+
+
+def _sqlite_viewer_diff_key(row: Mapping[str, object]) -> str:
+    return str(row.get("name") or "")
+
+
+def _sqlite_viewer_diff_values(row: Mapping[str, object]) -> dict[str, object]:
+    columns = row.get("columns") if isinstance(row.get("columns"), Sequence) else []
+    rows = row.get("rows") if isinstance(row.get("rows"), Sequence) else []
+    return {
+        "name": str(row.get("name") or ""),
+        "row_count": optional_int_for_api(row.get("row_count")),
+        "schema_sha256": hashlib.sha256(str(row.get("schema_sql") or "").encode("utf-8", errors="replace")).hexdigest(),
+        "columns_sha256": stable_json_sha256(list(columns)),
+        "sample_rows_sha256": stable_json_sha256(list(rows)),
+    }
+
+
+def _email_thread_diff_key(row: Mapping[str, object]) -> str:
+    return str(row.get("thread_id") or row.get("subject") or "")
+
+
+def _email_thread_diff_values(row: Mapping[str, object]) -> dict[str, object]:
+    participants = row.get("participants") if isinstance(row.get("participants"), Sequence) else []
+    order = row.get("message_order") if isinstance(row.get("message_order"), Sequence) else []
+    return {
+        "subject": str(row.get("subject") or ""),
+        "message_count": optional_int_for_api(row.get("message_count")) or 0,
+        "participants_sha256": stable_json_sha256(sorted(str(item) for item in participants)),
+        "message_order_sha256": stable_json_sha256(list(order)),
+        "attachment_count": optional_int_for_api(row.get("attachment_count")) or 0,
+    }
+
+
+def stable_json_sha256(value: object) -> str:
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
 def image_viewer_core_accuracy_gates(*, source_path: Path, details: Mapping[str, object]) -> list[dict[str, object]]:

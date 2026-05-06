@@ -13,8 +13,10 @@ from rapidtriage.core.case_db import (
     SCHEMA_VERSION,
     CaseDatabase,
     CaseDatabaseError,
+    build_reviewer_workflow_trusted_diff,
     list_tables,
     open_case_database,
+    review_workflow_assessment,
     table_columns,
 )
 from rapidtriage.core.sample_case import run_sample_workflow
@@ -624,6 +626,43 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertTrue(all(match["source"] == "documents" for match in filtered["matches"]))
             self.assertTrue(all(match["review"]["verification_status"] == "source_opened" for match in filtered["matches"]))
             self.assertEqual(filtered["matches"][0]["review"]["status"], "relevant")
+
+    def test_reviewer_workflow_requires_trusted_audit_diff_for_report_grade_gate(self) -> None:
+        rapid = [
+            {
+                "citation_id": "CASE-REV-000001",
+                "target_type": "indexed_document",
+                "target_id": "doc-1",
+                "status": "relevant",
+                "verification_status": "source_opened",
+                "reviewer": "analyst-a",
+                "assignee": "analyst-b",
+                "priority": "high",
+                "due_at": "2026-05-07",
+                "include_in_report": True,
+                "tags": ["credential", "report"],
+            }
+        ]
+        trusted = [dict(rapid[0])]
+
+        diff = build_reviewer_workflow_trusted_diff(rapid, trusted, trusted_tool="analyst-review-log")
+        self.assertEqual(diff["status"], "pass")
+        workflow = review_workflow_assessment(
+            assignee="analyst-b",
+            priority="high",
+            due_at="2026-05-07",
+            trusted_diff=diff,
+        )
+        self.assertIn("trusted reviewer workflow audit diff pass", workflow["core_accuracy_gates"][0]["satisfied_checks"])
+        self.assertNotIn("review-workflow-trusted-audit-diff-required", workflow["blockers"])
+
+        mismatch = build_reviewer_workflow_trusted_diff(
+            rapid,
+            [{**rapid[0], "status": "rejected"}],
+            trusted_tool="analyst-review-log",
+        )
+        self.assertEqual(mismatch["status"], "fail")
+        self.assertEqual(mismatch["mismatched_fields"][0]["field"], "status")
 
     def test_cli_case_review_marks_result_for_filtered_case_search(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

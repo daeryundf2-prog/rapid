@@ -11,7 +11,15 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from rapidtriage.api.app import create_app
+from rapidtriage.api.app import (
+    build_email_conversation_trusted_diff,
+    build_hex_viewer_trusted_diff,
+    build_sqlite_viewer_trusted_diff,
+    email_viewer_core_accuracy_gates,
+    create_app,
+    hex_viewer_core_accuracy_gates,
+    sqlite_viewer_core_accuracy_gates,
+)
 from rapidtriage.cli import build_web_parser
 from rapidtriage.core.jobs import RunJobStore
 from tests.schema_validation import validate
@@ -310,6 +318,11 @@ class RapidTriageApiTests(unittest.TestCase):
                 "deleted-row-and-wal-recovery-not-implemented-in-viewer",
                 sqlite_uplift["reportability_decision"]["blockers"],
             )
+            self.assertEqual(sqlite_preview["sqlite"]["trusted_sqlite_viewer_diff"]["status"], "missing")
+            self.assertIn(
+                "sqlite-viewer-trusted-query-schema-diff-required",
+                sqlite_uplift["reportability_decision"]["blockers"],
+            )
             self.assertIn("read-only SQLite open", sqlite_preview["sqlite"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("#74", sqlite_preview["sqlite"]["sqlite_fts_optimization_assessment"]["commercial_gap_ids"])
             self.assertIn("#74", sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["commercial_gap_ids"])
@@ -362,6 +375,11 @@ class RapidTriageApiTests(unittest.TestCase):
                 "native-pst-ost-msg-conversation-view-not-implemented",
                 eml_uplift["reportability_decision"]["blockers"],
             )
+            self.assertEqual(eml_preview["email"]["trusted_email_conversation_diff"]["status"], "missing")
+            self.assertIn(
+                "email-viewer-trusted-thread-export-required",
+                eml_uplift["reportability_decision"]["blockers"],
+            )
             self.assertEqual(eml_preview["email"]["conversation_view"]["thread_count"], 1)
             self.assertEqual(
                 eml_preview["email"]["conversation_view"]["threads"][0]["message_order"][0]["subject"],
@@ -387,6 +405,11 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertIn(
                 "exported-hex-range-citation-package-not-implemented",
+                hex_uplift["reportability_decision"]["blockers"],
+            )
+            self.assertEqual(binary_preview["hex"]["trusted_hex_viewer_diff"]["status"], "missing")
+            self.assertIn(
+                "hex-viewer-trusted-offset-manifest-required",
                 hex_uplift["reportability_decision"]["blockers"],
             )
             self.assertTrue(binary_preview["hex"]["offset_navigation"]["supports_keyword_byte_hits"])
@@ -509,6 +532,66 @@ class RapidTriageApiTests(unittest.TestCase):
             first_artifact_group = next(iter(paged_artifacts.values()))
             self.assertEqual(first_artifact_group["pagination"]["collection"], "artifacts")
             self.assertLessEqual(len(first_artifact_group["artifacts"]), 1)
+
+    def test_viewer_trusted_diffs_control_core_accuracy_gates(self) -> None:
+        hex_rows = [{"offset": 0, "offset_hex": "0x00000000", "hex": "52 61 70 69 64", "ascii": "Rapid"}]
+        hex_diff = build_hex_viewer_trusted_diff(hex_rows, list(hex_rows), trusted_tool="known-byte-offset-manifest")
+        self.assertEqual(hex_diff["status"], "pass")
+        hex_gate = hex_viewer_core_accuracy_gates(
+            source_path=Path("fixture.bin"),
+            rows=hex_rows,
+            preview_hashes={"sha256": "preview-hash"},
+            truncated=False,
+            trusted_diff=hex_diff,
+        )[0]
+        self.assertIn("trusted hex offset manifest diff pass", hex_gate["satisfied_checks"])
+
+        sqlite_tables = [
+            {
+                "name": "notes",
+                "columns": ["id", "body"],
+                "row_count": 1,
+                "schema_sql": "CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT)",
+                "rows": [{"row_number": 1, "values": {"id": 1, "body": "password"}}],
+            }
+        ]
+        sqlite_diff = build_sqlite_viewer_trusted_diff(sqlite_tables, list(sqlite_tables), trusted_tool="sqlite3-cli-oracle")
+        self.assertEqual(sqlite_diff["status"], "pass")
+        sqlite_gate = sqlite_viewer_core_accuracy_gates(
+            source_path=Path("fixture.sqlite"),
+            database_metadata={"page_size": 4096, "page_count": 1},
+            tables=sqlite_tables,
+            trusted_diff=sqlite_diff,
+        )[0]
+        self.assertIn("trusted sqlite query/schema diff pass", sqlite_gate["satisfied_checks"])
+
+        email_threads = [
+            {
+                "thread_id": "thread-1",
+                "subject": "Password review",
+                "message_count": 1,
+                "participants": ["alice@example.test", "bob@example.test"],
+                "attachment_count": 1,
+                "message_order": [{"index": 1, "message_id": "<m1@example.test>"}],
+            }
+        ]
+        email_diff = build_email_conversation_trusted_diff(email_threads, list(email_threads), trusted_tool="mail-client-thread-export")
+        self.assertEqual(email_diff["status"], "pass")
+        email_gate = email_viewer_core_accuracy_gates(
+            source_path=Path("fixture.eml"),
+            messages=[{"from": "alice@example.test", "subject": "Password review", "attachment_count": 1}],
+            conversation={"threads": email_threads},
+            trusted_diff=email_diff,
+        )[0]
+        self.assertIn("trusted email thread/export diff pass", email_gate["satisfied_checks"])
+
+        mismatch = build_hex_viewer_trusted_diff(
+            hex_rows,
+            [{**hex_rows[0], "ascii": "Wrong"}],
+            trusted_tool="known-byte-offset-manifest",
+        )
+        self.assertEqual(mismatch["status"], "fail")
+        self.assertEqual(mismatch["blocker_id"], "hex-viewer-trusted-offset-manifest-required")
 
     def test_create_run_rejects_detected_image_that_cannot_be_scanned_directly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

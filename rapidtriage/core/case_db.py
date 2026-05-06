@@ -30,6 +30,13 @@ WRITE_BLOCKER_ACQUISITION_METADATA_GAP_ID = "#96"
 TIMEZONE_NORMALIZATION_GAP_ID = "#97"
 CLOCK_SKEW_ANALYSIS_GAP_ID = "#98"
 EVIDENCE_CONTAMINATION_WARNING_GAP_ID = "#99"
+REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER = "review-workflow-trusted-audit-diff-required"
+REVIEW_WORKFLOW_TRUSTED_TOOLS = {
+    "analyst-review-log",
+    "case-review-ground-truth",
+    "reviewer-signoff-export",
+    "qa-review-workbook",
+}
 CITATION_WIDTH = 6
 CITATION_KIND_PREFIXES = {
     "evidence": "EVID",
@@ -3973,7 +3980,13 @@ def review_mark_to_dict(row: sqlite3.Row) -> dict[str, object]:
     }
 
 
-def review_workflow_assessment(*, assignee: str, priority: str, due_at: str) -> dict[str, object]:
+def review_workflow_assessment(
+    *,
+    assignee: str,
+    priority: str,
+    due_at: str,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     satisfied = [
         "review status fields persisted",
         "verification status captured",
@@ -3982,9 +3995,13 @@ def review_workflow_assessment(*, assignee: str, priority: str, due_at: str) -> 
     ]
     if assignee or priority:
         satisfied.append("assignment and priority captured")
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted reviewer workflow audit diff pass")
     blockers = [
         "local-single-database-review-workflow-until-role-based-server-is-enabled",
         "review-status-does-not-replace-source-verification-and-parser-validation",
+        REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER,
     ]
     core_accuracy_gates = [
         build_accuracy_gate(
@@ -3996,9 +4013,11 @@ def review_workflow_assessment(*, assignee: str, priority: str, due_at: str) -> 
                 f"due_at:{due_at}",
                 "case_db:review_mark",
                 "case_db:review_mark_history",
+                f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
             ],
         )
     ]
+    active_blockers = [blocker for blocker in blockers if blocker != REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER or trusted_diff.get("status") != "pass"]
     return {
         "commercial_gap_ids": ["#51"],
         "status": "implemented-baseline-validation-required",
@@ -4006,6 +4025,11 @@ def review_workflow_assessment(*, assignee: str, priority: str, due_at: str) -> 
         "priority": priority,
         "due_at": due_at,
         "core_accuracy_gates": core_accuracy_gates,
+        "trusted_review_workflow_diff": dict(trusted_diff) if trusted_diff else {
+            "status": "missing",
+            "blocker_id": REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER,
+            "required_tools": sorted(REVIEW_WORKFLOW_TRUSTED_TOOLS),
+        },
         "commercial_uplift_evidence": {
             "batch_id": "commercial-uplift-051-055",
             "item_numbers": [51],
@@ -4027,6 +4051,7 @@ def review_workflow_assessment(*, assignee: str, priority: str, due_at: str) -> 
                     "notification-workflow",
                     "role-based-assignment-queue",
                     "sla-dashboard",
+                    *([] if trusted_diff.get("status") == "pass" else [REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER]),
                 ],
                 "ready_for_court_report": False,
                 "required_before_report": [
@@ -4040,8 +4065,9 @@ def review_workflow_assessment(*, assignee: str, priority: str, due_at: str) -> 
                 "sla-dashboard",
                 "notification-workflow",
                 "multi-user-conflict-resolution",
+                *([] if trusted_diff.get("status") == "pass" else [REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER]),
             ],
-            "commercial_blockers": blockers,
+            "commercial_blockers": active_blockers,
             "large_data_controls": {
                 "local_case_db_review_mark": True,
                 "assignment_present": bool(assignee),
@@ -4053,7 +4079,7 @@ def review_workflow_assessment(*, assignee: str, priority: str, due_at: str) -> 
             "reporting_status": "implemented-baseline-validation-required",
         },
         "ready_for_court_report": False,
-        "blockers": blockers,
+        "blockers": active_blockers,
         "supported_fields": [
             "status",
             "verification_status",
@@ -4065,6 +4091,78 @@ def review_workflow_assessment(*, assignee: str, priority: str, due_at: str) -> 
             "include_in_report",
             "history",
         ],
+    }
+
+
+def build_reviewer_workflow_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+    comparison_id: str = "review-workflow-trusted-audit-diff",
+) -> dict[str, object]:
+    rapid_index = {_review_workflow_diff_key(row): _review_workflow_diff_values(row) for row in rapid_rows}
+    trusted_index = {_review_workflow_diff_key(row): _review_workflow_diff_values(row) for row in trusted_rows}
+    rapid_index.pop("", None)
+    trusted_index.pop("", None)
+    missing_in_trusted = sorted(key for key in rapid_index if key not in trusted_index)
+    unexpected_in_trusted = sorted(key for key in trusted_index if key not in rapid_index)
+    mismatches: list[dict[str, object]] = []
+    for key in sorted(set(rapid_index) & set(trusted_index)):
+        rapid = rapid_index[key]
+        trusted = trusted_index[key]
+        for field in ("status", "verification_status", "reviewer", "assignee", "priority", "due_at", "include_in_report", "tags"):
+            if rapid.get(field) != trusted.get(field):
+                mismatches.append({"row_key": key, "field": field, "rapid": rapid.get(field, ""), "trusted": trusted.get(field, "")})
+    tool_accepted = trusted_tool.strip().lower() in REVIEW_WORKFLOW_TRUSTED_TOOLS
+    status = "pass" if tool_accepted and rapid_index and trusted_index and not missing_in_trusted and not unexpected_in_trusted and not mismatches else "fail"
+    return {
+        "profile_version": "review-workflow-trusted-audit-diff-v1",
+        "comparison_id": comparison_id,
+        "status": status,
+        "blocker_id": "" if status == "pass" else REVIEW_WORKFLOW_TRUSTED_DIFF_BLOCKER,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_accepted": tool_accepted,
+        "accepted_trusted_tools": sorted(REVIEW_WORKFLOW_TRUSTED_TOOLS),
+        "rapid_row_count": len(rapid_index),
+        "trusted_row_count": len(trusted_index),
+        "matched_count": len(set(rapid_index) & set(trusted_index)),
+        "missing_in_trusted_count": len(missing_in_trusted),
+        "unexpected_in_trusted_count": len(unexpected_in_trusted),
+        "mismatch_count": len(mismatches),
+        "mismatched_fields": mismatches[:50],
+        "missing_in_trusted": missing_in_trusted[:50],
+        "unexpected_in_trusted": unexpected_in_trusted[:50],
+        "commercial_grade_evidence": status == "pass",
+    }
+
+
+def _review_workflow_diff_key(row: Mapping[str, object]) -> str:
+    citation = str(row.get("citation_id") or row.get("review_citation_id") or "").strip()
+    if citation:
+        return citation
+    target_type = str(row.get("target_type") or "").strip()
+    target_id = str(row.get("target_id") or "").strip()
+    return f"{target_type}:{target_id}" if target_type or target_id else ""
+
+
+def _review_workflow_diff_values(row: Mapping[str, object]) -> dict[str, object]:
+    tags = row.get("tags")
+    if isinstance(tags, str):
+        normalized_tags = sorted(item.strip() for item in tags.split(",") if item.strip())
+    elif isinstance(tags, Sequence) and not isinstance(tags, (bytes, bytearray, str)):
+        normalized_tags = sorted(str(item).strip() for item in tags if str(item).strip())
+    else:
+        normalized_tags = []
+    return {
+        "status": str(row.get("status") or ""),
+        "verification_status": str(row.get("verification_status") or ""),
+        "reviewer": str(row.get("reviewer") or ""),
+        "assignee": str(row.get("assignee") or ""),
+        "priority": str(row.get("priority") or ""),
+        "due_at": str(row.get("due_at") or ""),
+        "include_in_report": bool(row.get("include_in_report")),
+        "tags": ",".join(normalized_tags),
     }
 
 

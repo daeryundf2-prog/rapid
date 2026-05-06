@@ -47,7 +47,16 @@ COMPARE_REPORT_GRADE_BLOCKERS = [
     "binary-structure-aware-diff-not-implemented",
     "visual-and-table-aware-diff-not-implemented",
     "comparison-context-and-analyst-selection-require-review-history",
+    "compare-trusted-expected-diff-required",
 ]
+COMPARE_TRUSTED_DIFF_BLOCKER = "compare-trusted-expected-diff-required"
+COMPARE_TRUSTED_TOOLS = {
+    "expected-diff-manifest",
+    "analyst-compare-workbook",
+    "beyond-compare-export",
+    "git-diff-ground-truth",
+    "vendor-compare-export",
+}
 
 
 def compare_paths(
@@ -214,7 +223,12 @@ def compare_many_paths(
     }
 
 
-def compare_core_accuracy_gates(*, results: Sequence[Mapping[str, object]], mode: str) -> list[dict[str, object]]:
+def compare_core_accuracy_gates(
+    *,
+    results: Sequence[Mapping[str, object]],
+    mode: str,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
     satisfied = []
     if mode == "multi" or len(results) >= 1:
         satisfied.append("A/B/C baseline compare")
@@ -226,15 +240,88 @@ def compare_core_accuracy_gates(*, results: Sequence[Mapping[str, object]], mode
         satisfied.append("status counts")
     if not COMPARE_NATIVE_CAPABILITIES["binary_structure_aware_diff"]:
         satisfied.append("specialized diff limitation warning")
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted A/B/C comparison expected diff pass")
     evidence_refs = [
         f"mode:{mode}",
         f"result_count:{len(results)}",
+        f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
     ]
     for result in results[:3]:
         evidence_refs.append(f"comparison_id:{result.get('comparison_id', '')}")
         evidence_refs.append(f"left:{result.get('left_path', '')}")
         evidence_refs.append(f"right:{result.get('right_path', '')}")
     return [build_accuracy_gate(52, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
+
+
+def build_compare_trusted_diff(
+    rapid_results: Sequence[Mapping[str, object]],
+    trusted_results: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+    comparison_id: str = "compare-trusted-expected-diff",
+) -> dict[str, object]:
+    rapid_index = {_compare_diff_key(row): _compare_diff_values(row) for row in rapid_results}
+    trusted_index = {_compare_diff_key(row): _compare_diff_values(row) for row in trusted_results}
+    rapid_index.pop("", None)
+    trusted_index.pop("", None)
+    missing_in_trusted = sorted(key for key in rapid_index if key not in trusted_index)
+    unexpected_in_trusted = sorted(key for key in trusted_index if key not in rapid_index)
+    mismatches: list[dict[str, object]] = []
+    for key in sorted(set(rapid_index) & set(trusted_index)):
+        rapid = rapid_index[key]
+        trusted = trusted_index[key]
+        for field in ("status", "left_sha256", "right_sha256", "diff_sha256", "different_field_count"):
+            if rapid.get(field) != trusted.get(field):
+                mismatches.append({"row_key": key, "field": field, "rapid": rapid.get(field, ""), "trusted": trusted.get(field, "")})
+    tool_accepted = trusted_tool.strip().lower() in COMPARE_TRUSTED_TOOLS
+    status = "pass" if tool_accepted and rapid_index and trusted_index and not missing_in_trusted and not unexpected_in_trusted and not mismatches else "fail"
+    return {
+        "profile_version": "compare-trusted-expected-diff-v1",
+        "comparison_id": comparison_id,
+        "status": status,
+        "blocker_id": "" if status == "pass" else COMPARE_TRUSTED_DIFF_BLOCKER,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_accepted": tool_accepted,
+        "accepted_trusted_tools": sorted(COMPARE_TRUSTED_TOOLS),
+        "rapid_row_count": len(rapid_index),
+        "trusted_row_count": len(trusted_index),
+        "matched_count": len(set(rapid_index) & set(trusted_index)),
+        "missing_in_trusted_count": len(missing_in_trusted),
+        "unexpected_in_trusted_count": len(unexpected_in_trusted),
+        "mismatch_count": len(mismatches),
+        "mismatched_fields": mismatches[:50],
+        "missing_in_trusted": missing_in_trusted[:50],
+        "unexpected_in_trusted": unexpected_in_trusted[:50],
+        "commercial_grade_evidence": status == "pass",
+    }
+
+
+def _compare_diff_key(row: Mapping[str, object]) -> str:
+    comparison_id = str(row.get("comparison_id") or "").strip()
+    if comparison_id:
+        return comparison_id
+    left = row.get("left") if isinstance(row.get("left"), Mapping) else {}
+    right = row.get("right") if isinstance(row.get("right"), Mapping) else {}
+    return f"{left.get('label', '')}:{left.get('path', '')}->{right.get('label', '')}:{right.get('path', '')}"
+
+
+def _compare_diff_values(row: Mapping[str, object]) -> dict[str, object]:
+    left = row.get("left") if isinstance(row.get("left"), Mapping) else {}
+    right = row.get("right") if isinstance(row.get("right"), Mapping) else {}
+    left_hashes = left.get("hashes") if isinstance(left.get("hashes"), Mapping) else {}
+    right_hashes = right.get("hashes") if isinstance(right.get("hashes"), Mapping) else {}
+    diff = row.get("diff") if isinstance(row.get("diff"), Mapping) else {}
+    preview = "\n".join(str(item) for item in diff.get("preview", []) if isinstance(item, str))
+    fields = row.get("fields") if isinstance(row.get("fields"), Sequence) else []
+    return {
+        "status": str(row.get("status") or ""),
+        "left_sha256": str(left_hashes.get("sha256") or ""),
+        "right_sha256": str(right_hashes.get("sha256") or ""),
+        "diff_sha256": hashlib.sha256(preview.encode("utf-8", errors="replace")).hexdigest() if preview else "",
+        "different_field_count": sum(1 for field in fields if isinstance(field, Mapping) and field.get("status") == "different"),
+    }
 
 
 def compare_report_grade_assessment(*, mode: str) -> dict[str, object]:
@@ -269,6 +356,7 @@ def compare_commercial_uplift_evidence(
         "image-visual-diff",
         "sqlite-table-aware-diff",
         "persistent-compare-notes",
+        COMPARE_TRUSTED_DIFF_BLOCKER,
     ]
     return {
         "batch_id": "commercial-uplift-051-055",

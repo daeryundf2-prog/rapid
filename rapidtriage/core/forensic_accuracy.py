@@ -770,6 +770,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "verification status captured",
             "report inclusion state captured",
             "history/audit limitation warning",
+            "trusted reviewer workflow audit diff pass",
         ),
     },
     {
@@ -784,6 +785,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "bounded text diff",
             "status counts",
             "specialized diff limitation warning",
+            "trusted A/B/C comparison expected diff pass",
         ),
     },
     {
@@ -798,6 +800,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "preview hash",
             "byte-search citation support",
             "full-source validation warning",
+            "trusted hex offset manifest diff pass",
         ),
     },
     {
@@ -812,6 +815,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "column/index metadata",
             "bounded row preview",
             "deleted/WAL limitation warning",
+            "trusted sqlite query/schema diff pass",
         ),
     },
     {
@@ -826,6 +830,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "participant/header preservation",
             "attachment inventory",
             "mailbox threading limitation warning",
+            "trusted email thread/export diff pass",
         ),
     },
     {
