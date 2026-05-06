@@ -46,6 +46,24 @@ MEDIA_REPORT_GRADE_BLOCKERS = [
     "native-ocr-and-translation-engine-execution-not-bundled",
     "deepfake-and-sensitive-media-classification-not-implemented",
 ]
+MEDIA_TRUSTED_DIFF_BLOCKERS = {
+    56: "image-gallery-trusted-manifest-diff-required",
+    58: "ocr-sidecar-trusted-engine-log-diff-required",
+    59: "korean-ocr-translation-trusted-review-diff-required",
+}
+MEDIA_TRUSTED_DIFF_CHECKS = {
+    56: "trusted image gallery manifest diff pass",
+    58: "trusted OCR engine/sidecar diff pass",
+    59: "trusted Korean OCR/translation review diff pass",
+}
+MEDIA_TRUSTED_TOOLS = {
+    "image-gallery-ground-truth",
+    "perceptual-hash-manifest",
+    "ocr-engine-log",
+    "ocr-sidecar-ground-truth",
+    "korean-ocr-review",
+    "certified-translation-review",
+}
 
 
 class PillowEncodedBytes:
@@ -162,6 +180,7 @@ def build_image_record(path: Path) -> ArtifactRecord:
         "media_report_grade_assessment": media_report_grade_assessment(),
     }
     details.update(build_ocr_and_classifier_validation(resolved))
+    details["media_trusted_diffs"] = missing_media_trusted_diffs()
     if not has_plausible_image_signature(resolved):
         image = None
     else:
@@ -333,6 +352,10 @@ def media_core_accuracy_gates(*, details: dict[str, object], source_path: Path) 
     hashes = details.get("hashes") if isinstance(details.get("hashes"), dict) else {}
     if hashes.get("sha256"):
         evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+    trusted_diffs = details.get("media_trusted_diffs") if isinstance(details.get("media_trusted_diffs"), Mapping) else {}
+    for number in (56, 58, 59):
+        diff = trusted_diffs.get(str(number)) if isinstance(trusted_diffs.get(str(number)), Mapping) else {}
+        evidence_refs.append(f"trusted_diff_{number}_status:{diff.get('status', 'missing')}")
 
     item56: list[str] = []
     if details.get("hashes") and (details.get("width") is not None or details.get("decoded") is not None):
@@ -345,6 +368,8 @@ def media_core_accuracy_gates(*, details: dict[str, object], source_path: Path) 
         item56.append("tag/report selection hints")
     if not MEDIA_NATIVE_CAPABILITIES["deepfake_detection"]:
         item56.append("visual-classifier limitation warning")
+    if trusted_media_diff_passed(trusted_diffs, 56):
+        item56.append(MEDIA_TRUSTED_DIFF_CHECKS[56])
 
     ocr_sidecar = details.get("ocr_sidecar") if isinstance(details.get("ocr_sidecar"), dict) else {}
     item58: list[str] = []
@@ -358,6 +383,8 @@ def media_core_accuracy_gates(*, details: dict[str, object], source_path: Path) 
         item58.append("engine/metadata preservation")
     if not MEDIA_NATIVE_CAPABILITIES["native_ocr_execution"]:
         item58.append("native OCR limitation warning")
+    if trusted_media_diff_passed(trusted_diffs, 58):
+        item58.append(MEDIA_TRUSTED_DIFF_CHECKS[58])
 
     translation_sidecar = details.get("translation_sidecar") if isinstance(details.get("translation_sidecar"), dict) else {}
     workflow = details.get("korean_ocr_translation_workflow") if isinstance(details.get("korean_ocr_translation_workflow"), dict) else {}
@@ -372,6 +399,8 @@ def media_core_accuracy_gates(*, details: dict[str, object], source_path: Path) 
         item59.append("confidence/engine metadata")
     if not MEDIA_NATIVE_CAPABILITIES["machine_translation_execution"]:
         item59.append("human translation validation warning")
+    if trusted_media_diff_passed(trusted_diffs, 59):
+        item59.append(MEDIA_TRUSTED_DIFF_CHECKS[59])
 
     return [
         build_accuracy_gate(56, satisfied_checks=item56, evidence_refs=evidence_refs),
@@ -388,6 +417,7 @@ def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], sou
             passed_by_item[str(gate["gap_id"])] = list(gate.get("satisfied_checks") or [])
     ocr_sidecar = details.get("ocr_sidecar") if isinstance(details.get("ocr_sidecar"), Mapping) else {}
     translation_sidecar = details.get("translation_sidecar") if isinstance(details.get("translation_sidecar"), Mapping) else {}
+    trusted_diffs = details.get("media_trusted_diffs") if isinstance(details.get("media_trusted_diffs"), Mapping) else {}
     return {
         "batch_id": "commercial-uplift-056-060",
         "item_numbers": [56, 58, 59],
@@ -400,19 +430,52 @@ def media_image_commercial_uplift_evidence(*, details: Mapping[str, object], sou
         ],
         "reportability_decision": media_image_reportability_decision(
             failed_by_item={
-                "#56": ["dedicated-gallery-grid", "persistent-tags", "ml-visual-similarity", "deepfake-classifier-validation"],
-                "#58": ["native-ocr-engine-execution", "engine-retry-logs", "case-db-ocr-job-persistence"],
-                "#59": ["built-in-korean-ocr-execution", "machine-translation-worker", "confidence-calibration-corpus"],
+                "#56": [
+                    "dedicated-gallery-grid",
+                    "persistent-tags",
+                    "ml-visual-similarity",
+                    "deepfake-classifier-validation",
+                    *([] if trusted_media_diff_passed(trusted_diffs, 56) else [MEDIA_TRUSTED_DIFF_BLOCKERS[56]]),
+                ],
+                "#58": [
+                    "native-ocr-engine-execution",
+                    "engine-retry-logs",
+                    "case-db-ocr-job-persistence",
+                    *([] if trusted_media_diff_passed(trusted_diffs, 58) else [MEDIA_TRUSTED_DIFF_BLOCKERS[58]]),
+                ],
+                "#59": [
+                    "built-in-korean-ocr-execution",
+                    "machine-translation-worker",
+                    "confidence-calibration-corpus",
+                    *([] if trusted_media_diff_passed(trusted_diffs, 59) else [MEDIA_TRUSTED_DIFF_BLOCKERS[59]]),
+                ],
             },
             ocr_sidecar=ocr_sidecar,
             translation_sidecar=translation_sidecar,
         ),
         "passed_validation_check_ids_by_item": passed_by_item,
         "failed_validation_check_ids_by_item": {
-            "#56": ["dedicated-gallery-grid", "persistent-tags", "ml-visual-similarity", "deepfake-classifier-validation"],
-            "#58": ["native-ocr-engine-execution", "engine-retry-logs", "case-db-ocr-job-persistence"],
-            "#59": ["built-in-korean-ocr-execution", "machine-translation-worker", "confidence-calibration-corpus"],
+            "#56": [
+                "dedicated-gallery-grid",
+                "persistent-tags",
+                "ml-visual-similarity",
+                "deepfake-classifier-validation",
+                *([] if trusted_media_diff_passed(trusted_diffs, 56) else [MEDIA_TRUSTED_DIFF_BLOCKERS[56]]),
+            ],
+            "#58": [
+                "native-ocr-engine-execution",
+                "engine-retry-logs",
+                "case-db-ocr-job-persistence",
+                *([] if trusted_media_diff_passed(trusted_diffs, 58) else [MEDIA_TRUSTED_DIFF_BLOCKERS[58]]),
+            ],
+            "#59": [
+                "built-in-korean-ocr-execution",
+                "machine-translation-worker",
+                "confidence-calibration-corpus",
+                *([] if trusted_media_diff_passed(trusted_diffs, 59) else [MEDIA_TRUSTED_DIFF_BLOCKERS[59]]),
+            ],
         },
+        "trusted_diffs": dict(trusted_diffs) if trusted_diffs else missing_media_trusted_diffs(),
         "commercial_blockers": list(MEDIA_REPORT_GRADE_BLOCKERS),
         "large_data_controls": {
             "source_size": int(details.get("source_size") or 0),
@@ -452,6 +515,98 @@ def media_image_reportability_decision(
             "attach certified Korean OCR/translation review evidence before reporting translated text",
         ],
     }
+
+
+def missing_media_trusted_diffs() -> dict[str, dict[str, object]]:
+    return {
+        str(number): {
+            "status": "missing",
+            "blocker_id": blocker,
+            "required_tools": sorted(MEDIA_TRUSTED_TOOLS),
+        }
+        for number, blocker in MEDIA_TRUSTED_DIFF_BLOCKERS.items()
+    }
+
+
+def trusted_media_diff_passed(trusted_diffs: Mapping[str, object], number: int) -> bool:
+    diff = trusted_diffs.get(str(number)) if isinstance(trusted_diffs.get(str(number)), Mapping) else {}
+    return diff.get("status") == "pass"
+
+
+def build_media_trusted_diff(
+    number: int,
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    blocker = MEDIA_TRUSTED_DIFF_BLOCKERS.get(number, "media-trusted-diff-required")
+    rapid_index = index_media_trusted_rows(number, rapid_rows)
+    trusted_index = index_media_trusted_rows(number, trusted_rows)
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in sorted(set(rapid_index) & set(trusted_index)):
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append({"row_key": key, "field": field, "rapid_value": rapid_value, "trusted_value": trusted_value})
+    recognized = trusted_tool.strip().lower().replace(" ", "") in {item.replace(" ", "").lower() for item in MEDIA_TRUSTED_TOOLS}
+    status = "pass" if recognized and rapid_index and trusted_index and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": "media-trusted-diff-v1",
+        "gap_id": f"#{number}",
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(set(rapid_index) & set(trusted_index)) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-media-output-as-report-grade-finding",
+            "blockers": [] if status == "pass" else [blocker],
+        },
+    }
+
+
+def index_media_trusted_rows(number: int, rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        path = str(row.get("source_path") or row.get("path") or "")
+        key = hashlib.sha256(path.encode("utf-8", errors="replace")).hexdigest()[:16] if path else str(row.get("entry_name") or row.get("name") or "")
+        if not key:
+            continue
+        if number == 56:
+            hashes = row.get("hashes") if isinstance(row.get("hashes"), Mapping) else {}
+            indexed[key] = {
+                "sha256": str(hashes.get("sha256") or row.get("source_sha256") or ""),
+                "width": str(row.get("width") or ""),
+                "height": str(row.get("height") or ""),
+                "perceptual_hash": str(row.get("perceptual_hash") or ""),
+                "similarity_bucket": str(row.get("similarity_bucket") or ""),
+            }
+        elif number == 58:
+            indexed[key] = {
+                "source_sha256": str(row.get("source_sha256") or row.get("sha256") or ""),
+                "sidecar_sha256": str(row.get("sidecar_sha256") or row.get("sha256") or ""),
+                "text_sha256": str(row.get("text_sha256") or ""),
+                "engine": str(row.get("engine") or ""),
+            }
+        else:
+            indexed[key] = {
+                "language_hint": str(row.get("language_hint") or row.get("source_language") or ""),
+                "text_sha256": str(row.get("text_sha256") or ""),
+                "translation_sha256": str(row.get("translation_sha256") or row.get("sha256") or ""),
+                "review_status": str(row.get("review_status") or row.get("validation_status") or ""),
+            }
+    return indexed
 
 
 def load_ocr_sidecar(path: Path) -> dict[str, object]:

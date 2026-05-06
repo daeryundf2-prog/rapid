@@ -44,6 +44,21 @@ OCR_QUEUE_REPORT_GRADE_BLOCKERS = [
     "translation-sidecars-are-review-aids-not-certified-translations",
     "sidecar-provenance-and-hashes-must-be-preserved-for-reporting",
 ]
+OCR_QUEUE_TRUSTED_DIFF_BLOCKERS = {
+    58: "ocr-queue-trusted-engine-log-diff-required",
+    59: "korean-ocr-translation-trusted-review-diff-required",
+}
+OCR_QUEUE_TRUSTED_DIFF_CHECKS = {
+    58: "trusted OCR queue engine/sidecar diff pass",
+    59: "trusted Korean OCR/translation review diff pass",
+}
+OCR_QUEUE_TRUSTED_TOOLS = {
+    "ocr-engine-log",
+    "ocr-queue-ground-truth",
+    "ocr-sidecar-ground-truth",
+    "korean-ocr-review",
+    "certified-translation-review",
+}
 
 
 class OcrQueueError(ValueError):
@@ -88,7 +103,8 @@ def build_ocr_queue(
         status_counts[status] = status_counts.get(status, 0) + 1
         language = str(item.get("language_hint") or "unknown")
         language_counts[language] = language_counts.get(language, 0) + 1
-    core_accuracy_gates = ocr_queue_core_accuracy_gates(items=items, root=resolved_root)
+    trusted_diffs = missing_ocr_queue_trusted_diffs()
+    core_accuracy_gates = ocr_queue_core_accuracy_gates(items=items, root=resolved_root, trusted_diffs=trusted_diffs)
     return {
         "command": "ocr-queue",
         "schema_version": OCR_QUEUE_SCHEMA_VERSION,
@@ -111,6 +127,7 @@ def build_ocr_queue(
         },
         "ocr_queue_native_capabilities": dict(OCR_QUEUE_NATIVE_CAPABILITIES),
         "ocr_queue_report_grade_assessment": ocr_queue_report_grade_assessment(),
+        "trusted_ocr_queue_diffs": trusted_diffs,
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": ocr_queue_commercial_uplift_evidence(
             items=items,
@@ -194,8 +211,17 @@ def build_ocr_queue_item(
     }
 
 
-def ocr_queue_core_accuracy_gates(*, items: list[dict[str, object]], root: Path) -> list[dict[str, object]]:
+def ocr_queue_core_accuracy_gates(
+    *,
+    items: list[dict[str, object]],
+    root: Path,
+    trusted_diffs: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
     evidence_refs = [f"root:{root}", f"candidate_count:{len(items)}"]
+    trusted_diffs = trusted_diffs if isinstance(trusted_diffs, Mapping) else {}
+    for number in (58, 59):
+        diff = trusted_diffs.get(str(number)) if isinstance(trusted_diffs.get(str(number)), Mapping) else {}
+        evidence_refs.append(f"trusted_diff_{number}_status:{diff.get('status', 'missing')}")
     for item in items[:5]:
         evidence_refs.append(f"source_path:{item.get('source_path', '')}")
         if isinstance(item.get("sidecar"), Mapping) and item["sidecar"].get("sha256"):
@@ -212,6 +238,8 @@ def ocr_queue_core_accuracy_gates(*, items: list[dict[str, object]], root: Path)
         item58.append("engine/metadata preservation")
     if not OCR_QUEUE_NATIVE_CAPABILITIES["native_ocr_engine_execution"]:
         item58.append("native OCR limitation warning")
+    if trusted_ocr_queue_diff_passed(trusted_diffs, 58):
+        item58.append(OCR_QUEUE_TRUSTED_DIFF_CHECKS[58])
 
     item59 = []
     if any("ko" in str(item.get("language_hint", "")).lower() or "kor" in str(item.get("language_hint", "")).lower() for item in items):
@@ -224,6 +252,8 @@ def ocr_queue_core_accuracy_gates(*, items: list[dict[str, object]], root: Path)
         item59.append("confidence/engine metadata")
     if not OCR_QUEUE_NATIVE_CAPABILITIES["human_translation_certification"]:
         item59.append("human translation validation warning")
+    if trusted_ocr_queue_diff_passed(trusted_diffs, 59):
+        item59.append(OCR_QUEUE_TRUSTED_DIFF_CHECKS[59])
 
     return [
         build_accuracy_gate(58, satisfied_checks=item58, evidence_refs=evidence_refs),
@@ -249,17 +279,38 @@ def ocr_queue_commercial_uplift_evidence(
         "source_refs": [f"root:{root}", f"candidate_count:{len(items)}"],
         "reportability_decision": ocr_queue_reportability_decision(
             failed_by_item={
-                "#58": ["native-ocr-engine-execution", "engine-specific-retry-logs", "case-db-ocr-job-persistence"],
-                "#59": ["built-in-korean-ocr-execution", "machine-translation-worker", "certified-translation-workflow"],
+                "#58": [
+                    "native-ocr-engine-execution",
+                    "engine-specific-retry-logs",
+                    "case-db-ocr-job-persistence",
+                    OCR_QUEUE_TRUSTED_DIFF_BLOCKERS[58],
+                ],
+                "#59": [
+                    "built-in-korean-ocr-execution",
+                    "machine-translation-worker",
+                    "certified-translation-workflow",
+                    OCR_QUEUE_TRUSTED_DIFF_BLOCKERS[59],
+                ],
             },
             item_count=len(items),
             sidecar_imported_count=sum(1 for item in items if str(item.get("status")) == "sidecar-imported"),
         ),
         "passed_validation_check_ids_by_item": passed_by_item,
         "failed_validation_check_ids_by_item": {
-            "#58": ["native-ocr-engine-execution", "engine-specific-retry-logs", "case-db-ocr-job-persistence"],
-            "#59": ["built-in-korean-ocr-execution", "machine-translation-worker", "certified-translation-workflow"],
+            "#58": [
+                "native-ocr-engine-execution",
+                "engine-specific-retry-logs",
+                "case-db-ocr-job-persistence",
+                OCR_QUEUE_TRUSTED_DIFF_BLOCKERS[58],
+            ],
+            "#59": [
+                "built-in-korean-ocr-execution",
+                "machine-translation-worker",
+                "certified-translation-workflow",
+                OCR_QUEUE_TRUSTED_DIFF_BLOCKERS[59],
+            ],
         },
+        "trusted_diffs": missing_ocr_queue_trusted_diffs(),
         "commercial_blockers": list(OCR_QUEUE_REPORT_GRADE_BLOCKERS),
         "large_data_controls": {
             "candidate_count": len(items),
@@ -371,7 +422,93 @@ def ocr_queue_item_core_accuracy_gates(*, item_context: Mapping[str, object]) ->
             }
         ],
         root=Path(str(item_context.get("source_path") or ".")).parent,
+        trusted_diffs=missing_ocr_queue_trusted_diffs(),
     )
+
+
+def missing_ocr_queue_trusted_diffs() -> dict[str, dict[str, object]]:
+    return {
+        str(number): {
+            "status": "missing",
+            "blocker_id": blocker,
+            "required_tools": sorted(OCR_QUEUE_TRUSTED_TOOLS),
+        }
+        for number, blocker in OCR_QUEUE_TRUSTED_DIFF_BLOCKERS.items()
+    }
+
+
+def trusted_ocr_queue_diff_passed(trusted_diffs: Mapping[str, object], number: int) -> bool:
+    diff = trusted_diffs.get(str(number)) if isinstance(trusted_diffs.get(str(number)), Mapping) else {}
+    return diff.get("status") == "pass"
+
+
+def build_ocr_queue_trusted_diff(
+    number: int,
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    blocker = OCR_QUEUE_TRUSTED_DIFF_BLOCKERS.get(number, "ocr-queue-trusted-diff-required")
+    rapid_index = index_ocr_queue_trusted_rows(number, rapid_rows)
+    trusted_index = index_ocr_queue_trusted_rows(number, trusted_rows)
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in sorted(set(rapid_index) & set(trusted_index)):
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append({"row_key": key, "field": field, "rapid_value": rapid_value, "trusted_value": trusted_value})
+    recognized = trusted_tool.strip().lower().replace(" ", "") in {item.replace(" ", "").lower() for item in OCR_QUEUE_TRUSTED_TOOLS}
+    status = "pass" if recognized and rapid_index and trusted_index and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": "ocr-queue-trusted-diff-v1",
+        "gap_id": f"#{number}",
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(set(rapid_index) & set(trusted_index)) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-ocr-output-as-engine-validated-finding",
+            "blockers": [] if status == "pass" else [blocker],
+        },
+    }
+
+
+def index_ocr_queue_trusted_rows(number: int, rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        key_source = str(row.get("queue_id") or row.get("source_path") or "")
+        if not key_source:
+            continue
+        key = hashlib.sha256(key_source.encode("utf-8", errors="replace")).hexdigest()[:16]
+        sidecar = row.get("sidecar") if isinstance(row.get("sidecar"), Mapping) else {}
+        translation = row.get("translation_sidecar") if isinstance(row.get("translation_sidecar"), Mapping) else {}
+        if number == 58:
+            metadata = sidecar.get("metadata") if isinstance(sidecar.get("metadata"), Mapping) else {}
+            indexed[key] = {
+                "source_sha256": str(row.get("source_sha256") or ""),
+                "status": str(row.get("status") or ""),
+                "sidecar_sha256": str(sidecar.get("sha256") or ""),
+                "text_sha256": str(sidecar.get("text_sha256") or ""),
+                "engine": str(metadata.get("engine") or ""),
+            }
+        else:
+            indexed[key] = {
+                "language_hint": str(row.get("language_hint") or ""),
+                "confidence": str(row.get("confidence") or ""),
+                "translation_sha256": str(translation.get("sha256") or ""),
+                "translation_text_sha256": str(translation.get("text_sha256") or ""),
+            }
+    return indexed
 
 
 def ocr_queue_report_grade_assessment() -> dict[str, object]:

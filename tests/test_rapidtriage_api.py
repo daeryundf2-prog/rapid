@@ -14,10 +14,12 @@ from fastapi.testclient import TestClient
 from rapidtriage.api.app import (
     build_email_conversation_trusted_diff,
     build_hex_viewer_trusted_diff,
+    build_media_transcript_trusted_diff,
     build_sqlite_viewer_trusted_diff,
     email_viewer_core_accuracy_gates,
     create_app,
     hex_viewer_core_accuracy_gates,
+    media_viewer_core_accuracy_gates,
     sqlite_viewer_core_accuracy_gates,
 )
 from rapidtriage.cli import build_web_parser
@@ -459,6 +461,11 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(media_uplift["item_numbers"], [57])
             self.assertIn("transcript sidecars imported", media_uplift["passed_validation_check_ids"])
             self.assertFalse(media_uplift["large_data_controls"]["playback_executed_inline"])
+            self.assertEqual(media_preview["media"]["trusted_media_transcript_diff"]["status"], "missing")
+            self.assertIn(
+                "media-transcript-trusted-cue-diff-required",
+                media_uplift["reportability_decision"]["blockers"],
+            )
             self.assertEqual(
                 media_uplift["reportability_decision"]["decision"],
                 "do-not-report-media-preview-as-playback-or-asr-validated",
@@ -592,6 +599,25 @@ class RapidTriageApiTests(unittest.TestCase):
         )
         self.assertEqual(mismatch["status"], "fail")
         self.assertEqual(mismatch["blocker_id"], "hex-viewer-trusted-offset-manifest-required")
+
+        sidecars = [
+            {
+                "path": "/case/audio.wav.srt",
+                "sha256": "sidecar-hash",
+                "cue_count": 1,
+                "preview": "password spoken",
+                "cues": [{"start": "00:00:00,000", "end": "00:00:01,000", "text": "password spoken"}],
+            }
+        ]
+        media_diff = build_media_transcript_trusted_diff(sidecars, list(sidecars), trusted_tool="transcript-cue-manifest")
+        self.assertEqual(media_diff["status"], "pass")
+        media_gate = media_viewer_core_accuracy_gates(
+            source_path=Path("/case/audio.wav"),
+            metadata={"duration_seconds": 1.0},
+            sidecars=sidecars,
+            trusted_diff=media_diff,
+        )[0]
+        self.assertIn("trusted transcript cue/alignment diff pass", media_gate["satisfied_checks"])
 
     def test_create_run_rejects_detected_image_that_cannot_be_scanned_directly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

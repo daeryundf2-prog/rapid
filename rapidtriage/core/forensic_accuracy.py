@@ -845,6 +845,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "perceptual similarity bucket",
             "tag/report selection hints",
             "visual-classifier limitation warning",
+            "trusted image gallery manifest diff pass",
         ),
     },
     {
@@ -859,6 +860,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "transcript sidecars imported",
             "cue timestamps preserved",
             "playback/transcript verification warning",
+            "trusted transcript cue/alignment diff pass",
         ),
     },
     {
@@ -873,6 +875,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "retry state handling",
             "engine/metadata preservation",
             "native OCR limitation warning",
+            "trusted OCR engine/sidecar diff pass",
         ),
     },
     {
@@ -887,6 +890,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "translation sidecar import",
             "confidence/engine metadata",
             "human translation validation warning",
+            "trusted Korean OCR/translation review diff pass",
         ),
     },
     {
@@ -901,6 +905,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "representative hit links",
             "source/path references",
             "near-duplicate limitation warning",
+            "trusted duplicate manifest diff pass",
         ),
     },
     {

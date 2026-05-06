@@ -65,6 +65,7 @@ ANALYSIS_TRUSTED_DIFF_BLOCKERS = {
     48: "graph-source-citation-trusted-diff-required",
     49: "timeline-known-answer-trusted-diff-required",
     50: "workbook-rubric-trusted-diff-required",
+    60: "search-dedup-trusted-duplicate-manifest-required",
 }
 ANALYSIS_TRUSTED_DIFF_CHECKS = {
     46: "trusted cluster review diff pass",
@@ -72,6 +73,7 @@ ANALYSIS_TRUSTED_DIFF_CHECKS = {
     48: "trusted graph source-citation diff pass",
     49: "trusted timeline known-answer diff pass",
     50: "trusted workbook rubric diff pass",
+    60: "trusted duplicate manifest diff pass",
 }
 ANALYSIS_TRUSTED_TOOLS = {
     "hand-labeled-cluster-review",
@@ -79,6 +81,8 @@ ANALYSIS_TRUSTED_TOOLS = {
     "graph-source-citation-review",
     "timeline-known-answer",
     "workbook-rubric-review",
+    "duplicate-manifest-review",
+    "dedup-suppression-review",
     "case-db-review-export",
     "independent-review-export",
 }
@@ -109,7 +113,7 @@ def build_search_analysis(
         entities=entities["entities"],
         max_edges=max_graph_edges,
     )
-    deduplication = build_search_hit_deduplication(normalized_matches)
+    deduplication = build_search_hit_deduplication(normalized_matches, trusted_diff=(trusted_diffs or {}).get(60))
     workbook = build_hypothesis_workbook(
         normalized_matches,
         keywords=keywords,
@@ -557,6 +561,7 @@ def index_analysis_trusted_rows(number: int, rows: Sequence[Mapping[str, object]
         48: index_graph_rows,
         49: index_timeline_rows,
         50: index_workbook_rows,
+        60: index_dedup_rows,
     }
     return indexers.get(number, index_workbook_rows)(rows)
 
@@ -649,6 +654,23 @@ def index_workbook_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[
     return indexed
 
 
+def index_dedup_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        group_id = diff_value(row.get("group_id"))
+        fingerprint = diff_value(row.get("fingerprint"))
+        key = group_id or stable_diff_key("dedup", fingerprint)
+        if not key:
+            continue
+        indexed[key] = {
+            "fingerprint": fingerprint,
+            "match_count": diff_value(row.get("match_count")),
+            "duplicate_resolution_status": diff_value(row.get("duplicate_resolution_status")),
+            "review_action": diff_value(row.get("review_action")),
+        }
+    return indexed
+
+
 def stable_diff_key(*parts: object) -> str:
     text = "|".join(diff_value(part) for part in parts if diff_value(part))
     if not text:
@@ -662,7 +684,12 @@ def diff_value(value: object) -> str:
     return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
 
 
-def build_search_hit_deduplication(matches: Sequence[Mapping[str, object]], *, max_groups: int = 25) -> dict[str, object]:
+def build_search_hit_deduplication(
+    matches: Sequence[Mapping[str, object]],
+    *,
+    max_groups: int = 25,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     buckets: dict[str, list[int]] = defaultdict(list)
     for index, match in enumerate(matches):
         buckets[dedupe_fingerprint(match)].append(index)
@@ -696,7 +723,7 @@ def build_search_hit_deduplication(matches: Sequence[Mapping[str, object]], *, m
         "unique_fingerprint_count": len(buckets),
         "max_groups": max_groups,
     }
-    core_accuracy_gates = search_deduplication_core_accuracy_gates(groups=groups, summary=summary)
+    core_accuracy_gates = search_deduplication_core_accuracy_gates(groups=groups, summary=summary, trusted_diff=trusted_diff)
     return {
         "summary": {
             "duplicate_group_count": len(groups),
@@ -709,11 +736,17 @@ def build_search_hit_deduplication(matches: Sequence[Mapping[str, object]], *, m
         },
         "groups": groups,
         "deduplication_assessment": search_deduplication_assessment(),
+        "trusted_duplicate_manifest_diff": dict(trusted_diff) if isinstance(trusted_diff, Mapping) else {
+            "status": "missing",
+            "blocker_id": ANALYSIS_TRUSTED_DIFF_BLOCKERS[60],
+            "required_tools": sorted(ANALYSIS_TRUSTED_TOOLS),
+        },
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": search_deduplication_commercial_uplift_evidence(
             groups=groups,
             summary=summary,
             core_accuracy_gates=core_accuracy_gates,
+            trusted_diff=trusted_diff,
         ),
     }
 
@@ -722,6 +755,7 @@ def search_deduplication_core_accuracy_gates(
     *,
     groups: Sequence[Mapping[str, object]],
     summary: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
     if summary.get("unique_fingerprint_count") is not None:
@@ -733,6 +767,9 @@ def search_deduplication_core_accuracy_gates(
     if any(group.get("sources") or group.get("paths") for group in groups):
         satisfied.append("source/path references")
     satisfied.append("near-duplicate limitation warning")
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    if trusted_diff.get("status") == "pass":
+        satisfied.append(ANALYSIS_TRUSTED_DIFF_CHECKS[60])
     return [
         build_accuracy_gate(
             60,
@@ -741,6 +778,7 @@ def search_deduplication_core_accuracy_gates(
                 f"duplicate_group_count:{summary.get('duplicate_group_count', 0)}",
                 f"duplicate_match_count:{summary.get('duplicate_match_count', 0)}",
                 f"unique_fingerprint_count:{summary.get('unique_fingerprint_count', 0)}",
+                f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
             ],
         )
     ]
@@ -751,6 +789,7 @@ def search_deduplication_commercial_uplift_evidence(
     groups: Sequence[Mapping[str, object]],
     summary: Mapping[str, object],
     core_accuracy_gates: Sequence[Mapping[str, object]],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     passed = []
     for gate in core_accuracy_gates:
@@ -772,6 +811,7 @@ def search_deduplication_commercial_uplift_evidence(
                 "fuzzy-near-duplicate-text-grouping",
                 "perceptual-media-duplicate-grouping",
                 "case-db-duplicate-suppression-state",
+                *([] if isinstance(trusted_diff, Mapping) and trusted_diff.get("status") == "pass" else [ANALYSIS_TRUSTED_DIFF_BLOCKERS[60]]),
             ],
             assessment_blockers=list(assessment["blockers"]),
             summary=summary,
@@ -782,7 +822,13 @@ def search_deduplication_commercial_uplift_evidence(
             "fuzzy-near-duplicate-text-grouping",
             "perceptual-media-duplicate-grouping",
             "case-db-duplicate-suppression-state",
+            *([] if isinstance(trusted_diff, Mapping) and trusted_diff.get("status") == "pass" else [ANALYSIS_TRUSTED_DIFF_BLOCKERS[60]]),
         ],
+        "trusted_diff": dict(trusted_diff) if isinstance(trusted_diff, Mapping) else {
+            "status": "missing",
+            "blocker_id": ANALYSIS_TRUSTED_DIFF_BLOCKERS[60],
+            "required_tools": sorted(ANALYSIS_TRUSTED_TOOLS),
+        },
         "commercial_blockers": list(assessment["blockers"]),
         "large_data_controls": {
             "max_groups": int(summary.get("max_groups") or 0),

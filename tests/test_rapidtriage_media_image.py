@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from rapidtriage.artifacts.media import average_hash
+from rapidtriage.artifacts.media import build_media_trusted_diff, average_hash, media_core_accuracy_gates
 from rapidtriage.cli import build_parser, main
 
 
@@ -92,6 +92,11 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             self.assertGreater(details["ocr_sidecar"]["quality_metrics"]["hangul_count"], 0)
             self.assertEqual(details["visual_classification"]["validation_status"], "triage-hint")
             self.assertEqual(details["classifier_validation"]["deepfake_detection_status"], "not-run")
+            self.assertEqual(details["media_trusted_diffs"]["56"]["status"], "missing")
+            self.assertIn(
+                "#56:image-gallery-trusted-manifest-diff-required",
+                media_uplift["reportability_decision"]["blockers"],
+            )
             thumbnail = details["thumbnail_preview"]
             self.assertTrue(thumbnail["available"])
             self.assertEqual(thumbnail["strategy"], "bounded-inline-png")
@@ -108,6 +113,60 @@ class RapidTriageMediaImageTests(unittest.TestCase):
             perceptual_hash = average_hash(image)
 
         self.assertEqual(len(perceptual_hash), 16)
+
+    def test_media_trusted_diffs_control_core_accuracy_gates(self) -> None:
+        image_row = {
+            "source_path": "/case/screen.png",
+            "hashes": {"sha256": "image-hash"},
+            "width": 16,
+            "height": 16,
+            "perceptual_hash": "f0f0f0f0f0f0f0f0",
+            "similarity_bucket": "f0f0f0f0",
+        }
+        ocr_row = {
+            "source_path": "/case/screen.png.ocr.txt",
+            "source_sha256": "image-hash",
+            "sidecar_sha256": "sidecar-hash",
+            "text_sha256": "text-hash",
+            "engine": "external",
+        }
+        translation_row = {
+            "source_path": "/case/screen.translation.txt",
+            "language_hint": "ko+en",
+            "translation_sha256": "translation-hash",
+            "text_sha256": "translation-text-hash",
+            "review_status": "human-reviewed",
+        }
+        gallery_diff = build_media_trusted_diff(56, [image_row], [dict(image_row)], trusted_tool="image-gallery-ground-truth")
+        ocr_diff = build_media_trusted_diff(58, [ocr_row], [dict(ocr_row)], trusted_tool="ocr-engine-log")
+        translation_diff = build_media_trusted_diff(59, [translation_row], [dict(translation_row)], trusted_tool="korean-ocr-review")
+        self.assertEqual(gallery_diff["status"], "pass")
+        self.assertEqual(ocr_diff["status"], "pass")
+        self.assertEqual(translation_diff["status"], "pass")
+
+        gates = media_core_accuracy_gates(
+            details={
+                **image_row,
+                "source_format": "png",
+                "source_size": 128,
+                "thumbnail_preview": {"available": True},
+                "gallery_review_mode": {"status": "ready"},
+                "ocr_plan": {"status": "sidecar-imported"},
+                "ocr_sidecar": {"text_sha256": "text-hash", "source_sha256": "image-hash", "sha256": "sidecar-hash", "metadata": {"engine": "external"}, "quality_metrics": {"korean_text_present": True}},
+                "translation_sidecar": {"text_sha256": "translation-text-hash"},
+                "korean_ocr_translation_workflow": {"language_hints": ["kor", "eng"]},
+                "media_trusted_diffs": {"56": gallery_diff, "58": ocr_diff, "59": translation_diff},
+            },
+            source_path=Path("/case/screen.png"),
+        )
+        by_gap = {gate["gap_id"]: gate for gate in gates}
+        self.assertIn("trusted image gallery manifest diff pass", by_gap["#56"]["satisfied_checks"])
+        self.assertIn("trusted OCR engine/sidecar diff pass", by_gap["#58"]["satisfied_checks"])
+        self.assertIn("trusted Korean OCR/translation review diff pass", by_gap["#59"]["satisfied_checks"])
+
+        mismatch = build_media_trusted_diff(56, [image_row], [{**image_row, "width": 32}], trusted_tool="image-gallery-ground-truth")
+        self.assertEqual(mismatch["status"], "diffs-present")
+        self.assertIn("image-gallery-trusted-manifest-diff-required", mismatch["reportability_decision"]["blockers"])
 
 
 def write_image_fixture(path: Path) -> None:

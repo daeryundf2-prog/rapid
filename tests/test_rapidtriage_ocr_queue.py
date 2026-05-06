@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
-from rapidtriage.core.ocr_queue import build_ocr_queue
+from rapidtriage.core.ocr_queue import build_ocr_queue, build_ocr_queue_trusted_diff, ocr_queue_core_accuracy_gates
 
 
 class RapidTriageOcrQueueTests(unittest.TestCase):
@@ -49,6 +49,11 @@ class RapidTriageOcrQueueTests(unittest.TestCase):
             self.assertIn("sidecar import and hashes", queue_uplift["passed_validation_check_ids_by_item"]["#58"])
             self.assertIn("Korean language hinting", queue_uplift["passed_validation_check_ids_by_item"]["#59"])
             self.assertFalse(queue_uplift["large_data_controls"]["native_ocr_engine_execution"])
+            self.assertEqual(payload["trusted_ocr_queue_diffs"]["58"]["status"], "missing")
+            self.assertIn(
+                "#58:ocr-queue-trusted-engine-log-diff-required",
+                queue_uplift["reportability_decision"]["blockers"],
+            )
             self.assertEqual(
                 queue_uplift["reportability_decision"]["decision"],
                 "do-not-report-ocr-or-translation-as-engine-validated",
@@ -124,6 +129,40 @@ class RapidTriageOcrQueueTests(unittest.TestCase):
             self.assertEqual(payload["items"][0]["attempt_count"], 2)
             self.assertIn("#58", payload["items"][0]["report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(payload["core_accuracy_gates"][0]["gap_id"], "#58")
+
+    def test_ocr_queue_trusted_diffs_control_core_accuracy_gates(self) -> None:
+        row = {
+            "queue_id": "queue-1",
+            "source_path": "/case/screen.png",
+            "source_sha256": "source-hash",
+            "status": "sidecar-imported",
+            "sidecar": {"sha256": "sidecar-hash", "text_sha256": "text-hash", "metadata": {"engine": "external"}},
+            "translation_sidecar": {"sha256": "translation-hash", "text_sha256": "translation-text-hash"},
+            "language_hint": "ko+en",
+            "confidence": 0.91,
+        }
+        ocr_diff = build_ocr_queue_trusted_diff(58, [row], [dict(row)], trusted_tool="ocr-engine-log")
+        translation_diff = build_ocr_queue_trusted_diff(59, [row], [dict(row)], trusted_tool="korean-ocr-review")
+        self.assertEqual(ocr_diff["status"], "pass")
+        self.assertEqual(translation_diff["status"], "pass")
+
+        gates = ocr_queue_core_accuracy_gates(
+            items=[row],
+            root=Path("/case"),
+            trusted_diffs={"58": ocr_diff, "59": translation_diff},
+        )
+        by_gap = {gate["gap_id"]: gate for gate in gates}
+        self.assertIn("trusted OCR queue engine/sidecar diff pass", by_gap["#58"]["satisfied_checks"])
+        self.assertIn("trusted Korean OCR/translation review diff pass", by_gap["#59"]["satisfied_checks"])
+
+        mismatch = build_ocr_queue_trusted_diff(
+            58,
+            [row],
+            [{**row, "status": "queued"}],
+            trusted_tool="ocr-engine-log",
+        )
+        self.assertEqual(mismatch["status"], "diffs-present")
+        self.assertIn("ocr-queue-trusted-engine-log-diff-required", mismatch["reportability_decision"]["blockers"])
 
 
 if __name__ == "__main__":

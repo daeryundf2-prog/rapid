@@ -167,6 +167,11 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
             "check:case-db-duplicate-suppression-state",
             dedup_uplift["reportability_decision"]["blockers"],
         )
+        self.assertEqual(analysis["deduplication"]["trusted_duplicate_manifest_diff"]["status"], "missing")
+        self.assertIn(
+            "check:search-dedup-trusted-duplicate-manifest-required",
+            dedup_uplift["reportability_decision"]["blockers"],
+        )
         self.assertFalse(analysis["deduplication"]["deduplication_assessment"]["ready_for_court_report"])
 
         workbook = analysis["workbook"]
@@ -221,6 +226,21 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("trusted graph source-citation diff pass", gates["#48"]["satisfied_checks"])
         self.assertIn("trusted timeline known-answer diff pass", gates["#49"]["satisfied_checks"])
         self.assertIn("trusted workbook rubric diff pass", gates["#50"]["satisfied_checks"])
+
+        dedup_diff = build_analysis_trusted_diff(
+            60,
+            baseline["deduplication"]["groups"],
+            [dict(row) for row in baseline["deduplication"]["groups"]],
+            trusted_tool="duplicate-manifest-review",
+        )
+        self.assertEqual(dedup_diff["status"], "pass")
+        analysis_with_dedup = build_search_analysis(
+            self.make_matches(),
+            ["password", "powershell"],
+            trusted_diffs={60: dedup_diff},
+        )
+        dedup_gate = analysis_with_dedup["deduplication"]["core_accuracy_gates"][0]
+        self.assertIn("trusted duplicate manifest diff pass", dedup_gate["satisfied_checks"])
 
         mismatch = build_analysis_trusted_diff(
             49,

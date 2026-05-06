@@ -80,6 +80,8 @@ SQLITE_VIEWER_TRUSTED_DIFF_BLOCKER = "sqlite-viewer-trusted-query-schema-diff-re
 SQLITE_VIEWER_TRUSTED_TOOLS = {"sqlite3-cli-oracle", "db-browser-export", "known-answer-sqlite-manifest"}
 EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER = "email-viewer-trusted-thread-export-required"
 EMAIL_VIEWER_TRUSTED_TOOLS = {"mail-client-thread-export", "eml-ground-truth", "mbox-ground-truth", "vendor-mailbox-export"}
+MEDIA_TRANSCRIPT_TRUSTED_DIFF_BLOCKER = "media-transcript-trusted-cue-diff-required"
+MEDIA_TRANSCRIPT_TRUSTED_TOOLS = {"transcript-cue-manifest", "asr-alignment-export", "manual-playback-review"}
 
 
 class RunCreateRequest(BaseModel):
@@ -2441,6 +2443,27 @@ def build_email_conversation_trusted_diff(
     )
 
 
+def build_media_transcript_trusted_diff(
+    rapid_sidecars: Sequence[Mapping[str, object]],
+    trusted_sidecars: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+    comparison_id: str = "media-transcript-trusted-cue-diff",
+) -> dict[str, object]:
+    rapid_index = {_media_transcript_diff_key(row): _media_transcript_diff_values(row) for row in rapid_sidecars}
+    trusted_index = {_media_transcript_diff_key(row): _media_transcript_diff_values(row) for row in trusted_sidecars}
+    return build_viewer_trusted_diff_result(
+        profile_version="media-transcript-trusted-cue-diff-v1",
+        comparison_id=comparison_id,
+        rapid_index=rapid_index,
+        trusted_index=trusted_index,
+        trusted_tool=trusted_tool,
+        accepted_tools=MEDIA_TRANSCRIPT_TRUSTED_TOOLS,
+        blocker_id=MEDIA_TRANSCRIPT_TRUSTED_DIFF_BLOCKER,
+        compare_fields=("sha256", "cue_count", "cues_sha256", "preview_sha256"),
+    )
+
+
 def build_viewer_trusted_diff_result(
     *,
     profile_version: str,
@@ -2531,6 +2554,21 @@ def _email_thread_diff_values(row: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _media_transcript_diff_key(row: Mapping[str, object]) -> str:
+    return str(row.get("path") or row.get("name") or "")
+
+
+def _media_transcript_diff_values(row: Mapping[str, object]) -> dict[str, object]:
+    cues = row.get("cues") if isinstance(row.get("cues"), Sequence) else []
+    preview = str(row.get("preview") or "")
+    return {
+        "sha256": str(row.get("sha256") or ""),
+        "cue_count": optional_int_for_api(row.get("cue_count")) or len(cues),
+        "cues_sha256": stable_json_sha256(list(cues)),
+        "preview_sha256": hashlib.sha256(preview.encode("utf-8", errors="replace")).hexdigest() if preview else "",
+    }
+
+
 def stable_json_sha256(value: object) -> str:
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
@@ -2564,22 +2602,34 @@ def media_viewer_core_accuracy_gates(
     source_path: Path,
     metadata: Mapping[str, object],
     sidecars: Sequence[Mapping[str, object]],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
     if metadata:
         satisfied.append("media metadata extracted")
-    if source_path.stat().st_size <= 128 * 1024 * 1024:
+    try:
+        source_size = source_path.stat().st_size
+    except OSError:
+        source_size = 0
+    if source_size <= 128 * 1024 * 1024:
         satisfied.append("source hashes captured")
     if sidecars:
         satisfied.append("transcript sidecars imported")
     if any(item.get("cues") for item in sidecars):
         satisfied.append("cue timestamps preserved")
     satisfied.append("playback/transcript verification warning")
+    trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
+    if trusted_diff.get("status") == "pass":
+        satisfied.append("trusted transcript cue/alignment diff pass")
     return [
         build_accuracy_gate(
             57,
             satisfied_checks=satisfied,
-            evidence_refs=[f"source_path:{source_path}", f"transcript_sidecar_count:{len(sidecars)}"],
+            evidence_refs=[
+                f"source_path:{source_path}",
+                f"transcript_sidecar_count:{len(sidecars)}",
+                f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
+            ],
         )
     ]
 
@@ -2610,6 +2660,11 @@ def build_media_preview(source_path: Path, *, mime_type: str) -> Dict[str, objec
     if source_path.suffix.lower() == ".wav":
         metadata.update(read_wav_metadata(source_path))
     transcript_text = "\n\n".join(str(item.get("preview") or "") for item in sidecars)
+    trusted_diff = {
+        "status": "missing",
+        "blocker_id": MEDIA_TRANSCRIPT_TRUSTED_DIFF_BLOCKER,
+        "required_tools": sorted(MEDIA_TRANSCRIPT_TRUSTED_TOOLS),
+    }
     return {
         "preview_type": "media",
         "message": "Media metadata preview is available.",
@@ -2642,7 +2697,9 @@ def build_media_preview(source_path: Path, *, mime_type: str) -> Dict[str, objec
                 source_path=source_path,
                 metadata=metadata,
                 sidecars=sidecars,
+                trusted_diff=trusted_diff,
             ),
+            "trusted_media_transcript_diff": trusted_diff,
             "commercial_uplift_evidence": viewer_workflow_commercial_uplift_evidence(
                 item_number=57,
                 component="video-audio-preview-and-transcript",
@@ -2656,6 +2713,7 @@ def build_media_preview(source_path: Path, *, mime_type: str) -> Dict[str, objec
                     "automatic-speech-recognition-not-executed-by-viewer",
                     "transcript-sidecar-alignment-must-be-verified-against-original-media",
                     "selected-cue-report-export-not-implemented",
+                    MEDIA_TRANSCRIPT_TRUSTED_DIFF_BLOCKER,
                 ],
                 source_refs=[f"source_path:{source_path}", f"transcript_sidecar_count:{len(sidecars)}"],
                 controls={
