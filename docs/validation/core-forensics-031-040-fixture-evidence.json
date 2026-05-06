@@ -20,7 +20,8 @@
       "number": 31,
       "title": "KakaoTalk parser",
       "assertions": [
-        "KakaoTalk export rows preserve service/profile detection, chat/message participant/media normalization, app/schema and BigBang compatibility metadata, encrypted/deleted warnings, source hashes, legal provenance, #31 core_accuracy_gates, and decrypted-complete reportability blockers."
+        "KakaoTalk export rows preserve service/profile detection, chat/message participant/media normalization, app/schema and BigBang compatibility metadata, encrypted/deleted warnings, source hashes, legal provenance, #31 core_accuracy_gates, and decrypted-complete reportability blockers.",
+        "build_chat_app_trusted_diff compares KakaoTalk rows against authorized export or validated native DB output before satisfying the #31 trusted diff gate."
       ],
       "blockers_kept": [
         "post-2025-08 KakaoTalk known-answer corpus",
@@ -32,7 +33,8 @@
       "number": 32,
       "title": "WhatsApp parser",
       "assertions": [
-        "WhatsApp export/database rows preserve service/profile detection, chat/contact/media normalization, crypt authority warnings, deleted-row warnings, source hash/app-version provenance, #32 core_accuracy_gates, and crypt/deleted-complete reportability blockers."
+        "WhatsApp export/database rows preserve service/profile detection, chat/contact/media normalization, crypt authority warnings, deleted-row warnings, source hash/app-version provenance, #32 core_accuracy_gates, and crypt/deleted-complete reportability blockers.",
+        "build_chat_app_trusted_diff compares WhatsApp export/msgstore rows before satisfying the #32 trusted diff gate."
       ],
       "blockers_kept": [
         "crypt backup key workflow",
@@ -44,7 +46,8 @@
       "number": 33,
       "title": "Telegram parser",
       "assertions": [
-        "Telegram export rows preserve service/profile detection, chat/user/media attribution, account/cache provenance, encrypted local-store warnings, deleted/cache limitation warnings, #33 core_accuracy_gates, and local-store-complete reportability blockers."
+        "Telegram export rows preserve service/profile detection, chat/user/media attribution, account/cache provenance, encrypted local-store warnings, deleted/cache limitation warnings, #33 core_accuracy_gates, and local-store-complete reportability blockers.",
+        "build_chat_app_trusted_diff compares Telegram export/cache rows before satisfying the #33 trusted diff gate."
       ],
       "blockers_kept": [
         "Telegram Desktop encrypted/local map decoding",
@@ -56,7 +59,8 @@
       "number": 34,
       "title": "Signal parser",
       "assertions": [
-        "Signal export rows preserve service/profile detection, thread/recipient/message inventory, SQLCipher/key authority gates, attachment/deleted warnings, secret-safe provenance, #34 core_accuracy_gates, and SQLCipher-complete reportability blockers."
+        "Signal export rows preserve service/profile detection, thread/recipient/message inventory, SQLCipher/key authority gates, attachment/deleted warnings, secret-safe provenance, #34 core_accuracy_gates, and SQLCipher-complete reportability blockers.",
+        "build_chat_app_trusted_diff compares Signal authorized export or validated SQLCipher rows before satisfying the #34 trusted diff gate."
       ],
       "blockers_kept": [
         "SQLCipher/key handling module",
@@ -68,7 +72,8 @@
       "number": 35,
       "title": "Extended messenger parser",
       "assertions": [
-        "LINE/Discord/Instagram/Facebook Messenger style export rows preserve extended service detection, message/media/reaction normalization, schema registry evidence, encrypted/ephemeral warnings, source hashes, legal provenance, #35 core_accuracy_gates, and service-complete reportability blockers."
+        "LINE/Discord/Instagram/Facebook Messenger style export rows preserve extended service detection, message/media/reaction normalization, schema registry evidence, encrypted/ephemeral warnings, source hashes, legal provenance, #35 core_accuracy_gates, and service-complete reportability blockers.",
+        "build_chat_app_trusted_diff compares extended messenger service export/native DB rows before satisfying the #35 trusted diff gate."
       ],
       "blockers_kept": [
         "service-specific encrypted stores",

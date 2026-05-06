@@ -293,6 +293,33 @@ CHAT_APP_NATIVE_CAPABILITIES = {
     "multi_device_sync_state_resolution": False,
     "known_answer_service_corpus": False,
 }
+CHAT_APP_TRUSTED_TOOLS = {
+    "kakaotalk export",
+    "validated kakaotalk sqlite",
+    "whatsapp export",
+    "validated msgstore",
+    "telegram export",
+    "telegram desktop export",
+    "signal export",
+    "validated signal sqlite",
+    "line export",
+    "discord export",
+    "instagram export",
+    "facebook messenger export",
+    "service export",
+    "vendor tool export",
+    "cellebrite",
+    "xry",
+    "graykey",
+    "axiom",
+}
+CHAT_APP_TRUSTED_DIFF_CHECKS = {
+    31: ("trusted KakaoTalk export/native DB diff pass", "kakaotalk-trusted-export-or-native-db-diff-required"),
+    32: ("trusted WhatsApp export/native DB diff pass", "whatsapp-trusted-export-or-native-db-diff-required"),
+    33: ("trusted Telegram export/native DB diff pass", "telegram-trusted-export-or-native-db-diff-required"),
+    34: ("trusted Signal export/native DB diff pass", "signal-trusted-export-or-native-db-diff-required"),
+    35: ("trusted extended messenger export/native DB diff pass", "extended-messenger-trusted-export-or-native-db-diff-required"),
+}
 
 TIMESTAMP_KEYS = (
     "timestamp",
@@ -640,6 +667,102 @@ def build_mobile_trusted_diff(
             "blockers": [] if status == "pass" else [blocker],
         },
     }
+
+
+def build_chat_app_trusted_diff(
+    number: int,
+    rapid_rows: list[Mapping[str, object]],
+    trusted_rows: list[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    _, blocker = CHAT_APP_TRUSTED_DIFF_CHECKS.get(number, ("trusted messenger diff pass", "messenger-trusted-diff-required"))
+    rapid_index = index_chat_app_trusted_rows(rapid_rows)
+    trusted_index = index_chat_app_trusted_rows(trusted_rows)
+    recognized = trusted_tool.strip().lower().replace(" ", "") in {
+        item.replace(" ", "").lower() for item in CHAT_APP_TRUSTED_TOOLS
+    }
+    common = sorted(set(rapid_index) & set(trusted_index))
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in common:
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append(
+                    {
+                        "chat_row_key": key,
+                        "field": field,
+                        "rapid_value": rapid_value,
+                        "trusted_value": trusted_value,
+                    }
+                )
+                break
+    status = "pass" if recognized and common and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": "chat-app-trusted-diff-v1",
+        "gap_id": f"#{number}",
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(common) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-messenger-output-as-final",
+            "blockers": [] if status == "pass" else [blocker],
+        },
+    }
+
+
+def index_chat_app_trusted_rows(rows: list[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        service = normalized_mobile_diff_value(first_mobile_alias(row, "service", "app", "platform"))
+        conversation_id = normalized_mobile_diff_value(first_mobile_alias(row, "conversation_id", "chat_id", "room_id", "thread_id"))
+        message_id = normalized_mobile_diff_value(first_mobile_alias(row, "message_id", "msg_id", "guid", "id"))
+        timestamp = normalized_mobile_diff_value(first_mobile_alias(row, "timestamp", "date", "sent_at", "created_at"))
+        sender = normalized_mobile_diff_value(first_mobile_alias(row, "sender", "from", "author"))
+        recipient = normalized_mobile_diff_value(first_mobile_alias(row, "recipient", "to"))
+        text_hash = normalized_mobile_diff_value(first_mobile_alias(row, "message_text_sha256", "text_sha256", "body_sha256"))
+        media_hash = normalized_mobile_diff_value(first_mobile_alias(row, "media_reference_sha256", "attachment_sha256", "media_sha256"))
+        reaction = normalized_mobile_diff_value(first_mobile_alias(row, "reaction", "emoji", "reactions"))
+        deleted_state = normalized_mobile_diff_value(first_mobile_alias(row, "deleted_state", "deleted", "is_deleted"))
+        key = "|".join(
+            item
+            for item in (
+                service,
+                conversation_id,
+                message_id,
+                timestamp,
+                sender,
+                recipient,
+            )
+            if item
+        )
+        if not key:
+            continue
+        indexed[key] = {
+            "service": service,
+            "conversation_id": conversation_id,
+            "message_id": message_id,
+            "timestamp": timestamp,
+            "sender": sender,
+            "recipient": recipient,
+            "message_text_sha256": text_hash,
+            "media_reference_sha256": media_hash,
+            "reaction": reaction,
+            "deleted_state": deleted_state,
+        }
+    return indexed
 
 
 def index_mobile_trusted_rows(rows: list[Mapping[str, object]]) -> dict[str, dict[str, str]]:
@@ -2111,6 +2234,7 @@ def mobile_core_accuracy_gates(
         evidence_refs.append(f"source_record_id:{record_id}")
 
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    trusted_diff = details.get("chat_app_trusted_diff") if isinstance(details.get("chat_app_trusted_diff"), Mapping) else {}
     trusted_diff = details.get("mobile_trusted_diff") if isinstance(details.get("mobile_trusted_diff"), Mapping) else {}
     gates: list[dict[str, object]] = []
     if "#26" in mobile_commercial_gap_ids(artifact_type, source_tool):
@@ -2253,6 +2377,7 @@ def chat_app_core_accuracy_gates(
     if source_hashes.get("sha256"):
         evidence_refs.append(f"source_sha256:{source_hashes['sha256']}")
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    trusted_diff = details.get("chat_app_trusted_diff") if isinstance(details.get("chat_app_trusted_diff"), Mapping) else {}
     issue_ids = {
         str(item.get("id"))
         for item in details.get("chat_app_issue_matrix", [])
@@ -2317,6 +2442,9 @@ def chat_app_core_accuracy_gates(
                 satisfied.append("encrypted/ephemeral limitation warning")
             if source_hashes.get("sha256") and source_tool:
                 satisfied.append("source hash and legal provenance")
+        trusted_check = CHAT_APP_TRUSTED_DIFF_CHECKS.get(number)
+        if trusted_check and trusted_diff.get("status") == "pass":
+            satisfied.append(trusted_check[0])
         gates.append(build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs))
     return gates
 
@@ -2514,6 +2642,11 @@ def chat_app_commercial_uplift_evidence(
             source_refs.append(f"{key}:{value}")
     passed_issue_matrix_ids = [str(item.get("id")) for item in issue_matrix if item.get("passed")]
     failed_issue_matrix_ids = [str(item.get("id")) for item in issue_matrix if not item.get("passed")]
+    trusted_diff = (
+        details.get("chat_app_trusted_diff")
+        if isinstance(details.get("chat_app_trusted_diff"), Mapping)
+        else {"status": "not-attached", "commercial_grade_evidence": False}
+    )
     return {
         "batch_id": "commercial-uplift-031-035",
         "item_numbers": item_numbers,
@@ -2527,7 +2660,9 @@ def chat_app_commercial_uplift_evidence(
             failed_issue_matrix_ids=failed_issue_matrix_ids,
             report_grade=report_grade,
             details=details,
+            trusted_diff=trusted_diff,
         ),
+        "chat_app_trusted_diff": trusted_diff,
         "source_refs": source_refs,
         "passed_issue_matrix_ids": passed_issue_matrix_ids,
         "failed_issue_matrix_ids": failed_issue_matrix_ids,
@@ -2557,6 +2692,7 @@ def chat_app_reportability_decision(
     failed_issue_matrix_ids: list[str],
     report_grade: Mapping[str, object],
     details: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in report_grade.get("blockers") or chat_app_blockers(service) if str(item)}
     blockers.update(f"issue:{item}" for item in failed_issue_matrix_ids)
@@ -2564,6 +2700,11 @@ def chat_app_reportability_decision(
         compatibility = details.get("kakaotalk_compatibility_assessment")
         if isinstance(compatibility, Mapping) and not compatibility.get("report_grade_ready"):
             blockers.update(str(item) for item in compatibility.get("blockers") or [] if str(item))
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        for number in item_numbers:
+            trusted_check = CHAT_APP_TRUSTED_DIFF_CHECKS.get(number)
+            if trusted_check:
+                blockers.add(trusted_check[1])
     primary = item_numbers[0] if item_numbers else 35
     decisions = {
         31: ("do-not-report-kakaotalk-message-content-as-decrypted-complete", "kakaotalk-export-or-inventory-triage-pivot"),

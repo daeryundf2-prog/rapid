@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rapidtriage.artifacts.mobile import build_mobile_trusted_diff, mobile_core_accuracy_gates
+from rapidtriage.artifacts.mobile import build_chat_app_trusted_diff, build_mobile_trusted_diff, chat_app_core_accuracy_gates, mobile_core_accuracy_gates
 from rapidtriage.cli import build_parser, main
 
 
@@ -480,6 +480,82 @@ class RapidTriageMobileExportTests(unittest.TestCase):
         self.assertFalse(diff["trusted_tool_recognized"])
         self.assertEqual(diff["mismatch_count"], 1)
         self.assertIn("vendor-mobile-export-trusted-diff-required", diff["reportability_decision"]["blockers"])
+
+    def test_chat_app_trusted_diffs_gate_messenger_claims(self) -> None:
+        cases = [
+            (31, "KakaoTalk", "KakaoTalk export", "trusted KakaoTalk export/native DB diff pass"),
+            (32, "WhatsApp", "WhatsApp export", "trusted WhatsApp export/native DB diff pass"),
+            (33, "Telegram", "Telegram export", "trusted Telegram export/native DB diff pass"),
+            (34, "Signal", "Signal export", "trusted Signal export/native DB diff pass"),
+            (35, "LINE", "LINE export", "trusted extended messenger export/native DB diff pass"),
+        ]
+        for number, service, tool, check in cases:
+            with self.subTest(service=service):
+                diff = build_chat_app_trusted_diff(
+                    number,
+                    [
+                        {
+                            "service": service,
+                            "conversation_id": "room-1",
+                            "message_id": "msg-1",
+                            "timestamp": "2026-04-26T01:02:03Z",
+                            "sender": "alice",
+                            "recipient": "bob",
+                            "message_text_sha256": "a" * 64,
+                            "reaction": "ok",
+                        }
+                    ],
+                    [
+                        {
+                            "Service": service,
+                            "ChatID": "room-1",
+                            "MsgID": "msg-1",
+                            "Date": "2026-04-26T01:02:03Z",
+                            "From": "alice",
+                            "To": "bob",
+                            "BodySHA256": "a" * 64,
+                            "Reaction": "ok",
+                        }
+                    ],
+                    trusted_tool=tool,
+                )
+                self.assertEqual(diff["status"], "pass")
+                gate = chat_app_core_accuracy_gates(
+                    artifact_type="mobile-message",
+                    source_tool="authorized-export",
+                    source_format="json",
+                    source_index=0,
+                    source_hashes={"sha256": "b" * 64},
+                    details={
+                        "service": service,
+                        "conversation_id": "room-1",
+                        "message_id": "msg-1",
+                        "message_text_sha256": "a" * 64,
+                        "reaction": "ok",
+                        "app_version": "1.0",
+                        "schema_version": "fixture",
+                        "chat_app_scope_profile": {"known_profile": True},
+                        "chat_app_issue_matrix": [{"id": "service-profile-known", "passed": True}],
+                        "kakaotalk_compatibility_assessment": {"report_grade_ready": False, "blockers": ["fixture"]},
+                        "commercial_grade_blockers": ["service-specific-validation-required"],
+                        "chat_app_trusted_diff": diff,
+                    },
+                )[0]
+                self.assertIn(check, gate["satisfied_checks"])
+                self.assertNotIn(check, gate["missing_required_checks"])
+
+    def test_chat_app_trusted_diff_blocks_unknown_tools_and_mismatches(self) -> None:
+        diff = build_chat_app_trusted_diff(
+            32,
+            [{"service": "WhatsApp", "conversation_id": "room-1", "message_id": "msg-1", "message_text_sha256": "a" * 64}],
+            [{"Service": "WhatsApp", "ChatID": "room-1", "MsgID": "msg-1", "BodySHA256": "b" * 64}],
+            trusted_tool="unknown-tool",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["trusted_tool_recognized"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertIn("whatsapp-trusted-export-or-native-db-diff-required", diff["reportability_decision"]["blockers"])
 
 
 def write_mobile_export_fixtures(root: Path) -> None:

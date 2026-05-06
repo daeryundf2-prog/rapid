@@ -470,6 +470,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "schema/app version and BigBang compatibility tracking",
             "encrypted/deleted limitation warning",
             "source hash and legal provenance",
+            "trusted KakaoTalk export/native DB diff pass",
         ),
     },
     {
@@ -484,6 +485,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "crypt backup authority workflow warning",
             "deleted-row limitation warning",
             "source hash and app-version provenance",
+            "trusted WhatsApp export/native DB diff pass",
         ),
     },
     {
@@ -498,6 +500,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "account/cache provenance",
             "encrypted local store warning",
             "deleted/cache recovery limitation",
+            "trusted Telegram export/native DB diff pass",
         ),
     },
     {
@@ -512,6 +515,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "SQLCipher/key authority gate",
             "attachment/deleted limitation warning",
             "secret-safe legal provenance",
+            "trusted Signal export/native DB diff pass",
         ),
     },
     {
@@ -526,6 +530,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "schema/app version registry",
             "encrypted/ephemeral limitation warning",
             "source hash and legal provenance",
+            "trusted extended messenger export/native DB diff pass",
         ),
     },
     {

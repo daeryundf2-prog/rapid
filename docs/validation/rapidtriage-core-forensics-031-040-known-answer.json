@@ -17,6 +17,7 @@
       "expected": {
         "required_assertions": [
           "KakaoTalk rows preserve service/profile, message/media pivots, BigBang compatibility, limitation warnings, source hashes, and #31 core_accuracy_gates",
+          "KakaoTalk trusted diff helper requires authorized export or validated native DB equality before satisfying the #31 trusted KakaoTalk export/native DB diff pass gate",
           "KakaoTalk reportability decisions block decrypted-complete message claims until post-BigBang/schema/encrypted/deleted validation exists"
         ]
       },
@@ -36,6 +37,7 @@
       "expected": {
         "required_assertions": [
           "WhatsApp rows preserve service/profile, chat/contact/media pivots, crypt/deleted warnings, source provenance, and #32 core_accuracy_gates",
+          "WhatsApp trusted diff helper requires export/msgstore row equality before satisfying the #32 trusted WhatsApp export/native DB diff pass gate",
           "WhatsApp reportability decisions block crypt/deleted-complete claims until backup key, database, and deleted-row validation exists"
         ]
       },
@@ -55,6 +57,7 @@
       "expected": {
         "required_assertions": [
           "Telegram rows preserve service/profile, chat/user/media attribution, cache/account provenance, limitations, and #33 core_accuracy_gates",
+          "Telegram trusted diff helper requires native export/cache row equality before satisfying the #33 trusted Telegram export/native DB diff pass gate",
           "Telegram reportability decisions block local-store-complete claims until encrypted store, cache/media, and account attribution validation exists"
         ]
       },
@@ -74,6 +77,7 @@
       "expected": {
         "required_assertions": [
           "Signal rows preserve service/profile, thread/message inventory, SQLCipher authority gates, attachment/deleted warnings, and #34 core_accuracy_gates",
+          "Signal trusted diff helper requires authorized export or validated SQLCipher row equality before satisfying the #34 trusted Signal export/native DB diff pass gate",
           "Signal reportability decisions block SQLCipher-complete claims until key handling, encrypted backup, attachment, and deleted-row validation exists"
         ]
       },
@@ -93,6 +97,7 @@
       "expected": {
         "required_assertions": [
           "Extended messenger rows preserve service/profile, message/media/reaction normalization, schema registry, limitations, and #35 core_accuracy_gates",
+          "Extended messenger trusted diff helper requires service export/native DB row equality before satisfying the #35 trusted extended messenger export/native DB diff pass gate",
           "Extended messenger reportability decisions block service-complete claims until service schemas, read-state/reactions, media, and ephemeral/deleted behavior are validated"
         ]
       },
