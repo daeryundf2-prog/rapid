@@ -35,6 +35,18 @@ RELEASE_NOTES_CHANGELOG_GAP_ID = "#112"
 LTS_HOTFIX_POLICY_GAP_ID = "#113"
 SUPPORT_SLA_GAP_ID = "#114"
 TRAINING_CURRICULUM_GAP_ID = "#115"
+OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS = {
+    112: "trusted-release-notes-ci-gate-diff-missing",
+    113: "trusted-lts-hotfix-policy-diff-missing",
+    114: "trusted-support-desk-sla-diff-missing",
+    115: "trusted-training-delivery-diff-missing",
+}
+OPERATIONS_DOCUMENT_TRUSTED_TOOLS = {
+    "release-notes-ci-gate",
+    "lts-hotfix-policy-review",
+    "support-desk-sla-attestation",
+    "training-delivery-log",
+}
 ANALYST_QUICKSTART_LAB_GAP_ID = "#116"
 ADMIN_DEPLOYMENT_GUIDE_GAP_ID = "#117"
 SECURITY_HARDENING_REVIEW_GAP_ID = "#118"
@@ -250,6 +262,10 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                     DEPENDENCY_VULNERABILITY_MONITORING_GAP_ID,
                 ],
                 "core_accuracy_gates": operations_documents_core_accuracy_gates(),
+                "trusted_operations_document_diffs": {
+                    str(number): missing_operations_document_trusted_diff(number) for number in range(112, 116)
+                },
+                "blockers": [OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[number] for number in range(112, 116)],
                 "documents": [
                     "docs/rapidtriage-release-notes-template.md",
                     "docs/rapidtriage-lts-hotfix-policy.md",
@@ -559,7 +575,62 @@ def release_packaging_core_accuracy_gate(
     ]
 
 
-def operations_documents_core_accuracy_gates() -> list[dict[str, object]]:
+def missing_operations_document_trusted_diff(number: int) -> dict[str, object]:
+    trusted_tools = {
+        112: "release-notes-ci-gate",
+        113: "lts-hotfix-policy-review",
+        114: "support-desk-sla-attestation",
+        115: "training-delivery-log",
+    }
+    gap_ids = {
+        112: RELEASE_NOTES_CHANGELOG_GAP_ID,
+        113: LTS_HOTFIX_POLICY_GAP_ID,
+        114: SUPPORT_SLA_GAP_ID,
+        115: TRAINING_CURRICULUM_GAP_ID,
+    }
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [gap_ids[number]],
+        "blocker": OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[number],
+        "required_trusted_tool": trusted_tools[number],
+    }
+
+
+def build_operations_document_trusted_diff(
+    number: int,
+    rapid_payload: dict[str, object],
+    trusted_payload: dict[str, object],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    gap_ids = {
+        112: RELEASE_NOTES_CHANGELOG_GAP_ID,
+        113: LTS_HOTFIX_POLICY_GAP_ID,
+        114: SUPPORT_SLA_GAP_ID,
+        115: TRAINING_CURRICULUM_GAP_ID,
+    }
+    compared_fields = ["status", "documents", "commercial_gap_ids"]
+    mismatches = []
+    for field in compared_fields:
+        rapid_value = normalize_release_packaging_value(rapid_payload.get(field))
+        trusted_value = normalize_release_packaging_value(trusted_payload.get(field))
+        if rapid_value != trusted_value:
+            mismatches.append({"field": field, "rapid": rapid_value, "trusted": trusted_value})
+    status = "pass" if not mismatches and trusted_tool in OPERATIONS_DOCUMENT_TRUSTED_TOOLS else "fail"
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [gap_ids[number]],
+        "compared_fields": compared_fields,
+        "mismatches": mismatches,
+        "blocker": None if status == "pass" else OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[number],
+    }
+
+
+def operations_documents_core_accuracy_gates(
+    trusted_diffs: dict[int, dict[str, object]] | None = None,
+) -> list[dict[str, object]]:
     checks_by_item = {
         112: ["release notes template packaged", "known limits section required", "validation state section required", "migration notes section required", "CI changelog blocker disclosed"],
         113: ["LTS policy document packaged", "hotfix criteria documented", "backport validation documented", "emergency patch gate documented", "operator maintenance blocker disclosed"],
@@ -571,14 +642,25 @@ def operations_documents_core_accuracy_gates() -> list[dict[str, object]]:
         119: ["preview sandboxing documented", "active content blocking documented", "parser crash isolation documented", "hostile evidence guidance documented", "OS sandbox blocker disclosed"],
         120: ["dependency inventory emitted", "vulnerability scan attempted", "release blocking policy recorded", "dependency monitoring script packaged", "CI scheduled scan blocker disclosed"],
     }
-    return [
-        build_accuracy_gate(
-            number,
-            satisfied_checks=checks,
-            evidence_refs=["rapidtriage-portable.zip", "docs operations package", "scripts/check-dependencies.py"],
+    trusted_checks = {
+        112: "trusted release notes CI gate diff pass",
+        113: "trusted LTS/hotfix policy diff pass",
+        114: "trusted support desk SLA diff pass",
+        115: "trusted training delivery diff pass",
+    }
+    gates = []
+    for number, checks in checks_by_item.items():
+        satisfied = list(checks)
+        if trusted_diffs and trusted_diffs.get(number, {}).get("status") == "pass" and number in trusted_checks:
+            satisfied.append(trusted_checks[number])
+        gates.append(
+            build_accuracy_gate(
+                number,
+                satisfied_checks=satisfied,
+                evidence_refs=["rapidtriage-portable.zip", "docs operations package", "scripts/check-dependencies.py"],
+            )
         )
-        for number, checks in checks_by_item.items()
-    ]
+    return gates
 
 
 def verify_sha256s(output_dir: Path) -> int:

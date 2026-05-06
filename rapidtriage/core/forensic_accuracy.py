@@ -1670,6 +1670,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "schema inventory captured",
             "restore hash verified",
             "migration rehearsal requirement recorded",
+            "trusted backup/restore rehearsal diff pass",
         ),
     },
     {
@@ -1684,6 +1685,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "validation state section required",
             "migration notes section required",
             "CI changelog blocker disclosed",
+            "trusted release notes CI gate diff pass",
         ),
     },
     {
@@ -1698,6 +1700,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "backport validation documented",
             "emergency patch gate documented",
             "operator maintenance blocker disclosed",
+            "trusted LTS/hotfix policy diff pass",
         ),
     },
     {
@@ -1712,6 +1715,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "response targets emitted",
             "secure intake requirement emitted",
             "staffed support blocker disclosed",
+            "trusted support desk SLA diff pass",
         ),
     },
     {
@@ -1726,6 +1730,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "admin curriculum documented",
             "validation exercise documented",
             "training delivery blocker disclosed",
+            "trusted training delivery diff pass",
         ),
     },
     {

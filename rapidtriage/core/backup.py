@@ -5,6 +5,7 @@ import json
 import shutil
 import sqlite3
 from pathlib import Path
+from typing import Mapping
 
 from .case_db import SCHEMA_VERSION
 from .forensic_accuracy import build_accuracy_gate
@@ -17,9 +18,17 @@ class BackupError(ValueError):
 
 BACKUP_MANIFEST_NAME = "rapidtriage-case-backup-manifest.json"
 BACKUP_RESTORE_MIGRATION_GAP_ID = "#111"
+BACKUP_RESTORE_TRUSTED_DIFF_BLOCKER_111 = "trusted-backup-restore-rehearsal-diff-missing"
+BACKUP_RESTORE_TRUSTED_TOOLS = {"backup-restore-rehearsal-log", "migration-corpus-run", "scheduled-backup-drill"}
 
 
-def build_case_backup(*, database_path: Path, output_dir: Path, overwrite: bool = False) -> dict[str, object]:
+def build_case_backup(
+    *,
+    database_path: Path,
+    output_dir: Path,
+    overwrite: bool = False,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     source = database_path.expanduser().resolve()
     if not source.is_file():
         raise BackupError(f"case database not found: {source}")
@@ -42,6 +51,11 @@ def build_case_backup(*, database_path: Path, output_dir: Path, overwrite: bool 
                 "size_bytes": destination.stat().st_size,
             }
         )
+    if trusted_diff is None:
+        trusted_diff = missing_backup_restore_trusted_diff()
+    blockers = []
+    if trusted_diff.get("status") != "pass":
+        blockers.append(BACKUP_RESTORE_TRUSTED_DIFF_BLOCKER_111)
     manifest = {
         "command": "case-backup",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -50,11 +64,14 @@ def build_case_backup(*, database_path: Path, output_dir: Path, overwrite: bool 
         "output_dir": str(destination_dir),
         "schema": inspect_case_database_schema(source),
         "migration_readiness": build_migration_readiness(source),
+        "trusted_backup_restore_diff": trusted_diff,
+        "blockers": blockers,
         "core_accuracy_gates": backup_restore_core_accuracy_gates(
             copied=copied,
             schema=inspect_case_database_schema(source),
             restored=False,
             hash_verified=False,
+            trusted_diff=trusted_diff,
         ),
         "copied_count": len(copied),
         "files": copied,
@@ -64,7 +81,13 @@ def build_case_backup(*, database_path: Path, output_dir: Path, overwrite: bool 
     return manifest
 
 
-def restore_case_backup(*, manifest_path: Path, output_path: Path, overwrite: bool = False) -> dict[str, object]:
+def restore_case_backup(
+    *,
+    manifest_path: Path,
+    output_path: Path,
+    overwrite: bool = False,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     manifest_file = manifest_path.expanduser().resolve()
     try:
         manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
@@ -86,6 +109,11 @@ def restore_case_backup(*, manifest_path: Path, output_path: Path, overwrite: bo
     shutil.copy2(source, destination)
     hashes = compute_hashes(destination)
     source_hashes = dict(database_file.get("hashes", {}))
+    if trusted_diff is None:
+        trusted_diff = missing_backup_restore_trusted_diff()
+    blockers = []
+    if trusted_diff.get("status") != "pass":
+        blockers.append(BACKUP_RESTORE_TRUSTED_DIFF_BLOCKER_111)
     return {
         "command": "case-restore",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -97,11 +125,14 @@ def restore_case_backup(*, manifest_path: Path, output_path: Path, overwrite: bo
         "hash_verified": hashes.get("sha256") == source_hashes.get("sha256"),
         "schema": inspect_case_database_schema(destination),
         "migration_readiness": manifest.get("migration_readiness", {}),
+        "trusted_backup_restore_diff": trusted_diff,
+        "blockers": blockers,
         "core_accuracy_gates": backup_restore_core_accuracy_gates(
             copied=[database_file],
             schema=inspect_case_database_schema(destination),
             restored=True,
             hash_verified=hashes.get("sha256") == source_hashes.get("sha256"),
+            trusted_diff=trusted_diff,
         ),
     }
 
@@ -170,6 +201,7 @@ def backup_restore_core_accuracy_gates(
     schema: dict[str, object],
     restored: bool,
     hash_verified: bool,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["backup manifest generated", "migration rehearsal requirement recorded"]
     if any(item.get("hashes") for item in copied):
@@ -178,6 +210,8 @@ def backup_restore_core_accuracy_gates(
         satisfied.append("schema inventory captured")
     if restored and hash_verified:
         satisfied.append("restore hash verified")
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted backup/restore rehearsal diff pass")
     return [
         build_accuracy_gate(
             111,
@@ -190,3 +224,45 @@ def backup_restore_core_accuracy_gates(
             ],
         )
     ]
+
+
+def missing_backup_restore_trusted_diff() -> dict[str, object]:
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [BACKUP_RESTORE_MIGRATION_GAP_ID],
+        "blocker": BACKUP_RESTORE_TRUSTED_DIFF_BLOCKER_111,
+        "required_trusted_tools": sorted(BACKUP_RESTORE_TRUSTED_TOOLS),
+    }
+
+
+def build_backup_restore_trusted_diff(
+    rapid_payload: Mapping[str, object],
+    trusted_payload: Mapping[str, object],
+    *,
+    trusted_tool: str = "backup-restore-rehearsal-log",
+) -> dict[str, object]:
+    compared_fields = ["hash_verified", "schema", "migration_readiness", "files"]
+    mismatches = []
+    for field in compared_fields:
+        rapid_value = normalize_backup_restore_value(rapid_payload.get(field))
+        trusted_value = normalize_backup_restore_value(trusted_payload.get(field))
+        if rapid_value != trusted_value:
+            mismatches.append({"field": field, "rapid": rapid_value, "trusted": trusted_value})
+    status = "pass" if not mismatches and trusted_tool in BACKUP_RESTORE_TRUSTED_TOOLS else "fail"
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [BACKUP_RESTORE_MIGRATION_GAP_ID],
+        "compared_fields": compared_fields,
+        "mismatches": mismatches,
+        "blocker": None if status == "pass" else BACKUP_RESTORE_TRUSTED_DIFF_BLOCKER_111,
+    }
+
+
+def normalize_backup_restore_value(value: object) -> object:
+    if isinstance(value, list):
+        return sorted(json.dumps(item, ensure_ascii=False, sort_keys=True, default=str) for item in value)
+    if isinstance(value, Mapping):
+        return json.dumps(dict(value), ensure_ascii=False, sort_keys=True, default=str)
+    return value

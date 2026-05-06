@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from rapidtriage.api.app import create_app
 from rapidtriage.cli import build_parser, main, run_web_server
+from rapidtriage.core.backup import backup_restore_core_accuracy_gates, build_backup_restore_trusted_diff
 from rapidtriage.core.crash import build_crash_report_trusted_diff, crash_report_core_accuracy_gates, write_crash_report
 from rapidtriage.core.commercial_readiness import calculate_readiness_score
 from rapidtriage.core.enterprise import (
@@ -1287,6 +1288,14 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#112", manifest["package_readiness"]["operations_documents"]["commercial_gap_ids"])
             self.assertIn("#120", manifest["package_readiness"]["operations_documents"]["commercial_gap_ids"])
             self.assertEqual(
+                manifest["package_readiness"]["operations_documents"]["trusted_operations_document_diffs"]["112"]["status"],
+                "missing",
+            )
+            self.assertIn(
+                "trusted-release-notes-ci-gate-diff-missing",
+                manifest["package_readiness"]["operations_documents"]["blockers"],
+            )
+            self.assertEqual(
                 [gate["gap_id"] for gate in manifest["package_readiness"]["operations_documents"]["core_accuracy_gates"]],
                 [f"#{number}" for number in range(112, 121)],
             )
@@ -1320,6 +1329,15 @@ class RapidTriageOpsTests(unittest.TestCase):
             windows_gates = build_release.release_packaging_core_accuracy_gate(101, trusted_diff=windows_diff)
             self.assertEqual(windows_diff["status"], "pass")
             self.assertIn("trusted Windows Authenticode evidence diff pass", windows_gates[0]["satisfied_checks"])
+            release_notes_diff = build_release.build_operations_document_trusted_diff(
+                112,
+                manifest["package_readiness"]["operations_documents"],
+                manifest["package_readiness"]["operations_documents"],
+                trusted_tool="release-notes-ci-gate",
+            )
+            operations_gates = build_release.operations_documents_core_accuracy_gates(trusted_diffs={112: release_notes_diff})
+            self.assertEqual(release_notes_diff["status"], "pass")
+            self.assertIn("trusted release notes CI gate diff pass", operations_gates[0]["satisfied_checks"])
 
             verify = subprocess.run(
                 [
@@ -1378,6 +1396,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(backup_payload["command"], "case-backup")
             self.assertIn("#111", backup_payload["commercial_gap_ids"])
             self.assertEqual(backup_payload["core_accuracy_gates"][0]["gap_id"], "#111")
+            self.assertEqual(backup_payload["trusted_backup_restore_diff"]["status"], "missing")
+            self.assertIn("trusted-backup-restore-rehearsal-diff-missing", backup_payload["blockers"])
             self.assertTrue((backup_dir / "rapidtriage-case-backup-manifest.json").is_file())
             self.assertEqual(backup_payload["schema"]["current_schema_version"], 1)
             self.assertIn("#111", backup_payload["migration_readiness"]["commercial_gap_ids"])
@@ -1400,10 +1420,22 @@ class RapidTriageOpsTests(unittest.TestCase):
             restore_payload = json.loads(restore_stdout.getvalue())
             self.assertIn("#111", restore_payload["commercial_gap_ids"])
             self.assertEqual(restore_payload["core_accuracy_gates"][0]["gap_id"], "#111")
+            self.assertEqual(restore_payload["trusted_backup_restore_diff"]["status"], "missing")
+            self.assertIn("trusted-backup-restore-rehearsal-diff-missing", restore_payload["blockers"])
             self.assertTrue(restore_payload["hash_verified"])
             self.assertEqual(restore_payload["schema"]["current_schema_version"], 1)
             self.assertEqual(restore_payload["migration_readiness"]["expected_schema_version"], 1)
             self.assertTrue(restored.is_file())
+            backup_diff = build_backup_restore_trusted_diff(restore_payload, restore_payload)
+            backup_gates = backup_restore_core_accuracy_gates(
+                copied=[{"hashes": restore_payload["source_hashes"]}],
+                schema=restore_payload["schema"],
+                restored=True,
+                hash_verified=restore_payload["hash_verified"],
+                trusted_diff=backup_diff,
+            )
+            self.assertEqual(backup_diff["status"], "pass")
+            self.assertIn("trusted backup/restore rehearsal diff pass", backup_gates[0]["satisfied_checks"])
 
     def test_dependency_monitoring_script_writes_vulnerability_policy_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
