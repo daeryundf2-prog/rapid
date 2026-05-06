@@ -28,6 +28,12 @@ ENTERPRISE_TRUSTED_TOOLS = {
 }
 SECURITY_HARDENING_REVIEW_GAP_ID = "#118"
 MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID = "#119"
+SECURITY_HARDENING_TRUSTED_DIFF_BLOCKER_118 = "trusted-security-hardening-review-diff-missing"
+MALICIOUS_SANDBOX_TRUSTED_DIFF_BLOCKER_119 = "trusted-malicious-evidence-sandbox-diff-missing"
+SECURITY_OPERATIONS_TRUSTED_TOOLS = {
+    "independent-appsec-review",
+    "malicious-evidence-sandbox-corpus",
+}
 
 
 def build_enterprise_policy() -> dict[str, object]:
@@ -164,13 +170,18 @@ def build_enterprise_policy() -> dict[str, object]:
         "security_hardening": {
             "commercial_gap_ids": [SECURITY_HARDENING_REVIEW_GAP_ID, MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID],
             "core_accuracy_gates": [
-                *security_hardening_core_accuracy_gates(),
-                *malicious_evidence_sandbox_core_accuracy_gates(),
+                *security_hardening_core_accuracy_gates(trusted_diff=missing_security_operations_trusted_diff(118)),
+                *malicious_evidence_sandbox_core_accuracy_gates(
+                    trusted_diff=missing_security_operations_trusted_diff(119),
+                ),
             ],
             "status": "documented-local-baseline",
             "preview_sandboxing": "read-only bounded previews with active-content blocking metadata",
             "parser_sandboxing": "parser crash isolation exists; OS-level parser sandbox remains external hardening work",
             "independent_review_required": True,
+            "trusted_security_hardening_diff": missing_security_operations_trusted_diff(118),
+            "trusted_malicious_sandbox_diff": missing_security_operations_trusted_diff(119),
+            "blockers": [SECURITY_HARDENING_TRUSTED_DIFF_BLOCKER_118, MALICIOUS_SANDBOX_TRUSTED_DIFF_BLOCKER_119],
         },
     }
 
@@ -412,33 +423,98 @@ def collaboration_audit_core_accuracy_gates(
     ]
 
 
-def security_hardening_core_accuracy_gates() -> list[dict[str, object]]:
+def missing_security_operations_trusted_diff(number: int) -> dict[str, object]:
+    gap_ids = {
+        118: SECURITY_HARDENING_REVIEW_GAP_ID,
+        119: MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID,
+    }
+    blockers = {
+        118: SECURITY_HARDENING_TRUSTED_DIFF_BLOCKER_118,
+        119: MALICIOUS_SANDBOX_TRUSTED_DIFF_BLOCKER_119,
+    }
+    trusted_tools = {
+        118: "independent-appsec-review",
+        119: "malicious-evidence-sandbox-corpus",
+    }
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [gap_ids[number]],
+        "blocker": blockers[number],
+        "required_trusted_tool": trusted_tools[number],
+    }
+
+
+def build_security_operations_trusted_diff(
+    number: int,
+    rapid_payload: Mapping[str, object],
+    trusted_payload: Mapping[str, object],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    gap_ids = {
+        118: SECURITY_HARDENING_REVIEW_GAP_ID,
+        119: MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID,
+    }
+    blockers = {
+        118: SECURITY_HARDENING_TRUSTED_DIFF_BLOCKER_118,
+        119: MALICIOUS_SANDBOX_TRUSTED_DIFF_BLOCKER_119,
+    }
+    compared_fields = ["status", "preview_sandboxing", "parser_sandboxing", "independent_review_required"]
+    mismatches = []
+    for field in compared_fields:
+        rapid_value = normalize_enterprise_trusted_value(rapid_payload.get(field))
+        trusted_value = normalize_enterprise_trusted_value(trusted_payload.get(field))
+        if rapid_value != trusted_value:
+            mismatches.append({"field": field, "rapid": rapid_value, "trusted": trusted_value})
+    status = "pass" if not mismatches and trusted_tool in SECURITY_OPERATIONS_TRUSTED_TOOLS else "fail"
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [gap_ids[number]],
+        "compared_fields": compared_fields,
+        "mismatches": mismatches,
+        "blocker": None if status == "pass" else blockers[number],
+    }
+
+
+def security_hardening_core_accuracy_gates(
+    trusted_diff: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
+    satisfied = [
+        "security baseline emitted",
+        "auth/network hardening documented",
+        "export rendering safety documented",
+        "crash redaction documented",
+        "independent AppSec blocker disclosed",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted independent AppSec review diff pass")
     return [
         build_accuracy_gate(
             118,
-            satisfied_checks=[
-                "security baseline emitted",
-                "auth/network hardening documented",
-                "export rendering safety documented",
-                "crash redaction documented",
-                "independent AppSec blocker disclosed",
-            ],
+            satisfied_checks=satisfied,
             evidence_refs=["enterprise_policy.security_hardening", "docs/rapidtriage-security-policy.md"],
         )
     ]
 
 
-def malicious_evidence_sandbox_core_accuracy_gates() -> list[dict[str, object]]:
+def malicious_evidence_sandbox_core_accuracy_gates(
+    trusted_diff: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
+    satisfied = [
+        "preview sandboxing documented",
+        "active content blocking documented",
+        "parser crash isolation documented",
+        "hostile evidence guidance documented",
+        "OS sandbox blocker disclosed",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted malicious evidence sandbox corpus diff pass")
     return [
         build_accuracy_gate(
             119,
-            satisfied_checks=[
-                "preview sandboxing documented",
-                "active content blocking documented",
-                "parser crash isolation documented",
-                "hostile evidence guidance documented",
-                "OS sandbox blocker disclosed",
-            ],
+            satisfied_checks=satisfied,
             evidence_refs=["enterprise_policy.security_hardening", "docs/rapidtriage-admin-deployment-guide.md"],
         )
     ]

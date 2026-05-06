@@ -1745,6 +1745,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "ingest/search/review/report steps documented",
             "bundle verification documented",
             "real training run blocker disclosed",
+            "trusted quickstart lab run diff pass",
         ),
     },
     {
@@ -1759,6 +1760,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "auth/network guidance documented",
             "backup/restore guidance documented",
             "deployment proof blocker disclosed",
+            "trusted admin deployment proof diff pass",
         ),
     },
     {
@@ -1773,6 +1775,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "export rendering safety documented",
             "crash redaction documented",
             "independent AppSec blocker disclosed",
+            "trusted independent AppSec review diff pass",
         ),
     },
     {
@@ -1787,6 +1790,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "parser crash isolation documented",
             "hostile evidence guidance documented",
             "OS sandbox blocker disclosed",
+            "trusted malicious evidence sandbox corpus diff pass",
         ),
     },
     {
@@ -1801,6 +1805,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "release blocking policy recorded",
             "dependency monitoring script packaged",
             "CI scheduled scan blocker disclosed",
+            "trusted dependency advisory/SBOM diff pass",
         ),
     },
 )

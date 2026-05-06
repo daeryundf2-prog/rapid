@@ -20,10 +20,13 @@ from rapidtriage.core.crash import build_crash_report_trusted_diff, crash_report
 from rapidtriage.core.commercial_readiness import calculate_readiness_score
 from rapidtriage.core.enterprise import (
     build_enterprise_trusted_diff,
+    build_security_operations_trusted_diff,
     collaboration_audit_core_accuracy_gates,
     license_activation_core_accuracy_gates,
+    malicious_evidence_sandbox_core_accuracy_gates,
     multi_user_case_server_core_accuracy_gates,
     rbac_core_accuracy_gates,
+    security_hardening_core_accuracy_gates,
     telemetry_core_accuracy_gates,
 )
 from rapidtriage.core.benchmark import (
@@ -61,6 +64,15 @@ from rapidtriage.core.validation import (
 def load_build_release_module():
     module_path = Path(__file__).resolve().parent.parent / "scripts" / "build-release.py"
     spec = importlib.util.spec_from_file_location("rapidtriage_build_release_test", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_check_dependencies_module():
+    module_path = Path(__file__).resolve().parent.parent / "scripts" / "check-dependencies.py"
+    spec = importlib.util.spec_from_file_location("rapidtriage_check_dependencies_test", module_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -202,6 +214,28 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("#119", payload["security_hardening"]["commercial_gap_ids"])
         self.assertEqual(payload["security_hardening"]["core_accuracy_gates"][0]["gap_id"], "#118")
         self.assertEqual(payload["security_hardening"]["core_accuracy_gates"][1]["gap_id"], "#119")
+        self.assertEqual(payload["security_hardening"]["trusted_security_hardening_diff"]["status"], "missing")
+        self.assertEqual(payload["security_hardening"]["trusted_malicious_sandbox_diff"]["status"], "missing")
+        self.assertIn("trusted-security-hardening-review-diff-missing", payload["security_hardening"]["blockers"])
+        self.assertIn("trusted-malicious-evidence-sandbox-diff-missing", payload["security_hardening"]["blockers"])
+        hardening_diff = build_security_operations_trusted_diff(
+            118,
+            payload["security_hardening"],
+            payload["security_hardening"],
+            trusted_tool="independent-appsec-review",
+        )
+        sandbox_diff = build_security_operations_trusted_diff(
+            119,
+            payload["security_hardening"],
+            payload["security_hardening"],
+            trusted_tool="malicious-evidence-sandbox-corpus",
+        )
+        hardening_gate = security_hardening_core_accuracy_gates(trusted_diff=hardening_diff)
+        sandbox_gate = malicious_evidence_sandbox_core_accuracy_gates(trusted_diff=sandbox_diff)
+        self.assertEqual(hardening_diff["status"], "pass")
+        self.assertEqual(sandbox_diff["status"], "pass")
+        self.assertIn("trusted independent AppSec review diff pass", hardening_gate[0]["satisfied_checks"])
+        self.assertIn("trusted malicious evidence sandbox corpus diff pass", sandbox_gate[0]["satisfied_checks"])
 
     def test_benchmark_command_writes_json_and_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1291,8 +1325,16 @@ class RapidTriageOpsTests(unittest.TestCase):
                 manifest["package_readiness"]["operations_documents"]["trusted_operations_document_diffs"]["112"]["status"],
                 "missing",
             )
+            self.assertEqual(
+                manifest["package_readiness"]["operations_documents"]["trusted_operations_document_diffs"]["116"]["status"],
+                "missing",
+            )
             self.assertIn(
                 "trusted-release-notes-ci-gate-diff-missing",
+                manifest["package_readiness"]["operations_documents"]["blockers"],
+            )
+            self.assertIn(
+                "trusted-admin-deployment-proof-diff-missing",
                 manifest["package_readiness"]["operations_documents"]["blockers"],
             )
             self.assertEqual(
@@ -1338,6 +1380,15 @@ class RapidTriageOpsTests(unittest.TestCase):
             operations_gates = build_release.operations_documents_core_accuracy_gates(trusted_diffs={112: release_notes_diff})
             self.assertEqual(release_notes_diff["status"], "pass")
             self.assertIn("trusted release notes CI gate diff pass", operations_gates[0]["satisfied_checks"])
+            admin_diff = build_release.build_operations_document_trusted_diff(
+                117,
+                manifest["package_readiness"]["operations_documents"],
+                manifest["package_readiness"]["operations_documents"],
+                trusted_tool="admin-deployment-proof",
+            )
+            admin_gates = build_release.operations_documents_core_accuracy_gates(trusted_diffs={117: admin_diff})
+            self.assertEqual(admin_diff["status"], "pass")
+            self.assertIn("trusted admin deployment proof diff pass", admin_gates[5]["satisfied_checks"])
 
             verify = subprocess.run(
                 [
@@ -1461,6 +1512,18 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#120", payload["vulnerability_scan"]["commercial_gap_ids"])
             self.assertEqual(payload["vulnerability_scan"]["core_accuracy_gates"][0]["gap_id"], "#120")
             self.assertIn("Block release", payload["vulnerability_scan"]["release_policy"])
+            self.assertEqual(payload["trusted_dependency_monitoring_diff"]["status"], "missing")
+            self.assertIn("trusted-dependency-advisory-sbom-diff-missing", payload["blockers"])
+            check_dependencies = load_check_dependencies_module()
+            dependency_diff = check_dependencies.build_dependency_monitoring_trusted_diff(payload, payload)
+            dependency_gates = check_dependencies.dependency_monitoring_core_accuracy_gates(
+                package_count=len(payload["pip_list"]["packages"]),
+                scan_attempted=True,
+                script_packaged=True,
+                trusted_diff=dependency_diff,
+            )
+            self.assertEqual(dependency_diff["status"], "pass")
+            self.assertIn("trusted dependency advisory/SBOM diff pass", dependency_gates[0]["satisfied_checks"])
 
     def test_case_acquisition_command_records_and_lists_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

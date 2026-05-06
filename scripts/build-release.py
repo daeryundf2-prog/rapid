@@ -40,12 +40,16 @@ OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS = {
     113: "trusted-lts-hotfix-policy-diff-missing",
     114: "trusted-support-desk-sla-diff-missing",
     115: "trusted-training-delivery-diff-missing",
+    116: "trusted-quickstart-lab-run-diff-missing",
+    117: "trusted-admin-deployment-proof-diff-missing",
 }
 OPERATIONS_DOCUMENT_TRUSTED_TOOLS = {
     "release-notes-ci-gate",
     "lts-hotfix-policy-review",
     "support-desk-sla-attestation",
     "training-delivery-log",
+    "quickstart-lab-run-log",
+    "admin-deployment-proof",
 }
 ANALYST_QUICKSTART_LAB_GAP_ID = "#116"
 ADMIN_DEPLOYMENT_GUIDE_GAP_ID = "#117"
@@ -263,9 +267,9 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 ],
                 "core_accuracy_gates": operations_documents_core_accuracy_gates(),
                 "trusted_operations_document_diffs": {
-                    str(number): missing_operations_document_trusted_diff(number) for number in range(112, 116)
+                    str(number): missing_operations_document_trusted_diff(number) for number in range(112, 118)
                 },
-                "blockers": [OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[number] for number in range(112, 116)],
+                "blockers": [OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[number] for number in range(112, 118)],
                 "documents": [
                     "docs/rapidtriage-release-notes-template.md",
                     "docs/rapidtriage-lts-hotfix-policy.md",
@@ -581,12 +585,16 @@ def missing_operations_document_trusted_diff(number: int) -> dict[str, object]:
         113: "lts-hotfix-policy-review",
         114: "support-desk-sla-attestation",
         115: "training-delivery-log",
+        116: "quickstart-lab-run-log",
+        117: "admin-deployment-proof",
     }
     gap_ids = {
         112: RELEASE_NOTES_CHANGELOG_GAP_ID,
         113: LTS_HOTFIX_POLICY_GAP_ID,
         114: SUPPORT_SLA_GAP_ID,
         115: TRAINING_CURRICULUM_GAP_ID,
+        116: ANALYST_QUICKSTART_LAB_GAP_ID,
+        117: ADMIN_DEPLOYMENT_GUIDE_GAP_ID,
     }
     return {
         "status": "missing",
@@ -609,6 +617,8 @@ def build_operations_document_trusted_diff(
         113: LTS_HOTFIX_POLICY_GAP_ID,
         114: SUPPORT_SLA_GAP_ID,
         115: TRAINING_CURRICULUM_GAP_ID,
+        116: ANALYST_QUICKSTART_LAB_GAP_ID,
+        117: ADMIN_DEPLOYMENT_GUIDE_GAP_ID,
     }
     compared_fields = ["status", "documents", "commercial_gap_ids"]
     mismatches = []
@@ -647,6 +657,8 @@ def operations_documents_core_accuracy_gates(
         113: "trusted LTS/hotfix policy diff pass",
         114: "trusted support desk SLA diff pass",
         115: "trusted training delivery diff pass",
+        116: "trusted quickstart lab run diff pass",
+        117: "trusted admin deployment proof diff pass",
     }
     gates = []
     for number, checks in checks_by_item.items():

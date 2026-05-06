@@ -249,10 +249,15 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("training curriculum packaged", training["required_checks"])
         self.assertIn("trusted training delivery diff pass", training["required_checks"])
         self.assertIn("sample workflow command recorded", quickstart["required_checks"])
+        self.assertIn("trusted quickstart lab run diff pass", quickstart["required_checks"])
         self.assertIn("admin guide packaged", admin_guide["required_checks"])
+        self.assertIn("trusted admin deployment proof diff pass", admin_guide["required_checks"])
         self.assertIn("independent AppSec blocker disclosed", security_hardening["required_checks"])
+        self.assertIn("trusted independent AppSec review diff pass", security_hardening["required_checks"])
         self.assertIn("OS sandbox blocker disclosed", malicious_sandbox["required_checks"])
+        self.assertIn("trusted malicious evidence sandbox corpus diff pass", malicious_sandbox["required_checks"])
         self.assertIn("release blocking policy recorded", dependency_monitoring["required_checks"])
+        self.assertIn("trusted dependency advisory/SBOM diff pass", dependency_monitoring["required_checks"])
 
     def test_known_answer_template_maps_every_profile_to_a_dataset(self) -> None:
         template = build_core_forensics_known_answer_template()
