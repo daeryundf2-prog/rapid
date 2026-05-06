@@ -117,6 +117,7 @@
       "expected": {
         "required_assertions": [
           "Search analysis preserves bounded clusters, representative match links, source/keyword grouping, truncation disclosure, review-state warning, and #46 core_accuracy_gates.",
+          "Search analysis trusted diff helper requires hand-labeled cluster review row equality before satisfying the #46 trusted cluster review diff pass gate.",
           "Search analysis reportability decisions block reviewed-cluster claims until persistent review state and near-duplicate text/media validation exists."
         ]
       },
@@ -136,6 +137,7 @@
       "expected": {
         "required_assertions": [
           "Search analysis preserves entity extraction, source/path references, match links, risk flags, merge/split warning, and #47 core_accuracy_gates.",
+          "Search analysis trusted diff helper requires analyst entity review row equality before satisfying the #47 trusted entity review diff pass gate.",
           "Search analysis reportability decisions block identity-resolved entity claims until analyst merge/split and false-positive validation exists."
         ]
       },
@@ -155,6 +157,7 @@
       "expected": {
         "required_assertions": [
           "Search analysis preserves graph nodes, relationship edges, source citation references, paging/truncation disclosure, causal-proof warning, and #48 core_accuracy_gates.",
+          "Search analysis trusted diff helper requires graph source-citation row equality before satisfying the #48 trusted graph source-citation diff pass gate.",
           "Search analysis reportability decisions block causal graph claims until server-side graph paging, saved layouts, and source-row review exists."
         ]
       },
@@ -174,6 +177,7 @@
       "expected": {
         "required_assertions": [
           "Search analysis preserves timestamp extraction, UTC normalization, source match anchors, date buckets, timezone/skew warning, and #49 core_accuracy_gates.",
+          "Search analysis trusted diff helper requires timeline known-answer row equality before satisfying the #49 trusted timeline known-answer diff pass gate.",
           "Search analysis reportability decisions block full timeline claims until full-case joins, timezone/skew validation, and cursor-paged timeline evidence exists."
         ]
       },
@@ -193,6 +197,7 @@
       "expected": {
         "required_assertions": [
           "Search analysis preserves draft hypotheses, evidence cluster links, review questions/tasks, report-readiness flags, persistence/versioning warning, and #50 core_accuracy_gates.",
+          "Search analysis trusted diff helper requires workbook rubric row equality before satisfying the #50 trusted workbook rubric diff pass gate.",
           "Search analysis reportability decisions block workbook findings until editable persistence, evidence attachments, reviewer assignment, and version history exists."
         ]
       },

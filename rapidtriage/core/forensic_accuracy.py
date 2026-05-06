@@ -695,6 +695,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "source and keyword grouping",
             "truncation disclosure",
             "review-state limitation warning",
+            "trusted cluster review diff pass",
         ),
     },
     {
@@ -709,6 +710,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "match reference links",
             "risk flag assignment",
             "merge/split limitation warning",
+            "trusted entity review diff pass",
         ),
     },
     {
@@ -723,6 +725,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "source citation references",
             "graph paging/truncation disclosure",
             "causal-proof limitation warning",
+            "trusted graph source-citation diff pass",
         ),
     },
     {
@@ -737,6 +740,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "source match anchors",
             "date bucket generation",
             "timezone/skew limitation warning",
+            "trusted timeline known-answer diff pass",
         ),
     },
     {
@@ -751,6 +755,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "review tasks and questions",
             "report-readiness flag",
             "persistence/versioning limitation warning",
+            "trusted workbook rubric diff pass",
         ),
     },
     {

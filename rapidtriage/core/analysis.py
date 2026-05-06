@@ -59,6 +59,29 @@ ANALYSIS_REPORT_GRADE_BLOCKERS = [
     "timeline-events-need-source-parser-confidence-and-timezone-validation",
     "hypotheses-are-draft-review-aids-not-findings",
 ]
+ANALYSIS_TRUSTED_DIFF_BLOCKERS = {
+    46: "cluster-review-trusted-diff-required",
+    47: "entity-review-trusted-diff-required",
+    48: "graph-source-citation-trusted-diff-required",
+    49: "timeline-known-answer-trusted-diff-required",
+    50: "workbook-rubric-trusted-diff-required",
+}
+ANALYSIS_TRUSTED_DIFF_CHECKS = {
+    46: "trusted cluster review diff pass",
+    47: "trusted entity review diff pass",
+    48: "trusted graph source-citation diff pass",
+    49: "trusted timeline known-answer diff pass",
+    50: "trusted workbook rubric diff pass",
+}
+ANALYSIS_TRUSTED_TOOLS = {
+    "hand-labeled-cluster-review",
+    "analyst-entity-review",
+    "graph-source-citation-review",
+    "timeline-known-answer",
+    "workbook-rubric-review",
+    "case-db-review-export",
+    "independent-review-export",
+}
 SEARCH_DEDUP_GAP_ID = "#60"
 
 
@@ -70,6 +93,7 @@ def build_search_analysis(
     max_entities: int = 200,
     max_graph_edges: int = 350,
     max_timeline_events: int = 500,
+    trusted_diffs: Mapping[int, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Build bounded analyst pivots for large search result sets.
 
@@ -101,6 +125,7 @@ def build_search_analysis(
         timeline=timeline,
         workbook=workbook,
         deduplication=deduplication,
+        trusted_diffs=trusted_diffs or {},
     )
     report_grade = analysis_report_grade_assessment()
     return {
@@ -137,6 +162,7 @@ def build_search_analysis(
             max_entities=max_entities,
             max_graph_edges=max_graph_edges,
             max_timeline_events=max_timeline_events,
+            trusted_diffs=trusted_diffs or {},
         ),
         "analysis_native_capabilities": dict(ANALYSIS_NATIVE_CAPABILITIES),
         "analysis_report_grade_assessment": report_grade,
@@ -162,6 +188,7 @@ def analysis_commercial_uplift_evidence(
     max_entities: int,
     max_graph_edges: int,
     max_timeline_events: int,
+    trusted_diffs: Mapping[int, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     passed_by_item = {
         str(gate.get("gap_id")): list(gate.get("satisfied_checks") or [])
@@ -180,6 +207,12 @@ def analysis_commercial_uplift_evidence(
     graph_summary = graph.get("summary") if isinstance(graph.get("summary"), Mapping) else {}
     timeline_summary = timeline.get("summary") if isinstance(timeline.get("summary"), Mapping) else {}
     workbook_summary = workbook.get("summary") if isinstance(workbook.get("summary"), Mapping) else {}
+    trusted_diffs = trusted_diffs or {}
+    trusted_diff_blockers = [
+        blocker
+        for number, blocker in ANALYSIS_TRUSTED_DIFF_BLOCKERS.items()
+        if trusted_diffs.get(number, {}).get("status") != "pass"
+    ]
     return {
         "batch_id": "commercial-uplift-046-050",
         "item_numbers": [46, 47, 48, 49, 50],
@@ -200,10 +233,22 @@ def analysis_commercial_uplift_evidence(
             graph_summary=graph_summary,
             timeline_summary=timeline_summary,
             workbook_summary=workbook_summary,
+            trusted_diffs=trusted_diffs,
         ),
         "passed_validation_check_ids_by_item": passed_by_item,
         "failed_validation_check_ids_by_item": failed_by_item,
         "commercial_blockers": list(report_grade.get("blockers") or []),
+        "trusted_diffs": {
+            str(number): dict(trusted_diffs.get(number, {}))
+            if trusted_diffs.get(number)
+            else {
+                "status": "missing",
+                "blocker_id": ANALYSIS_TRUSTED_DIFF_BLOCKERS[number],
+                "required_tools": sorted(ANALYSIS_TRUSTED_TOOLS),
+            }
+            for number in range(46, 51)
+        },
+        "trusted_diff_blockers": trusted_diff_blockers,
         "large_data_controls": {
             "max_clusters": max_clusters,
             "max_entities": max_entities,
@@ -232,6 +277,7 @@ def analysis_reportability_decision(
     graph_summary: Mapping[str, object],
     timeline_summary: Mapping[str, object],
     workbook_summary: Mapping[str, object],
+    trusted_diffs: Mapping[int, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     blockers = {str(item) for item in report_grade.get("blockers", []) if str(item)}
     for item_id, checks in failed_by_item.items():
@@ -240,6 +286,10 @@ def analysis_reportability_decision(
         blockers.add("full-case-reindex-not-available")
     if not ANALYSIS_NATIVE_CAPABILITIES["analyst_verified_entity_resolution"]:
         blockers.add("analyst-verified-entity-resolution-not-available")
+    trusted_diffs = trusted_diffs or {}
+    for number, blocker in ANALYSIS_TRUSTED_DIFF_BLOCKERS.items():
+        if trusted_diffs.get(number, {}).get("status") != "pass":
+            blockers.add(blocker)
     return {
         "profile_version": "search-analysis-reportability-decision-v1",
         "commercial_gap_ids": ["#46", "#47", "#48", "#49", "#50"],
@@ -258,6 +308,7 @@ def analysis_reportability_decision(
             "persist analyst review state for clusters, entity merge/split decisions, graph layouts, and workbook hypotheses",
             "validate graph and timeline joins against full-case indexed source rows with timezone and parser-confidence evidence",
             "attach report citations to verified source rows before promoting any draft hypothesis to a finding",
+            "attach passing trusted review diffs for clusters, entities, graph citations, timeline order, and workbook hypotheses",
         ],
     }
 
@@ -271,6 +322,7 @@ def analysis_core_accuracy_gates(
     timeline: Mapping[str, object],
     workbook: Mapping[str, object],
     deduplication: Mapping[str, object],
+    trusted_diffs: Mapping[int, Mapping[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     evidence_refs = [
         f"match_count:{len(matches)}",
@@ -294,6 +346,11 @@ def analysis_core_accuracy_gates(
     hypotheses = workbook.get("hypotheses") if isinstance(workbook.get("hypotheses"), list) else []
     dedup_summary = deduplication.get("summary") if isinstance(deduplication.get("summary"), Mapping) else {}
     duplicate_groups = deduplication.get("groups") if isinstance(deduplication.get("groups"), list) else []
+    trusted_diffs = trusted_diffs or {}
+    for number, diff in trusted_diffs.items():
+        if isinstance(diff, Mapping):
+            evidence_refs.append(f"trusted_diff_{number}_status:{diff.get('status', '')}")
+            evidence_refs.append(f"trusted_diff_{number}_tool:{diff.get('trusted_tool', '')}")
 
     item46: list[str] = []
     if cluster_summary.get("cluster_count") is not None:
@@ -306,6 +363,8 @@ def analysis_core_accuracy_gates(
         item46.append("truncation disclosure")
     if not ANALYSIS_NATIVE_CAPABILITIES["ml_semantic_clustering"]:
         item46.append("review-state limitation warning")
+    if trusted_diffs.get(46, {}).get("status") == "pass":
+        item46.append("trusted cluster review diff pass")
 
     item47: list[str] = []
     if entity_summary.get("type_counts"):
@@ -318,6 +377,8 @@ def analysis_core_accuracy_gates(
         item47.append("risk flag assignment")
     if not ANALYSIS_NATIVE_CAPABILITIES["analyst_verified_entity_resolution"]:
         item47.append("merge/split limitation warning")
+    if trusted_diffs.get(47, {}).get("status") == "pass":
+        item47.append("trusted entity review diff pass")
 
     item48: list[str] = []
     node_types = {str(row.get("type")) for row in graph_nodes if isinstance(row, Mapping)}
@@ -331,6 +392,8 @@ def analysis_core_accuracy_gates(
         item48.append("graph paging/truncation disclosure")
     if not ANALYSIS_NATIVE_CAPABILITIES["court_ready_graph_layout"]:
         item48.append("causal-proof limitation warning")
+    if trusted_diffs.get(48, {}).get("status") == "pass":
+        item48.append("trusted graph source-citation diff pass")
 
     item49: list[str] = []
     if timeline_events:
@@ -342,6 +405,8 @@ def analysis_core_accuracy_gates(
     if timeline.get("date_buckets") is not None:
         item49.append("date bucket generation")
     item49.append("timezone/skew limitation warning")
+    if trusted_diffs.get(49, {}).get("status") == "pass":
+        item49.append("trusted timeline known-answer diff pass")
 
     item50: list[str] = []
     if hypotheses:
@@ -354,6 +419,8 @@ def analysis_core_accuracy_gates(
         item50.append("report-readiness flag")
     if not ANALYSIS_NATIVE_CAPABILITIES["full_case_reindex"]:
         item50.append("persistence/versioning limitation warning")
+    if trusted_diffs.get(50, {}).get("status") == "pass":
+        item50.append("trusted workbook rubric diff pass")
 
     item60: list[str] = []
     if dedup_summary.get("unique_fingerprint_count") is not None:
@@ -427,6 +494,172 @@ def build_result_clusters(
         "clusters": clusters,
         "report_grade_assessment": component_report_grade_assessment("#46", "large-result-clustering"),
     }
+
+
+def build_analysis_trusted_diff(
+    number: int,
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    blocker = ANALYSIS_TRUSTED_DIFF_BLOCKERS.get(number, "analysis-trusted-diff-required")
+    rapid_index = index_analysis_trusted_rows(number, rapid_rows)
+    trusted_index = index_analysis_trusted_rows(number, trusted_rows)
+    recognized = trusted_tool.strip().lower().replace(" ", "") in {
+        item.replace(" ", "").lower() for item in ANALYSIS_TRUSTED_TOOLS
+    }
+    common = sorted(set(rapid_index) & set(trusted_index))
+    missing = sorted(set(rapid_index) - set(trusted_index))
+    extra = sorted(set(trusted_index) - set(rapid_index))
+    mismatches: list[dict[str, object]] = []
+    for key in common:
+        for field, rapid_value in rapid_index[key].items():
+            trusted_value = trusted_index[key].get(field, "")
+            if rapid_value and trusted_value and rapid_value != trusted_value:
+                mismatches.append(
+                    {
+                        "analysis_row_key": key,
+                        "field": field,
+                        "rapid_value": rapid_value,
+                        "trusted_value": trusted_value,
+                    }
+                )
+                break
+    status = "pass" if recognized and common and not missing and not extra and not mismatches else "diffs-present"
+    return {
+        "mode": "search-analysis-trusted-diff-v1",
+        "gap_id": f"#{number}",
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "trusted_tool_recognized": recognized,
+        "rapid_indexed_count": len(rapid_index),
+        "trusted_indexed_count": len(trusted_index),
+        "matched_count": len(common) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing),
+        "extra_in_trusted_count": len(extra),
+        "mismatches": mismatches[:25],
+        "missing_in_trusted_sample": missing[:25],
+        "extra_in_trusted_sample": extra[:25],
+        "commercial_grade_evidence": status == "pass",
+        "reportability_decision": {
+            "decision": "trusted-diff-passed" if status == "pass" else "do-not-use-search-analysis-output-as-reviewed-finding",
+            "blockers": [] if status == "pass" else [blocker],
+        },
+    }
+
+
+def index_analysis_trusted_rows(number: int, rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexers = {
+        46: index_cluster_rows,
+        47: index_entity_rows,
+        48: index_graph_rows,
+        49: index_timeline_rows,
+        50: index_workbook_rows,
+    }
+    return indexers.get(number, index_workbook_rows)(rows)
+
+
+def index_cluster_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        family = diff_value(row.get("family"))
+        value = diff_value(row.get("value") or row.get("label"))
+        cluster_id = diff_value(row.get("cluster_id"))
+        key = cluster_id or stable_diff_key("cluster", family, value)
+        if not key:
+            continue
+        indexed[key] = {
+            "family": family,
+            "value": value,
+            "match_count": diff_value(row.get("match_count")),
+            "review_status": diff_value(row.get("review_status") or row.get("validation_status")),
+        }
+    return indexed
+
+
+def index_entity_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        entity_type = diff_value(row.get("type") or row.get("entity_type"))
+        value = diff_value(row.get("value") or row.get("entity"))
+        key = stable_diff_key("entity", entity_type, value)
+        if not value:
+            continue
+        indexed[key] = {
+            "type": entity_type,
+            "value": value,
+            "source_count": diff_value(row.get("source_count")),
+            "review_status": diff_value(row.get("review_status") or row.get("merge_status")),
+        }
+    return indexed
+
+
+def index_graph_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        source = diff_value(row.get("source") or row.get("from") or row.get("from_node"))
+        target = diff_value(row.get("target") or row.get("to") or row.get("to_node"))
+        edge_type = diff_value(row.get("type") or row.get("edge_type"))
+        key = diff_value(row.get("edge_id")) or stable_diff_key("edge", source, target, edge_type)
+        if not source and not target:
+            continue
+        indexed[key] = {
+            "source": source,
+            "target": target,
+            "type": edge_type,
+            "citation_count": diff_value(row.get("citation_count") or len(row.get("match_indices") or [])),
+        }
+    return indexed
+
+
+def index_timeline_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        timestamp = diff_value(row.get("timestamp"))
+        source = diff_value(row.get("source"))
+        match_index = diff_value(row.get("match_index"))
+        title = diff_value(row.get("title") or row.get("summary"))
+        key = diff_value(row.get("event_id")) or stable_diff_key("timeline", timestamp, source, match_index, title)
+        if not timestamp:
+            continue
+        indexed[key] = {
+            "timestamp": timestamp,
+            "source": source,
+            "match_index": match_index,
+            "title": title,
+        }
+    return indexed
+
+
+def index_workbook_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
+    indexed: dict[str, dict[str, str]] = {}
+    for row in rows:
+        key_value = diff_value(row.get("key") or row.get("hypothesis_id") or row.get("title"))
+        key = stable_diff_key("workbook", key_value)
+        if not key_value:
+            continue
+        indexed[key] = {
+            "key": key_value,
+            "ready_for_report": diff_value(row.get("ready_for_report")),
+            "evidence_count": diff_value(row.get("evidence_count") or len(row.get("evidence_cluster_ids") or [])),
+            "review_status": diff_value(row.get("review_status") or row.get("status")),
+        }
+    return indexed
+
+
+def stable_diff_key(*parts: object) -> str:
+    text = "|".join(diff_value(part) for part in parts if diff_value(part))
+    if not text:
+        return ""
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+
+
+def diff_value(value: object) -> str:
+    if isinstance(value, (list, tuple, set)):
+        return ",".join(sorted(diff_value(item) for item in value if diff_value(item)))
+    return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
 
 
 def build_search_hit_deduplication(matches: Sequence[Mapping[str, object]], *, max_groups: int = 25) -> dict[str, object]:

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from rapidtriage.core.analysis import build_search_analysis
+from rapidtriage.core.analysis import build_analysis_trusted_diff, build_search_analysis
 from rapidtriage.core.keyword_packs import resolve_keyword_packs
 from rapidtriage.core.search import run_unified_search
 
@@ -118,6 +118,10 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertEqual(analysis_uplift["reportability_decision"]["review_output_counts"]["hypotheses"], 4)
         self.assertFalse(analysis_uplift["large_data_controls"]["persistent_review_state"])
         self.assertFalse(analysis_uplift["large_data_controls"]["full_case_reindex"])
+        self.assertIn(
+            "cluster-review-trusted-diff-required",
+            analysis_uplift["reportability_decision"]["blockers"],
+        )
 
         clusters = analysis["clusters"]["clusters"]
         self.assertTrue(any(cluster["family"] == "keyword" and cluster["value"] == "password" for cluster in clusters))
@@ -172,6 +176,60 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertIn("execution-or-persistence", hypothesis_keys)
         self.assertIn("#50", workbook["summary"]["commercial_gap_ids"])
         self.assertFalse(workbook["hypotheses"][0]["ready_for_report"])
+
+    def test_analysis_trusted_diffs_control_reviewed_finding_gates(self) -> None:
+        baseline = build_search_analysis(self.make_matches(), ["password", "powershell"])
+        trusted_diffs = {
+            46: build_analysis_trusted_diff(
+                46,
+                baseline["clusters"]["clusters"],
+                [dict(row) for row in baseline["clusters"]["clusters"]],
+                trusted_tool="hand-labeled-cluster-review",
+            ),
+            47: build_analysis_trusted_diff(
+                47,
+                baseline["entities"]["entities"],
+                [dict(row) for row in baseline["entities"]["entities"]],
+                trusted_tool="analyst-entity-review",
+            ),
+            48: build_analysis_trusted_diff(
+                48,
+                baseline["graph"]["edges"],
+                [dict(row) for row in baseline["graph"]["edges"]],
+                trusted_tool="graph-source-citation-review",
+            ),
+            49: build_analysis_trusted_diff(
+                49,
+                baseline["timeline"]["events"],
+                [dict(row) for row in baseline["timeline"]["events"]],
+                trusted_tool="timeline-known-answer",
+            ),
+            50: build_analysis_trusted_diff(
+                50,
+                baseline["workbook"]["hypotheses"],
+                [dict(row) for row in baseline["workbook"]["hypotheses"]],
+                trusted_tool="workbook-rubric-review",
+            ),
+        }
+        self.assertTrue(all(diff["status"] == "pass" for diff in trusted_diffs.values()))
+
+        analysis = build_search_analysis(self.make_matches(), ["password", "powershell"], trusted_diffs=trusted_diffs)
+        gates = {gate["gap_id"]: gate for gate in analysis["core_accuracy_gates"]}
+
+        self.assertIn("trusted cluster review diff pass", gates["#46"]["satisfied_checks"])
+        self.assertIn("trusted entity review diff pass", gates["#47"]["satisfied_checks"])
+        self.assertIn("trusted graph source-citation diff pass", gates["#48"]["satisfied_checks"])
+        self.assertIn("trusted timeline known-answer diff pass", gates["#49"]["satisfied_checks"])
+        self.assertIn("trusted workbook rubric diff pass", gates["#50"]["satisfied_checks"])
+
+        mismatch = build_analysis_trusted_diff(
+            49,
+            baseline["timeline"]["events"],
+            [{**dict(row), "timestamp": "2026-04-25T09:09:09+00:00"} for row in baseline["timeline"]["events"]],
+            trusted_tool="timeline-known-answer",
+        )
+        self.assertEqual(mismatch["status"], "diffs-present")
+        self.assertIn("timeline-known-answer-trusted-diff-required", mismatch["reportability_decision"]["blockers"])
 
     def test_unified_search_payload_includes_analysis_by_default_and_can_skip_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
