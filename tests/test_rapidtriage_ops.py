@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import io
 import json
 import subprocess
@@ -14,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from rapidtriage.api.app import create_app
 from rapidtriage.cli import build_parser, main, run_web_server
-from rapidtriage.core.crash import write_crash_report
+from rapidtriage.core.crash import build_crash_report_trusted_diff, crash_report_core_accuracy_gates, write_crash_report
 from rapidtriage.core.commercial_readiness import calculate_readiness_score
 from rapidtriage.core.benchmark import (
     benchmark_core_accuracy_gates,
@@ -46,6 +47,15 @@ from rapidtriage.core.validation import (
     build_validation_package_assessment,
     build_validation_package_trusted_diff,
 )
+
+
+def load_build_release_module():
+    module_path = Path(__file__).resolve().parent.parent / "scripts" / "build-release.py"
+    spec = importlib.util.spec_from_file_location("rapidtriage_build_release_test", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class RapidTriageOpsTests(unittest.TestCase):
@@ -1182,14 +1192,28 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#120", manifest["commercialization_gap_ids"])
             self.assertIn("#101", manifest["package_readiness"]["windows_signed_installer"]["commercial_gap_ids"])
             self.assertEqual(manifest["package_readiness"]["windows_signed_installer"]["core_accuracy_gates"][0]["gap_id"], "#101")
+            self.assertEqual(manifest["package_readiness"]["windows_signed_installer"]["trusted_windows_signing_diff"]["status"], "missing")
+            self.assertIn(
+                "trusted-windows-signing-evidence-diff-missing",
+                manifest["package_readiness"]["windows_signed_installer"]["blockers"],
+            )
             self.assertIn("#102", manifest["package_readiness"]["macos_notarized_package"]["commercial_gap_ids"])
             self.assertEqual(manifest["package_readiness"]["macos_notarized_package"]["core_accuracy_gates"][0]["gap_id"], "#102")
+            self.assertEqual(manifest["package_readiness"]["macos_notarized_package"]["trusted_macos_notarization_diff"]["status"], "missing")
+            self.assertIn(
+                "trusted-macos-notarization-evidence-diff-missing",
+                manifest["package_readiness"]["macos_notarized_package"]["blockers"],
+            )
             self.assertIn("#103", manifest["package_readiness"]["linux_package"]["commercial_gap_ids"])
             self.assertEqual(manifest["package_readiness"]["linux_package"]["core_accuracy_gates"][0]["gap_id"], "#103")
             self.assertEqual(manifest["package_readiness"]["linux_package"]["status"], "packaging-plan-ready")
+            self.assertEqual(manifest["package_readiness"]["linux_package"]["trusted_linux_package_diff"]["status"], "missing")
+            self.assertIn("trusted-linux-package-smoke-diff-missing", manifest["package_readiness"]["linux_package"]["blockers"])
             self.assertIn("#104", manifest["package_readiness"]["auto_update_channel"]["commercial_gap_ids"])
             self.assertEqual(manifest["package_readiness"]["auto_update_channel"]["core_accuracy_gates"][0]["gap_id"], "#104")
             self.assertEqual(manifest["package_readiness"]["auto_update_channel"]["status"], "manifest-generated")
+            self.assertEqual(manifest["package_readiness"]["auto_update_channel"]["trusted_auto_update_channel_diff"]["status"], "missing")
+            self.assertIn("trusted-auto-update-channel-diff-missing", manifest["package_readiness"]["auto_update_channel"]["blockers"])
             self.assertIn("#112", manifest["package_readiness"]["operations_documents"]["commercial_gap_ids"])
             self.assertIn("#120", manifest["package_readiness"]["operations_documents"]["commercial_gap_ids"])
             self.assertEqual(
@@ -1200,16 +1224,32 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#104", update_manifest["commercial_gap_ids"])
             self.assertEqual(update_manifest["core_accuracy_gates"][0]["gap_id"], "#104")
             self.assertFalse(update_manifest["auto_update_enabled_by_default"])
+            self.assertEqual(update_manifest["trusted_auto_update_channel_diff"]["status"], "missing")
+            self.assertIn("trusted-auto-update-channel-diff-missing", update_manifest["blockers"])
             packaging_plan = json.loads((output_dir / "packaging-plan.json").read_text(encoding="utf-8"))
             self.assertIn("#101", packaging_plan["commercial_gap_ids"])
             self.assertEqual(packaging_plan["platform_packages"]["windows"]["current_status"], "external-signing-required")
             self.assertIn("#101", packaging_plan["platform_packages"]["windows"]["commercial_gap_ids"])
             self.assertEqual(packaging_plan["platform_packages"]["windows"]["core_accuracy_gates"][0]["gap_id"], "#101")
+            self.assertEqual(packaging_plan["platform_packages"]["windows"]["trusted_packaging_diff"]["status"], "missing")
             self.assertIn("#102", packaging_plan["platform_packages"]["macos"]["commercial_gap_ids"])
             self.assertEqual(packaging_plan["platform_packages"]["macos"]["core_accuracy_gates"][0]["gap_id"], "#102")
+            self.assertEqual(packaging_plan["platform_packages"]["macos"]["trusted_packaging_diff"]["status"], "missing")
             self.assertIn("#103", packaging_plan["platform_packages"]["linux"]["commercial_gap_ids"])
             self.assertEqual(packaging_plan["platform_packages"]["linux"]["core_accuracy_gates"][0]["gap_id"], "#103")
             self.assertIn("AppImage", packaging_plan["platform_packages"]["linux"]["target_outputs"])
+            self.assertEqual(packaging_plan["platform_packages"]["linux"]["trusted_packaging_diff"]["status"], "missing")
+
+            build_release = load_build_release_module()
+            windows_diff = build_release.build_release_packaging_trusted_diff(
+                101,
+                packaging_plan["platform_packages"]["windows"],
+                packaging_plan["platform_packages"]["windows"],
+                trusted_tool="authenticode-signature-log",
+            )
+            windows_gates = build_release.release_packaging_core_accuracy_gate(101, trusted_diff=windows_diff)
+            self.assertEqual(windows_diff["status"], "pass")
+            self.assertIn("trusted Windows Authenticode evidence diff pass", windows_gates[0]["satisfied_checks"])
 
             verify = subprocess.run(
                 [
@@ -1241,6 +1281,16 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue(payload["local_only"])
             self.assertEqual(payload["context"]["auth_token"], "<redacted>")
             self.assertEqual(payload["exception"]["type"], "RuntimeError")
+            self.assertEqual(payload["trusted_crash_report_diff"]["status"], "missing")
+            self.assertIn("trusted-crash-redaction-export-diff-missing", payload["blockers"])
+            crash_diff = build_crash_report_trusted_diff(payload, payload)
+            crash_gates = crash_report_core_accuracy_gates(
+                crash_id=payload["crash_id"],
+                report_path=Path(report["path"]),
+                trusted_diff=crash_diff,
+            )
+            self.assertEqual(crash_diff["status"], "pass")
+            self.assertIn("trusted crash redaction/export diff pass", crash_gates[0]["satisfied_checks"])
 
     def test_case_backup_and_restore_commands_copy_database_with_hashes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

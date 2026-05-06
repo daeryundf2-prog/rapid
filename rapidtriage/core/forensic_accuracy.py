@@ -1520,6 +1520,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "timestamp authority requirement recorded",
             "windows smoke test requirement recorded",
             "external signing blocker disclosed",
+            "trusted Windows Authenticode evidence diff pass",
         ),
     },
     {
@@ -1534,6 +1535,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "notarization requirement recorded",
             "gatekeeper smoke requirement recorded",
             "external notarization blocker disclosed",
+            "trusted macOS notarization evidence diff pass",
         ),
     },
     {
@@ -1548,6 +1550,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "dependency inventory generated",
             "linux smoke requirement recorded",
             "package wrapper blocker disclosed",
+            "trusted Linux package smoke diff pass",
         ),
     },
     {
@@ -1562,6 +1565,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "enterprise disable recorded",
             "rollback guidance recorded",
             "public hosting/signing blocker disclosed",
+            "trusted signed update channel diff pass",
         ),
     },
     {
@@ -1576,6 +1580,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "runtime metadata captured",
             "no-upload policy recorded",
             "operator export limitation disclosed",
+            "trusted crash redaction/export diff pass",
         ),
     },
     {

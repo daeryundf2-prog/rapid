@@ -21,6 +21,16 @@ WINDOWS_SIGNED_INSTALLER_GAP_ID = "#101"
 MACOS_NOTARIZED_PACKAGE_GAP_ID = "#102"
 LINUX_PACKAGE_GAP_ID = "#103"
 AUTO_UPDATE_CHANNEL_GAP_ID = "#104"
+WINDOWS_SIGNING_TRUSTED_DIFF_BLOCKER_101 = "trusted-windows-signing-evidence-diff-missing"
+MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102 = "trusted-macos-notarization-evidence-diff-missing"
+LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103 = "trusted-linux-package-smoke-diff-missing"
+AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104 = "trusted-auto-update-channel-diff-missing"
+RELEASE_PACKAGING_TRUSTED_TOOLS = {
+    "authenticode-signature-log",
+    "macos-notarization-log",
+    "linux-package-smoke-log",
+    "signed-update-channel-log",
+}
 RELEASE_NOTES_CHANGELOG_GAP_ID = "#112"
 LTS_HOTFIX_POLICY_GAP_ID = "#113"
 SUPPORT_SLA_GAP_ID = "#114"
@@ -196,12 +206,16 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 "commercial_gap_ids": [WINDOWS_SIGNED_INSTALLER_GAP_ID],
                 "core_accuracy_gates": release_packaging_core_accuracy_gate(101),
                 "required_evidence": ["Authenticode signature", "timestamp authority", "fresh Windows smoke test"],
+                "trusted_windows_signing_diff": missing_release_packaging_trusted_diff(101),
+                "blockers": [WINDOWS_SIGNING_TRUSTED_DIFF_BLOCKER_101],
             },
             "macos_notarized_package": {
                 "status": "external-required",
                 "commercial_gap_ids": [MACOS_NOTARIZED_PACKAGE_GAP_ID],
                 "core_accuracy_gates": release_packaging_core_accuracy_gate(102),
                 "required_evidence": ["codesign verification", "notarization ticket", "Gatekeeper assessment"],
+                "trusted_macos_notarization_diff": missing_release_packaging_trusted_diff(102),
+                "blockers": [MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102],
             },
             "linux_package": {
                 "status": "packaging-plan-ready",
@@ -210,6 +224,8 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 "supported_outputs": ["portable zip", "wheel", "sdist"],
                 "future_outputs": ["deb", "rpm", "AppImage"],
                 "plan": "packaging-plan.json",
+                "trusted_linux_package_diff": missing_release_packaging_trusted_diff(103),
+                "blockers": [LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103],
             },
             "auto_update_channel": {
                 "status": "manifest-generated",
@@ -217,6 +233,8 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                 "core_accuracy_gates": release_packaging_core_accuracy_gate(104),
                 "manifest": "update-manifest.json",
                 "enterprise_disable_supported": True,
+                "trusted_auto_update_channel_diff": missing_release_packaging_trusted_diff(104),
+                "blockers": [AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104],
             },
             "operations_documents": {
                 "status": "packaged",
@@ -287,6 +305,8 @@ def write_packaging_plan(output_dir: Path) -> None:
                 "core_accuracy_gates": release_packaging_core_accuracy_gate(101),
                 "target_outputs": ["msi", "exe"],
                 "current_status": "external-signing-required",
+                "trusted_packaging_diff": missing_release_packaging_trusted_diff(101),
+                "blockers": [WINDOWS_SIGNING_TRUSTED_DIFF_BLOCKER_101],
                 "build_steps": [
                     "Build wheel/sdist and portable ZIP with scripts/build-release.py.",
                     "Wrap the release payload with the selected Windows installer tool.",
@@ -305,6 +325,8 @@ def write_packaging_plan(output_dir: Path) -> None:
                 "core_accuracy_gates": release_packaging_core_accuracy_gate(102),
                 "target_outputs": ["pkg", "dmg"],
                 "current_status": "external-codesign-notarization-required",
+                "trusted_packaging_diff": missing_release_packaging_trusted_diff(102),
+                "blockers": [MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102],
                 "build_steps": [
                     "Build wheel/sdist and portable ZIP with scripts/build-release.py.",
                     "Wrap launcher and payload into pkg/dmg with hardened runtime settings where applicable.",
@@ -323,6 +345,8 @@ def write_packaging_plan(output_dir: Path) -> None:
                 "core_accuracy_gates": release_packaging_core_accuracy_gate(103),
                 "target_outputs": ["deb", "rpm", "AppImage"],
                 "current_status": "portable-zip-wheel-ready-package-wrapper-pending",
+                "trusted_packaging_diff": missing_release_packaging_trusted_diff(103),
+                "blockers": [LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103],
                 "build_steps": [
                     "Build wheel/sdist and portable ZIP with scripts/build-release.py.",
                     "Generate distro package metadata from pyproject and dependency inventory.",
@@ -403,11 +427,90 @@ def write_update_manifest(output_dir: Path) -> None:
         "rollback_guidance": "Keep the previous portable ZIP and SHA256SUMS until the new release smoke tests pass.",
         "artifacts": artifacts,
         "signature_policy": "Public distribution requires signed Windows/macOS artifacts; portable ZIP distribution must verify SHA256SUMS.",
+        "trusted_auto_update_channel_diff": missing_release_packaging_trusted_diff(104),
+        "blockers": [AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104],
     }
     (output_dir / "update-manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def release_packaging_core_accuracy_gate(number: int) -> list[dict[str, object]]:
+def missing_release_packaging_trusted_diff(number: int) -> dict[str, object]:
+    blockers = {
+        101: WINDOWS_SIGNING_TRUSTED_DIFF_BLOCKER_101,
+        102: MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102,
+        103: LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103,
+        104: AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104,
+    }
+    trusted_tools = {
+        101: "authenticode-signature-log",
+        102: "macos-notarization-log",
+        103: "linux-package-smoke-log",
+        104: "signed-update-channel-log",
+    }
+    gap_ids = {
+        101: WINDOWS_SIGNED_INSTALLER_GAP_ID,
+        102: MACOS_NOTARIZED_PACKAGE_GAP_ID,
+        103: LINUX_PACKAGE_GAP_ID,
+        104: AUTO_UPDATE_CHANNEL_GAP_ID,
+    }
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [gap_ids[number]],
+        "blocker": blockers[number],
+        "required_trusted_tool": trusted_tools[number],
+    }
+
+
+def build_release_packaging_trusted_diff(
+    number: int,
+    rapid_payload: dict[str, object],
+    trusted_payload: dict[str, object],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    blockers = {
+        101: WINDOWS_SIGNING_TRUSTED_DIFF_BLOCKER_101,
+        102: MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102,
+        103: LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103,
+        104: AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104,
+    }
+    gap_ids = {
+        101: WINDOWS_SIGNED_INSTALLER_GAP_ID,
+        102: MACOS_NOTARIZED_PACKAGE_GAP_ID,
+        103: LINUX_PACKAGE_GAP_ID,
+        104: AUTO_UPDATE_CHANNEL_GAP_ID,
+    }
+    compared_fields = ["status", "required_evidence", "target_outputs", "artifacts", "signature_policy"]
+    mismatches = []
+    for field in compared_fields:
+        rapid_value = normalize_release_packaging_value(rapid_payload.get(field))
+        trusted_value = normalize_release_packaging_value(trusted_payload.get(field))
+        if rapid_value != trusted_value:
+            mismatches.append({"field": field, "rapid": rapid_value, "trusted": trusted_value})
+    status = "pass" if not mismatches and trusted_tool in RELEASE_PACKAGING_TRUSTED_TOOLS else "fail"
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [gap_ids[number]],
+        "compared_fields": compared_fields,
+        "mismatches": mismatches,
+        "blocker": None if status == "pass" else blockers[number],
+    }
+
+
+def normalize_release_packaging_value(value: object) -> object:
+    if isinstance(value, list):
+        return sorted(json.dumps(item, ensure_ascii=False, sort_keys=True, default=str) for item in value)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    return value
+
+
+def release_packaging_core_accuracy_gate(
+    number: int,
+    *,
+    trusted_diff: dict[str, object] | None = None,
+) -> list[dict[str, object]]:
     checks = {
         101: [
             "windows installer target declared",
@@ -438,10 +541,19 @@ def release_packaging_core_accuracy_gate(number: int) -> list[dict[str, object]]
             "public hosting/signing blocker disclosed",
         ],
     }
+    satisfied_checks = list(checks[number])
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        trusted_checks = {
+            101: "trusted Windows Authenticode evidence diff pass",
+            102: "trusted macOS notarization evidence diff pass",
+            103: "trusted Linux package smoke diff pass",
+            104: "trusted signed update channel diff pass",
+        }
+        satisfied_checks.append(trusted_checks[number])
     return [
         build_accuracy_gate(
             number,
-            satisfied_checks=checks[number],
+            satisfied_checks=satisfied_checks,
             evidence_refs=["scripts/build-release.py", "release-manifest.json", "packaging-plan.json"],
         )
     ]
