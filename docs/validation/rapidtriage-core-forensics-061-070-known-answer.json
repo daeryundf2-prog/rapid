@@ -66,8 +66,8 @@
       "status": "pass",
       "backlog_items": [66],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Benchmark output preserves scale matrix, ingest/search metrics, memory/output size, run-summary link, hardware-scale warning, #66 core_accuracy_gates, and #66 commercial_uplift_evidence.", "Benchmark reportability decisions block published scale-proof claims until hardware, OS, dependency, evidence-size, wall-time, memory, p95, and independent reproduction evidence exists."]},
-      "notes": "Internal fixture pass; published hardware matrix remains required."
+      "expected": {"required_assertions": ["Benchmark output preserves scale matrix, ingest/search metrics, memory/output size, run-summary link, hardware-scale warning, trusted threshold diff status, #66 core_accuracy_gates, and #66 commercial_uplift_evidence.", "Benchmark reportability decisions block published scale-proof claims until hardware, OS, dependency, evidence-size, wall-time, memory, p95, trusted threshold manifest, and independent reproduction evidence exists."]},
+      "notes": "Internal fixture pass; published hardware matrix and trusted threshold manifest remain required."
     },
     {
       "id": "core-forensics-067-stress-fixture",
@@ -77,8 +77,8 @@
       "status": "pass",
       "backlog_items": [67],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, real-hardware warning, #67 core_accuracy_gates, and #67 commercial_uplift_evidence.", "Stress-plan reportability decisions block executed TB-validation claims until actual 1TB-10TB hardware runs, bottleneck traces, and independent reproduction logs exist."]},
-      "notes": "Internal fixture pass; actual 1TB-10TB hardware runs remain required."
+      "expected": {"required_assertions": ["Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, real-hardware warning, trusted run-log diff status, #67 core_accuracy_gates, and #67 commercial_uplift_evidence.", "Stress-plan reportability decisions block executed TB-validation claims until actual 1TB-10TB hardware runs, trusted run-log manifests, bottleneck traces, and independent reproduction logs exist."]},
+      "notes": "Internal fixture pass; actual 1TB-10TB hardware runs and trusted run-log manifests remain required."
     },
     {
       "id": "core-forensics-068-incremental-fixture",
@@ -88,8 +88,8 @@
       "status": "pass",
       "backlog_items": [68],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Run fingerprint output preserves fingerprint, path/size/mtime metadata, changed-source reuse behavior, truncation disclosure, limitation warning, #68 core_accuracy_gates, and #68 commercial_uplift_evidence.", "Incremental indexing reportability decisions block content-hash-complete claims until content-hash reuse, changed-source behavior, and large-case replay validation exists."]},
-      "notes": "Internal fixture pass; content-hash incremental reindexing remains blocker."
+      "expected": {"required_assertions": ["Run fingerprint output preserves fingerprint, path/size/mtime metadata, changed-source reuse behavior, truncation disclosure, trusted reuse diff status, limitation warning, #68 core_accuracy_gates, and #68 commercial_uplift_evidence.", "Incremental indexing reportability decisions block content-hash-complete claims until content-hash reuse, changed-source behavior, trusted reuse manifests, and large-case replay validation exists."]},
+      "notes": "Internal fixture pass; content-hash incremental reindexing and trusted reuse manifests remain blockers."
     },
     {
       "id": "core-forensics-069-job-queue-fixture",
@@ -99,8 +99,8 @@
       "status": "pass",
       "backlog_items": [69],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Job payloads preserve status, step progress, state persistence, cancel/retry state, local-threadpool limitation, #69 core_accuracy_gates, and #69 commercial_uplift_evidence.", "Job queue reportability decisions block distributed parser-scheduler claims until distributed worker, parser-level progress, resource telemetry, cancellation, and retry validation under load exists."]},
-      "notes": "Internal fixture pass; distributed workers and parser-level progress telemetry remain blockers."
+      "expected": {"required_assertions": ["Job payloads preserve status, step progress, state persistence, cancel/retry state, local-threadpool limitation, trusted transition-log diff status, #69 core_accuracy_gates, and #69 commercial_uplift_evidence.", "Job queue reportability decisions block distributed parser-scheduler claims until distributed worker, trusted transition logs, parser-level progress, resource telemetry, cancellation, and retry validation under load exists."]},
+      "notes": "Internal fixture pass; distributed workers, trusted transition logs, and parser-level progress telemetry remain blockers."
     },
     {
       "id": "core-forensics-070-checkpoint-fixture",
@@ -110,8 +110,8 @@
       "status": "pass",
       "backlog_items": [70],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Run checkpoint output preserves stage checkpoints, output path/size, reused flags, resume summary, partial-stage warning, #70 core_accuracy_gates, and #70 commercial_uplift_evidence.", "Checkpoint reportability decisions block mid-parser-complete resume claims until failed-stage and mid-parser resume are validated across long-running corpora."]},
-      "notes": "Internal fixture pass; mid-parser checkpointing and failed-stage resume remain blockers."
+      "expected": {"required_assertions": ["Run checkpoint output preserves stage checkpoints, output path/size, reused flags, resume summary, partial-stage warning, trusted checkpoint diff status, #70 core_accuracy_gates, and #70 commercial_uplift_evidence.", "Checkpoint reportability decisions block mid-parser-complete resume claims until failed-stage and mid-parser resume are validated against trusted manifests across long-running corpora."]},
+      "notes": "Internal fixture pass; mid-parser checkpointing, trusted checkpoint manifests, and failed-stage resume remain blockers."
     }
   ]
 }

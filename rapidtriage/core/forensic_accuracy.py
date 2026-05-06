@@ -995,6 +995,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "memory/output size captured",
             "run summary linked",
             "hardware-scale limitation warning",
+            "trusted benchmark threshold diff pass",
         ),
     },
     {
@@ -1009,6 +1010,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "failure thresholds specified",
             "required evidence bundle listed",
             "real-hardware validation warning",
+            "trusted stress run-log diff pass",
         ),
     },
     {
@@ -1023,6 +1025,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "changed-source reuse disabled",
             "truncation disclosure",
             "per-file reindex limitation warning",
+            "trusted incremental reuse diff pass",
         ),
     },
     {
@@ -1037,6 +1040,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "state-file persistence",
             "cancel/retry state recorded",
             "local-threadpool limitation warning",
+            "trusted job transition-log diff pass",
         ),
     },
     {
@@ -1051,6 +1055,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "reused flag captured",
             "resume status summarized",
             "partial-stage limitation warning",
+            "trusted checkpoint/resume manifest diff pass",
         ),
     },
     {

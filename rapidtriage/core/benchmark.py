@@ -21,6 +21,8 @@ BENCHMARK_GAP_ID = "#66"
 STRESS_TEST_GAP_ID = "#67"
 BENCHMARK_SCALE_TARGETS = (100_000, 1_000_000, 10_000_000)
 PERFORMANCE_BATCH_ID = "commercial-uplift-066-070"
+BENCHMARK_TRUSTED_DIFF_BLOCKER_66 = "trusted-benchmark-hardware-threshold-diff-missing"
+STRESS_TRUSTED_DIFF_BLOCKER_67 = "trusted-stress-run-log-diff-missing"
 BENCHMARK_NATIVE_CAPABILITIES = {
     "synthetic_case_generation": True,
     "existing_root_benchmark": True,
@@ -147,6 +149,7 @@ def run_benchmark(
             external_validation=[
                 "published 100k/1M/10M hardware and OS benchmark matrix",
                 "release threshold comparison under representative analyst hardware",
+                BENCHMARK_TRUSTED_DIFF_BLOCKER_66,
             ],
         ),
         "core_accuracy_gates": benchmark_core_accuracy_gates(
@@ -231,6 +234,7 @@ def build_stress_test_plan(
             external_validation=[
                 "actual 1TB-10TB hardware stress runs",
                 "bottleneck traces and independent reproduction logs",
+                STRESS_TRUSTED_DIFF_BLOCKER_67,
             ],
         ),
         "core_accuracy_gates": stress_core_accuracy_gates(scenarios=scenarios),
@@ -293,7 +297,10 @@ def build_stress_scenario(*, size_tb: int, expected_throughput_mb_s: float) -> d
                 "checkpoint interval and parser batch-size hints are explicit",
                 "resource caps and required evidence are attached to this scenario",
             ],
-            external_validation=["execute this scenario on real evidence hardware before commercial claims"],
+            external_validation=[
+                "execute this scenario on real evidence hardware before commercial claims",
+                STRESS_TRUSTED_DIFF_BLOCKER_67,
+            ],
         ),
     }
 
@@ -337,6 +344,7 @@ def benchmark_report_grade_assessment(*, file_count: int) -> dict[str, object]:
             "published-hardware-and-os-matrix-required-for-performance-claims",
             "1m-and-10m-record-runs-should-be-executed-outside-unit-tests",
             "benchmark-results-are-operational-evidence-not-forensic-findings",
+            BENCHMARK_TRUSTED_DIFF_BLOCKER_66,
         ],
         "recommended_validation": [
             "Preserve benchmark JSON/Markdown, run summary, hardware profile, dependency versions, and sample evidence manifest.",
@@ -361,6 +369,7 @@ def stress_test_assessment(*, scenarios: list[dict[str, object]]) -> dict[str, o
             "stress-plan-does-not-generate-or-process-terabytes-of-evidence",
             "actual-1tb-10tb-hardware-runs-and-bottleneck-logs-remain-required",
             "independent-reproduction-logs-are-required-before-commercial-claims",
+            STRESS_TRUSTED_DIFF_BLOCKER_67,
         ],
         "recommended_validation": [
             "Run the generated runbook on representative hardware with read-only evidence and resume enabled.",
@@ -379,11 +388,88 @@ def stress_test_assessment(*, scenarios: list[dict[str, object]]) -> dict[str, o
     }
 
 
+def build_benchmark_trusted_diff(
+    rapid_metrics: Mapping[str, object],
+    trusted_metrics: Mapping[str, object],
+    *,
+    trusted_tool: str = "benchmark-threshold-manifest",
+) -> dict[str, object]:
+    metric_names = ("ingest_seconds", "search_p50_seconds", "search_p95_seconds", "memory_peak_bytes", "run_output_size_bytes")
+    missing = [name for name in metric_names if name in trusted_metrics and name not in rapid_metrics]
+    mismatched = []
+    for name in metric_names:
+        if name not in rapid_metrics or name not in trusted_metrics:
+            continue
+        rapid_value = numeric_value(rapid_metrics.get(name))
+        trusted_value = numeric_value(trusted_metrics.get(name))
+        tolerance = max(abs(trusted_value) * 0.05, 0.001)
+        if abs(rapid_value - trusted_value) > tolerance:
+            mismatched.append({"metric": name, "rapid": rapid_value, "trusted": trusted_value, "tolerance": tolerance})
+    status = "pass" if not missing and not mismatched else "fail"
+    return {
+        "profile": "benchmark-trusted-hardware-threshold-diff-v1",
+        "item_number": 66,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "missing": missing,
+        "mismatched": mismatched,
+        "commercial_gap_ids": [BENCHMARK_GAP_ID],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def build_stress_run_trusted_diff(
+    rapid_scenarios: Sequence[Mapping[str, object]],
+    trusted_scenarios: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str = "stress-run-log-manifest",
+) -> dict[str, object]:
+    rapid_index = {str(item.get("size_tb") or ""): stress_scenario_diff_value(item) for item in rapid_scenarios}
+    trusted_index = {str(item.get("size_tb") or ""): stress_scenario_diff_value(item) for item in trusted_scenarios}
+    missing = sorted(key for key in trusted_index if key not in rapid_index)
+    unexpected = sorted(key for key in rapid_index if key not in trusted_index)
+    mismatched = [
+        {"size_tb": key, "rapid": rapid_index[key], "trusted": trusted_index[key]}
+        for key in sorted(set(rapid_index).intersection(trusted_index))
+        if rapid_index[key] != trusted_index[key]
+    ]
+    status = "pass" if not missing and not unexpected and not mismatched else "fail"
+    return {
+        "profile": "stress-run-trusted-log-diff-v1",
+        "item_number": 67,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "missing": missing,
+        "unexpected": unexpected,
+        "mismatched": mismatched,
+        "commercial_gap_ids": [STRESS_TEST_GAP_ID],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def numeric_value(value: object) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def stress_scenario_diff_value(item: Mapping[str, object]) -> dict[str, object]:
+    resource_caps = item.get("resource_caps") if isinstance(item.get("resource_caps"), Mapping) else {}
+    return {
+        "size_bytes": int(item.get("size_bytes") or 0),
+        "checkpoint_interval_minutes": int(item.get("checkpoint_interval_minutes") or 0),
+        "memory_percent_of_host": int(resource_caps.get("memory_percent_of_host") or 0),
+        "parser_batch_size_hint": int(item.get("parser_batch_size_hint") or 0),
+    }
+
+
 def benchmark_core_accuracy_gates(
     *,
     file_count: int,
     metrics: Mapping[str, object],
     run_summary_path: Path | None,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["scale matrix emitted", "hardware-scale limitation warning"]
     if metrics.get("ingest_seconds") is not None and metrics.get("search_p50_seconds") is not None:
@@ -392,14 +478,18 @@ def benchmark_core_accuracy_gates(
         satisfied.append("memory/output size captured")
     if run_summary_path is not None:
         satisfied.append("run summary linked")
+    evidence_refs = [
+        f"file_count:{file_count}",
+        f"run_summary:{run_summary_path or ''}",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted benchmark threshold diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return [
         build_accuracy_gate(
             66,
             satisfied_checks=satisfied,
-            evidence_refs=[
-                f"file_count:{file_count}",
-                f"run_summary:{run_summary_path or ''}",
-            ],
+            evidence_refs=evidence_refs,
         )
     ]
 
@@ -458,7 +548,11 @@ def performance_reportability_decision(
     }
 
 
-def stress_core_accuracy_gates(*, scenarios: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+def stress_core_accuracy_gates(
+    *,
+    scenarios: Sequence[Mapping[str, object]],
+    trusted_diff: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
     satisfied = ["real-hardware validation warning"]
     if scenarios:
         satisfied.append("TB-scale scenarios emitted")
@@ -467,11 +561,15 @@ def stress_core_accuracy_gates(*, scenarios: Sequence[Mapping[str, object]]) -> 
     if any(scenario.get("required_evidence") for scenario in scenarios):
         satisfied.append("required evidence bundle listed")
     satisfied.append("failure thresholds specified")
+    evidence_refs = [f"scenario_count:{len(scenarios)}"]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted stress run-log diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return [
         build_accuracy_gate(
             67,
             satisfied_checks=satisfied,
-            evidence_refs=[f"scenario_count:{len(scenarios)}"],
+            evidence_refs=evidence_refs,
         )
     ]
 

@@ -53,6 +53,8 @@ CHECKPOINT_RESUME_GAP_ID = "#70"
 PARALLEL_PARSER_SCHEDULER_GAP_ID = "#75"
 MEMORY_CAP_ENV = "RAPIDTRIAGE_MEMORY_CAP_BYTES"
 PERFORMANCE_BATCH_ID = "commercial-uplift-066-070"
+INCREMENTAL_TRUSTED_DIFF_BLOCKER_68 = "trusted-incremental-reuse-manifest-diff-missing"
+CHECKPOINT_TRUSTED_DIFF_BLOCKER_70 = "trusted-checkpoint-resume-manifest-diff-missing"
 
 
 @dataclass(frozen=True)
@@ -912,6 +914,7 @@ def build_run_input_fingerprint(root: Path, *, max_files: int = 5000) -> Dict[st
             external_validation=[
                 "content-hash per-file incremental reindexing",
                 "large-case validation on changed multi-million-file evidence roots",
+                INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
             ],
         ),
     }
@@ -945,7 +948,10 @@ def record_run_checkpoint(records: list[dict[str, object]], stage: str, path: Pa
                     f"stage `{stage}` records output path, byte size, and reuse status",
                     "stage-level checkpoints support review of completed/reused output files",
                 ],
-                external_validation=["mid-parser checkpointing and failed-stage replay validation"],
+                external_validation=[
+                    "mid-parser checkpointing and failed-stage replay validation",
+                    CHECKPOINT_TRUSTED_DIFF_BLOCKER_70,
+                ],
             ),
         }
     )
@@ -1007,6 +1013,7 @@ def write_run_checkpoints(
                 "mid-parser checkpointing",
                 "failed-stage resume replay on long-running cases",
                 "cancellation/retry cleanup validation under load",
+                CHECKPOINT_TRUSTED_DIFF_BLOCKER_70,
             ],
         ),
         "checkpoints": [dict(item) for item in checkpoints],
@@ -1027,6 +1034,7 @@ def incremental_indexing_assessment(*, scanned_files: int, max_files: int, trunc
             "fingerprint-is-bounded-path-size-mtime-metadata-not-full-content-index-delta",
             "changed-source-disables-reuse-instead-of-per-file-incremental-reindex",
             "case-db-deduplication-and-reindex-policy-require-large-corpus-validation",
+            INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
         ],
         "recommended_validation": [
             "Preserve rapidtriage-run-fingerprint.json with resumed run outputs.",
@@ -1043,7 +1051,10 @@ def incremental_indexing_assessment(*, scanned_files: int, max_files: int, trunc
                 "scan counts and fingerprint truncation status are visible",
                 "changed-source reuse behavior is safety-first rebuild rather than silent reuse",
             ],
-            external_validation=["content-hash delta index and large-case validation remain required"],
+            external_validation=[
+                "content-hash delta index and large-case validation remain required",
+                INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
+            ],
         ),
         "core_accuracy_gates": incremental_indexing_core_accuracy_gates(
             scanned_files=scanned_files,
@@ -1072,6 +1083,7 @@ def checkpoint_resume_assessment(
             "checkpointing-reuses-complete-json-stage-outputs-not-mid-parser-state",
             "failed-or-partial-stage-resume-requires-rebuild-and-review-of-warning-output",
             "long-running-parser-cooperative-cancellation-remains-limited",
+            CHECKPOINT_TRUSTED_DIFF_BLOCKER_70,
         ],
         "recommended_validation": [
             "Review each checkpoint status, output path, size, and reused flag before relying on resumed results.",
@@ -1084,13 +1096,93 @@ def checkpoint_resume_assessment(
                 "checkpoint count and reused count are operator-visible",
                 "stage status records make resumed runs auditable",
             ],
-            external_validation=["failed-stage and mid-parser replay validation remain required"],
+            external_validation=[
+                "failed-stage and mid-parser replay validation remain required",
+                CHECKPOINT_TRUSTED_DIFF_BLOCKER_70,
+            ],
         ),
         "core_accuracy_gates": checkpoint_resume_core_accuracy_gates(
             checkpoints=checkpoints,
             resume_requested=resume_requested,
             resume_effective=resume_effective,
         ),
+    }
+
+
+def build_incremental_indexing_trusted_diff(
+    rapid_fingerprint: Mapping[str, object],
+    trusted_fingerprint: Mapping[str, object],
+    *,
+    trusted_tool: str = "incremental-reuse-manifest",
+) -> dict[str, object]:
+    rapid_value = incremental_fingerprint_diff_value(rapid_fingerprint)
+    trusted_value = incremental_fingerprint_diff_value(trusted_fingerprint)
+    mismatched = [
+        {"field": key, "rapid": rapid_value[key], "trusted": trusted_value[key]}
+        for key in sorted(set(rapid_value).union(trusted_value))
+        if rapid_value.get(key) != trusted_value.get(key)
+    ]
+    status = "pass" if not mismatched else "fail"
+    return {
+        "profile": "incremental-indexing-trusted-reuse-diff-v1",
+        "item_number": 68,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "mismatched": mismatched,
+        "commercial_gap_ids": [INCREMENTAL_INDEXING_GAP_ID],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def incremental_fingerprint_diff_value(item: Mapping[str, object]) -> dict[str, object]:
+    summary = item.get("summary") if isinstance(item.get("summary"), Mapping) else {}
+    return {
+        "fingerprint": str(item.get("fingerprint") or ""),
+        "scanned_file_count": int(summary.get("scanned_file_count") or 0),
+        "total_size_bytes": int(summary.get("total_size_bytes") or 0),
+        "truncated": bool(summary.get("truncated")),
+    }
+
+
+def build_checkpoint_resume_trusted_diff(
+    rapid_checkpoints: Sequence[Mapping[str, object]],
+    trusted_checkpoints: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str = "checkpoint-resume-manifest",
+) -> dict[str, object]:
+    rapid_index = {checkpoint_diff_key(item): checkpoint_diff_value(item) for item in rapid_checkpoints}
+    trusted_index = {checkpoint_diff_key(item): checkpoint_diff_value(item) for item in trusted_checkpoints}
+    missing = sorted(key for key in trusted_index if key not in rapid_index)
+    unexpected = sorted(key for key in rapid_index if key not in trusted_index)
+    mismatched = [
+        {"stage": key, "rapid": rapid_index[key], "trusted": trusted_index[key]}
+        for key in sorted(set(rapid_index).intersection(trusted_index))
+        if rapid_index[key] != trusted_index[key]
+    ]
+    status = "pass" if not missing and not unexpected and not mismatched else "fail"
+    return {
+        "profile": "checkpoint-resume-trusted-manifest-diff-v1",
+        "item_number": 70,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "missing": missing,
+        "unexpected": unexpected,
+        "mismatched": mismatched,
+        "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def checkpoint_diff_key(item: Mapping[str, object]) -> str:
+    return str(item.get("stage") or "")
+
+
+def checkpoint_diff_value(item: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "status": str(item.get("status") or ""),
+        "exists": bool(item.get("exists", True)),
+        "reused": bool(item.get("reused")),
+        "size_bytes": int(item.get("size_bytes") or 0),
     }
 
 
@@ -1101,22 +1193,27 @@ def incremental_indexing_core_accuracy_gates(
     truncated: bool,
     fingerprint: str,
     reuse_disabled: bool,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["input fingerprint emitted", "path/size/mtime metadata captured", "per-file reindex limitation warning"]
     if reuse_disabled:
         satisfied.append("changed-source reuse disabled")
     if truncated or max_files:
         satisfied.append("truncation disclosure")
+    evidence_refs = [
+        f"fingerprint:{fingerprint}",
+        f"scanned_file_count:{scanned_files}",
+        f"max_files:{max_files}",
+        f"truncated:{truncated}",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted incremental reuse diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return [
         build_accuracy_gate(
             68,
             satisfied_checks=satisfied,
-            evidence_refs=[
-                f"fingerprint:{fingerprint}",
-                f"scanned_file_count:{scanned_files}",
-                f"max_files:{max_files}",
-                f"truncated:{truncated}",
-            ],
+            evidence_refs=evidence_refs,
         )
     ]
 
@@ -1180,6 +1277,7 @@ def checkpoint_resume_core_accuracy_gates(
     checkpoints: Sequence[Mapping[str, object]],
     resume_requested: bool,
     resume_effective: bool,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["partial-stage limitation warning"]
     if checkpoints:
@@ -1190,15 +1288,19 @@ def checkpoint_resume_core_accuracy_gates(
         satisfied.append("reused flag captured")
     if resume_requested or resume_effective or checkpoints:
         satisfied.append("resume status summarized")
+    evidence_refs = [
+        f"checkpoint_count:{len(checkpoints)}",
+        f"resume_requested:{resume_requested}",
+        f"resume_effective:{resume_effective}",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted checkpoint/resume manifest diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return [
         build_accuracy_gate(
             70,
             satisfied_checks=satisfied,
-            evidence_refs=[
-                f"checkpoint_count:{len(checkpoints)}",
-                f"resume_requested:{resume_requested}",
-                f"resume_effective:{resume_effective}",
-            ],
+            evidence_refs=evidence_refs,
         )
     ]
 
@@ -1666,6 +1768,7 @@ def build_processing_summary(
                 external_validation=[
                     "content-hash per-file incremental reindexing",
                     "large-case changed-source validation",
+                    INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
                 ],
             ),
         },
@@ -1684,6 +1787,7 @@ def build_processing_summary(
                 external_validation=[
                     "mid-parser checkpointing",
                     "failed-stage replay validation on long-running evidence",
+                    CHECKPOINT_TRUSTED_DIFF_BLOCKER_70,
                 ],
             ),
         },

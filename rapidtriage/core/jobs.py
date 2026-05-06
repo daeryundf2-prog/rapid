@@ -20,6 +20,7 @@ JOB_STEP_NAMES = ("prepare", "triage", "persist", "finalize")
 BACKGROUND_JOB_GAP_ID = "#69"
 LONG_RUNNING_JOB_GAP_ID = "#80"
 PERFORMANCE_BATCH_ID = "commercial-uplift-066-070"
+JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69 = "trusted-job-transition-log-diff-missing"
 
 
 def now_iso() -> str:
@@ -517,6 +518,7 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
             "running-parser-cancellation-is-cooperative-and-stage-boundary-limited",
             "job-queue-is-local-process-threadpool-not-distributed-worker-system",
             "per-parser-progress-percent-and-resource-telemetry-remain-limited",
+            JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69,
         ],
         "commercial_uplift_evidence": job_queue_commercial_uplift_evidence(
             validation_ids=[
@@ -541,12 +543,55 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
     }
 
 
+def build_job_queue_trusted_diff(
+    rapid_job: Mapping[str, object],
+    trusted_job: Mapping[str, object],
+    *,
+    trusted_tool: str = "job-transition-log",
+) -> dict[str, object]:
+    rapid_value = job_queue_diff_value(rapid_job)
+    trusted_value = job_queue_diff_value(trusted_job)
+    mismatched = [
+        {"field": key, "rapid": rapid_value.get(key), "trusted": trusted_value.get(key)}
+        for key in sorted(set(rapid_value).union(trusted_value))
+        if rapid_value.get(key) != trusted_value.get(key)
+    ]
+    status = "pass" if not mismatched else "fail"
+    return {
+        "profile": "job-queue-trusted-transition-diff-v1",
+        "item_number": 69,
+        "trusted_tool": trusted_tool,
+        "status": status,
+        "mismatched": mismatched,
+        "commercial_gap_ids": [BACKGROUND_JOB_GAP_ID],
+        "commercial_claim_allowed": status == "pass",
+    }
+
+
+def job_queue_diff_value(job: Mapping[str, object]) -> dict[str, object]:
+    steps = job.get("steps") if isinstance(job.get("steps"), Sequence) else []
+    return {
+        "status": str(job.get("status") or ""),
+        "cancellation_requested": bool(job.get("cancellation_requested")),
+        "steps": [
+            {
+                "name": str(step.get("name") or ""),
+                "status": str(step.get("status") or ""),
+                "retry_count": int(step.get("retry_count") or 0),
+            }
+            for step in steps
+            if isinstance(step, Mapping)
+        ],
+    }
+
+
 def job_queue_core_accuracy_gates(
     *,
     status: str,
     steps: Sequence[Mapping[str, object]],
     state_persisted: bool,
     cancellation_requested: bool,
+    trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["local-threadpool limitation warning"]
     if status:
@@ -557,15 +602,19 @@ def job_queue_core_accuracy_gates(
         satisfied.append("state-file persistence")
     if cancellation_requested or status in {"failed", "canceled"}:
         satisfied.append("cancel/retry state recorded")
+    evidence_refs = [
+        f"job_status:{status}",
+        f"step_count:{len(steps)}",
+        f"cancellation_requested:{cancellation_requested}",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted job transition-log diff pass")
+        evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
     return [
         build_accuracy_gate(
             69,
             satisfied_checks=satisfied,
-            evidence_refs=[
-                f"job_status:{status}",
-                f"step_count:{len(steps)}",
-                f"cancellation_requested:{cancellation_requested}",
-            ],
+            evidence_refs=evidence_refs,
         )
     ]
 
@@ -592,6 +641,7 @@ def job_queue_commercial_uplift_evidence(
             "distributed worker execution",
             "parser-level progress percentage and resource telemetry under load",
             "cooperative cancellation validation on long-running parser workloads",
+            JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69,
         ],
     }
 
@@ -605,6 +655,7 @@ def job_queue_reportability_decision(
         "distributed worker execution",
         "parser-level progress percentage and resource telemetry under load",
         "cooperative cancellation validation on long-running parser workloads",
+        JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69,
     }
     return {
         "profile_version": "job-queue-reportability-decision-v1",

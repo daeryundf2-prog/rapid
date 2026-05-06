@@ -16,7 +16,13 @@ from rapidtriage.api.app import create_app
 from rapidtriage.cli import build_parser, main, run_web_server
 from rapidtriage.core.crash import write_crash_report
 from rapidtriage.core.commercial_readiness import calculate_readiness_score
-from rapidtriage.core.jobs import RunJobStore, RunRequest
+from rapidtriage.core.benchmark import (
+    benchmark_core_accuracy_gates,
+    build_benchmark_trusted_diff,
+    build_stress_run_trusted_diff,
+    stress_core_accuracy_gates,
+)
+from rapidtriage.core.jobs import RunJobStore, RunRequest, build_job_queue_trusted_diff, job_queue_core_accuracy_gates
 from rapidtriage.core.sample_case import run_sample_workflow
 
 
@@ -136,10 +142,20 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertFalse(uplift["commercial_grade_ready"])
             self.assertIn("p50/p95 search latency", " ".join(uplift["large_data_controls"]))
             self.assertIn("published 100k/1M/10M hardware and OS benchmark matrix", uplift["remaining_external_validation"])
+            self.assertIn("trusted-benchmark-hardware-threshold-diff-missing", uplift["remaining_external_validation"])
             self.assertEqual(
                 uplift["reportability_decision"]["decision"],
                 "do-not-report-benchmark-as-published-scale-proof",
             )
+            trusted_diff = build_benchmark_trusted_diff(payload["metrics"], payload["metrics"])
+            trusted_gates = benchmark_core_accuracy_gates(
+                file_count=payload["options"]["file_count"],
+                metrics=payload["metrics"],
+                run_summary_path=Path(payload["outputs"]["run_summary"]),
+                trusted_diff=trusted_diff,
+            )
+            self.assertEqual(trusted_diff["status"], "pass")
+            self.assertIn("trusted benchmark threshold diff pass", trusted_gates[0]["satisfied_checks"])
 
     def test_stress_plan_command_writes_large_case_runbook(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -182,12 +198,17 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(uplift["item_numbers"], [67])
             self.assertIn("1TB/5TB/10TB runbook scenarios", " ".join(uplift["large_data_controls"]))
             self.assertIn("actual 1TB-10TB hardware stress runs", uplift["remaining_external_validation"])
+            self.assertIn("trusted-stress-run-log-diff-missing", uplift["remaining_external_validation"])
             self.assertEqual(
                 uplift["reportability_decision"]["allowed_use"],
                 "stress-runbook-triage-pivot",
             )
             scenario_uplift = payload["scenarios"][0]["commercial_uplift_evidence"]
             self.assertEqual(scenario_uplift["item_numbers"], [67])
+            stress_diff = build_stress_run_trusted_diff(payload["scenarios"], payload["scenarios"])
+            stress_gates = stress_core_accuracy_gates(scenarios=payload["scenarios"], trusted_diff=stress_diff)
+            self.assertEqual(stress_diff["status"], "pass")
+            self.assertIn("trusted stress run-log diff pass", stress_gates[0]["satisfied_checks"])
 
     def test_validation_command_writes_release_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -945,10 +966,22 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(queue_uplift["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(queue_uplift["item_numbers"], [69])
             self.assertIn("local-threadpool limitation", " ".join(queue_uplift["large_data_controls"]))
+            self.assertIn("trusted-job-transition-log-diff-missing", queue_uplift["remaining_external_validation"])
             self.assertEqual(
                 queue_uplift["reportability_decision"]["decision"],
                 "do-not-report-job-queue-as-distributed-parser-scheduler",
             )
+            job_payload = canceled.to_dict()
+            job_diff = build_job_queue_trusted_diff(job_payload, job_payload)
+            job_gates = job_queue_core_accuracy_gates(
+                status=job_payload["status"],
+                steps=job_payload["steps"],
+                state_persisted=True,
+                cancellation_requested=job_payload["cancellation_requested"],
+                trusted_diff=job_diff,
+            )
+            self.assertEqual(job_diff["status"], "pass")
+            self.assertIn("trusted job transition-log diff pass", job_gates[0]["satisfied_checks"])
             self.assertTrue(
                 all(step["commercial_uplift_evidence"]["batch_id"] == "commercial-uplift-066-070" for step in canceled.to_dict()["steps"])
             )

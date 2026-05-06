@@ -10,7 +10,14 @@ from typing import Any
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.input_root import InputRoot
 from rapidtriage.core.reporting import build_run_report_context, render_run_markdown_report
-from rapidtriage.core.run import isolated_parser_error_payload, memory_cap_enforcement_assessment
+from rapidtriage.core.run import (
+    build_checkpoint_resume_trusted_diff,
+    build_incremental_indexing_trusted_diff,
+    checkpoint_resume_core_accuracy_gates,
+    incremental_indexing_core_accuracy_gates,
+    isolated_parser_error_payload,
+    memory_cap_enforcement_assessment,
+)
 from rapidtriage.core.silent_failure import build_silent_failure_report
 from tests.windows_artifact_fixtures import build_windows_artifact_fixture
 
@@ -281,6 +288,34 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("input fingerprint emitted", fingerprint["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertEqual(fingerprint["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(fingerprint["commercial_uplift_evidence"]["item_numbers"], [68])
+            self.assertIn(
+                "trusted-incremental-reuse-manifest-diff-missing",
+                fingerprint["commercial_uplift_evidence"]["remaining_external_validation"],
+            )
+            fingerprint_diff = build_incremental_indexing_trusted_diff(fingerprint, fingerprint)
+            fingerprint_gates = incremental_indexing_core_accuracy_gates(
+                scanned_files=fingerprint["summary"]["scanned_file_count"],
+                max_files=fingerprint["summary"]["max_files"],
+                truncated=fingerprint["summary"]["truncated"],
+                fingerprint=fingerprint["fingerprint"],
+                reuse_disabled=False,
+                trusted_diff=fingerprint_diff,
+            )
+            self.assertEqual(fingerprint_diff["status"], "pass")
+            self.assertIn("trusted incremental reuse diff pass", fingerprint_gates[0]["satisfied_checks"])
+            self.assertIn(
+                "trusted-checkpoint-resume-manifest-diff-missing",
+                checkpoints["commercial_uplift_evidence"]["remaining_external_validation"],
+            )
+            checkpoint_diff = build_checkpoint_resume_trusted_diff(checkpoints["checkpoints"], checkpoints["checkpoints"])
+            checkpoint_gates = checkpoint_resume_core_accuracy_gates(
+                checkpoints=checkpoints["checkpoints"],
+                resume_requested=checkpoints["resume"]["requested"],
+                resume_effective=checkpoints["resume"]["effective"],
+                trusted_diff=checkpoint_diff,
+            )
+            self.assertEqual(checkpoint_diff["status"], "pass")
+            self.assertIn("trusted checkpoint/resume manifest diff pass", checkpoint_gates[0]["satisfied_checks"])
 
             step_statuses = {step["name"]: step["status"] for step in summary_payload["steps"]}
             self.assertEqual(step_statuses["docs"], "reused")
