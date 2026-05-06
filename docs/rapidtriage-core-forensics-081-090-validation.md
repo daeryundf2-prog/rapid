@@ -20,11 +20,11 @@ rapidtriage commercial-readiness \
 
 | Item | Internal validated claim | Still not commercial-grade without |
 | --- | --- | --- |
-| #81 Known-answer tests | Validation output records manifest ingestion, dataset counts, evidence-path checks, public-corpus guidance, release gate, and #81 `core_accuracy_gates`. | Real CFReDS/CFTT corpus runs for each report-grade parser claim. |
-| #82 Fixture corpus | Validation output inventories parser areas, fixture/test counts, edge cases, coverage status, release gate, and #82 `core_accuracy_gates`. | Broader malformed/deleted/native fixture corpora and release-blocking coverage policy. |
-| #83 FP/FN docs | Parser-family notes record false-positive risks, false-negative risks, validation-required guidance, scope, and #83 `core_accuracy_gates`. | Quantified FP/FN rates by corpus and parser version. |
-| #84 Independent validation | Validation output records independent report status, required signoffs, minimum sections, optional hash/size, and #84 `core_accuracy_gates`. | Actual third-party signed review for the target release. |
-| #85 Validation package | Validation package and artifact manifest record JSON/Markdown/hash outputs, validation sections, limitations, and #85 `core_accuracy_gates`. | Operator-attached test logs and independent release evidence. |
+| #81 Known-answer tests | Validation output records manifest ingestion, dataset counts, evidence-path checks, public-corpus guidance, release gate, trusted manifest diff helpers/gates, and #81 `core_accuracy_gates`. | Real CFReDS/CFTT corpus runs, trusted known-answer manifests, and reviewer signoff for each report-grade parser claim. |
+| #82 Fixture corpus | Validation output inventories parser areas, fixture/test counts, edge cases, coverage status, release gate, trusted fixture-manifest diff helpers/gates, and #82 `core_accuracy_gates`. | Broader malformed/deleted/native fixture corpora, trusted fixture corpus manifests, and release-blocking coverage policy. |
+| #83 FP/FN docs | Parser-family notes record false-positive risks, false-negative risks, validation-required guidance, scope, trusted FP/FN register diff helpers/gates, and #83 `core_accuracy_gates`. | Quantified FP/FN rates by corpus/parser version and a reviewed risk register. |
+| #84 Independent validation | Validation output records independent report status, required signoffs, minimum sections, optional hash/size, trusted signoff diff helpers/gates, and #84 `core_accuracy_gates`. | Actual third-party signed review for the target release and trusted signoff manifest. |
+| #85 Validation package | Validation package and artifact manifest record JSON/Markdown/hash outputs, validation sections, limitations, trusted package-manifest diff helpers/gates, and #85 `core_accuracy_gates`. | Operator-attached test logs, release evidence, independent review, and trusted validation package manifest. |
 | #86 Chain of custody | Case DB report exports evidence-source inventory, custody events, citation IDs, status/hash fields, limitations, and #86 `core_accuracy_gates`. | Signed handoff forms, acquisition-device metadata, and lab custody policy. |
 | #87 Acquisition hashes | Case DB report exports evidence-source hashes, hash records, algorithms, timestamps, missing-hash warnings, and #87 `core_accuracy_gates`. | Whole-device acquisition hash workflow and write-blocker/operator metadata. |
 | #88 Immutable audit | Case DB report exports audit events, previous/event hashes, actor/action/target/time fields, head hash, and #88 `core_accuracy_gates`. | Database-level append-only enforcement and external notarization/signing. |
@@ -33,4 +33,4 @@ rapidtriage commercial-readiness \
 
 ## Interpretation
 
-Passing this manifest promotes #81 through #90 to the internal `validated` maturity stage only. These features remain `commercial_grade_ready=false` until public corpus, independent validation, external signing, acquisition metadata, and court/lab process evidence are attached.
+Passing this manifest promotes #81 through #90 to the internal `validated` maturity stage only. These features remain `commercial_grade_ready=false` until public corpus, trusted manifests, independent validation, external signing, acquisition metadata, and court/lab process evidence are attached.

@@ -1220,6 +1220,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "evidence path existence checked",
             "public corpus guidance emitted",
             "report-grade release gate recorded",
+            "trusted known-answer manifest diff pass",
         ),
     },
     {
@@ -1234,6 +1235,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "expected edge cases listed",
             "coverage status summarized",
             "release gate for parser changes recorded",
+            "trusted fixture corpus manifest diff pass",
         ),
     },
     {
@@ -1248,6 +1250,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "validation-required guidance recorded",
             "parser family scope recorded",
             "quantification limitation warning",
+            "trusted FP/FN risk register diff pass",
         ),
     },
     {
@@ -1262,6 +1265,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "required signoffs listed",
             "minimum report sections listed",
             "not-attached blocker recorded",
+            "trusted independent validation signoff diff pass",
         ),
     },
     {
@@ -1276,6 +1280,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "artifact hash manifest generated",
             "known-answer/fixture sections included",
             "package generation limitation warning",
+            "trusted validation package manifest diff pass",
         ),
     },
     {

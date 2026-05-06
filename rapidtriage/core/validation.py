@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from .audit import compute_sha256
 from .commercial_readiness import build_commercial_readiness_report
@@ -24,6 +24,18 @@ PARSER_FIXTURE_CORPUS_GAP_ID = "#82"
 PARSER_FP_FN_GAP_ID = "#83"
 INDEPENDENT_VALIDATION_GAP_ID = "#84"
 VALIDATION_PACKAGE_GAP_ID = "#85"
+KNOWN_ANSWER_TRUSTED_DIFF_BLOCKER_81 = "trusted-known-answer-manifest-diff-missing"
+FIXTURE_CORPUS_TRUSTED_DIFF_BLOCKER_82 = "trusted-fixture-corpus-manifest-diff-missing"
+FP_FN_TRUSTED_DIFF_BLOCKER_83 = "trusted-fp-fn-risk-register-diff-missing"
+INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84 = "trusted-independent-validation-signoff-diff-missing"
+VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85 = "trusted-validation-package-manifest-diff-missing"
+VALIDATION_TRUSTED_TOOLS = {
+    "known-answer-manifest",
+    "fixture-corpus-manifest",
+    "fp-fn-risk-register",
+    "independent-validation-signoff",
+    "validation-package-manifest",
+}
 EXTERNAL_TOOL_VERSION_GAP_ID = "#95"
 DEPLOYMENT_OPERATIONS_GAP_IDS = [
     "#101",
@@ -255,7 +267,11 @@ def build_validation_package(
     return payload
 
 
-def build_known_answer_validation(manifest_path: Path | None = None) -> dict[str, object]:
+def build_known_answer_validation(
+    manifest_path: Path | None = None,
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     datasets: list[dict[str, object]] = []
     manifest_status = "not-provided"
     manifest_error = ""
@@ -316,6 +332,14 @@ def build_known_answer_validation(manifest_path: Path | None = None) -> dict[str
         satisfied.append("dataset status counts recorded")
     if datasets:
         satisfied.append("evidence path existence checked")
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted known-answer manifest diff pass")
+    blockers = [
+        "known-answer-manifest-not-attached" if manifest_path is None else "review-open-known-answer-results",
+        "public-corpus-coverage-must-match-claimed-parser-scope",
+    ]
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(KNOWN_ANSWER_TRUSTED_DIFF_BLOCKER_81)
     return {
         "status": manifest_status,
         "commercial_gap_ids": [KNOWN_ANSWER_TEST_GAP_ID],
@@ -324,6 +348,11 @@ def build_known_answer_validation(manifest_path: Path | None = None) -> dict[str
         "dataset_count": len(datasets),
         "status_counts": status_counts,
         "datasets": datasets,
+        "trusted_known_answer_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
+            KNOWN_ANSWER_TEST_GAP_ID,
+            KNOWN_ANSWER_TRUSTED_DIFF_BLOCKER_81,
+            trusted_tool="known-answer-manifest",
+        ),
         "recommended_public_corpora": [
             {
                 "name": "NIST CFReDS",
@@ -349,14 +378,31 @@ def build_known_answer_validation(manifest_path: Path | None = None) -> dict[str
                 ],
             )
         ],
-        "blockers": [
-            "known-answer-manifest-not-attached" if manifest_path is None else "review-open-known-answer-results",
-            "public-corpus-coverage-must-match-claimed-parser-scope",
-        ],
+        "blockers": blockers,
     }
 
 
-def build_validation_package_assessment(output_dir: Path) -> dict[str, object]:
+def build_validation_package_assessment(
+    output_dir: Path,
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    satisfied = [
+        "validation JSON output generated",
+        "validation Markdown output generated",
+        "artifact hash manifest generated",
+        "known-answer/fixture sections included",
+        "package generation limitation warning",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted validation package manifest diff pass")
+    blockers = [
+        "package-generation-does-not-prove-tests-were-run-unless-evidence-is-attached",
+        "independent-lab-validation-remains-operator-owned",
+        "court-admissibility-depends-on-jurisdiction-lab-policy-and-expert-testimony",
+    ]
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        blockers.append(VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85)
     return {
         "component": "tool-validation-package",
         "status": "json-markdown-hash-manifest-generated",
@@ -364,16 +410,15 @@ def build_validation_package_assessment(output_dir: Path) -> dict[str, object]:
         "output_dir": str(output_dir),
         "outputs": [VALIDATION_JSON_NAME, VALIDATION_MARKDOWN_NAME, VALIDATION_ARTIFACTS_NAME],
         "ready_for_court_report": False,
+        "trusted_validation_package_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
+            VALIDATION_PACKAGE_GAP_ID,
+            VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85,
+            trusted_tool="validation-package-manifest",
+        ),
         "core_accuracy_gates": [
             build_accuracy_gate(
                 85,
-                satisfied_checks=[
-                    "validation JSON output generated",
-                    "validation Markdown output generated",
-                    "artifact hash manifest generated",
-                    "known-answer/fixture sections included",
-                    "package generation limitation warning",
-                ],
+                satisfied_checks=satisfied,
                 evidence_refs=[
                     f"output_dir:{output_dir}",
                     VALIDATION_JSON_NAME,
@@ -389,11 +434,7 @@ def build_validation_package_assessment(output_dir: Path) -> dict[str, object]:
             "independent-report-hash-attachment",
             "validation-output-hash-manifest",
         ],
-        "blockers": [
-            "package-generation-does-not-prove-tests-were-run-unless-evidence-is-attached",
-            "independent-lab-validation-remains-operator-owned",
-            "court-admissibility-depends-on-jurisdiction-lab-policy-and-expert-testimony",
-        ],
+        "blockers": blockers,
     }
 
 
@@ -445,7 +486,11 @@ def deployment_operations_core_accuracy_gates() -> list[dict[str, object]]:
     ]
 
 
-def build_parser_fixture_corpus(fixture_root: Path) -> dict[str, object]:
+def build_parser_fixture_corpus(
+    fixture_root: Path,
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     fixture_root = fixture_root.expanduser().resolve()
     rows: list[dict[str, object]] = []
     for area in PARSER_FIXTURE_AREAS:
@@ -475,6 +520,8 @@ def build_parser_fixture_corpus(fixture_root: Path) -> dict[str, object]:
         "coverage status summarized",
         "release gate for parser changes recorded",
     ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted fixture corpus manifest diff pass")
     return {
         "fixture_root": str(fixture_root),
         "parser_area_count": len(rows),
@@ -482,6 +529,12 @@ def build_parser_fixture_corpus(fixture_root: Path) -> dict[str, object]:
         "coverage_status": "fixture-backed-baseline" if covered == len(rows) else "fixture-gaps-present",
         "commercial_gap_ids": [PARSER_FIXTURE_CORPUS_GAP_ID],
         "ready_for_court_report": covered == len(rows),
+        "trusted_fixture_corpus_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
+            PARSER_FIXTURE_CORPUS_GAP_ID,
+            FIXTURE_CORPUS_TRUSTED_DIFF_BLOCKER_82,
+            trusted_tool="fixture-corpus-manifest",
+        ),
+        "blockers": [FIXTURE_CORPUS_TRUSTED_DIFF_BLOCKER_82] if not trusted_diff or trusted_diff.get("status") != "pass" else [],
         "core_accuracy_gates": [
             build_accuracy_gate(
                 82,
@@ -497,22 +550,34 @@ def build_parser_fixture_corpus(fixture_root: Path) -> dict[str, object]:
     }
 
 
-def build_parser_false_positive_false_negative_notes() -> list[dict[str, object]]:
+def build_parser_false_positive_false_negative_notes(
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
     rows = []
     for item in PARSER_FALSE_POSITIVE_NOTES:
         row = dict(item)
         row["commercial_gap_ids"] = [PARSER_FP_FN_GAP_ID]
         row["ready_for_court_report"] = False
+        row["trusted_fp_fn_diff"] = dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
+            PARSER_FP_FN_GAP_ID,
+            FP_FN_TRUSTED_DIFF_BLOCKER_83,
+            trusted_tool="fp-fn-risk-register",
+        )
+        row["blockers"] = [FP_FN_TRUSTED_DIFF_BLOCKER_83] if not trusted_diff or trusted_diff.get("status") != "pass" else []
+        satisfied = [
+            "false positive risks documented",
+            "false negative risks documented",
+            "validation-required guidance recorded",
+            "parser family scope recorded",
+            "quantification limitation warning",
+        ]
+        if trusted_diff and trusted_diff.get("status") == "pass":
+            satisfied.append("trusted FP/FN risk register diff pass")
         row["core_accuracy_gates"] = [
             build_accuracy_gate(
                 83,
-                satisfied_checks=[
-                    "false positive risks documented",
-                    "false negative risks documented",
-                    "validation-required guidance recorded",
-                    "parser family scope recorded",
-                    "quantification limitation warning",
-                ],
+                satisfied_checks=satisfied,
                 evidence_refs=[f"parser:{row.get('parser', '')}"],
             )
         ]
@@ -520,8 +585,20 @@ def build_parser_false_positive_false_negative_notes() -> list[dict[str, object]
     return rows
 
 
-def build_independent_validation_report(report_path: Path | None = None) -> dict[str, object]:
+def build_independent_validation_report(
+    report_path: Path | None = None,
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     if report_path is None:
+        satisfied = [
+            "independent report status recorded",
+            "required signoffs listed",
+            "minimum report sections listed",
+            "not-attached blocker recorded",
+        ]
+        if trusted_diff and trusted_diff.get("status") == "pass":
+            satisfied.append("trusted independent validation signoff diff pass")
         return {
             "status": "not-attached",
             "commercial_gap_ids": [INDEPENDENT_VALIDATION_GAP_ID],
@@ -536,15 +613,16 @@ def build_independent_validation_report(report_path: Path | None = None) -> dict
                 "legal/report wording review",
             ],
             "ready_for_court_report": False,
+            "trusted_independent_validation_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
+                INDEPENDENT_VALIDATION_GAP_ID,
+                INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84,
+                trusted_tool="independent-validation-signoff",
+            ),
+            "blockers": [INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84],
             "core_accuracy_gates": [
                 build_accuracy_gate(
                     84,
-                    satisfied_checks=[
-                        "independent report status recorded",
-                        "required signoffs listed",
-                        "minimum report sections listed",
-                        "not-attached blocker recorded",
-                    ],
+                    satisfied_checks=satisfied,
                     evidence_refs=["status:not-attached"],
                 )
             ],
@@ -552,6 +630,16 @@ def build_independent_validation_report(report_path: Path | None = None) -> dict
     resolved = report_path.expanduser().resolve()
     if not resolved.is_file():
         raise ValidationError(f"independent validation report not found: {resolved}")
+    satisfied = [
+        "independent report status recorded",
+        "report hash captured when attached",
+        "required signoffs listed",
+        "minimum report sections listed",
+        "not-attached blocker recorded",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted independent validation signoff diff pass")
+    blockers = [] if trusted_diff and trusted_diff.get("status") == "pass" else [INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84]
     return {
         "status": "attached",
         "commercial_gap_ids": [INDEPENDENT_VALIDATION_GAP_ID],
@@ -566,24 +654,29 @@ def build_independent_validation_report(report_path: Path | None = None) -> dict
             "false positive/false negative notes",
             "legal/report wording review",
         ],
-        "ready_for_court_report": True,
+        "ready_for_court_report": bool(trusted_diff and trusted_diff.get("status") == "pass"),
+        "trusted_independent_validation_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
+            INDEPENDENT_VALIDATION_GAP_ID,
+            INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84,
+            trusted_tool="independent-validation-signoff",
+        ),
+        "blockers": blockers,
         "core_accuracy_gates": [
             build_accuracy_gate(
                 84,
-                satisfied_checks=[
-                    "independent report status recorded",
-                    "report hash captured when attached",
-                    "required signoffs listed",
-                    "minimum report sections listed",
-                    "not-attached blocker recorded",
-                ],
+                satisfied_checks=satisfied,
                 evidence_refs=[f"report_path:{resolved}", f"sha256:{compute_sha256(resolved)}"],
             )
         ],
     }
 
 
-def build_validation_artifact_manifest(output_dir: Path, paths: tuple[Path, ...]) -> dict[str, object]:
+def build_validation_artifact_manifest(
+    output_dir: Path,
+    paths: tuple[Path, ...],
+    *,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     artifacts = []
     for path in paths:
         artifacts.append(
@@ -594,6 +687,15 @@ def build_validation_artifact_manifest(output_dir: Path, paths: tuple[Path, ...]
                 "size_bytes": path.stat().st_size,
             }
         )
+    satisfied = [
+        "validation JSON output generated",
+        "validation Markdown output generated",
+        "artifact hash manifest generated",
+        "known-answer/fixture sections included",
+        "package generation limitation warning",
+    ]
+    if trusted_diff and trusted_diff.get("status") == "pass":
+        satisfied.append("trusted validation package manifest diff pass")
     return {
         "command": "validation-artifact-manifest",
         "generated_at": now_iso(),
@@ -601,21 +703,268 @@ def build_validation_artifact_manifest(output_dir: Path, paths: tuple[Path, ...]
         "commercial_gap_ids": [VALIDATION_PACKAGE_GAP_ID],
         "artifact_count": len(artifacts),
         "artifacts": artifacts,
+        "trusted_validation_package_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
+            VALIDATION_PACKAGE_GAP_ID,
+            VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85,
+            trusted_tool="validation-package-manifest",
+        ),
+        "blockers": [VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85] if not trusted_diff or trusted_diff.get("status") != "pass" else [],
         "core_accuracy_gates": [
             build_accuracy_gate(
                 85,
-                satisfied_checks=[
-                    "validation JSON output generated",
-                    "validation Markdown output generated",
-                    "artifact hash manifest generated",
-                    "known-answer/fixture sections included",
-                    "package generation limitation warning",
-                ],
+                satisfied_checks=satisfied,
                 evidence_refs=[f"artifact_count:{len(artifacts)}", f"output_dir:{output_dir}"],
             )
         ],
         "tamper_note": "Recompute SHA256 values before release publication; this manifest covers the validation package outputs.",
     }
+
+
+def missing_validation_trusted_diff(gap_id: str, blocker: str, *, trusted_tool: str) -> dict[str, object]:
+    return {
+        "status": "missing",
+        "trusted_tool": None,
+        "commercial_gap_ids": [gap_id],
+        "blocker": blocker,
+        "required_trusted_tool": trusted_tool,
+    }
+
+
+def build_known_answer_trusted_diff(
+    rapid_validation: Mapping[str, object],
+    trusted_validation: Mapping[str, object],
+    *,
+    trusted_tool: str = "known-answer-manifest",
+) -> dict[str, object]:
+    rapid_index = index_known_answer_datasets(rapid_validation.get("datasets"))
+    trusted_index = index_known_answer_datasets(trusted_validation.get("datasets"))
+    mismatches = compare_indexed_manifests(
+        rapid_index,
+        trusted_index,
+        fields=("status", "backlog_items", "evidence_paths_present"),
+    )
+    status = "pass" if not mismatches and trusted_tool in VALIDATION_TRUSTED_TOOLS else "fail"
+    return validation_trusted_diff_result(
+        status=status,
+        gap_id=KNOWN_ANSWER_TEST_GAP_ID,
+        blocker=KNOWN_ANSWER_TRUSTED_DIFF_BLOCKER_81,
+        trusted_tool=trusted_tool,
+        compared_fields=["dataset_id", "status", "backlog_items", "evidence_paths_present"],
+        mismatches=mismatches,
+    )
+
+
+def build_fixture_corpus_trusted_diff(
+    rapid_corpus: Mapping[str, object],
+    trusted_corpus: Mapping[str, object],
+    *,
+    trusted_tool: str = "fixture-corpus-manifest",
+) -> dict[str, object]:
+    rapid_index = index_fixture_areas(rapid_corpus.get("areas"))
+    trusted_index = index_fixture_areas(trusted_corpus.get("areas"))
+    mismatches = compare_indexed_manifests(
+        rapid_index,
+        trusted_index,
+        fields=("fixture_count", "test_file_count", "fixture_backed"),
+    )
+    status = "pass" if not mismatches and trusted_tool in VALIDATION_TRUSTED_TOOLS else "fail"
+    return validation_trusted_diff_result(
+        status=status,
+        gap_id=PARSER_FIXTURE_CORPUS_GAP_ID,
+        blocker=FIXTURE_CORPUS_TRUSTED_DIFF_BLOCKER_82,
+        trusted_tool=trusted_tool,
+        compared_fields=["area_id", "fixture_count", "test_file_count", "fixture_backed"],
+        mismatches=mismatches,
+    )
+
+
+def build_fp_fn_trusted_diff(
+    rapid_notes: Sequence[Mapping[str, object]],
+    trusted_notes: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str = "fp-fn-risk-register",
+) -> dict[str, object]:
+    rapid_index = index_fp_fn_notes(rapid_notes)
+    trusted_index = index_fp_fn_notes(trusted_notes)
+    mismatches = compare_indexed_manifests(
+        rapid_index,
+        trusted_index,
+        fields=("false_positive_count", "false_negative_count", "validation_required"),
+    )
+    status = "pass" if not mismatches and trusted_tool in VALIDATION_TRUSTED_TOOLS else "fail"
+    return validation_trusted_diff_result(
+        status=status,
+        gap_id=PARSER_FP_FN_GAP_ID,
+        blocker=FP_FN_TRUSTED_DIFF_BLOCKER_83,
+        trusted_tool=trusted_tool,
+        compared_fields=["parser", "false_positive_count", "false_negative_count", "validation_required"],
+        mismatches=mismatches,
+    )
+
+
+def build_independent_validation_trusted_diff(
+    rapid_report: Mapping[str, object],
+    trusted_report: Mapping[str, object],
+    *,
+    trusted_tool: str = "independent-validation-signoff",
+) -> dict[str, object]:
+    compared_fields = ["status", "sha256", "size_bytes", "required_signoffs", "minimum_sections"]
+    mismatches = [
+        {"field": field, "rapid": rapid_report.get(field), "trusted": trusted_report.get(field)}
+        for field in compared_fields
+        if normalize_manifest_value(rapid_report.get(field)) != normalize_manifest_value(trusted_report.get(field))
+    ]
+    status = "pass" if not mismatches and trusted_tool in VALIDATION_TRUSTED_TOOLS else "fail"
+    return validation_trusted_diff_result(
+        status=status,
+        gap_id=INDEPENDENT_VALIDATION_GAP_ID,
+        blocker=INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84,
+        trusted_tool=trusted_tool,
+        compared_fields=compared_fields,
+        mismatches=mismatches,
+    )
+
+
+def build_validation_package_trusted_diff(
+    rapid_manifest: Mapping[str, object],
+    trusted_manifest: Mapping[str, object],
+    *,
+    trusted_tool: str = "validation-package-manifest",
+) -> dict[str, object]:
+    rapid_index = index_validation_artifacts(rapid_manifest.get("artifacts"))
+    trusted_index = index_validation_artifacts(trusted_manifest.get("artifacts"))
+    mismatches = compare_indexed_manifests(
+        rapid_index,
+        trusted_index,
+        fields=("sha256", "size_bytes"),
+    )
+    status = "pass" if not mismatches and trusted_tool in VALIDATION_TRUSTED_TOOLS else "fail"
+    return validation_trusted_diff_result(
+        status=status,
+        gap_id=VALIDATION_PACKAGE_GAP_ID,
+        blocker=VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85,
+        trusted_tool=trusted_tool,
+        compared_fields=["artifact_name", "sha256", "size_bytes"],
+        mismatches=mismatches,
+    )
+
+
+def validation_trusted_diff_result(
+    *,
+    status: str,
+    gap_id: str,
+    blocker: str,
+    trusted_tool: str,
+    compared_fields: Sequence[str],
+    mismatches: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    return {
+        "status": status,
+        "trusted_tool": trusted_tool,
+        "commercial_gap_ids": [gap_id],
+        "compared_fields": list(compared_fields),
+        "mismatches": [dict(item) for item in mismatches],
+        "blocker": None if status == "pass" else blocker,
+    }
+
+
+def compare_indexed_manifests(
+    rapid_index: Mapping[str, Mapping[str, object]],
+    trusted_index: Mapping[str, Mapping[str, object]],
+    *,
+    fields: Sequence[str],
+) -> list[dict[str, object]]:
+    mismatches: list[dict[str, object]] = []
+    for key, trusted_row in sorted(trusted_index.items()):
+        rapid_row = rapid_index.get(key)
+        if rapid_row is None:
+            mismatches.append({"id": key, "field": "row", "rapid": None, "trusted": "present"})
+            continue
+        for field in fields:
+            rapid_value = normalize_manifest_value(rapid_row.get(field))
+            trusted_value = normalize_manifest_value(trusted_row.get(field))
+            if rapid_value != trusted_value:
+                mismatches.append({"id": key, "field": field, "rapid": rapid_value, "trusted": trusted_value})
+    for key in sorted(set(rapid_index) - set(trusted_index)):
+        mismatches.append({"id": key, "field": "row", "rapid": "present", "trusted": None})
+    return mismatches
+
+
+def normalize_manifest_value(value: object) -> object:
+    if isinstance(value, list):
+        return sorted(str(item) for item in value)
+    if isinstance(value, tuple):
+        return sorted(str(item) for item in value)
+    return value
+
+
+def index_known_answer_datasets(rows: object) -> dict[str, Mapping[str, object]]:
+    indexed: dict[str, Mapping[str, object]] = {}
+    if not isinstance(rows, list):
+        return indexed
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        dataset_id = str(row.get("id") or "")
+        if not dataset_id:
+            continue
+        indexed[dataset_id] = {
+            "status": row.get("status"),
+            "backlog_items": [str(value).lstrip("#") for value in row.get("backlog_items") or []],
+            "evidence_paths_present": bool(row.get("evidence_paths_present")),
+        }
+    return indexed
+
+
+def index_fixture_areas(rows: object) -> dict[str, Mapping[str, object]]:
+    indexed: dict[str, Mapping[str, object]] = {}
+    if not isinstance(rows, list):
+        return indexed
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        area_id = str(row.get("id") or "")
+        if not area_id:
+            continue
+        indexed[area_id] = {
+            "fixture_count": int(row.get("fixture_count") or 0),
+            "test_file_count": int(row.get("test_file_count") or 0),
+            "fixture_backed": bool(row.get("fixture_backed")),
+        }
+    return indexed
+
+
+def index_fp_fn_notes(rows: Sequence[Mapping[str, object]]) -> dict[str, Mapping[str, object]]:
+    indexed: dict[str, Mapping[str, object]] = {}
+    for row in rows:
+        parser = str(row.get("parser") or "")
+        if not parser:
+            continue
+        fp = row.get("false_positive_risks")
+        fn = row.get("false_negative_risks")
+        indexed[parser] = {
+            "false_positive_count": len(fp) if isinstance(fp, list) else 0,
+            "false_negative_count": len(fn) if isinstance(fn, list) else 0,
+            "validation_required": str(row.get("validation_required") or ""),
+        }
+    return indexed
+
+
+def index_validation_artifacts(rows: object) -> dict[str, Mapping[str, object]]:
+    indexed: dict[str, Mapping[str, object]] = {}
+    if not isinstance(rows, list):
+        return indexed
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        name = str(row.get("name") or "")
+        if not name:
+            continue
+        indexed[name] = {
+            "sha256": str(row.get("sha256") or ""),
+            "size_bytes": int(row.get("size_bytes") or 0),
+        }
+    return indexed
 
 
 def build_external_tool_versions() -> list[dict[str, object]]:

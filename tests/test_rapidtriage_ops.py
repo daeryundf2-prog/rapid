@@ -31,6 +31,19 @@ from rapidtriage.core.jobs import (
     job_queue_core_accuracy_gates,
 )
 from rapidtriage.core.sample_case import run_sample_workflow
+from rapidtriage.core.validation import (
+    build_fixture_corpus_trusted_diff,
+    build_fp_fn_trusted_diff,
+    build_independent_validation_report,
+    build_independent_validation_trusted_diff,
+    build_known_answer_trusted_diff,
+    build_known_answer_validation,
+    build_parser_false_positive_false_negative_notes,
+    build_parser_fixture_corpus,
+    build_validation_artifact_manifest,
+    build_validation_package_assessment,
+    build_validation_package_trusted_diff,
+)
 
 
 class RapidTriageOpsTests(unittest.TestCase):
@@ -240,14 +253,24 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue((output_dir / "rapidtriage-validation-report.md").is_file())
             self.assertIn("#85", payload["validation_package_assessment"]["commercial_gap_ids"])
             self.assertEqual(payload["validation_package_assessment"]["core_accuracy_gates"][0]["gap_id"], "#85")
+            self.assertEqual(payload["validation_package_assessment"]["trusted_validation_package_diff"]["status"], "missing")
+            self.assertIn("trusted-validation-package-manifest-diff-missing", payload["validation_package_assessment"]["blockers"])
             self.assertIn("#81", payload["known_answer_validation"]["commercial_gap_ids"])
             self.assertEqual(payload["known_answer_validation"]["core_accuracy_gates"][0]["gap_id"], "#81")
+            self.assertEqual(payload["known_answer_validation"]["trusted_known_answer_diff"]["status"], "missing")
+            self.assertIn("trusted-known-answer-manifest-diff-missing", payload["known_answer_validation"]["blockers"])
             self.assertIn("#82", payload["parser_fixture_corpus"]["commercial_gap_ids"])
             self.assertEqual(payload["parser_fixture_corpus"]["core_accuracy_gates"][0]["gap_id"], "#82")
+            self.assertEqual(payload["parser_fixture_corpus"]["trusted_fixture_corpus_diff"]["status"], "missing")
+            self.assertIn("trusted-fixture-corpus-manifest-diff-missing", payload["parser_fixture_corpus"]["blockers"])
             self.assertIn("#83", payload["parser_false_positive_false_negative_notes"][0]["commercial_gap_ids"])
             self.assertEqual(payload["parser_false_positive_false_negative_notes"][0]["core_accuracy_gates"][0]["gap_id"], "#83")
+            self.assertEqual(payload["parser_false_positive_false_negative_notes"][0]["trusted_fp_fn_diff"]["status"], "missing")
+            self.assertIn("trusted-fp-fn-risk-register-diff-missing", payload["parser_false_positive_false_negative_notes"][0]["blockers"])
             self.assertIn("#84", payload["independent_validation_report"]["commercial_gap_ids"])
             self.assertEqual(payload["independent_validation_report"]["core_accuracy_gates"][0]["gap_id"], "#84")
+            self.assertEqual(payload["independent_validation_report"]["trusted_independent_validation_diff"]["status"], "missing")
+            self.assertIn("trusted-independent-validation-signoff-diff-missing", payload["independent_validation_report"]["blockers"])
             self.assertIn("#95", payload["external_tool_version_assessment"]["commercial_gap_ids"])
             self.assertEqual(payload["external_tool_version_assessment"]["core_accuracy_gates"][0]["gap_id"], "#95")
             self.assertTrue(all("#95" in item["commercial_gap_ids"] for item in payload["external_tool_versions"]))
@@ -263,6 +286,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             artifact_manifest = json.loads((output_dir / "rapidtriage-validation-artifacts.json").read_text(encoding="utf-8"))
             self.assertIn("#85", artifact_manifest["commercial_gap_ids"])
             self.assertEqual(artifact_manifest["core_accuracy_gates"][0]["gap_id"], "#85")
+            self.assertEqual(artifact_manifest["trusted_validation_package_diff"]["status"], "missing")
+            self.assertIn("trusted-validation-package-manifest-diff-missing", artifact_manifest["blockers"])
             check_ids = {item["id"] for item in payload["checks"]}
             self.assertIn("unit-tests", check_ids)
             self.assertIn("known-limitations", check_ids)
@@ -290,6 +315,77 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("verify-release-checksums", command_names)
             self.assertIn("smoke-summary", command_names)
             self.assertIn("release-evidence", command_names)
+
+    def test_validation_trusted_diffs_promote_legal_validation_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            evidence = root / "known-answer.json"
+            evidence.write_text('{"status":"pass"}', encoding="utf-8")
+            manifest = root / "manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "datasets": [
+                            {
+                                "id": "dataset-1",
+                                "name": "Dataset 1",
+                                "status": "pass",
+                                "backlog_items": [81],
+                                "evidence_paths": [str(evidence)],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            known_answer = build_known_answer_validation(manifest)
+            known_diff = build_known_answer_trusted_diff(known_answer, known_answer)
+            promoted_known = build_known_answer_validation(manifest, trusted_diff=known_diff)
+
+            self.assertEqual(known_diff["status"], "pass")
+            self.assertIn("trusted known-answer manifest diff pass", promoted_known["core_accuracy_gates"][0]["satisfied_checks"])
+
+            fixture_corpus = build_parser_fixture_corpus(Path.cwd())
+            fixture_diff = build_fixture_corpus_trusted_diff(fixture_corpus, fixture_corpus)
+            promoted_fixture = build_parser_fixture_corpus(Path.cwd(), trusted_diff=fixture_diff)
+            self.assertEqual(fixture_diff["status"], "pass")
+            self.assertIn("trusted fixture corpus manifest diff pass", promoted_fixture["core_accuracy_gates"][0]["satisfied_checks"])
+
+            fp_fn_notes = build_parser_false_positive_false_negative_notes()
+            fp_fn_diff = build_fp_fn_trusted_diff(fp_fn_notes, fp_fn_notes)
+            promoted_fp_fn = build_parser_false_positive_false_negative_notes(trusted_diff=fp_fn_diff)
+            self.assertEqual(fp_fn_diff["status"], "pass")
+            self.assertIn("trusted FP/FN risk register diff pass", promoted_fp_fn[0]["core_accuracy_gates"][0]["satisfied_checks"])
+
+            report = root / "independent-report.md"
+            report.write_text("signed independent validation report", encoding="utf-8")
+            independent_report = build_independent_validation_report(report)
+            independent_diff = build_independent_validation_trusted_diff(independent_report, independent_report)
+            promoted_independent = build_independent_validation_report(report, trusted_diff=independent_diff)
+            self.assertEqual(independent_diff["status"], "pass")
+            self.assertTrue(promoted_independent["ready_for_court_report"])
+            self.assertIn(
+                "trusted independent validation signoff diff pass",
+                promoted_independent["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+
+            package_file = root / "rapidtriage-validation-package.json"
+            package_file.write_text('{"command":"validation"}', encoding="utf-8")
+            markdown_file = root / "rapidtriage-validation-report.md"
+            markdown_file.write_text("# Validation", encoding="utf-8")
+            package_manifest = build_validation_artifact_manifest(root, (package_file, markdown_file))
+            package_diff = build_validation_package_trusted_diff(package_manifest, package_manifest)
+            promoted_manifest = build_validation_artifact_manifest(root, (package_file, markdown_file), trusted_diff=package_diff)
+            promoted_assessment = build_validation_package_assessment(root, trusted_diff=package_diff)
+            self.assertEqual(package_diff["status"], "pass")
+            self.assertIn(
+                "trusted validation package manifest diff pass",
+                promoted_manifest["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "trusted validation package manifest diff pass",
+                promoted_assessment["core_accuracy_gates"][0]["satisfied_checks"],
+            )
 
     def test_commercial_readiness_command_lists_non_commercial_items(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

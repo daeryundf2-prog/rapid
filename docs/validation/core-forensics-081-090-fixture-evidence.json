@@ -9,45 +9,45 @@
       "title": "NIST CFReDS/CFTT based known-answer tests",
       "test_files": ["tests/test_rapidtriage_ops.py", "tests/test_rapidtriage_core_forensics_accuracy.py"],
       "assertions": [
-        "Validation output preserves known-answer manifest ingestion, dataset status counts, evidence path checks, public corpus guidance, report-grade release gate, and #81 core_accuracy_gates."
+        "Validation output preserves known-answer manifest ingestion, dataset status counts, evidence path checks, public corpus guidance, report-grade release gate, trusted known-answer manifest diff helpers/gates, and #81 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Real CFReDS/CFTT corpus runs for each report-grade parser claim."]
+      "remaining_external_validation": ["Real CFReDS/CFTT corpus runs, trusted known-answer manifests, and reviewer signoff for each report-grade parser claim."]
     },
     {
       "item": 82,
       "title": "Parser-specific fixture corpus",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Validation output inventories parser areas, fixture/test counts, expected edge cases, coverage status, release gate, and #82 core_accuracy_gates."
+        "Validation output inventories parser areas, fixture/test counts, expected edge cases, coverage status, release gate, trusted fixture corpus manifest diff helpers/gates, and #82 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Broader malformed, deleted, native, and versioned corpus coverage."]
+      "remaining_external_validation": ["Broader malformed, deleted, native, and versioned corpus coverage plus trusted fixture corpus manifests."]
     },
     {
       "item": 83,
       "title": "Parser-specific false positive/false negative documentation",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Parser-family FP/FN notes preserve false-positive risks, false-negative risks, validation-required guidance, parser scope, quantification warning, and #83 core_accuracy_gates."
+        "Parser-family FP/FN notes preserve false-positive risks, false-negative risks, validation-required guidance, parser scope, quantification warning, trusted FP/FN risk register diff helpers/gates, and #83 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Quantified false-positive/false-negative rates by corpus and parser version."]
+      "remaining_external_validation": ["Quantified false-positive/false-negative rates by corpus and parser version plus a reviewed risk register."]
     },
     {
       "item": 84,
       "title": "Independent validation report",
       "test_files": ["tests/test_rapidtriage_ops.py", "tests/test_rapidtriage_final_roadmap.py"],
       "assertions": [
-        "Validation output preserves independent report status, required signoffs, minimum sections, optional report hash/size, not-attached blocker, and #84 core_accuracy_gates."
+        "Validation output preserves independent report status, required signoffs, minimum sections, optional report hash/size, not-attached blocker, trusted independent validation signoff diff helpers/gates, and #84 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Actual independent signed validation report for the release."]
+      "remaining_external_validation": ["Actual independent signed validation report and trusted signoff manifest for the release."]
     },
     {
       "item": 85,
       "title": "Tool validation package automation",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Validation package outputs preserve JSON, Markdown, artifact hash manifest, known-answer/fixture sections, limitation warnings, and #85 core_accuracy_gates."
+        "Validation package outputs preserve JSON, Markdown, artifact hash manifest, known-answer/fixture sections, limitation warnings, trusted validation package manifest diff helpers/gates, and #85 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Operator-attached test logs, release evidence, and independent review."]
+      "remaining_external_validation": ["Operator-attached test logs, release evidence, trusted validation package manifests, and independent review."]
     },
     {
       "item": 86,
