@@ -16,6 +16,18 @@ PARSER_VERSION = "windows-os-account-v9"
 USER_PROFILE_ROOT = "Users"
 REGISTRY_EXPORT_EXT = ".reg"
 SAM_HIVE_NAME = "SAM"
+SAM_V_DATA_BASE_OFFSET = 0xCC
+SAM_V_STRING_LAYOUT = (
+    ("user_name", 0x0C),
+    ("full_name", 0x18),
+    ("comment", 0x24),
+    ("user_comment", 0x30),
+    ("home_directory", 0x3C),
+    ("home_drive", 0x48),
+    ("logon_script", 0x54),
+    ("profile_path", 0x60),
+    ("workstations", 0x6C),
+)
 SAM_BUILTIN_KEY_NAMES = {"SAM", "Domains", "Account", "Users", "Names", "Builtin", "Aliases", "Groups"}
 SAM_COMMON_GROUP_NAMES = {
     "account operators",
@@ -800,6 +812,11 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
         rid = str(account.get("rid") or "")
         group_rows = group_memberships_for_account(groups, user_name, rid)
         security_context = account_security_context(account, group_rows, hints)
+        security_context_rows = normalized_account_security_context_rows(
+            account=account,
+            group_rows=group_rows,
+            security_context=security_context,
+        )
         risk_flags = account_lifecycle_risk_flags(account, group_rows)
         validation_checks = account_lifecycle_validation_checks(account, group_rows)
         report_grade = os_account_report_grade_assessment(
@@ -834,6 +851,22 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 "rid": rid,
                 "group_count": len(group_rows),
                 "inherited_privilege_count": security_context.get("inherited_privilege_count", 0),
+                "security_context_row_count": len(security_context_rows),
+            },
+        )
+        sam_security_system_profile = sam_security_system_deep_parser_profile(
+            artifact_scope="account-lifecycle-security-context",
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            security_context=security_context,
+            evidence_fields={
+                "user_name": user_name,
+                "rid": rid,
+                "profile_path": account.get("profile_path", ""),
+                "sam_binary_field_names": sorted((account.get("sam_binary_fields") or {}).keys()),
+                "group_count": len(group_rows),
+                "inherited_privilege_count": security_context.get("inherited_privilege_count", 0),
+                "security_context_row_count": len(security_context_rows),
             },
         )
         yield ArtifactRecord(
@@ -864,6 +897,8 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 "sam_binary_fields": dict(account.get("sam_binary_fields") or {}),
                 "group_membership_hints": group_rows,
                 "account_security_context": security_context,
+                "normalized_security_context_rows": security_context_rows,
+                "normalized_security_context_row_count": len(security_context_rows),
                 "parser_confidence": account_lifecycle_confidence(account, group_rows),
                 "evidence_strength": "account-lifecycle-registry-export",
                 "validation_required": True,
@@ -884,6 +919,7 @@ def build_account_lifecycle_records(path: Path, hints: dict[str, object], source
                 ),
                 "os_account_native_capabilities": OS_ACCOUNT_NATIVE_CAPABILITIES,
                 "account_privilege_deep_parse_profile": deep_parse_profile,
+                "sam_security_system_deep_parser_profile": sam_security_system_profile,
                 "account_reportability_decision": deep_parse_profile["reportability_decision"],
                 "forensic_review": build_forensic_review(
                     gap_id="#6",
@@ -1129,6 +1165,7 @@ def account_privilege_deep_parse_profile(
             "sam_f_value_export_candidate": bool(validation_checks.get("has_sam_f_value")),
             "sam_v_value_export_candidate": bool(validation_checks.get("has_sam_v_value")),
             "sam_fv_candidate_fields": bool(validation_checks.get("native_sam_fv_candidate_decoding_available")),
+            "sam_v_layout_string_candidates": bool(validation_checks.get("has_decoded_sam_v_layout_fields")),
             "sam_alias_key_candidates": bool(
                 validation_checks.get("has_builtin_alias_rid_candidate")
                 or validation_checks.get("has_group_name")
@@ -1160,6 +1197,87 @@ def account_privilege_deep_parse_profile(
         "commercial_grade_ready": False,
         "commercial_grade_blockers": list(report_grade.get("blockers") or []),
         "legal_handling": "SECURITY secrets are inventoried as metadata only; decryption requires explicit lawful authority and audit logging.",
+    }
+
+
+def sam_security_system_deep_parser_profile(
+    *,
+    artifact_scope: str,
+    validation_checks: Mapping[str, object],
+    report_grade: Mapping[str, object],
+    security_context: Mapping[str, object],
+    evidence_fields: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "profile_version": "sam-security-system-deep-parser-v1",
+        "commercial_batch_id": "commercial-uplift-011-015",
+        "item_number": 12,
+        "artifact_scope": artifact_scope,
+        "target_hives": ["SAM", "SECURITY", "SYSTEM"],
+        "decoded_components": {
+            "sam_f_value_metadata": bool(validation_checks.get("has_sam_f_value")),
+            "sam_v_value_metadata": bool(validation_checks.get("has_sam_v_value")),
+            "account_lifecycle_timestamps": bool(
+                validation_checks.get("has_created_timestamp") or validation_checks.get("has_last_logon_timestamp")
+            ),
+            "group_membership_hints": bool(security_context.get("inherited_privilege_count")),
+            "privilege_assignment_hints": bool(validation_checks.get("has_privilege")),
+            "lsa_secret_metadata_inventory": bool(
+                validation_checks.get("has_secret_name") or validation_checks.get("has_exported_values")
+            ),
+            "current_control_set_context": bool(validation_checks.get("has_current_control_set")),
+            "native_sam_alias_member_decode": bool(OS_ACCOUNT_NATIVE_CAPABILITIES["native_sam_alias_member_binary_decode"]),
+            "security_secret_decryption": bool(OS_ACCOUNT_NATIVE_CAPABILITIES["security_secret_decryption"]),
+            "transaction_log_replay": bool(OS_ACCOUNT_NATIVE_CAPABILITIES["transaction_log_replay"]),
+        },
+        "evidence_fields": dict(evidence_fields),
+        "normalized_security_context_schema": {
+            "fields": [
+                "context_type",
+                "principal",
+                "name",
+                "sid",
+                "privilege",
+                "service_name",
+                "risk_flags",
+                "citation",
+            ],
+            "row_count": int(evidence_fields.get("security_context_row_count") or 0),
+            "secret_value_policy": "metadata-only-redacted",
+            "safe_for_case_db_indexing": True,
+        },
+        "reportability_decision": os_account_reportability_decision(
+            artifact_scope=artifact_scope,
+            report_grade=report_grade,
+            validation_checks=validation_checks,
+        ),
+        "legal_handling": {
+            "security_secret_values_redacted": True,
+            "secret_decryption_allowed_by_default": False,
+            "authority_gate": "explicit-legal-authority-and-audited-secret-workflow-required",
+        },
+        "required_before_report": [
+            "validate SAM F/V binary layouts by Windows build and account RID",
+            "decode SAM alias/member binary values instead of relying only on name hints",
+            "replay SAM/SECURITY/SYSTEM transaction logs before final account-state claims",
+            "resolve domain/local SID context and ControlSet attribution",
+            "diff account/group/privilege rows against Eric Zimmerman's Registry Explorer/RECmd or equivalent trusted output",
+        ],
+        "large_data_controls": {
+            "row_is_account_scoped": True,
+            "secrets_are_metadata_only": True,
+            "safe_for_case_db_indexing": True,
+        },
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": sorted(
+            set(report_grade.get("blockers") or [])
+            | {
+                "sam-security-system-trusted-diff-required",
+                "native-sam-alias-member-decode-required",
+                "transaction-log-replay-required",
+            }
+        ),
     }
 
 
@@ -1290,6 +1408,216 @@ def os_account_commercial_uplift_evidence(details: Mapping[str, object]) -> dict
     }
 
 
+def build_os_account_trusted_diff(
+    rapid_rows: Sequence[Mapping[str, object]],
+    trusted_rows: Sequence[Mapping[str, object]],
+    *,
+    trusted_tool: str,
+) -> dict[str, object]:
+    """Compare SAM/SECURITY/SYSTEM account rows against a trusted parser/export."""
+
+    tool_name = str(trusted_tool or "").strip()
+    rapid_by_key = {
+        key: normalized
+        for row in rapid_rows
+        for key, normalized in [_normalize_os_account_row(row)]
+        if key
+    }
+    trusted_by_key = {
+        key: normalized
+        for row in trusted_rows
+        for key, normalized in [_normalize_os_account_row(row)]
+        if key
+    }
+    missing_in_trusted = sorted(key for key in rapid_by_key if key not in trusted_by_key)
+    extra_in_trusted = sorted(key for key in trusted_by_key if key not in rapid_by_key)
+    mismatches: list[dict[str, object]] = []
+    matched_count = 0
+    for key in sorted(set(rapid_by_key) & set(trusted_by_key)):
+        rapid = rapid_by_key[key]
+        trusted = trusted_by_key[key]
+        field_diffs = []
+        for field in (
+            "row_type",
+            "user_name",
+            "sid",
+            "rid",
+            "uac_flags",
+            "group_names",
+            "assigned_privileges",
+            "group_name",
+            "member_sids",
+            "member_names",
+            "privilege",
+            "assigned_sids",
+            "secret_name",
+            "admin_hint",
+            "account_disabled_hint",
+        ):
+            left = rapid.get(field, "")
+            right = trusted.get(field, "")
+            if left or right:
+                if left != right:
+                    field_diffs.append({"field": field, "rapid": left, "trusted": right})
+        if field_diffs:
+            mismatches.append({"row_key": key, "field_diffs": field_diffs})
+        else:
+            matched_count += 1
+
+    status = "pass"
+    if not tool_name or not rapid_by_key or not trusted_by_key:
+        status = "not-enough-evidence"
+    elif missing_in_trusted or extra_in_trusted or mismatches:
+        status = "diffs-present"
+    normalized_tool = re.sub(r"[^a-z0-9]+", "", tool_name.lower())
+    trusted_tool_recognized = any(hint in normalized_tool for hint in OS_ACCOUNT_TRUSTED_TOOL_HINTS)
+    uses_rapidtriage_artifact_rows = any(isinstance(row.get("details"), Mapping) for row in rapid_rows)
+    passed_decision = "os-account-diff-passed" if uses_rapidtriage_artifact_rows else "account-diff-passed"
+    return {
+        "profile_version": "os-account-trusted-diff-v1",
+        "trusted_tool": tool_name,
+        "trusted_tool_recognized": trusted_tool_recognized,
+        "compare_fields": [
+            "row_type",
+            "user_name",
+            "sid",
+            "rid",
+            "uac_flags",
+            "group_names",
+            "assigned_privileges",
+            "group_name",
+            "member_sids",
+            "member_names",
+            "privilege",
+            "assigned_sids",
+            "secret_name",
+            "admin_hint",
+            "account_disabled_hint",
+        ],
+        "rapid_row_count": len(rapid_by_key),
+        "trusted_row_count": len(trusted_by_key),
+        "matched_count": matched_count,
+        "mismatch_count": len(mismatches),
+        "missing_in_trusted_count": len(missing_in_trusted),
+        "extra_in_trusted_count": len(extra_in_trusted),
+        "status": status,
+        "commercial_grade_evidence": status == "pass" and trusted_tool_recognized,
+        "missing_in_trusted": missing_in_trusted[:100],
+        "extra_in_trusted": extra_in_trusted[:100],
+        "mismatches": mismatches[:100],
+        "reportability_decision": {
+            "decision": passed_decision if status == "pass" else "do-not-use-os-account-row-as-final",
+            "allowed_use": (
+                "support report-grade account/group/privilege assertions with attached corpus/signoff"
+                if status == "pass" and trusted_tool_recognized
+                else "triage-only account pivot until SAM/SECURITY/SYSTEM trusted diff is clean"
+            ),
+            "blockers": [] if status == "pass" and trusted_tool_recognized else ["sam-security-system-trusted-diff-required"],
+        },
+    }
+
+
+def _normalize_os_account_row(row: Mapping[str, object]) -> tuple[str, dict[str, str]]:
+    payload = _os_account_row_payload(row)
+    row_type = os_account_row_type(row, payload)
+    normalized = {
+        "row_type": row_type,
+        "user_name": str(payload.get("user_name") or payload.get("account_name") or "").strip().lower(),
+        "sid": str(payload.get("sid") or payload.get("user_sid") or payload.get("account_sid") or "").strip().lower(),
+        "rid": _normalize_rid(
+            payload.get("rid")
+            or payload.get("rid_decimal")
+            or payload.get("account_rid")
+            or payload.get("rid_candidate")
+            or ""
+        ),
+        "uac_flags": _normalize_string_list(
+            payload.get("uac_flags")
+            or payload.get("user_account_control_flags")
+            or payload.get("account_control_flags")
+            or []
+        ),
+        "group_names": _normalize_string_list(payload.get("group_names") or payload.get("groups") or []),
+        "assigned_privileges": _normalize_string_list(
+            payload.get("assigned_privileges") or payload.get("privileges") or []
+        ),
+        "group_name": str(payload.get("group_name") or payload.get("group_name_candidate") or "").strip().lower(),
+        "member_sids": _normalize_string_list(payload.get("member_sids") or payload.get("assigned_member_sids") or []),
+        "member_names": _normalize_string_list(payload.get("member_names") or payload.get("assigned_member_names") or []),
+        "privilege": str(payload.get("privilege") or payload.get("right") or "").strip().lower(),
+        "assigned_sids": _normalize_string_list(payload.get("assigned_sids") or payload.get("assigned_principal_sids") or []),
+        "secret_name": str(payload.get("secret_name") or payload.get("lsa_secret_name") or "").strip().lower(),
+        "admin_hint": _normalize_bool_text(payload.get("admin_hint") or payload.get("is_admin") or payload.get("privileged_group")),
+        "account_disabled_hint": _normalize_bool_text(
+            payload.get("account_disabled_hint") or payload.get("disabled") or payload.get("is_disabled")
+        ),
+    }
+    key = os_account_row_key(normalized)
+    return key, normalized
+
+
+def _os_account_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
+    details = row.get("details") if isinstance(row.get("details"), Mapping) else {}
+    if not details:
+        return row
+    flattened = dict(details)
+    for key, value in row.items():
+        if key == "details":
+            continue
+        flattened.setdefault(key, value)
+    return flattened
+
+
+def os_account_row_type(row: Mapping[str, object], payload: Mapping[str, object]) -> str:
+    artifact_type = str(row.get("artifact_type") or payload.get("artifact_type") or "").lower()
+    if "privilege" in artifact_type or payload.get("privilege") or payload.get("right") or payload.get("assigned_principal_sids"):
+        return "privilege"
+    if "group" in artifact_type or payload.get("group_name") or payload.get("group_name_candidate"):
+        return "group"
+    if "secret" in artifact_type or payload.get("secret_name"):
+        return "secret"
+    return "account"
+
+
+def os_account_row_key(normalized: Mapping[str, str]) -> str:
+    row_type = str(normalized.get("row_type") or "account")
+    if row_type == "privilege":
+        return f"privilege:{normalized.get('privilege', '')}"
+    if row_type == "group":
+        return f"group:{normalized.get('group_name', '') or normalized.get('rid', '')}"
+    if row_type == "secret":
+        return f"secret:{normalized.get('secret_name', '')}"
+    return f"account:{normalized.get('rid', '') or normalized.get('user_name', '')}"
+
+
+def _normalize_rid(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        pass
+    if re.fullmatch(r"[0-9a-fA-F]{8}", text):
+        return str(int(text, 16))
+    return text.lower()
+
+
+def _normalize_string_list(value: object) -> str:
+    values: list[str] = []
+    if isinstance(value, str):
+        values = [part.strip() for part in re.split(r"[,;|]", value) if part.strip()]
+    elif isinstance(value, Sequence):
+        values = [str(item).strip() for item in value if str(item).strip()]
+    return "|".join(sorted({item.lower() for item in values}))
+
+
+def _normalize_bool_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    return str(bool(value)).lower()
+
+
 def os_account_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, object]]:
     labels = {
         "regf_header_valid": ("SAM hive header", "critical"),
@@ -1307,6 +1635,10 @@ def os_account_validation_matrix(checks: Mapping[str, object]) -> list[dict[str,
         "has_exported_values": ("LSA exported values", "medium"),
         "has_sam_f_value": ("SAM F value", "high"),
         "has_sam_v_value": ("SAM V value", "high"),
+        "has_decoded_sam_f_timestamps": ("SAM F timestamp candidates", "medium"),
+        "has_decoded_sam_f_uac": ("SAM F UAC candidate", "medium"),
+        "has_decoded_sam_v_strings": ("SAM V string candidates", "medium"),
+        "has_decoded_sam_v_layout_fields": ("SAM V layout string candidates", "medium"),
         "native_sam_fv_candidate_decoding_available": ("Native SAM F/V candidate decode", "medium"),
         "native_sam_fv_report_grade": ("Native SAM F/V report-grade decode", "critical"),
         "native_membership_reconstruction_available": ("Native membership reconstruction", "critical"),
@@ -1363,122 +1695,6 @@ def os_account_report_grade_assessment(
             "transaction logs, domain context, and a second trusted parser before final testimony."
         ),
     }
-
-
-def build_os_account_trusted_diff(
-    rapid_rows: Sequence[Mapping[str, object]],
-    trusted_rows: Sequence[Mapping[str, object]],
-    *,
-    trusted_tool: str,
-) -> dict[str, object]:
-    """Compare account/group/privilege rows with a trusted SAM/SECURITY/SYSTEM parser export."""
-
-    tool_name = str(trusted_tool or "").strip()
-    rapid_by_key = {
-        key: normalized
-        for row in rapid_rows
-        for key, normalized in [_normalize_os_account_row(row)]
-        if key
-    }
-    trusted_by_key = {
-        key: normalized
-        for row in trusted_rows
-        for key, normalized in [_normalize_os_account_row(row)]
-        if key
-    }
-    missing = sorted(key for key in rapid_by_key if key not in trusted_by_key)
-    extra = sorted(key for key in trusted_by_key if key not in rapid_by_key)
-    mismatches: list[dict[str, object]] = []
-    matched = 0
-    for key in sorted(set(rapid_by_key) & set(trusted_by_key)):
-        rapid = rapid_by_key[key]
-        trusted = trusted_by_key[key]
-        field_diffs = []
-        for field in ("user_name", "rid", "sid", "uac_flags", "group_names", "privileges", "secret_redacted"):
-            left = rapid.get(field, "")
-            right = trusted.get(field, "")
-            if left or right:
-                if left != right:
-                    field_diffs.append({"field": field, "rapid": left, "trusted": right})
-        if field_diffs:
-            mismatches.append({"account_key": key, "field_diffs": field_diffs})
-        else:
-            matched += 1
-    status = "pass"
-    if not tool_name or not rapid_by_key or not trusted_by_key:
-        status = "not-enough-evidence"
-    elif missing or extra or mismatches:
-        status = "diffs-present"
-    normalized_tool = re.sub(r"[^a-z0-9]+", "", tool_name.lower())
-    trusted_tool_recognized = any(hint in normalized_tool for hint in OS_ACCOUNT_TRUSTED_TOOL_HINTS)
-    return {
-        "profile_version": "os-account-trusted-diff-v1",
-        "trusted_tool": tool_name,
-        "trusted_tool_recognized": trusted_tool_recognized,
-        "compare_fields": ["user_name", "rid", "sid", "uac_flags", "group_names", "privileges", "secret_redacted"],
-        "rapid_row_count": len(rapid_by_key),
-        "trusted_row_count": len(trusted_by_key),
-        "matched_count": matched,
-        "mismatch_count": len(mismatches),
-        "missing_in_trusted_count": len(missing),
-        "extra_in_trusted_count": len(extra),
-        "status": status,
-        "commercial_grade_evidence": status == "pass" and trusted_tool_recognized,
-        "missing_in_trusted": missing[:100],
-        "extra_in_trusted": extra[:100],
-        "mismatches": mismatches[:100],
-        "reportability_decision": {
-            "decision": "account-diff-passed" if status == "pass" else "do-not-report-account-state-as-final",
-            "allowed_use": (
-                "support report-grade account assertions with attached SAM/SECURITY/SYSTEM corpus/signoff"
-                if status == "pass" and trusted_tool_recognized
-                else "triage-only account pivot until trusted SAM/SECURITY/SYSTEM diff is clean"
-            ),
-            "blockers": [] if status == "pass" and trusted_tool_recognized else ["sam-security-system-trusted-diff-required"],
-        },
-    }
-
-
-def _normalize_os_account_row(row: Mapping[str, object]) -> tuple[str, dict[str, str]]:
-    user_name = str(row.get("user_name") or row.get("account_name") or row.get("name") or "").strip()
-    rid = str(row.get("rid") or row.get("rid_decimal") or "").strip()
-    sid = str(row.get("sid") or row.get("user_sid") or "").strip()
-    key = sid or f"{user_name.lower()}:{rid}"
-    if not key.strip(":"):
-        return "", {}
-    group_names = row.get("group_names") or row.get("groups") or row.get("group_membership_hints") or []
-    privileges = row.get("privileges") or row.get("assigned_privileges") or row.get("assigned_sids") or []
-    uac_flags = row.get("uac_flags") or row.get("user_account_control_flags") or []
-    secret_metadata = row.get("secret_value_metadata") if isinstance(row.get("secret_value_metadata"), Mapping) else {}
-    return key, {
-        "user_name": user_name,
-        "rid": rid,
-        "sid": sid,
-        "uac_flags": _join_sorted_values(uac_flags),
-        "group_names": _join_sorted_values(group_names),
-        "privileges": _join_sorted_values(privileges),
-        "secret_redacted": str(bool(secret_metadata) and all(
-            not bool(item.get("decrypted")) for item in secret_metadata.values() if isinstance(item, Mapping)
-        )).lower() if secret_metadata else "",
-    }
-
-
-def _join_sorted_values(value: object) -> str:
-    if isinstance(value, str):
-        parts = [value]
-    elif isinstance(value, Mapping):
-        parts = [str(item) for item in value.values() if str(item)]
-    elif isinstance(value, Sequence):
-        parts = [
-            str(item.get("group_name") or item.get("principal") or item.get("sid") or item)
-            if isinstance(item, Mapping)
-            else str(item)
-            for item in value
-            if str(item)
-        ]
-    else:
-        parts = []
-    return "|".join(sorted({part for part in parts if part}, key=str.lower))
 
 
 def registry_value_type_label(value: str) -> str:
@@ -1679,6 +1895,84 @@ def account_security_context(
     }
 
 
+def normalized_account_security_context_rows(
+    *,
+    account: Mapping[str, object],
+    group_rows: Sequence[Mapping[str, object]],
+    security_context: Mapping[str, object],
+) -> list[dict[str, object]]:
+    user_name = str(account.get("user_name") or "")
+    rid = str(account.get("rid") or "")
+    rows: list[dict[str, object]] = []
+    for group in group_rows:
+        group_name = str(group.get("group_name") or "")
+        group_sids = group.get("group_sid_candidates") if isinstance(group.get("group_sid_candidates"), list) else [""]
+        for sid in group_sids:
+            rows.append(
+                {
+                    "context_type": "group-membership-hint",
+                    "principal": user_name,
+                    "rid": rid,
+                    "name": group_name,
+                    "sid": str(sid),
+                    "privileged": bool(group.get("privileged_group")),
+                    "risk_flags": group_membership_risk_flags(dict(group)),
+                    "citation": {"source": "SAM/Builtin/Alias export hint", "group_name": group_name},
+                    "reportability": "triage-pivot",
+                }
+            )
+    inherited = security_context.get("inherited_privileges")
+    if isinstance(inherited, Sequence):
+        for privilege in inherited:
+            if not isinstance(privilege, Mapping):
+                continue
+            rows.append(
+                {
+                    "context_type": "inherited-privilege-hint",
+                    "principal": user_name,
+                    "rid": rid,
+                    "privilege": str(privilege.get("privilege") or ""),
+                    "via_groups": list(privilege.get("via_groups") or []),
+                    "via_group_sids": list(privilege.get("via_group_sids") or []),
+                    "risk_flags": list(privilege.get("risk_flags") or []),
+                    "citation": {"source": "SECURITY/Privilege Rights export hint"},
+                    "reportability": "triage-pivot",
+                }
+            )
+    services = security_context.get("service_account_matches")
+    if isinstance(services, Sequence):
+        for service in services:
+            if not isinstance(service, Mapping):
+                continue
+            rows.append(
+                {
+                    "context_type": "service-account-match",
+                    "principal": user_name,
+                    "rid": rid,
+                    "service_name": str(service.get("service_name") or ""),
+                    "object_name": str(service.get("object_name") or ""),
+                    "image_path": str(service.get("image_path") or ""),
+                    "risk_flags": service_risk_flags(service),
+                    "citation": {"source": "SYSTEM/Services ObjectName export hint"},
+                    "reportability": "triage-pivot",
+                }
+            )
+    if int(security_context.get("lsa_sensitive_location_count") or 0):
+        rows.append(
+            {
+                "context_type": "lsa-sensitive-location-summary",
+                "principal": user_name,
+                "rid": rid,
+                "count": int(security_context.get("lsa_sensitive_location_count") or 0),
+                "secret_values_redacted": True,
+                "risk_flags": ["lsa-sensitive-location"],
+                "citation": {"source": "SECURITY/Policy/Secrets metadata inventory"},
+                "reportability": "metadata-only",
+            }
+        )
+    return rows
+
+
 def account_lifecycle_confidence(account: dict[str, object], group_rows: list[dict[str, object]]) -> float:
     score = 0.58
     if account.get("user_name"):
@@ -1853,6 +2147,7 @@ def account_lifecycle_validation_checks(account: dict[str, object], group_rows: 
         "has_decoded_sam_f_timestamps": bool(f_field.get("decoded_timestamps")),
         "has_decoded_sam_f_uac": bool(f_field.get("user_account_control_flags")),
         "has_decoded_sam_v_strings": bool(v_field.get("string_candidates")),
+        "has_decoded_sam_v_layout_fields": bool(v_field.get("layout_string_fields")),
         "native_sam_fv_candidate_decoding_available": bool(f_field.get("decoded") or v_field.get("decoded")),
         "native_sam_fv_report_grade": False,
         "requires_second_parser_validation": True,
@@ -1873,9 +2168,9 @@ def decode_sam_binary_field(field_name: str, value: str) -> dict[str, object]:
         decoded.update(f_decoded)
         decoded["decoded"] = bool(f_decoded)
     elif field_name == "V":
-        string_candidates = extract_utf16le_strings(raw, min_chars=3, limit=20)
-        decoded["string_candidates"] = string_candidates
-        decoded["decoded"] = bool(string_candidates)
+        v_decoded = decode_sam_v_value(raw)
+        decoded.update(v_decoded)
+        decoded["decoded"] = bool(v_decoded.get("string_candidates") or v_decoded.get("layout_string_fields"))
     return decoded
 
 
@@ -1919,6 +2214,88 @@ def decode_sam_f_value(raw: bytes) -> dict[str, object]:
     return result
 
 
+def decode_sam_v_value(raw: bytes) -> dict[str, object]:
+    """Extract conservative SAM V string metadata without claiming OS-version-complete decoding."""
+
+    strings = extract_utf16le_strings(raw, min_chars=3, limit=20)
+    result: dict[str, object] = {
+        "string_candidates": strings,
+        "layout_profile": "sam-v-offset-length-candidate-v1",
+        "layout_base_offset": SAM_V_DATA_BASE_OFFSET,
+        "layout_validation_status": "fallback-string-scan",
+        "layout_string_fields": {},
+        "layout_field_candidates": [],
+    }
+    if len(raw) < SAM_V_DATA_BASE_OFFSET:
+        return result
+
+    field_values: dict[str, str] = {}
+    field_candidates: list[dict[str, object]] = []
+    for field_name, descriptor_offset in SAM_V_STRING_LAYOUT:
+        candidate = decode_sam_v_string_descriptor(raw, field_name, descriptor_offset)
+        if not candidate:
+            continue
+        field_candidates.append(candidate)
+        if candidate.get("decoded_text"):
+            field_values[field_name] = str(candidate["decoded_text"])
+
+    if field_candidates:
+        result["layout_field_candidates"] = field_candidates
+        result["layout_string_fields"] = field_values
+        result["layout_validation_status"] = (
+            "layout-string-candidates-present" if field_values else "layout-descriptors-present-no-text"
+        )
+        result["reportability_warning"] = (
+            "SAM V offsets are treated as OS-version-sensitive candidates; validate field semantics "
+            "with a trusted SAM parser before final account testimony."
+        )
+    return result
+
+
+def decode_sam_v_string_descriptor(raw: bytes, field_name: str, descriptor_offset: int) -> dict[str, object]:
+    if descriptor_offset + 8 > len(raw):
+        return {}
+    relative_offset = int.from_bytes(raw[descriptor_offset : descriptor_offset + 4], "little", signed=False)
+    length = int.from_bytes(raw[descriptor_offset + 4 : descriptor_offset + 8], "little", signed=False)
+    allocated_length = (
+        int.from_bytes(raw[descriptor_offset + 8 : descriptor_offset + 12], "little", signed=False)
+        if descriptor_offset + 12 <= len(raw)
+        else 0
+    )
+    if length <= 0:
+        return {}
+    absolute_offset = SAM_V_DATA_BASE_OFFSET + relative_offset
+    within_bounds = absolute_offset >= SAM_V_DATA_BASE_OFFSET and absolute_offset + length <= len(raw)
+    candidate = {
+        "field": field_name,
+        "descriptor_offset": descriptor_offset,
+        "relative_offset": relative_offset,
+        "absolute_offset": absolute_offset,
+        "byte_length": length,
+        "allocated_length": allocated_length,
+        "within_bounds": within_bounds,
+        "decoded_text": "",
+    }
+    if not within_bounds:
+        return candidate
+    raw_text = raw[absolute_offset : absolute_offset + length]
+    try:
+        text = raw_text.decode("utf-16le", errors="ignore").rstrip("\x00")
+    except UnicodeError:
+        text = ""
+    if text and is_printable_sam_text(text):
+        candidate["decoded_text"] = text
+    return candidate
+
+
+def is_printable_sam_text(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    printable = sum(1 for char in stripped if char.isprintable())
+    return printable / max(len(stripped), 1) >= 0.85
+
+
 def apply_sam_binary_decoded_fields(hint: dict[str, object], field_name: str, decoded: dict[str, object]) -> None:
     if field_name == "F":
         timestamps = decoded.get("decoded_timestamps") if isinstance(decoded.get("decoded_timestamps"), dict) else {}
@@ -1931,10 +2308,16 @@ def apply_sam_binary_decoded_fields(hint: dict[str, object], field_name: str, de
         if decoded.get("user_account_control_flags"):
             hint["uac_flags"] = sorted(set([*list(hint.get("uac_flags") or []), *list(decoded.get("user_account_control_flags") or [])]))
             hint["account_disabled_hint"] = bool(hint.get("account_disabled_hint") or "ACCOUNTDISABLE" in hint["uac_flags"])
-    elif field_name == "V" and not hint.get("user_name"):
+    elif field_name == "V":
+        layout_fields = decoded.get("layout_string_fields") if isinstance(decoded.get("layout_string_fields"), dict) else {}
+        if not hint.get("user_name") and layout_fields.get("user_name"):
+            hint["user_name"] = layout_fields["user_name"]
+        if not hint.get("profile_path") and layout_fields.get("profile_path"):
+            hint["profile_path"] = layout_fields["profile_path"]
         strings = decoded.get("string_candidates") if isinstance(decoded.get("string_candidates"), list) else []
         if strings:
-            hint["user_name"] = strings[0]
+            if not hint.get("user_name"):
+                hint["user_name"] = strings[0]
 
 
 def user_account_control_flags(value: int) -> list[str]:

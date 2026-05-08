@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -60,6 +61,8 @@ class VirtualDiskExtractionResult:
     tool_preflight: tuple[dict[str, object], ...] = ()
     command_history: tuple[dict[str, object], ...] = ()
     warnings: tuple[str, ...] = ()
+    virtual_disk_chain_profile: dict[str, object] = field(default_factory=dict)
+    qemu_img_info_profile: dict[str, object] = field(default_factory=dict)
     commercial_grade_ready: bool = False
 
     @property
@@ -81,6 +84,8 @@ class VirtualDiskExtractionResult:
             "tool_preflight": list(self.tool_preflight),
             "command_history": list(self.command_history),
             "warnings": list(self.warnings),
+            "virtual_disk_chain_profile": self.virtual_disk_chain_profile,
+            "qemu_img_info_profile": self.qemu_img_info_profile,
             "commercial_grade_ready": self.commercial_grade_ready,
             "commercial_gap_ids": ["#24"],
             "validation_matrix": image_validation_matrix(
@@ -103,6 +108,8 @@ class VirtualDiskExtractionResult:
                     "command_history": [*list(self.command_history), *list(self.raw_result.command_history)],
                     "raw_extraction": self.raw_result.to_dict(),
                     "warnings": list(self.warnings),
+                    "virtual_disk_chain_profile": self.virtual_disk_chain_profile,
+                    "qemu_img_info_profile": self.qemu_img_info_profile,
                     "native_capabilities": dict(VIRTUAL_DISK_NATIVE_CAPABILITIES),
                     "limitations": VIRTUAL_DISK_REPORT_GRADE_BLOCKERS,
                 },
@@ -120,6 +127,8 @@ class VirtualDiskExtractionResult:
                     "command_history": [*list(self.command_history), *list(self.raw_result.command_history)],
                     "raw_extraction": self.raw_result.to_dict(),
                     "warnings": list(self.warnings),
+                    "virtual_disk_chain_profile": self.virtual_disk_chain_profile,
+                    "qemu_img_info_profile": self.qemu_img_info_profile,
                     "limitations": VIRTUAL_DISK_REPORT_GRADE_BLOCKERS,
                 },
             ),
@@ -143,6 +152,70 @@ def is_virtual_disk_path(path: Path) -> bool:
 
 def can_convert_virtual_disk_suffix(suffix: str) -> bool:
     return suffix.lower() in QEMU_CONVERTIBLE_SUFFIXES
+
+
+def build_virtual_disk_chain_profile(source_path: Path) -> dict[str, object]:
+    suffix = source_path.suffix.lower()
+    name = source_path.name.lower()
+    snapshot_tokens = ("snapshot", "delta", "differencing", "-00000", "-s0", ".avhd", ".avhdx")
+    suspected_snapshot = any(token in name for token in snapshot_tokens)
+    warnings: list[str] = []
+    if suspected_snapshot:
+        warnings.append("Virtual disk name suggests a snapshot/differencing member; parent chain validation is required.")
+    if suffix == ".xva":
+        warnings.append("XVA direct extraction is not implemented; export metadata and produced disks must be preserved.")
+    elif suffix in {".vmdk", ".vhdx", ".qcow", ".qcow2"}:
+        warnings.append("Parent/snapshot chain metadata is not natively resolved; validate qemu-img info and acquisition notes.")
+    return {
+        "profile_version": "virtual-disk-chain-v1",
+        "source_path": str(source_path.resolve()),
+        "detected_format": suffix.lstrip(".") or "virtual-disk",
+        "qemu_convertible": can_convert_virtual_disk_suffix(suffix),
+        "suspected_snapshot_or_differencing_member": suspected_snapshot,
+        "chain_validation_status": "review-required" if warnings else "not-detected",
+        "parent_chain_resolution": "not-implemented",
+        "hypervisor_metadata_decode": "not-implemented",
+        "warnings": warnings,
+        "recommended_validation": [
+            "Capture qemu-img info output and compare virtual size, backing file, and format-specific metadata.",
+            "Preserve hypervisor/export logs when snapshots, differencing disks, or converted raw output are used.",
+        ],
+    }
+
+
+def build_qemu_img_info_profile(result: subprocess.CompletedProcess[str]) -> dict[str, object]:
+    stdout = result.stdout.strip()
+    stderr = result.stderr.strip()
+    parsed: dict[str, object] = {}
+    parse_status = "empty-output"
+    if stdout:
+        try:
+            candidate = json.loads(stdout)
+            if isinstance(candidate, dict):
+                parsed = candidate
+                parse_status = "json-parsed"
+            else:
+                parse_status = "json-non-object"
+        except json.JSONDecodeError:
+            parse_status = "text-output"
+            for line in stdout.splitlines():
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                parsed[key.strip().lower().replace(" ", "_")] = value.strip()
+    return {
+        "profile_version": "qemu-img-info-profile-v1",
+        "command_status": "ok" if result.returncode == 0 else "failed",
+        "parse_status": parse_status,
+        "returncode": result.returncode,
+        "format": parsed.get("format") or parsed.get("file_format") or "",
+        "virtual_size": parsed.get("virtual-size") or parsed.get("virtual_size") or "",
+        "actual_size": parsed.get("actual-size") or parsed.get("disk_size") or "",
+        "backing_filename": parsed.get("backing-filename") or parsed.get("backing_file") or "",
+        "backing_filename_present": bool(parsed.get("backing-filename") or parsed.get("backing_file")),
+        "parsed": parsed,
+        "stderr_preview": stderr[:500],
+    }
 
 
 def missing_virtual_disk_tools(
@@ -179,6 +252,7 @@ def extract_virtual_disk_to_directory(
         raise VirtualDiskExtractionError(
             "XVA direct extraction is not implemented yet; export or convert the virtual disk first and preserve the export log."
         )
+    chain_profile = build_virtual_disk_chain_profile(source_path)
 
     missing = missing_virtual_disk_tools(source_path.suffix, tool_resolver=tool_resolver)
     tool_preflight = collect_tool_preflight(VIRTUAL_DISK_REQUIRED_TOOLS, runner=runner, tool_resolver=tool_resolver)
@@ -195,9 +269,16 @@ def extract_virtual_disk_to_directory(
     convert_dir.mkdir(parents=True, exist_ok=True)
     converted_raw = convert_dir / f"{source_path.stem}.raw"
 
+    info_command = ["qemu-img", "info", "--output=json", str(source_path)]
+    info_result = runner(info_command)
+    qemu_img_info_profile = build_qemu_img_info_profile(info_result)
+
     convert_command = ["qemu-img", "convert", "-O", "raw", str(source_path), str(converted_raw)]
     convert_result = runner(convert_command)
-    command_history = [command_record("qemu-img-raw-conversion", convert_command, convert_result)]
+    command_history = [
+        command_record("qemu-img-info", info_command, info_result),
+        command_record("qemu-img-raw-conversion", convert_command, convert_result),
+    ]
     if convert_result.returncode != 0:
         detail = convert_result.stderr.strip() or convert_result.stdout.strip()
         raise VirtualDiskExtractionError(f"qemu-img conversion failed: {detail}")
@@ -220,6 +301,8 @@ def extract_virtual_disk_to_directory(
         converted_raw_integrity=describe_source_integrity(converted_raw),
         tool_preflight=tuple(tool_preflight),
         command_history=tuple(command_history),
+        virtual_disk_chain_profile=chain_profile,
+        qemu_img_info_profile=qemu_img_info_profile,
         warnings=(
             "Virtual disk direct handling converts to raw before Sleuth Kit recovery; validate conversion logs and source chain metadata.",
         ),

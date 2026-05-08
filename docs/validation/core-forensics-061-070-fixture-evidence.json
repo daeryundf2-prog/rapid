@@ -9,25 +9,25 @@
       "title": "Fuzzy search/stemming/regex proximity search",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search output preserves query mode/options, fuzzy/stem/regex behavior, proximity metadata, source pointers, trusted query-hit diff helper/gate, verification warnings, #61 core_accuracy_gates, and reportability blockers for missing source-row hash verification plus regex/fuzzy/proximity false-positive review."
+        "Search output preserves query mode/options, fuzzy/stem/regex behavior, proximity metadata, source pointers, advanced_search_profile query validation, regex validity warnings, web mode/fuzzy/proximity controls, trusted query-hit diff helper/gate, verification warnings, #61 core_accuracy_gates, and reportability blockers for missing source-row hash verification plus regex/fuzzy/proximity false-positive review."
       ],
-      "remaining_external_validation": ["Large multilingual query relevance corpus, trusted query-hit manifest, and UI query-builder validation."]
+      "remaining_external_validation": ["Large multilingual query relevance corpus, trusted query-hit manifest, tuned false-positive/false-negative metrics, and full browser query-builder validation."]
     },
     {
       "item": 62,
       "title": "Saved keyword pack library",
       "test_files": ["tests/test_rapidtriage_api.py", "tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Keyword-pack API and resolver preserve built-in inventory, deduplicated expansion, pack provenance, custom JSON support, trusted expansion diff helper/gate, #62 core_accuracy_gates, and reportability blockers for missing signed/versioned packs, case edits, and language/domain corpus validation."
+        "Keyword-pack API and resolver preserve built-in inventory, deduplicated expansion, pack provenance, custom JSON support, API search keyword_pack_selection_profile, web built-in pack selection controls, trusted expansion diff helper/gate, #62 core_accuracy_gates, and reportability blockers for missing signed/versioned packs, case edits, and language/domain corpus validation."
       ],
-      "remaining_external_validation": ["Signed pack library, trusted expansion manifest, per-case editing UI, and release-reviewed pack versions."]
+      "remaining_external_validation": ["Signed pack library, trusted expansion manifest, per-case editing UI, language/domain pack corpus, and release-reviewed pack versions."]
     },
     {
       "item": 63,
       "title": "IOC/TI enrichment plugin",
-      "test_files": ["tests/test_rapidtriage_indicators.py"],
+      "test_files": ["tests/test_rapidtriage_indicators.py", "tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Indicator summaries preserve source links, local rules, offline feed provenance, matched_on mode, local-only warning, trusted IOC/TI diff helper/gate, #63 core_accuracy_gates, and reportability blockers for missing signed feed provenance, STIX/TAXII/provider validation, confidence decay, and API governance."
+        "Indicator summaries preserve source links, local rules, offline feed provenance with feed hash/size, matched_on mode, local-only warning, API/web local enrichment review packages, trusted IOC/TI diff helper/gate, #63 core_accuracy_gates, and reportability blockers for missing signed feed provenance, STIX/TAXII/provider validation, confidence decay, and API governance."
       ],
       "remaining_external_validation": ["Signed feeds, STIX/TAXII import, confidence decay, trusted enrichment manifest, and feed trust workflow."]
     },
@@ -36,7 +36,7 @@
       "title": "Report citation manager",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB report exports preserve citation IDs, source references, citation counts, report-use warnings, trusted citation-index diff helper/gate, #64 core_accuracy_gates, and reportability blockers for missing source hashes, parser versions, exhibit numbering, manifests, and reviewer sign-off."
+        "Case DB report exports preserve citation IDs, copy-safe citation strings, source references, source-hash/parser-version coverage profile, citation counts, report-use warnings, trusted citation-index diff helper/gate, #64 core_accuracy_gates, and reportability blockers for missing source hashes, parser versions, exhibit numbering, manifests, and reviewer sign-off."
       ],
       "remaining_external_validation": ["Exhibit numbering UI, trusted citation manifest, jurisdiction templates, and full source-hash completeness validation."]
     },
@@ -45,7 +45,7 @@
       "title": "Evidence selection/version history",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Review history preserves version rows, changed fields, previous/current state, include-in-report changes, trusted evidence-history diff helper/gate, #65 core_accuracy_gates, and reportability blockers for missing immutable signed multi-user history and conflict handling."
+        "Review history preserves version rows, changed fields, previous/current state, include-in-report changes, per-row hashes, export-time history hash chain/head hash, trusted evidence-history diff helper/gate, #65 core_accuracy_gates, and reportability blockers for missing immutable signed multi-user history and conflict handling."
       ],
       "remaining_external_validation": ["Multi-user signed history, trusted history manifest, conflict handling, and database-level append-only enforcement."]
     },
@@ -54,7 +54,7 @@
       "title": "100k/1M/10M record benchmark",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Benchmark output preserves scale matrix, ingest/search metrics, memory/output size, run-summary link, trusted threshold diff helper/gate, #66 core_accuracy_gates, #66 commercial_uplift_evidence, and reportability blockers for missing hardware/OS/dependency/evidence-size/wall-time/memory/p95 independent reproduction evidence."
+        "Benchmark output preserves scale matrix, ingest/search metrics, raw latency samples, environment profile, release-threshold guardrail profile, memory/output size, run-summary link, trusted threshold diff helper/gate, #66 core_accuracy_gates, #66 commercial_uplift_evidence, and reportability blockers for missing hardware/OS/dependency/evidence-size/wall-time/memory/p95 independent reproduction evidence."
       ],
       "remaining_external_validation": ["Published 100k/1M/10M hardware runs, trusted threshold manifests, and release thresholds."]
     },
@@ -63,7 +63,7 @@
       "title": "1TB-10TB evidence stress test",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, trusted run-log diff helper/gate, #67 core_accuracy_gates, #67 commercial_uplift_evidence, and reportability blockers for missing actual 1TB-10TB hardware runs, bottleneck traces, and independent reproduction logs."
+        "Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, per-scenario run-log templates, telemetry/evidence capture profile, trusted run-log diff helper/gate, #67 core_accuracy_gates, #67 commercial_uplift_evidence, and reportability blockers for missing actual 1TB-10TB hardware runs, bottleneck traces, and independent reproduction logs."
       ],
       "remaining_external_validation": ["Actual 1TB-10TB hardware runs, trusted run-log manifests, bottleneck logs, and independent reproduction."]
     },
@@ -72,25 +72,25 @@
       "title": "Incremental indexing",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Run fingerprint output preserves path/size/mtime metadata, truncation disclosure, reuse safety, trusted reuse diff helper/gate, #68 core_accuracy_gates, #68 commercial_uplift_evidence, and reportability blockers for missing content-hash reuse, changed-source behavior, and large-case replay validation."
+        "Run fingerprint output preserves path/size/mtime metadata, bounded per-file SHA-256 hashes, incremental reuse plan counts, truncation disclosure, reuse safety, trusted reuse diff helper/gate, #68 core_accuracy_gates, #68 commercial_uplift_evidence, and reportability blockers for missing full large-file delta reuse, trusted manifests, and large-case replay validation."
       ],
-      "remaining_external_validation": ["Per-file content-hash incremental reindexing, trusted reuse manifests, and large-case validation."]
+      "remaining_external_validation": ["Full large-file content-hash delta reindexing, trusted reuse manifests, and large-case validation."]
     },
     {
       "item": 69,
       "title": "Background job queue",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Job payloads preserve job status, step progress, state-file persistence assessment, cancel/retry state, trusted transition-log diff helper/gate, #69 core_accuracy_gates, #69 commercial_uplift_evidence, and reportability blockers for missing distributed workers, parser-level progress, resource telemetry, cancellation, and retry validation under load."
+        "Job payloads preserve job status, step progress, state-file persistence assessment, append-intent transition logs, transition head hashes, cancel/retry state, trusted transition-log diff helper/gate, #69 core_accuracy_gates, #69 commercial_uplift_evidence, and reportability blockers for missing distributed workers, parser-level progress, resource telemetry, cancellation, and retry validation under load."
       ],
-      "remaining_external_validation": ["Distributed workers, trusted transition logs, parser-level progress percentages, and cancellation validation under load."]
+      "remaining_external_validation": ["Distributed workers, externally trusted transition logs, parser-level progress percentages, and cancellation validation under load."]
     },
     {
       "item": 70,
       "title": "Stage checkpoint/resume hardening",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Run checkpoint output preserves stage outputs, sizes, reused flags, resume state, partial-stage warnings, trusted checkpoint diff helper/gate, #70 core_accuracy_gates, #70 commercial_uplift_evidence, and reportability blockers for missing failed-stage and mid-parser resume validation across long-running corpora."
+        "Run checkpoint output preserves stage outputs, sizes, reused flags, row hashes, checkpoint integrity head hash, resume state, partial-stage warnings, trusted checkpoint diff helper/gate, #70 core_accuracy_gates, #70 commercial_uplift_evidence, and reportability blockers for missing failed-stage and mid-parser resume validation across long-running corpora."
       ],
       "remaining_external_validation": ["Mid-parser checkpointing, trusted checkpoint manifests, failed-stage resume, and long-running case replay validation."]
     }

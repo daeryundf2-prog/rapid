@@ -47,6 +47,8 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             eml_gate = eml["details"]["core_accuracy_gates"][0]
             self.assertEqual(eml_gate["gap_id"], "#36")
             self.assertIn("mailbox/message source profile detection", eml_gate["satisfied_checks"])
+            self.assertIn("mailbox strategy profile", eml_gate["satisfied_checks"])
+            self.assertIn("email expansion citation manifest", eml_gate["satisfied_checks"])
             self.assertIn("message header/body/attachment inventory", eml_gate["satisfied_checks"])
             self.assertIn("PST/OST native limitation warning", eml_gate["satisfied_checks"])
             self.assertIn("threading/dedup validation warning", eml_gate["satisfied_checks"])
@@ -54,6 +56,40 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             eml_uplift = eml["details"]["commercial_uplift_evidence"]
             self.assertEqual(eml_uplift["batch_id"], "commercial-uplift-036-040")
             self.assertEqual(eml_uplift["item_numbers"], [36])
+            self.assertEqual(eml_uplift["functional_priority_profile"]["item_number"], 49)
+            self.assertEqual(eml_uplift["functional_priority_profile"]["batch_id"], "commercial-uplift-046-050")
+            eml_manifest = eml["details"]["email_expansion_citation_manifest"]
+            self.assertEqual(eml_manifest["manifest_version"], "email-expansion-citation-manifest-v1")
+            self.assertEqual(eml_manifest["item_number"], 49)
+            self.assertEqual(eml_manifest["gap_id"], "#49")
+            self.assertEqual(len(eml_manifest["manifest_sha256"]), 64)
+            self.assertEqual(
+                eml["details"]["email_expansion_citation_manifest_hash"],
+                eml_manifest["manifest_sha256"],
+            )
+            self.assertEqual(eml_manifest["message_citation_count"], 1)
+            self.assertEqual(eml_manifest["attachment_citation_count"], 1)
+            self.assertIn("row_hash", eml_manifest["message_citations"][0])
+            self.assertEqual(
+                eml_uplift["functional_priority_profile"]["implemented_controls"]["citation_manifest_hash"],
+                eml_manifest["manifest_sha256"],
+            )
+            self.assertIn(
+                "email-expansion-citation-manifest-emitted",
+                eml_uplift["functional_priority_profile"]["passed_validation_check_ids"],
+            )
+            self.assertEqual(
+                eml["details"]["email_mailbox_strategy_profile"]["selected_track"],
+                "mime-message-parse-known-answer-validation",
+            )
+            self.assertEqual(
+                eml_uplift["email_mailbox_strategy_profile"]["selected_track"],
+                "mime-message-parse-known-answer-validation",
+            )
+            self.assertIn(
+                "email-known-answer-corpus-not-attached",
+                eml_uplift["functional_priority_profile"]["failed_validation_check_ids"],
+            )
             self.assertIn("source-hash-and-basic-parse", eml_uplift["passed_validation_matrix_ids"])
             self.assertIn("thread-dedup-validation", eml_uplift["failed_validation_matrix_ids"])
             self.assertEqual(
@@ -84,16 +120,49 @@ class RapidTriageEmailArtifactsTests(unittest.TestCase):
             self.assertIn("alice@example.test", pst["details"]["email_candidates"])
             self.assertIn("mailbox-container-candidate", pst["details"]["risk_flags"])
             self.assertFalse(pst["details"]["validation_checks"]["native_mailbox_decoding_available"])
+            self.assertTrue(pst["details"]["validation_checks"]["mapi_container_review_profile_emitted"])
+            self.assertTrue(pst["details"]["validation_checks"]["bounded_candidate_inventory_present"])
             self.assertIn("#36", pst["details"]["commercial_gap_ids"])
             self.assertEqual(pst["details"]["forensic_review"]["gap_id"], "#36")
             self.assertEqual(pst["details"]["email_format_profile"]["support_tier"], "bounded-string-inventory")
             self.assertIn("mapi-native-object-decode", {item["id"] for item in pst["details"]["email_issue_matrix"]})
             pst_gate = pst["details"]["core_accuracy_gates"][0]
             self.assertEqual(pst_gate["gap_id"], "#36")
+            self.assertIn("MAPI container bounded review profile", pst_gate["satisfied_checks"])
+            self.assertIn("bounded mailbox candidate inventory", pst_gate["satisfied_checks"])
             self.assertIn("PST/OST native limitation warning", pst_gate["satisfied_checks"])
+            self.assertIn("mailbox strategy profile", pst_gate["satisfied_checks"])
+            self.assertIn("email expansion citation manifest", pst_gate["satisfied_checks"])
+            mapi_profile = pst["details"]["mapi_container_review_profile"]
+            self.assertEqual(mapi_profile["profile_version"], "mapi-container-review-v1")
+            self.assertEqual(mapi_profile["native_object_decode_status"], "not-implemented")
+            self.assertGreaterEqual(mapi_profile["folder_path_candidate_count"], 1)
+            self.assertGreaterEqual(mapi_profile["attachment_name_candidate_count"], 1)
+            self.assertEqual(mapi_profile["deleted_item_recovery_status"], "not-performed")
+            self.assertEqual(
+                pst["details"]["email_mailbox_strategy_profile"]["selected_track"],
+                "pst-libpff-or-outlook-export-diff-required",
+            )
+            self.assertTrue(pst["details"]["email_mailbox_strategy_profile"]["bounded_inventory_only"])
             pst_uplift = pst["details"]["commercial_uplift_evidence"]
+            self.assertEqual(pst_uplift["functional_priority_profile"]["item_number"], 49)
+            pst_manifest = pst["details"]["email_expansion_citation_manifest"]
+            self.assertEqual(pst_manifest["manifest_version"], "email-expansion-citation-manifest-v1")
+            self.assertEqual(pst_manifest["item_number"], 49)
+            self.assertEqual(len(pst_manifest["manifest_sha256"]), 64)
+            self.assertGreaterEqual(pst_manifest["candidate_citation_count"], 3)
+            self.assertEqual(pst_manifest["candidate_citations"][0]["source_viewer_locator"]["viewer"], "bounded-container-string")
+            self.assertIn(
+                "bounded-container-candidate-citations-emitted",
+                pst_uplift["functional_priority_profile"]["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "pst-ost-msg-native-object-decode-not-implemented",
+                pst_uplift["functional_priority_profile"]["failed_validation_check_ids"],
+            )
             self.assertIn("native-container-object-decode", pst_uplift["failed_validation_matrix_ids"])
             self.assertEqual(pst_uplift["large_data_controls"]["container_scan_limit"], 16 * 1024 * 1024)
+            self.assertTrue(pst_uplift["large_data_controls"]["mapi_container_review_profile_present"])
             self.assertIn(
                 "native-mapi-container-decoding-not-validated",
                 pst_uplift["reportability_decision"]["blockers"],
@@ -180,6 +249,7 @@ def write_email_fixture(root: Path) -> None:
         (root / name).write_bytes(
             b"Subject: Container Fixture\r\n"
             b"alice@example.test\x00bob@example.test\x00"
+            + b"IPM.Note\x00invoice.pdf\x00Inbox\x00Deleted Items\x00"
             + "secret mailbox keyword".encode("utf-16le")
         )
 

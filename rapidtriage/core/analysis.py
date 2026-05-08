@@ -207,10 +207,35 @@ def analysis_commercial_uplift_evidence(
         "#50": ["editable-persistent-workbook", "evidence-attachment-workflow", "workbook-version-history"],
     }
     cluster_summary = clusters.get("summary") if isinstance(clusters.get("summary"), Mapping) else {}
+    cluster_review_profile = (
+        clusters.get("cluster_review_profile")
+        if isinstance(clusters.get("cluster_review_profile"), Mapping)
+        else {}
+    )
     entity_summary = entities.get("summary") if isinstance(entities.get("summary"), Mapping) else {}
+    entity_review_profile = (
+        entities.get("entity_review_profile")
+        if isinstance(entities.get("entity_review_profile"), Mapping)
+        else {}
+    )
     graph_summary = graph.get("summary") if isinstance(graph.get("summary"), Mapping) else {}
+    graph_interaction_profile = (
+        graph.get("graph_interaction_profile")
+        if isinstance(graph.get("graph_interaction_profile"), Mapping)
+        else {}
+    )
     timeline_summary = timeline.get("summary") if isinstance(timeline.get("summary"), Mapping) else {}
+    timeline_correlation_profile = (
+        timeline.get("timeline_correlation_profile")
+        if isinstance(timeline.get("timeline_correlation_profile"), Mapping)
+        else {}
+    )
     workbook_summary = workbook.get("summary") if isinstance(workbook.get("summary"), Mapping) else {}
+    workbook_review_profile = (
+        workbook.get("workbook_review_profile")
+        if isinstance(workbook.get("workbook_review_profile"), Mapping)
+        else {}
+    )
     trusted_diffs = trusted_diffs or {}
     trusted_diff_blockers = [
         blocker
@@ -262,9 +287,36 @@ def analysis_commercial_uplift_evidence(
             "max_cluster_representatives": MAX_CLUSTER_REPRESENTATIVES,
             "max_entity_match_references": MAX_ENTITY_MATCH_REFERENCES,
             "cluster_truncated": bool(cluster_summary.get("truncated")),
+            "cluster_review_profile_present": bool(cluster_review_profile),
+            "cluster_review_queue_count": int(cluster_review_profile.get("review_queue_count") or 0),
+            "high_volume_cluster_count": int(cluster_review_profile.get("high_volume_cluster_count") or 0),
+            "representative_first_cluster_review": bool(cluster_review_profile.get("representative_first_review")),
             "entity_truncated": bool(entity_summary.get("truncated")),
+            "entity_review_profile_present": bool(entity_review_profile),
+            "entity_review_queue_count": int(entity_review_profile.get("review_queue_count") or 0),
+            "merge_split_candidate_count": int(entity_review_profile.get("merge_split_candidate_count") or 0),
+            "analyst_verified_entity_resolution": bool(
+                entity_review_profile.get("analyst_verified_entity_resolution")
+            ),
+            "persistent_entity_review_state": bool(entity_review_profile.get("persistent_entity_review_state")),
             "graph_truncated": bool(graph_summary.get("truncated")),
+            "graph_interaction_profile_present": bool(graph_interaction_profile),
+            "graph_filter_count": len(graph_interaction_profile.get("available_filters") or []),
+            "graph_edge_page_count": int(graph_interaction_profile.get("edge_page_count") or 0),
+            "graph_saved_layout_supported": bool(graph_interaction_profile.get("saved_layout_supported")),
             "timeline_truncated": bool(timeline_summary.get("truncated")),
+            "timeline_correlation_profile_present": bool(timeline_correlation_profile),
+            "timeline_event_page_count": int(timeline_correlation_profile.get("event_page_count") or 0),
+            "timeline_missing_timezone_count": int(timeline_correlation_profile.get("missing_timezone_count") or 0),
+            "timeline_clock_skew_overlay_supported": bool(
+                timeline_correlation_profile.get("clock_skew_overlay_supported")
+            ),
+            "workbook_review_profile_present": bool(workbook_review_profile),
+            "workbook_review_queue_count": int(workbook_review_profile.get("review_queue_count") or 0),
+            "workbook_evidence_attachment_count": int(
+                workbook_review_profile.get("evidence_attachment_count") or 0
+            ),
+            "workbook_version_history_supported": bool(workbook_review_profile.get("version_history_supported")),
             "persistent_review_state": False,
             "full_case_reindex": False,
         },
@@ -338,10 +390,35 @@ def analysis_core_accuracy_gates(
         f"duplicate_groups:{deduplication.get('summary', {}).get('duplicate_group_count', 0) if isinstance(deduplication.get('summary'), Mapping) else 0}",
     ]
     cluster_summary = clusters.get("summary") if isinstance(clusters.get("summary"), Mapping) else {}
+    cluster_review_profile = (
+        clusters.get("cluster_review_profile")
+        if isinstance(clusters.get("cluster_review_profile"), Mapping)
+        else {}
+    )
     entity_summary = entities.get("summary") if isinstance(entities.get("summary"), Mapping) else {}
+    entity_review_profile = (
+        entities.get("entity_review_profile")
+        if isinstance(entities.get("entity_review_profile"), Mapping)
+        else {}
+    )
     graph_summary = graph.get("summary") if isinstance(graph.get("summary"), Mapping) else {}
+    graph_interaction_profile = (
+        graph.get("graph_interaction_profile")
+        if isinstance(graph.get("graph_interaction_profile"), Mapping)
+        else {}
+    )
     timeline_summary = timeline.get("summary") if isinstance(timeline.get("summary"), Mapping) else {}
+    timeline_correlation_profile = (
+        timeline.get("timeline_correlation_profile")
+        if isinstance(timeline.get("timeline_correlation_profile"), Mapping)
+        else {}
+    )
     workbook_summary = workbook.get("summary") if isinstance(workbook.get("summary"), Mapping) else {}
+    workbook_review_profile = (
+        workbook.get("workbook_review_profile")
+        if isinstance(workbook.get("workbook_review_profile"), Mapping)
+        else {}
+    )
     cluster_rows = clusters.get("clusters") if isinstance(clusters.get("clusters"), list) else []
     entity_rows = entities.get("entities") if isinstance(entities.get("entities"), list) else []
     graph_nodes = graph.get("nodes") if isinstance(graph.get("nodes"), list) else []
@@ -350,6 +427,11 @@ def analysis_core_accuracy_gates(
     hypotheses = workbook.get("hypotheses") if isinstance(workbook.get("hypotheses"), list) else []
     dedup_summary = deduplication.get("summary") if isinstance(deduplication.get("summary"), Mapping) else {}
     duplicate_groups = deduplication.get("groups") if isinstance(deduplication.get("groups"), list) else []
+    dedup_review_profile = (
+        deduplication.get("dedup_review_profile")
+        if isinstance(deduplication.get("dedup_review_profile"), Mapping)
+        else {}
+    )
     trusted_diffs = trusted_diffs or {}
     for number, diff in trusted_diffs.items():
         if isinstance(diff, Mapping):
@@ -363,6 +445,12 @@ def analysis_core_accuracy_gates(
         item46.append("representative match links")
     if any(isinstance(row, Mapping) and row.get("sources") for row in cluster_rows):
         item46.append("source and keyword grouping")
+    if cluster_review_profile:
+        item46.append("cluster review profile")
+        evidence_refs.append(f"cluster_review_queue_count:{cluster_review_profile.get('review_queue_count', 0)}")
+        evidence_refs.append(f"high_volume_cluster_count:{cluster_review_profile.get('high_volume_cluster_count', 0)}")
+    if cluster_review_profile.get("representative_first_review"):
+        item46.append("representative-first review queue")
     if "truncated" in cluster_summary:
         item46.append("truncation disclosure")
     if not ANALYSIS_NATIVE_CAPABILITIES["ml_semantic_clustering"]:
@@ -379,6 +467,12 @@ def analysis_core_accuracy_gates(
         item47.append("match reference links")
     if any(isinstance(row, Mapping) and row.get("risk_flags") for row in entity_rows):
         item47.append("risk flag assignment")
+    if entity_review_profile:
+        item47.append("entity review profile")
+        evidence_refs.append(f"entity_review_queue_count:{entity_review_profile.get('review_queue_count', 0)}")
+        evidence_refs.append(f"merge_split_candidate_count:{entity_review_profile.get('merge_split_candidate_count', 0)}")
+    if int(entity_review_profile.get("merge_split_candidate_count") or 0) > 0:
+        item47.append("merge/split review queue")
     if not ANALYSIS_NATIVE_CAPABILITIES["analyst_verified_entity_resolution"]:
         item47.append("merge/split limitation warning")
     if trusted_diffs.get(47, {}).get("status") == "pass":
@@ -392,6 +486,14 @@ def analysis_core_accuracy_gates(
         item48.append("relationship edges built")
     if matches:
         item48.append("source citation references")
+    if any(isinstance(row, Mapping) and row.get("source_citation") for row in graph_edges):
+        item48.append("edge source citations")
+    if graph_interaction_profile:
+        item48.append("graph interaction profile")
+        evidence_refs.append(f"graph_filter_count:{len(graph_interaction_profile.get('available_filters') or [])}")
+        evidence_refs.append(f"graph_edge_page_count:{graph_interaction_profile.get('edge_page_count', 0)}")
+    if graph_interaction_profile.get("available_filters"):
+        item48.append("filter metadata")
     if "truncated" in graph_summary:
         item48.append("graph paging/truncation disclosure")
     if not ANALYSIS_NATIVE_CAPABILITIES["court_ready_graph_layout"]:
@@ -408,6 +510,16 @@ def analysis_core_accuracy_gates(
         item49.append("source match anchors")
     if timeline.get("date_buckets") is not None:
         item49.append("date bucket generation")
+    if timeline_correlation_profile:
+        item49.append("timeline correlation profile")
+        evidence_refs.append(f"timeline_event_page_count:{timeline_correlation_profile.get('event_page_count', 0)}")
+        evidence_refs.append(
+            f"timeline_missing_timezone_count:{timeline_correlation_profile.get('missing_timezone_count', 0)}"
+        )
+    if timeline_correlation_profile.get("event_page_count") is not None:
+        item49.append("cursor page metadata")
+    if timeline_correlation_profile.get("timezone_counts") is not None:
+        item49.append("timezone distribution")
     item49.append("timezone/skew limitation warning")
     if trusted_diffs.get(49, {}).get("status") == "pass":
         item49.append("trusted timeline known-answer diff pass")
@@ -421,6 +533,14 @@ def analysis_core_accuracy_gates(
         item50.append("review tasks and questions")
     if any(isinstance(row, Mapping) and row.get("ready_for_report") is False for row in hypotheses):
         item50.append("report-readiness flag")
+    if workbook_review_profile:
+        item50.append("workbook review profile")
+        evidence_refs.append(f"workbook_review_queue_count:{workbook_review_profile.get('review_queue_count', 0)}")
+        evidence_refs.append(
+            f"workbook_evidence_attachment_count:{workbook_review_profile.get('evidence_attachment_count', 0)}"
+        )
+    if int(workbook_review_profile.get("review_queue_count") or 0) > 0:
+        item50.append("hypothesis review queue")
     if not ANALYSIS_NATIVE_CAPABILITIES["full_case_reindex"]:
         item50.append("persistence/versioning limitation warning")
     if trusted_diffs.get(50, {}).get("status") == "pass":
@@ -435,6 +555,9 @@ def analysis_core_accuracy_gates(
         item60.append("representative hit links")
     if any(isinstance(row, Mapping) and (row.get("sources") or row.get("paths")) for row in duplicate_groups):
         item60.append("source/path references")
+    if dedup_review_profile.get("collapse_preview_supported"):
+        item60.append("collapse preview profile")
+        evidence_refs.append(f"dedup_review_group_count:{dedup_review_profile.get('duplicate_group_count', 0)}")
     item60.append("near-duplicate limitation warning")
 
     return [
@@ -486,17 +609,84 @@ def build_result_clusters(
         )
         if len(clusters) >= max_clusters:
             break
+    review_profile = build_cluster_review_profile(clusters, candidate_bucket_count=len(buckets), max_clusters=max_clusters)
     return {
         "summary": {
             "cluster_count": len(clusters),
             "candidate_bucket_count": len(buckets),
             "max_clusters": max_clusters,
             "truncated": len(clusters) >= max_clusters and len(buckets) > max_clusters,
+            "review_queue_count": int(review_profile.get("review_queue_count") or 0),
+            "high_volume_cluster_count": int(review_profile.get("high_volume_cluster_count") or 0),
             "commercial_gap_ids": ["#46"],
             "commercial_grade_ready": False,
         },
+        "cluster_review_profile": review_profile,
         "clusters": clusters,
         "report_grade_assessment": component_report_grade_assessment("#46", "large-result-clustering"),
+    }
+
+
+def build_cluster_review_profile(
+    clusters: Sequence[Mapping[str, object]],
+    *,
+    candidate_bucket_count: int,
+    max_clusters: int,
+) -> dict[str, object]:
+    family_counts = Counter(str(cluster.get("family") or "unknown") for cluster in clusters)
+    review_queue: list[dict[str, object]] = []
+    high_volume_count = 0
+    for cluster in clusters:
+        match_count = int(cluster.get("match_count") or 0)
+        if match_count >= 3:
+            high_volume_count += 1
+        family = str(cluster.get("family") or "unknown")
+        review_priority = "high" if match_count >= 3 or family in {"keyword", "folder"} else "normal"
+        review_queue.append(
+            {
+                "cluster_id": str(cluster.get("cluster_id") or ""),
+                "family": family,
+                "value": str(cluster.get("value") or ""),
+                "label": str(cluster.get("label") or ""),
+                "match_count": match_count,
+                "representative_match_indices": list(cluster.get("match_indices") or [])[:MAX_CLUSTER_REPRESENTATIVES],
+                "top_paths": list(cluster.get("top_paths") or [])[:5],
+                "review_priority": review_priority,
+                "review_status": "unreviewed",
+                "review_decision": "pending",
+                "report_candidate": False,
+                "noise_candidate": family in {"source", "extension"} and match_count >= 5,
+                "review_hint": str(cluster.get("review_hint") or ""),
+            }
+        )
+    review_queue.sort(
+        key=lambda item: (
+            item["review_priority"] != "high",
+            -int(item["match_count"]),
+            str(item["family"]),
+            str(item["value"]),
+        )
+    )
+    return {
+        "profile_version": "large-result-cluster-review-v1",
+        "selected_track": "bounded-representative-first-cluster-review",
+        "cluster_count": len(clusters),
+        "candidate_bucket_count": candidate_bucket_count,
+        "max_clusters": max_clusters,
+        "family_counts": dict(sorted(family_counts.items())),
+        "high_volume_cluster_count": high_volume_count,
+        "review_queue": review_queue,
+        "review_queue_count": len(review_queue),
+        "persistent_review_state": False,
+        "near_duplicate_text_media_clustering": False,
+        "representative_first_review": True,
+        "commercial_release_blocked": True,
+        "reporting_status": "cluster-review-validation-required",
+        "required_before_report": [
+            "persist analyst review decisions before suppressing, promoting, or reporting cluster output",
+            "validate high-volume clusters against hand-labeled review sets for false positive/noise rates",
+            "add near-duplicate text/media clustering validation before claiming semantic clustering coverage",
+        ],
     }
 
 
@@ -706,11 +896,15 @@ def build_search_hit_deduplication(
                 "fingerprint": fingerprint,
                 "match_count": len(indices),
                 "match_indices": indices[:20],
+                "representative_index": indices[0],
+                "hidden_duplicate_count": max(0, len(indices) - 1),
                 "truncated_match_indices": len(indices) > 20,
                 "sources": sorted({str(item.get("source") or "unknown") for item in sample}),
                 "paths": sorted({str(item.get("path") or "") for item in sample if item.get("path")})[:8],
                 "representative_preview": str(sample[0].get("preview") or "")[:240] if sample else "",
+                "collapse_hint": "show-representative-with-duplicates-collapsed",
                 "review_action": "review-representative-hit-first",
+                "report_suppression_status": "not-suppressed",
                 "duplicate_resolution_status": "candidate",
                 "commercial_gap_ids": [SEARCH_DEDUP_GAP_ID],
             }
@@ -735,6 +929,7 @@ def build_search_hit_deduplication(
             "commercial_grade_ready": False,
         },
         "groups": groups,
+        "dedup_review_profile": build_dedup_review_profile(groups=groups, summary=summary),
         "deduplication_assessment": search_deduplication_assessment(),
         "trusted_duplicate_manifest_diff": dict(trusted_diff) if isinstance(trusted_diff, Mapping) else {
             "status": "missing",
@@ -766,6 +961,8 @@ def search_deduplication_core_accuracy_gates(
         satisfied.append("representative hit links")
     if any(group.get("sources") or group.get("paths") for group in groups):
         satisfied.append("source/path references")
+    if any(group.get("collapse_hint") for group in groups):
+        satisfied.append("collapse preview profile")
     satisfied.append("near-duplicate limitation warning")
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
     if trusted_diff.get("status") == "pass":
@@ -807,7 +1004,7 @@ def search_deduplication_commercial_uplift_evidence(
         ],
         "reportability_decision": search_deduplication_reportability_decision(
             failed_validation_check_ids=[
-                "ui-collapse-suppression-workflow",
+                "persistent-dedup-suppression-workflow",
                 "fuzzy-near-duplicate-text-grouping",
                 "perceptual-media-duplicate-grouping",
                 "case-db-duplicate-suppression-state",
@@ -818,7 +1015,7 @@ def search_deduplication_commercial_uplift_evidence(
         ),
         "passed_validation_check_ids": sorted(set(passed)),
         "failed_validation_check_ids": [
-            "ui-collapse-suppression-workflow",
+            "persistent-dedup-suppression-workflow",
             "fuzzy-near-duplicate-text-grouping",
             "perceptual-media-duplicate-grouping",
             "case-db-duplicate-suppression-state",
@@ -836,6 +1033,7 @@ def search_deduplication_commercial_uplift_evidence(
             "duplicate_match_count": int(summary.get("duplicate_match_count") or 0),
             "representative_first_review": True,
             "hash_or_preview_fingerprint": True,
+            "collapse_preview_supported": True,
             "media_perceptual_duplicate_grouping": False,
             "case_db_suppression_state": False,
         },
@@ -864,6 +1062,42 @@ def search_deduplication_reportability_decision(
             "validate exact, fuzzy text, perceptual image/video, and OCR duplicate groups against a large known-answer corpus",
             "persist analyst suppression decisions in Case DB before hiding or excluding duplicates",
             "verify representative source rows and hashes before using duplicates in reports",
+        ],
+    }
+
+
+def build_dedup_review_profile(*, groups: Sequence[Mapping[str, object]], summary: Mapping[str, object]) -> dict[str, object]:
+    review_groups = []
+    for group in groups[:10]:
+        review_groups.append(
+            {
+                "group_id": group.get("group_id"),
+                "representative_index": group.get("representative_index"),
+                "hidden_duplicate_count": group.get("hidden_duplicate_count"),
+                "match_count": group.get("match_count"),
+                "review_status": "unreviewed",
+                "review_decision": "pending",
+                "report_suppression_status": group.get("report_suppression_status", "not-suppressed"),
+                "suggested_action": "open representative hit, verify source hash, then review duplicate members before suppressing",
+                "collapse_hint": group.get("collapse_hint", "show-representative-with-duplicates-collapsed"),
+            }
+        )
+    return {
+        "profile_version": "search-dedup-review-profile-v1",
+        "commercial_gap_ids": [SEARCH_DEDUP_GAP_ID],
+        "duplicate_group_count": int(summary.get("duplicate_group_count") or 0),
+        "duplicate_match_count": int(summary.get("duplicate_match_count") or 0),
+        "representative_first_review": True,
+        "collapse_preview_supported": True,
+        "review_group_limit": 10,
+        "review_groups": review_groups,
+        "case_db_suppression_state": False,
+        "suppression_requires_analyst_override": True,
+        "commercial_release_blocked": True,
+        "blockers": [
+            "case-db-duplicate-suppression-state",
+            "trusted-duplicate-manifest-diff",
+            "fuzzy-text-and-perceptual-media-duplicate-validation",
         ],
     }
 
@@ -1008,18 +1242,95 @@ def build_entity_view(
             break
 
     type_counts = Counter(str(item["type"]) for item in entities)
+    review_profile = build_entity_review_profile(entities, total_candidate_count=len(buckets), max_entities=max_entities)
     return {
         "summary": {
             "entity_count": len(entities),
             "type_counts": dict(sorted(type_counts.items())),
             "max_entities": max_entities,
             "truncated": len(buckets) > len(entities),
+            "review_queue_count": int(review_profile.get("review_queue_count") or 0),
+            "merge_split_candidate_count": int(review_profile.get("merge_split_candidate_count") or 0),
             "commercial_gap_ids": ["#47"],
             "commercial_grade_ready": False,
         },
+        "entity_review_profile": review_profile,
         "entities": entities,
         "report_grade_assessment": component_report_grade_assessment("#47", "entity-view"),
     }
+
+
+def build_entity_review_profile(
+    entities: Sequence[Mapping[str, object]],
+    *,
+    total_candidate_count: int,
+    max_entities: int,
+) -> dict[str, object]:
+    type_counts = Counter(str(entity.get("type") or "unknown") for entity in entities)
+    review_queue: list[dict[str, object]] = []
+    merge_split_candidate_count = 0
+    for entity in entities:
+        entity_type = str(entity.get("type") or "unknown")
+        count = int(entity.get("count") or 0)
+        sources = list(entity.get("sources") or [])
+        paths = list(entity.get("paths") or [])
+        risk_flags = list(entity.get("risk_flags") or [])
+        merge_split_required = entity_type in {"person", "account", "phone", "email"} or len(sources) > 1
+        if merge_split_required:
+            merge_split_candidate_count += 1
+        review_queue.append(
+            {
+                "entity_id": str(entity.get("entity_id") or ""),
+                "type": entity_type,
+                "value": str(entity.get("value") or ""),
+                "count": count,
+                "source_count": len(sources),
+                "path_count": len(paths),
+                "risk_flags": risk_flags[:10],
+                "match_indices": list(entity.get("match_indices") or [])[:MAX_ENTITY_MATCH_REFERENCES],
+                "review_priority": entity_review_priority(entity_type, count, risk_flags, len(sources)),
+                "review_status": "unreviewed",
+                "review_decision": "pending",
+                "merge_split_review_required": merge_split_required,
+                "report_candidate": False,
+                "validation_status": "candidate",
+            }
+        )
+    review_queue.sort(
+        key=lambda item: (
+            item["review_priority"] != "high",
+            -int(item["count"]),
+            str(item["type"]),
+            str(item["value"]),
+        )
+    )
+    return {
+        "profile_version": "entity-review-profile-v1",
+        "selected_track": "bounded-pattern-and-structured-entity-review",
+        "entity_count": len(entities),
+        "total_candidate_count": total_candidate_count,
+        "max_entities": max_entities,
+        "type_counts": dict(sorted(type_counts.items())),
+        "review_queue": review_queue,
+        "review_queue_count": len(review_queue),
+        "merge_split_candidate_count": merge_split_candidate_count,
+        "persistent_entity_review_state": False,
+        "analyst_verified_entity_resolution": False,
+        "automatic_merge_performed": False,
+        "commercial_release_blocked": True,
+        "reporting_status": "entity-review-validation-required",
+        "required_before_report": [
+            "persist analyst merge/split decisions before using entities as people/account conclusions",
+            "validate entity extraction against a hand-labeled fixture for false positives and missed aliases",
+            "attach source-row citations and confidence notes before promoting entity pivots to report findings",
+        ],
+    }
+
+
+def entity_review_priority(entity_type: str, count: int, risk_flags: Sequence[object], source_count: int) -> str:
+    if risk_flags or entity_type in {"email", "url", "domain", "ipv4", "hash"} or count >= 2 or source_count >= 2:
+        return "high"
+    return "normal"
 
 
 def entity_haystack(match: Mapping[str, object]) -> str:
@@ -1177,11 +1488,11 @@ def build_relationship_graph(
         if path:
             path_id = stable_id("path", path)
             nodes.setdefault(path_id, {"id": path_id, "type": "path", "label": Path(path).name or path, "path": path})
-            edges.append({"source": match_id, "target": path_id, "type": "located-at"})
+            edges.append(graph_edge(match_id, path_id, "located-at", match=match, match_index=index))
         for keyword in match.get("matched_keywords", []):
             keyword_id = stable_id("keyword", keyword)
             nodes.setdefault(keyword_id, {"id": keyword_id, "type": "keyword", "label": str(keyword)})
-            edges.append({"source": match_id, "target": keyword_id, "type": "matched-keyword"})
+            edges.append(graph_edge(match_id, keyword_id, "matched-keyword", match=match, match_index=index))
         for entity in entity_by_match.get(index, [])[:8]:
             entity_id = str(entity.get("entity_id"))
             nodes.setdefault(
@@ -1193,11 +1504,17 @@ def build_relationship_graph(
                     "count": entity.get("count"),
                 },
             )
-            edges.append({"source": match_id, "target": entity_id, "type": "mentions"})
+            edges.append(graph_edge(match_id, entity_id, "mentions", match=match, match_index=index))
         if len(edges) >= max_edges:
             edges = edges[:max_edges]
             break
 
+    interaction_profile = build_graph_interaction_profile(
+        nodes=list(nodes.values()),
+        edges=edges,
+        match_count=len(matches),
+        max_edges=max_edges,
+    )
     return {
         "summary": {
             "node_count": len(nodes),
@@ -1205,12 +1522,99 @@ def build_relationship_graph(
             "max_match_nodes": MAX_GRAPH_MATCH_NODES,
             "max_edges": max_edges,
             "truncated": len(matches) > MAX_GRAPH_MATCH_NODES or len(edges) >= max_edges,
+            "source_citation_edge_count": int(interaction_profile.get("source_citation_edge_count") or 0),
+            "available_filter_count": len(interaction_profile.get("available_filters") or []),
+            "edge_page_count": int(interaction_profile.get("edge_page_count") or 0),
             "commercial_gap_ids": ["#48"],
             "commercial_grade_ready": False,
         },
         "nodes": list(nodes.values()),
         "edges": edges,
+        "graph_interaction_profile": interaction_profile,
         "report_grade_assessment": component_report_grade_assessment("#48", "relationship-graph"),
+    }
+
+
+def graph_edge(
+    source_id: str,
+    target_id: str,
+    edge_type: str,
+    *,
+    match: Mapping[str, object],
+    match_index: int,
+) -> dict[str, object]:
+    return {
+        "edge_id": stable_id("edge", source_id, target_id, edge_type, match_index),
+        "source": source_id,
+        "target": target_id,
+        "type": edge_type,
+        "match_indices": [match_index],
+        "citation_count": 1,
+        "source_citation": {
+            "match_index": match_index,
+            "source": str(match.get("source") or "unknown"),
+            "kind": str(match.get("kind") or ""),
+            "path": str(match.get("path") or ""),
+            "pointer": str(match.get("pointer") or ""),
+            "title": str(match.get("title") or ""),
+        },
+        "validation_status": "candidate",
+        "causal_proof": False,
+    }
+
+
+def build_graph_interaction_profile(
+    *,
+    nodes: Sequence[Mapping[str, object]],
+    edges: Sequence[Mapping[str, object]],
+    match_count: int,
+    max_edges: int,
+) -> dict[str, object]:
+    node_type_counts = Counter(str(node.get("type") or "unknown") for node in nodes)
+    edge_type_counts = Counter(str(edge.get("type") or "unknown") for edge in edges)
+    available_filters = [
+        {
+            "filter_id": f"node-type:{node_type}",
+            "label": f"Node type: {node_type}",
+            "count": count,
+            "field": "node.type",
+            "value": node_type,
+        }
+        for node_type, count in sorted(node_type_counts.items())
+    ]
+    available_filters.extend(
+        {
+            "filter_id": f"edge-type:{edge_type}",
+            "label": f"Edge type: {edge_type}",
+            "count": count,
+            "field": "edge.type",
+            "value": edge_type,
+        }
+        for edge_type, count in sorted(edge_type_counts.items())
+    )
+    edge_page_size = max(1, min(max_edges, 100))
+    edge_page_count = (len(edges) + edge_page_size - 1) // edge_page_size if edges else 0
+    return {
+        "profile_version": "relationship-graph-interaction-v1",
+        "selected_track": "bounded-cited-graph-review",
+        "match_count": match_count,
+        "node_type_counts": dict(sorted(node_type_counts.items())),
+        "edge_type_counts": dict(sorted(edge_type_counts.items())),
+        "available_filters": available_filters,
+        "edge_page_size": edge_page_size,
+        "edge_page_count": edge_page_count,
+        "current_edge_page": 1 if edges else 0,
+        "source_citation_edge_count": sum(1 for edge in edges if edge.get("source_citation")),
+        "saved_layout_supported": False,
+        "server_side_paging_supported": False,
+        "interactive_canvas_supported": False,
+        "commercial_release_blocked": True,
+        "reporting_status": "graph-source-citation-validation-required",
+        "required_before_report": [
+            "persist graph filters and analyst layout before treating graph state as reviewed evidence",
+            "add server-side graph paging before opening very large case-wide relationship graphs",
+            "validate every reported edge against source citations and trusted graph review diffs",
+        ],
     }
 
 
@@ -1236,9 +1640,16 @@ def build_correlated_timeline(
                 }
             )
     events.sort(key=lambda item: (timestamp_to_epoch(str(item["timestamp"])), str(item["source"]), str(item["path"])))
+    original_event_count = len(events)
     truncated = len(events) > max_events
     events = events[:max_events]
     buckets = Counter(str(event["timestamp"])[:10] for event in events if str(event.get("timestamp")))
+    correlation_profile = build_timeline_correlation_profile(
+        events=events,
+        original_event_count=original_event_count,
+        max_events=max_events,
+        truncated=truncated,
+    )
     return {
         "summary": {
             "event_count": len(events),
@@ -1246,13 +1657,69 @@ def build_correlated_timeline(
             "earliest_event_at": events[0]["timestamp"] if events else None,
             "latest_event_at": events[-1]["timestamp"] if events else None,
             "truncated": truncated,
+            "event_page_count": int(correlation_profile.get("event_page_count") or 0),
+            "missing_timezone_count": int(correlation_profile.get("missing_timezone_count") or 0),
             "commercial_gap_ids": ["#49"],
             "commercial_grade_ready": False,
         },
         "date_buckets": [{"date": date, "count": count} for date, count in sorted(buckets.items())],
         "events": events,
+        "timeline_correlation_profile": correlation_profile,
         "report_grade_assessment": component_report_grade_assessment("#49", "correlated-timeline"),
     }
+
+
+def build_timeline_correlation_profile(
+    *,
+    events: Sequence[Mapping[str, object]],
+    original_event_count: int,
+    max_events: int,
+    truncated: bool,
+) -> dict[str, object]:
+    source_counts = Counter(str(event.get("source") or "unknown") for event in events)
+    kind_counts = Counter(str(event.get("kind") or "unknown") for event in events)
+    timezone_counts = Counter(timestamp_timezone_label(str(event.get("timestamp") or "")) for event in events)
+    missing_timezone_count = int(timezone_counts.get("missing", 0))
+    event_page_size = max(1, min(max_events, 250))
+    event_page_count = (len(events) + event_page_size - 1) // event_page_size if events else 0
+    return {
+        "profile_version": "timeline-correlation-review-v1",
+        "selected_track": "bounded-source-anchored-timeline-review",
+        "original_event_count": original_event_count,
+        "retained_event_count": len(events),
+        "max_events": max_events,
+        "truncated": truncated,
+        "event_page_size": event_page_size,
+        "event_page_count": event_page_count,
+        "current_event_page": 1 if events else 0,
+        "source_counts": dict(sorted(source_counts.items())),
+        "kind_counts": dict(sorted(kind_counts.items())),
+        "timezone_counts": dict(sorted(timezone_counts.items())),
+        "missing_timezone_count": missing_timezone_count,
+        "timezone_normalization_status": "utc-normalized-source-preserved",
+        "source_anchor_required": True,
+        "full_case_join_supported": False,
+        "clock_skew_overlay_supported": False,
+        "review_annotation_overlay_supported": False,
+        "cursor_api_supported": False,
+        "commercial_release_blocked": True,
+        "reporting_status": "timeline-correlation-validation-required",
+        "required_before_report": [
+            "join timeline rows from the full Case DB instead of bounded search matches",
+            "validate source timezone assumptions and clock skew against known-answer evidence",
+            "persist analyst annotations and cursor state before using the timeline as reviewed case chronology",
+        ],
+    }
+
+
+def timestamp_timezone_label(timestamp: str) -> str:
+    if not timestamp:
+        return "missing"
+    if timestamp.endswith("Z"):
+        return "UTC"
+    if len(timestamp) >= 6 and timestamp[-6] in {"+", "-"} and timestamp[-3] == ":":
+        return timestamp[-6:]
+    return "missing"
 
 
 def iter_timestamps(value: object, *, prefix: str = "") -> Iterable[tuple[str, str]]:
@@ -1348,22 +1815,29 @@ def build_hypothesis_workbook(
             evidence_cluster_ids=[str(cluster.get("cluster_id")) for cluster in clusters[:3]],
         )
 
-    return {
-        "summary": {
-            "hypothesis_count": len(hypotheses),
-            "keyword_count": len([keyword for keyword in keywords if str(keyword).strip()]),
-            "source_counts": dict(sorted(source_counts.items())),
-            "commercial_gap_ids": ["#50"],
-            "commercial_grade_ready": False,
-        },
-        "hypotheses": hypotheses,
-        "report_grade_assessment": component_report_grade_assessment("#50", "hypothesis-workbook"),
-        "review_questions": [
+    review_profile = build_workbook_review_profile(
+        hypotheses=hypotheses,
+        review_questions=[
             "Which cluster contains unique report-worthy evidence rather than repeated noise?",
             "Which entities connect multiple sources, users, or time ranges?",
             "Do timeline events support the analyst hypothesis in chronological order?",
             "Have source hashes and parser limitations been verified before report inclusion?",
         ],
+    )
+    return {
+        "summary": {
+            "hypothesis_count": len(hypotheses),
+            "keyword_count": len([keyword for keyword in keywords if str(keyword).strip()]),
+            "source_counts": dict(sorted(source_counts.items())),
+            "review_queue_count": int(review_profile.get("review_queue_count") or 0),
+            "evidence_attachment_count": int(review_profile.get("evidence_attachment_count") or 0),
+            "commercial_gap_ids": ["#50"],
+            "commercial_grade_ready": False,
+        },
+        "hypotheses": hypotheses,
+        "workbook_review_profile": review_profile,
+        "report_grade_assessment": component_report_grade_assessment("#50", "hypothesis-workbook"),
+        "review_questions": list(review_profile["review_questions"]),
         "next_actions": [
             "Open representative hits from the top clusters.",
             "Bookmark only verified source rows and mark review status.",
@@ -1371,6 +1845,52 @@ def build_hypothesis_workbook(
             "Export report candidates only after source preview/hash verification.",
         ],
         "timeline_anchor_indices": [int(event["match_index"]) for event in timeline_events[:10] if isinstance(event.get("match_index"), int)],
+    }
+
+
+def build_workbook_review_profile(
+    *,
+    hypotheses: Sequence[Mapping[str, object]],
+    review_questions: Sequence[str],
+) -> dict[str, object]:
+    review_queue = []
+    evidence_attachment_count = 0
+    for index, hypothesis in enumerate(hypotheses):
+        evidence_ids = list(hypothesis.get("evidence_cluster_ids") or [])
+        evidence_attachment_count += len(evidence_ids)
+        review_queue.append(
+            {
+                "hypothesis_id": str(hypothesis.get("hypothesis_id") or ""),
+                "key": str(hypothesis.get("key") or ""),
+                "title": str(hypothesis.get("title") or ""),
+                "queue_position": index + 1,
+                "review_status": str(hypothesis.get("status") or "draft"),
+                "report_decision": "pending",
+                "ready_for_report": bool(hypothesis.get("ready_for_report")),
+                "evidence_cluster_ids": evidence_ids[:8],
+                "evidence_count": len(evidence_ids),
+                "required_actions": list(hypothesis.get("tasks") or [])[:8],
+            }
+        )
+    return {
+        "profile_version": "hypothesis-workbook-review-v1",
+        "selected_track": "bounded-draft-hypothesis-review",
+        "review_queue": review_queue,
+        "review_queue_count": len(review_queue),
+        "review_questions": list(review_questions),
+        "review_question_count": len(review_questions),
+        "evidence_attachment_count": evidence_attachment_count,
+        "editable_workbook_supported": False,
+        "persistent_workbook_supported": False,
+        "version_history_supported": False,
+        "report_section_export_supported": False,
+        "commercial_release_blocked": True,
+        "reporting_status": "workbook-validation-required",
+        "required_before_report": [
+            "persist analyst edits, notes, and hypothesis status in the Case DB",
+            "attach verified source-row citations instead of only cluster IDs before report export",
+            "preserve workbook version history and reviewer decisions for reproducibility",
+        ],
     }
 
 

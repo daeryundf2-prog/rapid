@@ -11,7 +11,7 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review, isoformat_from_timestamp
 
-PARSER_VERSION = "windows-system-v6"
+PARSER_VERSION = "windows-system-v7"
 TASKS_ROOT = ("Windows", "System32", "Tasks")
 TASK_SUSPICIOUS_TERMS = (
     "powershell",
@@ -160,6 +160,7 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
         trigger_details = task_trigger_details(xml_root)
         action_details = task_action_details(xml_root)
         principal_details = task_principal_details(xml_root)
+        temporal_profile = task_temporal_profile(xml_root, stat_result.st_mtime, trigger_details)
         risk_flags = task_scheduler_risk_flags(command, arguments, working_directory, uri)
         validation_checks = task_scheduler_validation_checks(
             command=command,
@@ -170,6 +171,7 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
             trigger_details=trigger_details,
             action_details=action_details,
             principal_details=principal_details,
+            temporal_profile=temporal_profile,
         )
         yield ArtifactRecord(
             provider=WindowsSystemArtifactsProvider.name,
@@ -199,6 +201,7 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
                 "trigger_details": trigger_details,
                 "trigger_count": len(trigger_details),
                 "start_boundaries": all_text(xml_root, "StartBoundary"),
+                "task_temporal_profile": temporal_profile,
                 "coverage_status": "task-xml-normalized",
                 "evidence_strength": "persistence-configuration",
                 "reportability": "triage",
@@ -214,6 +217,7 @@ def collect_task_scheduler(root: Path) -> Iterable[ArtifactRecord]:
                         "risk_flags": risk_flags,
                         "actions": action_details,
                         "trigger_details": trigger_details,
+                        "task_temporal_profile": temporal_profile,
                         "normalized_action": normalized_task_action(command, arguments, working_directory),
                     },
                 ),
@@ -629,6 +633,38 @@ def task_principal_details(root: ET.Element) -> list[dict[str, str]]:
     return principals
 
 
+def task_temporal_profile(
+    root: ET.Element,
+    file_modified_timestamp: float,
+    trigger_details: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    registration_date = first_text(root, "Date")
+    start_boundaries = [str(item.get("start_boundary") or "") for item in trigger_details if item.get("start_boundary")]
+    end_boundaries = [str(item.get("end_boundary") or "") for item in trigger_details if item.get("end_boundary")]
+    enabled_values = [item.get("enabled") for item in trigger_details if item.get("enabled") is not None]
+    return {
+        "profile_version": "task-temporal-profile-v1",
+        "registration_date": registration_date,
+        "file_modified_at": isoformat_from_timestamp(file_modified_timestamp),
+        "start_boundaries": start_boundaries,
+        "end_boundaries": end_boundaries,
+        "enabled_trigger_count": sum(1 for value in enabled_values if bool(value)),
+        "disabled_trigger_count": sum(1 for value in enabled_values if not bool(value)),
+        "timestamp_sources": [
+            item
+            for item in [
+            "RegistrationInfo/Date" if registration_date else "",
+            "Triggers/*/StartBoundary" if start_boundaries else "",
+            "Triggers/*/EndBoundary" if end_boundaries else "",
+            "task_file_modified_at",
+            ]
+            if item
+        ],
+        "validation_status": "xml-time-candidates-not-execution-proof",
+        "reportability_warning": "Task XML times describe configuration metadata and trigger schedule candidates; correlate with TaskScheduler Operational EVTX before claiming execution.",
+    }
+
+
 def normalized_task_action(command: str, arguments: str, working_directory: str) -> dict[str, str]:
     return {
         "command": command,
@@ -650,8 +686,10 @@ def task_scheduler_validation_checks(
     trigger_details: list[dict[str, object]],
     action_details: list[dict[str, object]],
     principal_details: list[dict[str, str]],
+    temporal_profile: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     haystack = " ".join((command, arguments, working_directory)).lower()
+    temporal_profile = temporal_profile or {}
     return {
         "xml_parsed": True,
         "has_task_uri": bool(uri),
@@ -660,6 +698,11 @@ def task_scheduler_validation_checks(
         "has_arguments": bool(arguments),
         "has_trigger": bool(trigger_details),
         "has_principal": bool(principal_details),
+        "has_task_temporal_metadata": bool(
+            temporal_profile.get("registration_date")
+            or temporal_profile.get("start_boundaries")
+            or temporal_profile.get("file_modified_at")
+        ),
         "microsoft_namespace": uri.lower().startswith(r"\microsoft\windows"),
         "command_uses_lolbin": any(flag.startswith("task-lolbin:") for flag in risk_flags),
         "references_user_writable_path": any(term in haystack for term in TASK_USER_WRITABLE_PATH_TERMS),
@@ -686,6 +729,12 @@ def system_validation_matrix(artifact_family: str, checks: dict[str, object]) ->
                     "label": "Task XML has an executable action and command pivot",
                     "passed": bool(checks.get("has_exec_action") and checks.get("has_command")),
                     "severity": "high",
+                },
+                {
+                    "id": "task-temporal-metadata",
+                    "label": "Task XML registration, trigger, and source file time metadata preserved",
+                    "passed": bool(checks.get("has_task_temporal_metadata")),
+                    "severity": "medium",
                 },
                 {
                     "id": "task-report-grade-correlation",
@@ -815,6 +864,8 @@ def system_core_accuracy_gates(artifact_family: str, details: dict[str, object])
     satisfied: list[str] = []
     if details.get("risk_flags") or checks.get("interesting_entries_present") or checks.get("blocked_entries_present") or checks.get("persistence_terms_present"):
         satisfied.append("event semantics and risk rules")
+    if artifact_family == "task-scheduler" and checks.get("has_task_temporal_metadata"):
+        satisfied.append("task temporal metadata provenance")
     if artifact_family == "task-scheduler" and checks.get("taskcache_registry_validated"):
         satisfied.append("Task XML/TaskCache correlation")
     if artifact_family in {"defender", "firewall"} and (details.get("interesting_entries") or details.get("sample_entries")):
@@ -943,20 +994,168 @@ def build_system_trusted_diff(
 def index_system_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
     indexed: dict[str, dict[str, str]] = {}
     for row in rows:
-        family = normalized_diff_value(first_alias(row, "artifact_family", "family", "type", "artifact_type"))
-        name = normalized_diff_value(first_alias(row, "task_uri", "rule_name", "threat_name", "application", "consumer", "name"))
-        command = normalized_diff_value(first_alias(row, "command_line", "command", "path", "application_path", "target_path"))
-        key = "|".join(item for item in (family, name, command) if item)
+        payload = system_diff_row_payload(row)
+        family = system_diff_family(payload)
+        key = system_diff_key(payload, family)
         if not key:
             continue
-        indexed[key] = {
+        row_payload: dict[str, str] = {
             "family": family,
-            "name": name,
-            "command": command,
-            "timestamp": normalized_diff_value(first_alias(row, "timestamp", "event_time", "created_at", "start_boundary")),
-            "risk": normalized_diff_value(first_alias(row, "risk_flag", "risk_flags", "action", "severity")),
+            "timestamp": normalized_diff_value(first_alias(payload, "timestamp", "event_time", "created_at", "start_boundary")),
+            "source_path": normalized_diff_value(first_alias(payload, "source_path", "source", "file_path")),
+            "risk": normalized_diff_list(first_alias(payload, "risk_flag", "risk_flags", "severity")),
         }
+        row_payload.update(system_family_diff_fields(payload, family))
+        indexed[key] = row_payload
     return indexed
+
+
+def system_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
+    details = row.get("details")
+    if not isinstance(details, Mapping):
+        return row
+    payload = dict(details)
+    for key, value in row.items():
+        if key == "details":
+            continue
+        payload.setdefault(key, value)
+    return payload
+
+
+def system_diff_family(row: Mapping[str, object]) -> str:
+    explicit = normalized_diff_value(first_alias(row, "artifact_family", "family", "type"))
+    artifact_type = normalized_diff_value(first_alias(row, "artifact_type", "artifacttype"))
+    if explicit:
+        explicit = explicit.replace(" ", "-")
+    if explicit in {"task", "taskscheduler", "task-scheduler-task"}:
+        return "task-scheduler"
+    if explicit in {"windows-defender", "defender-support-log"}:
+        return "defender"
+    if explicit in {"windows-firewall", "firewall-log-row"}:
+        return "firewall"
+    if explicit in {"windows-error-reporting", "wer-report"}:
+        return "wer"
+    if explicit in {"wmi-repository", "wmi-repository-inventory"}:
+        return "wmi"
+    if explicit:
+        return explicit
+    if "task-scheduler" in artifact_type or artifact_type.startswith("task-"):
+        return "task-scheduler"
+    if "defender" in artifact_type:
+        return "defender"
+    if "firewall" in artifact_type:
+        return "firewall"
+    if "wer" in artifact_type or "error-report" in artifact_type:
+        return "wer"
+    if "wmi" in artifact_type:
+        return "wmi"
+    if "zone-identifier" in artifact_type:
+        return "zone-identifier"
+    return artifact_type
+
+
+def system_diff_key(row: Mapping[str, object], family: str) -> str:
+    if family == "task-scheduler":
+        identity = first_present(
+            first_alias(row, "task_uri", "taskuri", "uri", "task_name", "name"),
+            first_alias(row, "command_line", "command", "executable_name"),
+        )
+    elif family == "defender":
+        identity = first_present(
+            first_alias(row, "threat_name", "threat", "source_path", "log_path", "name"),
+            first_list_value(first_alias(row, "interesting_entries", "interesting_entry", "entries")),
+        )
+    elif family == "firewall":
+        identity = "|".join(
+            item
+            for item in (
+                normalized_diff_value(first_alias(row, "timestamp", "date_time", "date", "time")),
+                normalized_diff_value(first_alias(row, "src_ip", "source_ip", "source", "src")),
+                normalized_diff_value(first_alias(row, "dst_ip", "destination_ip", "destination", "dst")),
+                normalized_int_text(first_alias(row, "dst_port", "destination_port", "dpt")),
+                normalized_diff_value(first_alias(row, "action")),
+            )
+            if item
+        )
+    elif family == "wer":
+        identity = "|".join(
+            item
+            for item in (
+                normalized_diff_value(first_alias(row, "application_name", "application", "app_name", "app")),
+                normalized_diff_value(first_alias(row, "event_name", "eventname", "problem_event_name")),
+                normalized_diff_value(first_alias(row, "event_time", "timestamp", "created_at")),
+                normalized_diff_value(first_alias(row, "bucket_id", "report_id", "cab_id", "bucket")),
+            )
+            if item
+        )
+    elif family == "wmi":
+        identity = first_present(
+            first_alias(row, "source_path", "repository_file", "path"),
+            normalized_diff_list(first_alias(row, "wmi_persistence_terms", "persistence_terms", "consumer", "filter")),
+        )
+    else:
+        identity = first_present(
+            first_alias(row, "name", "path", "source_path", "target_path"),
+            first_alias(row, "command", "command_line"),
+        )
+    normalized_identity = normalized_diff_value(identity)
+    return "|".join(item for item in (family, normalized_identity) if item)
+
+
+def system_family_diff_fields(row: Mapping[str, object], family: str) -> dict[str, str]:
+    if family == "task-scheduler":
+        return {
+            "task_uri": normalized_diff_value(first_alias(row, "task_uri", "taskuri", "uri", "task_name")),
+            "command": normalized_diff_value(first_alias(row, "command_line", "command", "action_command", "executable_name")),
+            "arguments": normalized_diff_value(first_alias(row, "arguments", "args", "action_arguments")),
+            "working_directory": normalized_diff_value(first_alias(row, "working_directory", "working_dir")),
+            "user_id": normalized_diff_value(first_alias(row, "user_id", "userid", "sid", "run_as")),
+            "run_level": normalized_diff_value(first_alias(row, "run_level", "runlevel")),
+            "logon_type": normalized_diff_value(first_alias(row, "logon_type", "logontype")),
+            "hidden": normalized_bool_text(first_alias(row, "hidden", "is_hidden")),
+            "trigger_types": normalized_diff_list(first_alias(row, "trigger_types", "triggers", "trigger")),
+        }
+    if family == "defender":
+        return {
+            "interesting_entry_count": normalized_int_text(
+                first_alias(row, "interesting_entry_count", "entry_count", "detections", "count")
+            ),
+            "interesting_entries": normalized_diff_list(first_alias(row, "interesting_entries", "entries", "message")),
+            "threat": normalized_diff_value(first_alias(row, "threat_name", "threat", "malware_name")),
+            "action": normalized_diff_value(first_alias(row, "action", "remediation_action", "status")),
+        }
+    if family == "firewall":
+        return {
+            "action": normalized_diff_value(first_alias(row, "action")),
+            "protocol": normalized_diff_value(first_alias(row, "protocol", "proto")),
+            "src_ip": normalized_diff_value(first_alias(row, "src_ip", "source_ip", "source", "src")),
+            "dst_ip": normalized_diff_value(first_alias(row, "dst_ip", "destination_ip", "destination", "dst")),
+            "src_port": normalized_int_text(first_alias(row, "src_port", "source_port", "sport")),
+            "dst_port": normalized_int_text(first_alias(row, "dst_port", "destination_port", "dport")),
+            "direction": normalized_diff_value(first_alias(row, "direction", "dir")),
+            "application": normalized_diff_value(first_alias(row, "application", "app", "path")),
+        }
+    if family == "wer":
+        return {
+            "application_name": normalized_diff_value(first_alias(row, "application_name", "application", "app_name", "app")),
+            "event_name": normalized_diff_value(first_alias(row, "event_name", "eventname", "problem_event_name")),
+            "exception_code": normalized_diff_value(first_alias(row, "exception_code", "exception", "fault_code")),
+            "event_time": normalized_diff_value(first_alias(row, "event_time", "timestamp", "created_at")),
+            "bucket_id": normalized_diff_value(first_alias(row, "bucket_id", "bucket", "report_id", "cab_id")),
+            "module_path": normalized_diff_value(first_alias(row, "fault_module_path", "module_path", "application_path")),
+        }
+    if family == "wmi":
+        return {
+            "persistence_terms": normalized_diff_list(
+                first_alias(row, "wmi_persistence_terms", "persistence_terms", "consumer", "filter", "binding")
+            ),
+            "path_pivots": normalized_diff_list(first_alias(row, "path_pivots", "paths", "command_paths", "command")),
+            "url_pivots": normalized_diff_list(first_alias(row, "url_pivots", "urls", "url")),
+        }
+    return {
+        "name": normalized_diff_value(first_alias(row, "name", "path", "source_path")),
+        "command": normalized_diff_value(first_alias(row, "command_line", "command", "target_path")),
+    }
 
 
 def build_system_diff_payload(
@@ -1016,6 +1215,84 @@ def normalize_key(value: object) -> str:
 
 def normalized_diff_value(value: object) -> str:
     return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
+
+
+def first_present(*values: object) -> object:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def first_list_value(value: object) -> object:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        parts = [part.strip() for part in re.split(r"[\r\n;|]", value) if part.strip()]
+        return parts[0] if parts else value
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        for item in value:
+            if item not in (None, ""):
+                return normalize_system_list_item(item)
+        return ""
+    return value
+
+
+def normalized_int_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        return normalized_diff_value(text)
+
+
+def normalized_bool_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    text = normalized_diff_value(value)
+    if text in {"1", "yes", "y", "true", "enabled"}:
+        return "true"
+    if text in {"0", "no", "n", "false", "disabled"}:
+        return "false"
+    return text
+
+
+def normalized_diff_list(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        parts = [part.strip() for part in re.split(r"[\r\n,;|]", value) if part.strip()]
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        parts = [normalize_system_list_item(item) for item in value]
+    else:
+        parts = [str(value).strip()]
+    return "|".join(sorted({normalized_diff_value(part) for part in parts if part}))
+
+
+def normalize_system_list_item(value: object) -> str:
+    if isinstance(value, Mapping):
+        return str(
+            first_alias(
+                value,
+                "type",
+                "name",
+                "value",
+                "path",
+                "command",
+                "message",
+                "entry",
+                "term",
+                "url",
+                "trigger_type",
+            )
+        )
+    return str(value)
 
 
 def windows_executable_name(command: str) -> str:

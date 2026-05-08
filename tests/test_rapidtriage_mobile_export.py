@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import plistlib
 import sqlite3
+import contextlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -81,12 +83,39 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("duplicate/deleted semantics", message_gate["satisfied_checks"])
             self.assertIn("source hash and acquisition linkage", message_gate["satisfied_checks"])
             self.assertIn("schema version compatibility warning", message_gate["satisfied_checks"])
+            self.assertIn("mobile vendor import manifest", message_gate["satisfied_checks"])
+            self.assertIn("mobile vendor source row locator", message_gate["satisfied_checks"])
+            vendor_import_manifest = message["details"]["mobile_vendor_import_manifest"]
+            self.assertEqual(vendor_import_manifest["manifest_version"], "mobile-vendor-import-manifest-v1")
+            self.assertEqual(vendor_import_manifest["item_number"], 52)
+            self.assertEqual(vendor_import_manifest["source_tool"], "cellebrite")
+            self.assertEqual(vendor_import_manifest["source_viewer_locator"]["viewer"], "mobile-vendor-export-row")
+            self.assertEqual(len(vendor_import_manifest["manifest_sha256"]), 64)
+            self.assertEqual(
+                message["details"]["mobile_vendor_import_manifest_hash"],
+                vendor_import_manifest["manifest_sha256"],
+            )
             message_uplift = message["details"]["commercial_uplift_evidence"]
             self.assertEqual(message_uplift["batch_id"], "commercial-uplift-026-030")
             self.assertEqual(message_uplift["item_numbers"], [26])
             self.assertIn("source-hash-present", message_uplift["passed_validation_matrix_ids"])
             self.assertIn("vendor-settings-verified", message_uplift["failed_validation_matrix_ids"])
             self.assertEqual(message_uplift["large_data_controls"]["max_rows_per_source"], 50000)
+            vendor_profile = message_uplift["functional_priority_profiles"][0]
+            self.assertEqual(vendor_profile["item_number"], 52)
+            self.assertEqual(vendor_profile["batch_id"], "commercial-uplift-051-055")
+            self.assertEqual(
+                vendor_profile["implemented_controls"]["mobile_vendor_import_manifest_hash"],
+                vendor_import_manifest["manifest_sha256"],
+            )
+            self.assertIn("mobile-vendor-import-manifest-emitted", vendor_profile["passed_validation_check_ids"])
+            self.assertIn("mobile-vendor-source-row-locator-emitted", vendor_profile["passed_validation_check_ids"])
+            self.assertIn("vendor-export-settings-not-verified", vendor_profile["failed_validation_check_ids"])
+            self.assertEqual(
+                message_uplift["large_data_controls"]["mobile_vendor_import_manifest_hash"],
+                vendor_import_manifest["manifest_sha256"],
+            )
+            self.assertTrue(message_uplift["large_data_controls"]["mobile_vendor_source_row_locator_present"])
             self.assertEqual(
                 message_uplift["reportability_decision"]["decision"],
                 "do-not-report-vendor-mobile-export-as-source-complete",
@@ -99,6 +128,34 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 "vendor-export-settings-not-verified",
                 message_uplift["reportability_decision"]["blockers"],
             )
+            source_record = next(
+                artifact
+                for artifact in payload["artifacts"]
+                if artifact["artifact_type"] == "mobile-export-source"
+                and artifact["details"]["source_tool"] == "cellebrite"
+            )
+            source_profile = source_record["details"]["mobile_export_source_profile"]
+            self.assertEqual(source_profile["source_tool"], "cellebrite")
+            self.assertEqual(source_profile["input_row_count"], source_record["details"]["input_row_count"])
+            self.assertEqual(source_profile["emitted_row_count"], source_record["details"]["row_count"])
+            self.assertIn("mobile-message", source_profile["detected_artifact_types"])
+            self.assertFalse(source_profile["truncated_by_row_cap"])
+            self.assertTrue(source_profile["vendor_export_manifest_present"])
+            self.assertEqual(source_profile["vendor_tool_version"], "7.66")
+            self.assertTrue(source_profile["source_hash_matches_manifest"])
+            self.assertTrue(source_profile["original_acquisition_hash_verified"])
+            self.assertEqual(source_profile["vendor_schema_registry_profile"]["vendor_family"], "cellebrite-ufed-physical-analyzer")
+            self.assertIn("messages", source_profile["vendor_schema_registry_profile"]["observed_artifact_families"])
+            manifest_profile = source_record["details"]["vendor_export_manifest_profile"]
+            self.assertEqual(manifest_profile["validation_status"], "metadata-linked")
+            self.assertTrue(manifest_profile["original_acquisition_hash_present"])
+            self.assertTrue(source_record["details"]["validation_checks"]["vendor_export_settings_verified"])
+            self.assertTrue(source_record["details"]["validation_checks"]["original_acquisition_hash_verified"])
+            self.assertTrue(source_record["details"]["validation_checks"]["schema_profile_emitted"])
+            source_gate = source_record["details"]["core_accuracy_gates"][0]
+            self.assertIn("export schema/source profile", source_gate["satisfied_checks"])
+            self.assertTrue(source_record["details"]["commercial_uplift_evidence"]["large_data_controls"]["source_schema_profile_emitted"])
+            self.assertTrue(source_record["details"]["commercial_uplift_evidence"]["large_data_controls"]["vendor_export_manifest_present"])
 
             chat_messages = [
                 artifact
@@ -119,10 +176,18 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(kakao["details"]["reaction"], "👍")
             self.assertTrue(kakao["details"]["validation_checks"]["service_detected"])
             self.assertFalse(kakao["details"]["validation_checks"]["app_schema_validated"])
+            self.assertTrue(kakao["details"]["validation_checks"]["kakaotalk_review_profile_emitted"])
+            self.assertTrue(kakao["details"]["validation_checks"]["kakaotalk_message_hash_present"])
+            self.assertTrue(kakao["details"]["validation_checks"]["kakaotalk_attachment_metadata_present"])
             self.assertIn("#31", kakao["details"]["chat_app_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(kakao["details"]["chat_app_forensic_review"]["gap_id"], "#31")
             self.assertFalse(kakao["details"]["chat_app_native_capabilities"]["service_specific_native_database_decode"])
             self.assertTrue(kakao["details"]["chat_app_scope_profile"]["known_profile"])
+            kakao_review_profile = kakao["details"]["kakaotalk_message_review_profile"]
+            self.assertEqual(kakao_review_profile["attachment_class"], "image")
+            self.assertFalse(kakao_review_profile["attachment_local_bytes_verified"])
+            self.assertEqual(kakao_review_profile["review_display_mode"], "chat-bubble-row-with-metadata-collapsed")
+            self.assertEqual(kakao_review_profile["content_source_status"], "authorized-export-row-not-native-decrypt")
             self.assertIn("schema-version-known-answer", {item["id"] for item in kakao["details"]["chat_app_issue_matrix"]})
             self.assertEqual(
                 kakao["details"]["kakaotalk_compatibility_assessment"]["status"],
@@ -135,14 +200,71 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             kakao_gate = {gate["gap_id"]: gate for gate in kakao["details"]["core_accuracy_gates"]}["#31"]
             self.assertIn("KakaoTalk service/profile detection", kakao_gate["satisfied_checks"])
             self.assertIn("chat/message participant/media normalization", kakao_gate["satisfied_checks"])
+            self.assertIn("KakaoTalk message review profile", kakao_gate["satisfied_checks"])
+            self.assertIn("KakaoTalk attachment metadata tracking", kakao_gate["satisfied_checks"])
             self.assertIn("schema/app version and BigBang compatibility tracking", kakao_gate["satisfied_checks"])
+            self.assertIn("KakaoTalk legacy/post-BigBang strategy profile", kakao_gate["satisfied_checks"])
             self.assertIn("encrypted/deleted limitation warning", kakao_gate["satisfied_checks"])
             self.assertIn("source hash and legal provenance", kakao_gate["satisfied_checks"])
+            self.assertEqual(
+                kakao["details"]["kakaotalk_compatibility_assessment"]["strategy_profile"]["selected_track"],
+                "post-bigbang-memory-key-store-and-export-validation",
+            )
+            kakao_manifest = kakao["details"]["messenger_export_framework_manifest"]
+            self.assertEqual(kakao_manifest["manifest_version"], "messenger-export-framework-manifest-v1")
+            self.assertEqual(kakao_manifest["item_number"], 50)
+            self.assertEqual(kakao_manifest["gap_id"], "#50")
+            self.assertIn("#50", kakao_manifest["commercial_gap_ids"])
+            self.assertEqual(kakao_manifest["service"], "KakaoTalk")
+            self.assertGreaterEqual(kakao_manifest["supported_service_count"], 20)
+            self.assertEqual(len(kakao_manifest["manifest_sha256"]), 64)
+            self.assertEqual(
+                kakao["details"]["messenger_export_framework_manifest_hash"],
+                kakao_manifest["manifest_sha256"],
+            )
+            self.assertEqual(
+                kakao_manifest["row_citation"]["source_viewer_locator"]["viewer"],
+                "messenger-export-row",
+            )
+            self.assertIn("row_hash", kakao_manifest["row_citation"])
+            self.assertTrue(kakao_manifest["large_data_controls"]["text_values_hash_only_by_default"])
+            self.assertIn("messenger export framework manifest", kakao_gate["satisfied_checks"])
+            self.assertIn("messenger source row citation", kakao_gate["satisfied_checks"])
             kakao_uplift = kakao["details"]["chat_app_commercial_uplift_evidence"]
             self.assertEqual(kakao_uplift["batch_id"], "commercial-uplift-031-035")
             self.assertEqual(kakao_uplift["item_numbers"], [31])
+            self.assertEqual(kakao_uplift["functional_priority_profile"]["item_number"], 50)
+            self.assertEqual(kakao_uplift["functional_priority_profile"]["batch_id"], "commercial-uplift-046-050")
+            self.assertIn(
+                "messenger-trusted-export-or-native-db-diff-required",
+                kakao_uplift["functional_priority_profile"]["failed_validation_check_ids"],
+            )
+            self.assertGreaterEqual(
+                kakao_uplift["functional_priority_profile"]["implemented_controls"]["supported_service_count"],
+                20,
+            )
+            self.assertEqual(
+                kakao_uplift["functional_priority_profile"]["implemented_controls"][
+                    "messenger_export_framework_manifest_hash"
+                ],
+                kakao_manifest["manifest_sha256"],
+            )
+            self.assertIn(
+                "messenger-export-framework-manifest-emitted",
+                kakao_uplift["functional_priority_profile"]["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "messenger-source-locator-emitted",
+                kakao_uplift["functional_priority_profile"]["passed_validation_check_ids"],
+            )
+            self.assertEqual(
+                kakao_uplift["large_data_controls"]["messenger_export_framework_manifest_hash"],
+                kakao_manifest["manifest_sha256"],
+            )
+            self.assertTrue(kakao_uplift["large_data_controls"]["messenger_row_citation_present"])
             self.assertIn("service-profile-known", kakao_uplift["passed_issue_matrix_ids"])
             self.assertIn("kakaotalk-post-2025-08-bigbang", kakao_uplift["failed_issue_matrix_ids"])
+            self.assertTrue(kakao_uplift["large_data_controls"]["kakaotalk_message_review_profile_present"])
             self.assertFalse(kakao_uplift["large_data_controls"]["encrypted_store_decryption"])
             self.assertEqual(
                 kakao_uplift["reportability_decision"]["decision"],
@@ -165,13 +287,39 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 ],
             )
             whatsapp = next(artifact for artifact in chat_messages if artifact["details"]["service"] == "WhatsApp")
+            self.assertTrue(whatsapp["details"]["validation_checks"]["whatsapp_review_profile_emitted"])
+            self.assertTrue(whatsapp["details"]["validation_checks"]["whatsapp_message_hash_present"])
+            self.assertTrue(whatsapp["details"]["validation_checks"]["whatsapp_media_metadata_present"])
+            self.assertTrue(whatsapp["details"]["validation_checks"]["whatsapp_jid_attribution_present"])
+            whatsapp_review_profile = whatsapp["details"]["whatsapp_message_review_profile"]
+            self.assertEqual(whatsapp_review_profile["media_class"], "image")
+            self.assertEqual(whatsapp_review_profile["sender_shape"], "user-jid")
+            self.assertEqual(whatsapp_review_profile["recipient_shape"], "user-jid")
+            self.assertEqual(whatsapp_review_profile["crypt_key_authority_status"], "not-attached")
+            self.assertEqual(
+                whatsapp_review_profile["review_display_mode"],
+                "chat-bubble-row-with-media-and-crypt-metadata-collapsed",
+            )
             whatsapp_gate = {gate["gap_id"]: gate for gate in whatsapp["details"]["core_accuracy_gates"]}["#32"]
             self.assertIn("WhatsApp service/profile detection", whatsapp_gate["satisfied_checks"])
             self.assertIn("chat/contact/media normalization", whatsapp_gate["satisfied_checks"])
+            self.assertIn("WhatsApp message review profile", whatsapp_gate["satisfied_checks"])
+            self.assertIn("WhatsApp JID attribution tracking", whatsapp_gate["satisfied_checks"])
+            self.assertIn("WhatsApp media metadata tracking", whatsapp_gate["satisfied_checks"])
+            self.assertIn("WhatsApp crypt/export strategy profile", whatsapp_gate["satisfied_checks"])
             self.assertIn("crypt backup authority workflow warning", whatsapp_gate["satisfied_checks"])
+            self.assertEqual(
+                whatsapp["details"]["chat_app_strategy_profile"]["selected_track"],
+                "whatsapp-export-msgstore-crypt-validation",
+            )
+            self.assertIn(
+                "msgstore.db",
+                whatsapp["details"]["chat_app_strategy_profile"]["expected_source_pivots"],
+            )
             whatsapp_uplift = whatsapp["details"]["chat_app_commercial_uplift_evidence"]
             self.assertEqual(whatsapp_uplift["item_numbers"], [32])
             self.assertIn("encrypted-store-authority", whatsapp_uplift["failed_issue_matrix_ids"])
+            self.assertTrue(whatsapp_uplift["large_data_controls"]["whatsapp_message_review_profile_present"])
             self.assertEqual(
                 whatsapp_uplift["reportability_decision"]["decision"],
                 "do-not-report-whatsapp-message-content-as-crypt-or-deleted-complete",
@@ -187,11 +335,37 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 ],
             )
             telegram = next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Telegram")
+            self.assertTrue(telegram["details"]["validation_checks"]["telegram_review_profile_emitted"])
+            self.assertTrue(telegram["details"]["validation_checks"]["telegram_message_hash_present"])
+            self.assertTrue(telegram["details"]["validation_checks"]["telegram_account_or_dialog_attribution_present"])
+            self.assertTrue(telegram["details"]["validation_checks"]["telegram_media_cache_metadata_present"])
+            telegram_review_profile = telegram["details"]["telegram_message_review_profile"]
+            self.assertEqual(telegram_review_profile["media_class"], "image")
+            self.assertTrue(telegram_review_profile["dialog_id_present"])
+            self.assertTrue(telegram_review_profile["author_present"])
+            self.assertEqual(telegram_review_profile["local_store_decryption_status"], "not-performed")
+            self.assertEqual(
+                telegram_review_profile["review_display_mode"],
+                "chat-bubble-row-with-account-cache-metadata-collapsed",
+            )
             telegram_gate = {gate["gap_id"]: gate for gate in telegram["details"]["core_accuracy_gates"]}["#33"]
             self.assertIn("Telegram service/profile detection", telegram_gate["satisfied_checks"])
             self.assertIn("chat/user/media attribution", telegram_gate["satisfied_checks"])
+            self.assertIn("Telegram message review profile", telegram_gate["satisfied_checks"])
+            self.assertIn("Telegram account/dialog attribution tracking", telegram_gate["satisfied_checks"])
+            self.assertIn("Telegram media/cache metadata tracking", telegram_gate["satisfied_checks"])
+            self.assertIn("Telegram export/cache strategy profile", telegram_gate["satisfied_checks"])
             self.assertIn("encrypted local store warning", telegram_gate["satisfied_checks"])
+            self.assertEqual(
+                telegram["details"]["chat_app_strategy_profile"]["selected_track"],
+                "telegram-export-cache-account-attribution",
+            )
             self.assertEqual(telegram["details"]["chat_app_commercial_uplift_evidence"]["item_numbers"], [33])
+            self.assertTrue(
+                telegram["details"]["chat_app_commercial_uplift_evidence"]["large_data_controls"][
+                    "telegram_message_review_profile_present"
+                ]
+            )
             self.assertEqual(
                 telegram["details"]["chat_app_commercial_uplift_evidence"]["reportability_decision"]["allowed_use"],
                 "telegram-export-or-cache-triage-pivot",
@@ -203,11 +377,37 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 ],
             )
             signal = next(artifact for artifact in chat_messages if artifact["details"]["service"] == "Signal")
+            self.assertTrue(signal["details"]["validation_checks"]["signal_review_profile_emitted"])
+            self.assertTrue(signal["details"]["validation_checks"]["signal_message_hash_present"])
+            self.assertTrue(signal["details"]["validation_checks"]["signal_thread_or_recipient_attribution_present"])
+            self.assertTrue(signal["details"]["validation_checks"]["signal_attachment_metadata_present"])
+            signal_review_profile = signal["details"]["signal_message_review_profile"]
+            self.assertEqual(signal_review_profile["attachment_class"], "audio")
+            self.assertTrue(signal_review_profile["thread_id_present"])
+            self.assertTrue(signal_review_profile["recipient_id_present"])
+            self.assertEqual(signal_review_profile["sqlcipher_key_authority_status"], "not-attached")
+            self.assertEqual(
+                signal_review_profile["review_display_mode"],
+                "chat-bubble-row-with-recipient-sqlcipher-metadata-collapsed",
+            )
             signal_gate = {gate["gap_id"]: gate for gate in signal["details"]["core_accuracy_gates"]}["#34"]
             self.assertIn("Signal service/profile detection", signal_gate["satisfied_checks"])
             self.assertIn("thread/recipient/message inventory", signal_gate["satisfied_checks"])
+            self.assertIn("Signal message review profile", signal_gate["satisfied_checks"])
+            self.assertIn("Signal thread/recipient attribution tracking", signal_gate["satisfied_checks"])
+            self.assertIn("Signal attachment metadata tracking", signal_gate["satisfied_checks"])
+            self.assertIn("Signal SQLCipher strategy profile", signal_gate["satisfied_checks"])
             self.assertIn("SQLCipher/key authority gate", signal_gate["satisfied_checks"])
+            self.assertEqual(
+                signal["details"]["chat_app_strategy_profile"]["selected_track"],
+                "signal-sqlcipher-authority-gated-inventory",
+            )
             self.assertEqual(signal["details"]["chat_app_commercial_uplift_evidence"]["item_numbers"], [34])
+            self.assertTrue(
+                signal["details"]["chat_app_commercial_uplift_evidence"]["large_data_controls"][
+                    "signal_message_review_profile_present"
+                ]
+            )
             self.assertEqual(
                 signal["details"]["chat_app_commercial_uplift_evidence"]["reportability_decision"]["decision"],
                 "do-not-report-signal-message-content-as-sqlcipher-complete",
@@ -224,14 +424,41 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             line_gate = {gate["gap_id"]: gate for gate in line["details"]["core_accuracy_gates"]}["#35"]
             self.assertIn("extended service/profile detection", line_gate["satisfied_checks"])
             self.assertIn("message/media/reaction normalization", line_gate["satisfied_checks"])
+            self.assertIn("extended messenger message review profile", line_gate["satisfied_checks"])
+            self.assertIn("extended messenger thread/channel attribution tracking", line_gate["satisfied_checks"])
+            self.assertIn("extended messenger attachment metadata tracking", line_gate["satisfied_checks"])
+            self.assertIn("extended messenger schema/ephemeral strategy profile", line_gate["satisfied_checks"])
             self.assertIn("schema/app version registry", line_gate["satisfied_checks"])
+            line_profile = line["details"]["extended_messenger_message_review_profile"]
+            self.assertEqual(line_profile["service"], "LINE")
+            self.assertEqual(line_profile["source_track"], "line-export-database-schema-review")
+            self.assertEqual(line_profile["attachment_class"], "image")
+            self.assertTrue(line_profile["thread_or_channel_attribution_present"])
+            self.assertTrue(line_profile["account_or_actor_attribution_present"])
+            self.assertTrue(line["details"]["validation_checks"]["extended_messenger_review_profile_emitted"])
+            self.assertTrue(line["details"]["validation_checks"]["extended_messenger_thread_or_channel_present"])
+            self.assertTrue(line["details"]["validation_checks"]["extended_messenger_attachment_metadata_present"])
+            self.assertEqual(
+                line["details"]["chat_app_strategy_profile"]["selected_track"],
+                "extended-service-export-schema-validation",
+            )
             line_uplift = line["details"]["chat_app_commercial_uplift_evidence"]
             self.assertEqual(line_uplift["item_numbers"], [35])
+            self.assertEqual(line_uplift["functional_priority_profile"]["item_number"], 50)
             self.assertIn("schema-version-known-answer", line_uplift["failed_issue_matrix_ids"])
             self.assertEqual(
                 line_uplift["reportability_decision"]["allowed_use"],
                 "extended-messenger-export-triage-pivot",
             )
+            self.assertTrue(
+                line_uplift["large_data_controls"]["extended_messenger_message_review_profile_present"]
+            )
+            for service in ("Discord", "Instagram"):
+                artifact = next(artifact for artifact in chat_messages if artifact["details"]["service"] == service)
+                profile = artifact["details"]["extended_messenger_message_review_profile"]
+                self.assertEqual(profile["service"], service)
+                self.assertTrue(profile["thread_or_channel_attribution_present"])
+                self.assertTrue(artifact["details"]["validation_checks"]["extended_messenger_review_profile_emitted"])
 
             app = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-app")
             self.assertEqual(app["details"]["source_tool"], "graykey")
@@ -257,11 +484,39 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             ios_gate = ios_file["details"]["core_accuracy_gates"][0]
             self.assertEqual(ios_gate["gap_id"], "#27")
             self.assertIn("Manifest.db domain/fileID mapping", ios_gate["satisfied_checks"])
+            self.assertIn("iOS backup scope/file profile", ios_gate["satisfied_checks"])
             self.assertIn("encrypted backup authority gate", ios_gate["satisfied_checks"])
             self.assertIn("app database schema detection", ios_gate["satisfied_checks"])
             self.assertIn("deleted-record limitation warning", ios_gate["satisfied_checks"])
+            self.assertIn("iOS backup parser manifest", ios_gate["satisfied_checks"])
+            self.assertIn("iOS backup source locator", ios_gate["satisfied_checks"])
+            self.assertEqual(ios_file["details"]["ios_backup_file_profile"]["category"], "message-or-chat-store")
+            ios_manifest = ios_file["details"]["ios_backup_parser_manifest"]
+            self.assertEqual(ios_manifest["manifest_version"], "ios-backup-parser-manifest-v1")
+            self.assertEqual(ios_manifest["item_number"], 53)
+            self.assertEqual(ios_manifest["source_viewer_locator"]["viewer"], "ios-manifest-file-row")
+            self.assertEqual(ios_manifest["manifest_row"]["file_id"], "abcdef123456")
+            self.assertEqual(ios_manifest["manifest_row"]["category"], "message-or-chat-store")
+            self.assertEqual(len(ios_manifest["manifest_sha256"]), 64)
+            self.assertEqual(ios_file["details"]["ios_backup_parser_manifest_hash"], ios_manifest["manifest_sha256"])
             ios_uplift = ios_file["details"]["commercial_uplift_evidence"]
             self.assertEqual(ios_uplift["item_numbers"], [27])
+            ios_profiles = {profile["item_number"]: profile for profile in ios_uplift["functional_priority_profiles"]}
+            self.assertIn(52, ios_profiles)
+            self.assertIn(53, ios_profiles)
+            self.assertEqual(ios_profiles[53]["batch_id"], "commercial-uplift-051-055")
+            self.assertTrue(ios_profiles[53]["implemented_controls"]["encrypted_backup_lawful_key_workflow_required"])
+            self.assertEqual(
+                ios_profiles[53]["implemented_controls"]["ios_backup_parser_manifest_hash"],
+                ios_manifest["manifest_sha256"],
+            )
+            self.assertIn("ios-backup-parser-manifest-emitted", ios_profiles[53]["passed_validation_check_ids"])
+            self.assertIn("ios-backup-source-locator-emitted", ios_profiles[53]["passed_validation_check_ids"])
+            self.assertEqual(
+                ios_uplift["large_data_controls"]["ios_backup_parser_manifest_hash"],
+                ios_manifest["manifest_sha256"],
+            )
+            self.assertTrue(ios_uplift["large_data_controls"]["ios_backup_source_locator_present"])
             self.assertIn("protected-data-boundary", ios_uplift["passed_validation_matrix_ids"])
             self.assertIn("known-answer-mobile-validation", ios_uplift["failed_validation_matrix_ids"])
             self.assertEqual(
@@ -282,6 +537,26 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             metadata_gate = ios_metadata["details"]["core_accuracy_gates"][0]
             self.assertEqual(metadata_gate["gap_id"], "#27")
             self.assertIn("Info/Status plist consistency", metadata_gate["satisfied_checks"])
+            ios_source = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "ios-backup-source")
+            self.assertEqual(ios_source["details"]["ios_backup_scope_profile"]["manifest_row_count"], 1)
+            self.assertEqual(ios_source["details"]["ios_backup_scope_profile"]["domain_count"], 1)
+            root_profile = ios_source["details"]["ios_backup_root_profile"]
+            self.assertTrue(root_profile["required_files_present"])
+            self.assertEqual(root_profile["validation_status"], "inventory-ready")
+            self.assertEqual(root_profile["device_name"], "Alice iPhone")
+            self.assertEqual(root_profile["product_version"], "18.4")
+            self.assertEqual(root_profile["snapshot_state"], "finished")
+            self.assertTrue(root_profile["is_full_backup"])
+            self.assertTrue(root_profile["required_files"]["Manifest.db"]["sha256"])
+            self.assertTrue(root_profile["required_files"]["Info.plist"]["sha256"])
+            self.assertTrue(root_profile["keychain_file"]["present"])
+            self.assertTrue(ios_source["details"]["validation_checks"]["backup_root_profile_emitted"])
+            self.assertTrue(ios_source["details"]["validation_checks"]["required_backup_files_present"])
+            source_ios_gate = ios_source["details"]["core_accuracy_gates"][0]
+            self.assertIn("backup root integrity/status profile", source_ios_gate["satisfied_checks"])
+            source_manifest = ios_source["details"]["ios_backup_parser_manifest"]
+            self.assertEqual(source_manifest["source_viewer_locator"]["viewer"], "ios-backup-source-summary")
+            self.assertTrue(source_manifest["backup_root"]["required_files_present"])
 
             keychain = next(artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "ios-keychain-inventory")
             self.assertFalse(keychain["details"]["validation_checks"]["secrets_extracted"])
@@ -293,12 +568,38 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             keychain_gate = keychain["details"]["core_accuracy_gates"][0]
             self.assertEqual(keychain_gate["gap_id"], "#28")
             self.assertIn("secret values redacted by default", keychain_gate["satisfied_checks"])
+            self.assertIn("keychain scope/table profile", keychain_gate["satisfied_checks"])
             self.assertIn("protected-data class labeling", keychain_gate["satisfied_checks"])
             self.assertIn("authority gate before reveal/decrypt", keychain_gate["satisfied_checks"])
+            self.assertIn("secret reveal authority profile", keychain_gate["satisfied_checks"])
             self.assertIn("record count/table inventory", keychain_gate["satisfied_checks"])
+            self.assertIn("iOS backup parser manifest", keychain_gate["satisfied_checks"])
+            self.assertIn("iOS keychain source locator", keychain_gate["satisfied_checks"])
             self.assertIn("audit log for any controlled reveal", keychain_gate["satisfied_checks"])
             keychain_uplift = keychain["details"]["commercial_uplift_evidence"]
             self.assertEqual(keychain_uplift["item_numbers"], [28])
+            keychain_manifest = keychain["details"]["ios_backup_parser_manifest"]
+            self.assertEqual(keychain_manifest["source_viewer_locator"]["viewer"], "ios-keychain-table-inventory")
+            self.assertFalse(keychain_manifest["keychain_inventory"]["secret_reveal_allowed"])
+            self.assertTrue(keychain_manifest["lawful_key_workflow"]["protected_values_redacted_by_default"])
+            keychain_scope = keychain["details"]["ios_keychain_scope_profile"]
+            self.assertEqual(keychain_scope["sensitive_table_names"], ["genp"])
+            self.assertEqual(keychain_scope["table_class_counts"]["generic-password"], 1)
+            self.assertIn("data", keychain_scope["sensitive_column_names"])
+            self.assertGreaterEqual(keychain_scope["protected_value_column_count"], 1)
+            self.assertTrue(keychain_scope["redaction_policy"]["values_redacted"])
+            self.assertFalse(keychain_scope["redaction_policy"]["secrets_extracted"])
+            self.assertEqual(keychain_scope["table_inventory_validation_status"], "inventory-ready")
+            authority_gate = keychain["details"]["ios_keychain_authority_gate"]
+            self.assertFalse(authority_gate["secret_reveal_allowed"])
+            self.assertTrue(authority_gate["audit_required_before_reveal"])
+            self.assertIn("generic-password", authority_gate["blocked_table_classes"])
+            self.assertIn("data", authority_gate["blocked_sensitive_columns"])
+            keychain_profiles = {
+                profile["item_number"]: profile for profile in keychain_uplift["functional_priority_profiles"]
+            }
+            self.assertIn(53, keychain_profiles)
+            self.assertTrue(keychain_profiles[53]["implemented_controls"]["keychain_redacted_inventory"])
             self.assertTrue(keychain_uplift["large_data_controls"]["protected_values_redacted_by_default"])
             self.assertIn("protected-data-boundary", keychain_uplift["passed_validation_matrix_ids"])
             self.assertEqual(
@@ -319,6 +620,25 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("mobile-chat-database", chat_db["details"]["risk_flags"])
             self.assertIn("#32", chat_db["details"]["chat_app_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(chat_db["details"]["chat_app_forensic_review"]["gap_id"], "#32")
+            whatsapp_db_profile = chat_db["details"]["whatsapp_database_review_profile"]
+            self.assertIn("messages", whatsapp_db_profile["message_table_candidates"])
+            self.assertTrue(whatsapp_db_profile["msgstore_shape_present"])
+            self.assertEqual(whatsapp_db_profile["crypt_key_authority_status"], "not-attached")
+            chat_db_manifest = chat_db["details"]["messenger_export_framework_manifest"]
+            self.assertEqual(chat_db_manifest["artifact_type"], "mobile-chat-database")
+            self.assertEqual(chat_db_manifest["table_summary_count"], 1)
+            self.assertEqual(chat_db_manifest["table_citation_count"], 1)
+            self.assertEqual(chat_db_manifest["table_citations"][0]["table_name"], "messages")
+            self.assertEqual(
+                chat_db_manifest["table_citations"][0]["source_viewer_locator"]["viewer"],
+                "sqlite-table-inventory",
+            )
+            self.assertIn(
+                "messenger table citation inventory",
+                {gate["gap_id"]: gate for gate in chat_db["details"]["core_accuracy_gates"]}["#32"][
+                    "satisfied_checks"
+                ],
+            )
 
             summaries = [artifact for artifact in payload["artifacts"] if artifact["artifact_type"] == "mobile-correlation-summary"]
             self.assertTrue(any(summary["details"]["message_count"] >= 7 for summary in summaries))
@@ -335,8 +655,33 @@ class RapidTriageMobileExportTests(unittest.TestCase):
                 messenger_summary["details"]["message_media_links"][0]["validation_status"],
                 "unresolved-candidate",
             )
+            timeline_profile = messenger_summary["details"]["mobile_timeline_correlation_profile"]
+            self.assertEqual(timeline_profile["profile_version"], "mobile-timeline-correlation-v1")
+            self.assertGreaterEqual(timeline_profile["event_count"], messenger_summary["details"]["message_count"])
+            self.assertGreaterEqual(timeline_profile["message_event_count"], messenger_summary["details"]["message_count"])
+            self.assertGreaterEqual(timeline_profile["message_media_link_count"], 1)
+            self.assertGreaterEqual(timeline_profile["unresolved_media_link_count"], 1)
+            self.assertFalse(timeline_profile["device_wide_timeline_ready"])
+            self.assertTrue(timeline_profile["known_answer_correlation_required"])
+            self.assertLessEqual(len(timeline_profile["events"]), timeline_profile["event_cap"])
             self.assertGreaterEqual(messenger_summary["details"]["unified_contact_call_sms_view_count"], 2)
+            actor_profile = messenger_summary["details"]["mobile_actor_review_profile"]
+            self.assertEqual(actor_profile["profile_version"], "mobile-actor-review-v1")
+            self.assertGreaterEqual(actor_profile["actor_count"], 2)
+            self.assertGreaterEqual(actor_profile["review_queue_count"], 1)
+            self.assertFalse(actor_profile["device_wide_identity_resolution_ready"])
+            self.assertTrue(actor_profile["merge_split_review_required"])
+            self.assertTrue(actor_profile["known_answer_actor_diff_required"])
+            self.assertLessEqual(len(actor_profile["review_queue"]), actor_profile["review_queue_count"])
             self.assertGreaterEqual(messenger_summary["details"]["schema_version_registry_count"], 1)
+            schema_profile = messenger_summary["details"]["mobile_schema_compatibility_profile"]
+            self.assertEqual(schema_profile["profile_version"], "mobile-schema-compatibility-v1")
+            self.assertGreaterEqual(schema_profile["entry_count"], 1)
+            self.assertGreaterEqual(schema_profile["unvalidated_entry_count"], 1)
+            self.assertTrue(schema_profile["known_answer_fixture_required"])
+            self.assertTrue(schema_profile["schema_migration_matrix_required"])
+            self.assertTrue(schema_profile["commercial_release_blocked"])
+            self.assertGreaterEqual(schema_profile["release_gate_entry_count"], 1)
             self.assertFalse(
                 messenger_summary["details"]["validation_checks"]["schema_version_registry_known_answer_validated"]
             )
@@ -347,11 +692,15 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("message-media linkage built", correlation_gates["#43"]["satisfied_checks"])
             self.assertIn("message/contact/call/media counts preserved", correlation_gates["#43"]["satisfied_checks"])
             self.assertIn("timeline correlation readiness", correlation_gates["#43"]["satisfied_checks"])
+            self.assertIn("timeline correlation profile", correlation_gates["#43"]["satisfied_checks"])
             self.assertIn("known-answer limitation warning", correlation_gates["#43"]["satisfied_checks"])
             self.assertIn("contact/call/SMS actor merge", correlation_gates["#44"]["satisfied_checks"])
             self.assertIn("participant attribution", correlation_gates["#44"]["satisfied_checks"])
+            self.assertIn("actor review profile", correlation_gates["#44"]["satisfied_checks"])
+            self.assertIn("merge/split review requirement", correlation_gates["#44"]["satisfied_checks"])
             self.assertIn("export-scope limitation warning", correlation_gates["#44"]["satisfied_checks"])
             self.assertIn("app/service schema version registry", correlation_gates["#45"]["satisfied_checks"])
+            self.assertIn("schema compatibility profile", correlation_gates["#45"]["satisfied_checks"])
             self.assertIn("source app/version attribution", correlation_gates["#45"]["satisfied_checks"])
             self.assertIn("release-gate limitation disclosure", correlation_gates["#45"]["satisfied_checks"])
             correlation_uplift = messenger_summary["details"]["mobile_correlation_commercial_uplift_evidence"]
@@ -359,7 +708,10 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertEqual(correlation_uplift["item_numbers"], [43, 44, 45])
             self.assertIn("media_message_links_built", correlation_uplift["passed_validation_check_ids"])
             self.assertIn("unified_contact_call_sms_view_built", correlation_uplift["passed_validation_check_ids"])
+            self.assertIn("actor_review_profile_built", correlation_uplift["passed_validation_check_ids"])
+            self.assertIn("timeline_correlation_profile_built", correlation_uplift["passed_validation_check_ids"])
             self.assertIn("schema_version_registry_built", correlation_uplift["passed_validation_check_ids"])
+            self.assertIn("schema_compatibility_profile_built", correlation_uplift["passed_validation_check_ids"])
             self.assertIn(
                 "correlation_validated_against_known_answer",
                 correlation_uplift["failed_validation_check_ids"],
@@ -382,6 +734,13 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             )
             self.assertFalse(correlation_uplift["large_data_controls"]["device_wide_timeline_ready"])
             self.assertTrue(correlation_uplift["large_data_controls"]["known_answer_correlation_required"])
+            self.assertTrue(correlation_uplift["large_data_controls"]["timeline_profile_present"])
+            self.assertGreaterEqual(correlation_uplift["large_data_controls"]["timeline_event_count"], 1)
+            self.assertTrue(correlation_uplift["large_data_controls"]["actor_review_profile_present"])
+            self.assertGreaterEqual(correlation_uplift["large_data_controls"]["actor_review_queue_count"], 1)
+            self.assertTrue(correlation_uplift["large_data_controls"]["schema_compatibility_profile_present"])
+            self.assertGreaterEqual(correlation_uplift["large_data_controls"]["schema_compatibility_entry_count"], 1)
+            self.assertTrue(correlation_uplift["large_data_controls"]["schema_release_gate_blocked"])
             self.assertIn(
                 "mobile-correlation-vendor-timeline-diff-required",
                 correlation_uplift["reportability_decision"]["blockers"],
@@ -647,6 +1006,21 @@ def write_mobile_export_fixtures(root: Path) -> None:
         ),
         encoding="utf-8",
     )
+    cellebrite_hash = hashlib.sha256(cellebrite.read_bytes()).hexdigest()
+    (cellebrite.parent / "export-metadata.json").write_text(
+        json.dumps(
+            {
+                "vendor_tool": "Cellebrite Physical Analyzer",
+                "vendor_tool_version": "7.66",
+                "parser_version": "PA-7.66-schema",
+                "schema_version": "messages-v1",
+                "source_sha256": cellebrite_hash,
+                "original_acquisition_sha256": "c" * 64,
+                "export_settings": {"timezone": "UTC", "include_deleted": True},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     xry = root / "XRY" / "contacts_calls.json"
     xry.parent.mkdir(parents=True)
@@ -722,17 +1096,22 @@ def write_mobile_export_fixtures(root: Path) -> None:
                     "Service": "WhatsApp",
                     "Conversation ID": "wa-thread-1",
                     "Message ID": "wa-msg-1",
-                    "Sender": "+15550100",
-                    "Recipient": "+15550200",
+                    "Sender": "15550100@s.whatsapp.net",
+                    "Recipient": "15550200@s.whatsapp.net",
                     "Text": "WhatsApp exported chat",
+                    "Media Path": "/WhatsApp/Media/IMG-0001.jpg",
+                    "App Version": "2.26.1",
                     "Timestamp": "2026-04-26T05:01:00Z",
                 },
                 {
                     "Service": "Telegram",
+                    "Conversation ID": "tg-dialog-1",
                     "Chat Title": "Ops",
                     "Message ID": "tg-msg-1",
                     "Author": "alice",
                     "Text": "Telegram desktop export",
+                    "Media Path": "/Telegram Desktop/tdata/cache/photo_1.jpg",
+                    "Source File": "result.json",
                     "Timestamp": "2026-04-26T05:02:00Z",
                 },
                 {
@@ -740,8 +1119,10 @@ def write_mobile_export_fixtures(root: Path) -> None:
                     "Thread ID": "signal-thread-1",
                     "Message ID": "signal-msg-1",
                     "From": "alice",
-                    "To": "bob",
+                    "To": "signal-recipient-1",
                     "Body": "Signal backup row",
+                    "Media Path": "/Signal/Attachments/voice-note.ogg",
+                    "App Version": "7.45.0",
                     "Timestamp": "2026-04-26T05:03:00Z",
                 },
                 {
@@ -750,6 +1131,8 @@ def write_mobile_export_fixtures(root: Path) -> None:
                     "Message ID": "line-msg-1",
                     "Sender": "alice",
                     "Content": "LINE export row",
+                    "Media Path": "/LINE/Images/sticker-1.png",
+                    "App Version": "15.1.0",
                     "Timestamp": "2026-04-26T05:04:00Z",
                 },
                 {
@@ -758,6 +1141,8 @@ def write_mobile_export_fixtures(root: Path) -> None:
                     "Message ID": "discord-msg-1",
                     "Author": "alice",
                     "Message": "Discord data package row",
+                    "Attachment URL": "https://cdn.discordapp.com/attachments/example/file.pdf",
+                    "Edited At": "2026-04-26T05:05:30Z",
                     "Timestamp": "2026-04-26T05:05:00Z",
                 },
                 {
@@ -766,6 +1151,8 @@ def write_mobile_export_fixtures(root: Path) -> None:
                     "Message ID": "ig-msg-1",
                     "Sender": "alice",
                     "Text": "Instagram direct export row",
+                    "Media Path": "/instagram/messages/inbox/photo.jpg",
+                    "Ephemeral": "vanish_mode_possible",
                     "Timestamp": "2026-04-26T05:06:00Z",
                 },
                 {
@@ -783,9 +1170,10 @@ def write_mobile_export_fixtures(root: Path) -> None:
 
     whatsapp_db = root / "WhatsApp" / "msgstore.db"
     whatsapp_db.parent.mkdir()
-    with sqlite3.connect(whatsapp_db) as connection:
+    with contextlib.closing(sqlite3.connect(whatsapp_db)) as connection:
         connection.execute("CREATE TABLE messages (_id INTEGER, key_remote_jid TEXT, from_me INTEGER, data TEXT, timestamp INTEGER)")
         connection.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?)", (1, "15550100@s.whatsapp.net", 0, "redacted", 1777180000000))
+        connection.commit()
 
     ios_backup = root / "iOS Backup"
     ios_backup.mkdir()
@@ -802,17 +1190,19 @@ def write_mobile_export_fixtures(root: Path) -> None:
     (ios_backup / "Status.plist").write_bytes(plistlib.dumps({"SnapshotState": "finished", "IsFullBackup": True}))
 
     manifest = ios_backup / "Manifest.db"
-    with sqlite3.connect(manifest) as connection:
+    with contextlib.closing(sqlite3.connect(manifest)) as connection:
         connection.execute("CREATE TABLE Files (fileID TEXT, domain TEXT, relativePath TEXT, flags INTEGER)")
         connection.execute(
             "INSERT INTO Files VALUES (?, ?, ?, ?)",
             ("abcdef123456", "AppDomain-com.apple.MobileSMS", "Library/SMS/sms.db", 1),
         )
+        connection.commit()
 
     keychain = ios_backup / "keychain-2.db"
-    with sqlite3.connect(keychain) as connection:
+    with contextlib.closing(sqlite3.connect(keychain)) as connection:
         connection.execute("CREATE TABLE genp (agrp TEXT, svce TEXT, acct TEXT, data BLOB)")
         connection.execute("INSERT INTO genp VALUES (?, ?, ?, ?)", ("test", "example", "alice", b"secret-not-exported"))
+        connection.commit()
 
 
 if __name__ == "__main__":

@@ -80,6 +80,10 @@
         "type": "boolean"
       }
     },
+    "compare_review_profile": {
+      "type": "object",
+      "additionalProperties": true
+    },
     "compare_report_grade_assessment": {
       "type": "object",
       "additionalProperties": true

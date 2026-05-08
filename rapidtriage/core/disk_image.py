@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 from .e01 import (
+    build_recovered_root_manifest,
     collect_tool_preflight,
     command_record,
     describe_source_integrity,
@@ -62,6 +63,8 @@ class DiskImageExtractionResult:
     tool_preflight: tuple[dict[str, object], ...] = ()
     partition_table: tuple[dict[str, object], ...] = ()
     split_part_warnings: tuple[str, ...] = ()
+    split_set_profile: dict[str, object] = field(default_factory=dict)
+    recovered_root_manifest: dict[str, object] = field(default_factory=dict)
     command_history: tuple[dict[str, object], ...] = ()
     warnings: tuple[str, ...] = ()
     commercial_grade_ready: bool = False
@@ -80,6 +83,8 @@ class DiskImageExtractionResult:
             "tool_preflight": list(self.tool_preflight),
             "partition_table": list(self.partition_table),
             "split_part_warnings": list(self.split_part_warnings),
+            "split_set_profile": self.split_set_profile,
+            "recovered_root_manifest": self.recovered_root_manifest,
             "command_history": list(self.command_history),
             "warnings": list(self.warnings),
             "commercial_grade_ready": self.commercial_grade_ready,
@@ -101,6 +106,8 @@ class DiskImageExtractionResult:
                     "partition_table": list(self.partition_table),
                     "partition_start_sector": self.partition_start_sector,
                     "split_part_warnings": list(self.split_part_warnings),
+                    "split_set_profile": self.split_set_profile,
+                    "recovered_root_manifest": self.recovered_root_manifest,
                     "command_history": list(self.command_history),
                     "warnings": list(self.warnings),
                     "recovery_mode": self.recovery_mode,
@@ -119,6 +126,8 @@ class DiskImageExtractionResult:
                     "partition_start_sector": self.partition_start_sector,
                     "split_part_count": len(self.image_paths),
                     "split_part_warnings": list(self.split_part_warnings),
+                    "split_set_profile": self.split_set_profile,
+                    "recovered_root_manifest": self.recovered_root_manifest,
                     "command_history": list(self.command_history),
                     "warnings": list(self.warnings),
                     "limitations": RAW_IMAGE_REPORT_GRADE_BLOCKERS,
@@ -174,7 +183,8 @@ def extract_raw_image_to_directory(
         )
 
     image_paths = tuple(discover_split_image_parts(source_path))
-    split_part_warnings = tuple(validate_split_image_parts(image_paths))
+    split_set_profile = build_split_set_profile(image_paths, selected_path=source_path)
+    split_part_warnings = tuple(split_set_profile["warnings"])
     stage = stage_dir.expanduser().resolve()
     extract_dir = stage / "filesystem"
     stage.mkdir(parents=True, exist_ok=True)
@@ -200,6 +210,7 @@ def extract_raw_image_to_directory(
             mmls_detail = mmls_result.stderr.strip() or mmls_result.stdout.strip()
             detail = f"{detail}; mmls failed before whole-image fallback: {mmls_detail}".strip("; ")
         raise DiskImageExtractionError(f"tsk_recover failed for raw/split image: {detail}")
+    recovered_manifest = build_recovered_root_manifest(extract_dir)
 
     return DiskImageExtractionResult(
         source_path=source_path,
@@ -212,6 +223,8 @@ def extract_raw_image_to_directory(
         tool_preflight=tuple(tool_preflight),
         partition_table=tuple(mark_selected_partition(partition_table, start_sector)),
         split_part_warnings=split_part_warnings,
+        split_set_profile=split_set_profile,
+        recovered_root_manifest=recovered_manifest,
         command_history=tuple(command_history),
         warnings=(
             "Raw/split direct extraction is an orchestrated Sleuth Kit workflow; validate recovered paths and timestamps before reporting.",
@@ -254,3 +267,46 @@ def validate_split_image_parts(image_paths: Sequence[Path]) -> list[str]:
     if numbers and min(numbers) not in {0, 1}:
         warnings.append(f"Split image sequence starts at {min(numbers)}; confirm no earlier segment exists.")
     return warnings
+
+
+def build_split_set_profile(
+    image_paths: Sequence[Path],
+    *,
+    selected_path: Path | None = None,
+) -> dict[str, object]:
+    parts = list(image_paths)
+    warnings = validate_split_image_parts(parts)
+    numbers: list[int] = []
+    for path in parts:
+        if re.fullmatch(r"\.\d+", path.suffix.lower()):
+            numbers.append(int(path.suffix.lstrip(".")))
+    selected = selected_path.resolve() if selected_path else (parts[0].resolve() if parts else None)
+    first = parts[0].resolve() if parts else None
+    if selected and first and selected != first:
+        warnings.append(f"Selected split image segment is not the first discovered segment: first={parts[0].name}")
+    expected = list(range(min(numbers), max(numbers) + 1)) if numbers else []
+    missing = sorted(set(expected) - set(numbers)) if expected else []
+    return {
+        "profile_version": "raw-split-set-v1",
+        "selected_segment": str(selected) if selected else "",
+        "selected_is_first_segment": bool(selected and first and selected == first),
+        "part_count": len(parts),
+        "segment_numbers": numbers,
+        "missing_segment_numbers": missing,
+        "contiguous": not missing,
+        "starts_at_expected_segment": min(numbers) in {0, 1} if numbers else True,
+        "total_size_bytes": sum(path.stat().st_size for path in parts if path.is_file()),
+        "parts": [
+            {
+                "path": str(path),
+                "name": path.name,
+                "segment_number": int(path.suffix.lstrip(".")) if re.fullmatch(r"\.\d+", path.suffix.lower()) else None,
+                "size": path.stat().st_size if path.is_file() else 0,
+                "mtime_ns": path.stat().st_mtime_ns if path.is_file() else None,
+            }
+            for path in parts
+        ],
+        "warnings": warnings,
+        "validation_status": "review-required" if warnings else "sequence-contiguous",
+        "commercial_note": "This is filename/sequence provenance; partition/filesystem parsing is still delegated to Sleuth Kit.",
+    }

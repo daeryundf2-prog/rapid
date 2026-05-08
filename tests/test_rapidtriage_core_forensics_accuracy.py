@@ -288,6 +288,13 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             template = payload["core_forensics_known_answer_template"]
             self.assertEqual(template["item_count"], 120)
             self.assertEqual(template["datasets"][0]["id"], "core-forensics-01")
+            matrix = payload["validation_legal_defensibility_matrix"]
+            self.assertEqual(matrix["profile_version"], "validation-legal-defensibility-matrix-v1")
+            self.assertEqual(matrix["item_numbers"], [81, 82, 83, 84, 85])
+            self.assertEqual(matrix["row_count"], 5)
+            self.assertEqual(len(matrix["matrix_hash"]), 64)
+            self.assertEqual(matrix["implemented_count"], 5)
+            self.assertEqual(matrix["usable_count"], 5)
 
             markdown = (output / "rapidtriage-validation-report.md").read_text(encoding="utf-8")
             self.assertIn("#1-#120 Core Forensics Accuracy Profiles", markdown)
@@ -616,6 +623,33 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
             self.assertEqual(known_answer["status"], "all-passed")
             self.assertEqual(known_answer["dataset_count"], 10)
             self.assertTrue(all(dataset["evidence_paths_present"] for dataset in known_answer["datasets"]))
+            self.assertEqual(
+                known_answer["dataset_evidence_matrix"]["profile_version"],
+                "known-answer-dataset-evidence-matrix-v1",
+            )
+            self.assertEqual(known_answer["dataset_evidence_matrix"]["dataset_count"], 10)
+            self.assertEqual(len(known_answer["dataset_evidence_matrix_hash"]), 64)
+            self.assertEqual(
+                known_answer["known_answer_pipeline_manifest"]["dataset_evidence_matrix_hash"],
+                known_answer["dataset_evidence_matrix_hash"],
+            )
+            self.assertTrue(all(dataset["evidence_matrix_row_hash"] for dataset in known_answer["datasets"]))
+            fixture_matrix = payload["parser_fixture_corpus"]["fixture_release_gate_matrix"]
+            self.assertEqual(fixture_matrix["profile_version"], "fixture-release-gate-matrix-v1")
+            self.assertEqual(len(payload["parser_fixture_corpus"]["fixture_release_gate_matrix_hash"]), 64)
+            self.assertEqual(fixture_matrix["matrix_hash"], payload["parser_fixture_corpus"]["fixture_release_gate_matrix_hash"])
+            fp_fn_profile = payload["parser_fp_fn_risk_register_profile"]
+            self.assertEqual(fp_fn_profile["risk_matrix"]["profile_version"], "parser-fp-fn-risk-matrix-v1")
+            self.assertEqual(len(fp_fn_profile["risk_matrix_hash"]), 64)
+            independent_manifest = payload["independent_validation_report"]["independent_validation_manifest"]
+            self.assertEqual(len(independent_manifest["minimum_section_presence_hash"]), 64)
+            self.assertEqual(len(independent_manifest["signoff_status_hash"]), 64)
+            validation_manifest = payload["validation_package_assessment"]["validation_package_manifest"]
+            self.assertEqual(len(validation_manifest["artifact_set_hash"]), 64)
+            self.assertEqual(len(validation_manifest["required_output_presence_hash"]), 64)
+            legal_matrix = payload["validation_legal_defensibility_matrix"]
+            self.assertEqual(legal_matrix["item_numbers"], [81, 82, 83, 84, 85])
+            self.assertEqual(len(legal_matrix["matrix_hash"]), 64)
 
             readiness = Path(tmp_dir) / "readiness"
             readiness_exit = main(

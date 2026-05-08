@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from rapidtriage.cli import build_parser, main
+from rapidtriage.core.hash_cache import reset_hash_cache
 from tests.windows_artifact_fixtures import _minimal_ese_database, build_minimal_lnk
 
 SAMPLES_DIR = Path(__file__).resolve().parent.parent / "docs" / "rapidtriage-output-samples"
@@ -264,16 +265,78 @@ def canonicalize_files(payload: dict[str, Any]) -> dict[str, Any]:
     canonical = dict(payload)
     canonical["candidates"] = sorted(canonical["candidates"], key=lambda item: item["path"])
     canonical["core_accuracy_gates"] = compact_core_accuracy_gates(canonical.get("core_accuracy_gates"))
+    canonical["hash_cache_manifest"] = compact_hash_cache_manifest(canonical.get("hash_cache_manifest"))
+    canonical["duplicate_content_manifest"] = compact_duplicate_content_manifest(
+        canonical.get("duplicate_content_manifest")
+    )
     cache = canonical.get("hash_cache_assessment")
     if isinstance(cache, dict):
         cache["entry_count"] = "<HASH_CACHE_ENTRY_COUNT>"
         cache["hit_count"] = "<HASH_CACHE_HIT_COUNT>"
         cache["miss_count"] = "<HASH_CACHE_MISS_COUNT>"
+        cache["invalidation_count"] = "<HASH_CACHE_INVALIDATION_COUNT>"
+        cache["hash_cache_manifest"] = compact_hash_cache_manifest(cache.get("hash_cache_manifest"))
         cache["core_accuracy_gates"] = compact_core_accuracy_gates(cache.get("core_accuracy_gates"))
     duplicate = canonical.get("duplicate_detection_assessment")
     if isinstance(duplicate, dict):
+        duplicate["duplicate_content_manifest"] = compact_duplicate_content_manifest(
+            duplicate.get("duplicate_content_manifest")
+        )
         duplicate["core_accuracy_gates"] = compact_core_accuracy_gates(duplicate.get("core_accuracy_gates"))
     return canonical
+
+
+def compact_duplicate_content_manifest(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    compact = dict(value)
+    compact["manifest_hash"] = "<DUPLICATE_CONTENT_MANIFEST_HASH>"
+    compact["groups"] = [
+        {
+            **group,
+            "group_fingerprint": "<DUPLICATE_GROUP_FINGERPRINT>",
+        }
+        for group in compact.get("groups", [])
+        if isinstance(group, dict)
+    ]
+    return compact
+
+
+def compact_hash_cache_manifest(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    compact = dict(value)
+    compact["manifest_hash"] = "<HASH_CACHE_MANIFEST_HASH>"
+    stats = compact.get("stats")
+    if isinstance(stats, dict):
+        compact["stats"] = {
+            "hits": "<HASH_CACHE_HITS>",
+            "misses": "<HASH_CACHE_MISSES>",
+            "invalidations": "<HASH_CACHE_INVALIDATIONS>",
+        }
+    compact["entries"] = [
+        {
+            **entry,
+            "path_hash": "<PATH_HASH>",
+            "inode": "<INODE>",
+            "device": "<DEVICE>",
+            "mtime_ns": "<MTIME_NS>",
+        }
+        for entry in compact.get("entries", [])
+        if isinstance(entry, dict)
+    ]
+    compact["recent_events"] = [
+        {
+            **event,
+            "path_hash": "<PATH_HASH>",
+            "inode": "<INODE>",
+            "device": "<DEVICE>",
+            "mtime_ns": "<MTIME_NS>",
+        }
+        for event in compact.get("recent_events", [])
+        if isinstance(event, dict)
+    ]
+    return compact
 
 
 def compact_core_accuracy_gates(value: object) -> list[dict[str, object]]:
@@ -290,6 +353,9 @@ def canonicalize_extract(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 class RapidTriageOutputSamplesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_hash_cache()
+
     def test_root_help_includes_current_examples(self) -> None:
         help_text = build_parser().format_help()
 

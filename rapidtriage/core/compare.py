@@ -39,9 +39,12 @@ COMPARE_NATIVE_CAPABILITIES = {
     "hash_compare_md5_sha1_sha256": True,
     "bounded_text_diff": True,
     "case_report_pivot": True,
+    "compare_review_profile": True,
+    "bounded_compare_notes": True,
     "binary_structure_aware_diff": False,
     "image_visual_diff": False,
     "sqlite_table_aware_diff": False,
+    "persistent_compare_notes": False,
 }
 COMPARE_REPORT_GRADE_BLOCKERS = [
     "binary-structure-aware-diff-not-implemented",
@@ -69,6 +72,8 @@ def compare_paths(
     include_text_diff: bool = True,
     max_text_bytes: int = 256 * 1024,
     diff_context: int = 3,
+    selection_rationale: str = "",
+    review_notes: Sequence[str] | None = None,
 ) -> dict[str, object]:
     left_path = left.expanduser().resolve()
     right_path = right.expanduser().resolve()
@@ -95,8 +100,15 @@ def compare_paths(
         "left": left_record,
         "right": right_record,
     }
+    review_profile = build_compare_review_profile(
+        results=[result],
+        mode="pair",
+        input_records=[left_record, right_record],
+        selection_rationale=selection_rationale,
+        review_notes=review_notes,
+    )
     report_grade = compare_report_grade_assessment(mode="pair")
-    core_accuracy_gates = compare_core_accuracy_gates(results=[result], mode="pair")
+    core_accuracy_gates = compare_core_accuracy_gates(results=[result], mode="pair", review_profile=review_profile)
     return {
         "command": "compare",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -107,6 +119,8 @@ def compare_paths(
             "include_text_diff": include_text_diff,
             "max_text_bytes": max_text_bytes,
             "diff_context": diff_context,
+            "selection_rationale": selection_rationale,
+            "review_note_count": int(review_profile.get("review_note_count") or 0),
         },
         "inputs": {
             "left": left_record,
@@ -117,10 +131,14 @@ def compare_paths(
             "status_counts": {status: 1},
             "different_field_count": sum(1 for item in fields if item.get("status") == "different"),
             "text_diff_included": bool(text_diff.get("included")) if isinstance(text_diff, Mapping) else False,
+            "review_queue_count": int(review_profile.get("review_queue_count") or 0),
+            "selection_rationale_present": bool(review_profile.get("selection_rationale")),
+            "review_note_count": int(review_profile.get("review_note_count") or 0),
             "commercial_gap_ids": [COMPARE_GAP_ID],
             "commercial_grade_ready": False,
         },
         "compare_native_capabilities": dict(COMPARE_NATIVE_CAPABILITIES),
+        "compare_review_profile": review_profile,
         "compare_report_grade_assessment": report_grade,
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": compare_commercial_uplift_evidence(
@@ -130,6 +148,7 @@ def compare_paths(
             core_accuracy_gates=core_accuracy_gates,
             max_text_bytes=max_text_bytes,
             diff_context=diff_context,
+            review_profile=review_profile,
         ),
         "results": [result],
     }
@@ -143,6 +162,8 @@ def compare_many_paths(
     include_text_diff: bool = True,
     max_text_bytes: int = 256 * 1024,
     diff_context: int = 3,
+    selection_rationale: str = "",
+    review_notes: Sequence[str] | None = None,
 ) -> dict[str, object]:
     if len(paths) < 2:
         raise CompareError("compare requires at least two files")
@@ -167,6 +188,8 @@ def compare_many_paths(
             include_text_diff=include_text_diff,
             max_text_bytes=max_text_bytes,
             diff_context=diff_context,
+            selection_rationale=selection_rationale,
+            review_notes=review_notes,
         )
         result = dict(payload["results"][0])
         result["comparison_id"] = f"compare-{index - 1:04d}"
@@ -180,8 +203,15 @@ def compare_many_paths(
         if diff.get("included"):
             text_diff_count += 1
         input_records.append(result["right"])
+    review_profile = build_compare_review_profile(
+        results=comparisons,
+        mode="multi",
+        input_records=input_records,
+        selection_rationale=selection_rationale,
+        review_notes=review_notes,
+    )
     report_grade = compare_report_grade_assessment(mode="multi")
-    core_accuracy_gates = compare_core_accuracy_gates(results=comparisons, mode="multi")
+    core_accuracy_gates = compare_core_accuracy_gates(results=comparisons, mode="multi", review_profile=review_profile)
     return {
         "command": "compare",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -193,6 +223,8 @@ def compare_many_paths(
             "include_text_diff": include_text_diff,
             "max_text_bytes": max_text_bytes,
             "diff_context": diff_context,
+            "selection_rationale": selection_rationale,
+            "review_note_count": int(review_profile.get("review_note_count") or 0),
         },
         "inputs": {
             "baseline": baseline_record,
@@ -205,10 +237,14 @@ def compare_many_paths(
             "different_field_count": different_field_count,
             "text_diff_included": text_diff_count > 0,
             "text_diff_count": text_diff_count,
+            "review_queue_count": int(review_profile.get("review_queue_count") or 0),
+            "selection_rationale_present": bool(review_profile.get("selection_rationale")),
+            "review_note_count": int(review_profile.get("review_note_count") or 0),
             "commercial_gap_ids": [COMPARE_GAP_ID],
             "commercial_grade_ready": False,
         },
         "compare_native_capabilities": dict(COMPARE_NATIVE_CAPABILITIES),
+        "compare_review_profile": review_profile,
         "compare_report_grade_assessment": report_grade,
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": compare_commercial_uplift_evidence(
@@ -218,6 +254,7 @@ def compare_many_paths(
             core_accuracy_gates=core_accuracy_gates,
             max_text_bytes=max_text_bytes,
             diff_context=diff_context,
+            review_profile=review_profile,
         ),
         "results": comparisons,
     }
@@ -228,6 +265,7 @@ def compare_core_accuracy_gates(
     results: Sequence[Mapping[str, object]],
     mode: str,
     trusted_diff: Mapping[str, object] | None = None,
+    review_profile: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = []
     if mode == "multi" or len(results) >= 1:
@@ -238,6 +276,15 @@ def compare_core_accuracy_gates(
         satisfied.append("bounded text diff")
     if results:
         satisfied.append("status counts")
+    review_profile = review_profile if isinstance(review_profile, Mapping) else {}
+    if review_profile:
+        satisfied.append("compare review profile")
+    if int(review_profile.get("review_queue_count") or 0) > 0:
+        satisfied.append("comparison review queue")
+    if review_profile.get("selection_rationale"):
+        satisfied.append("selection rationale captured")
+    if int(review_profile.get("review_note_count") or 0) > 0:
+        satisfied.append("bounded compare notes captured")
     if not COMPARE_NATIVE_CAPABILITIES["binary_structure_aware_diff"]:
         satisfied.append("specialized diff limitation warning")
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
@@ -246,6 +293,8 @@ def compare_core_accuracy_gates(
     evidence_refs = [
         f"mode:{mode}",
         f"result_count:{len(results)}",
+        f"review_queue_count:{review_profile.get('review_queue_count', 0)}",
+        f"review_note_count:{review_profile.get('review_note_count', 0)}",
         f"trusted_diff_status:{trusted_diff.get('status', 'missing')}",
     ]
     for result in results[:3]:
@@ -253,6 +302,90 @@ def compare_core_accuracy_gates(
         evidence_refs.append(f"left:{result.get('left_path', '')}")
         evidence_refs.append(f"right:{result.get('right_path', '')}")
     return [build_accuracy_gate(52, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
+
+
+def build_compare_review_profile(
+    *,
+    results: Sequence[Mapping[str, object]],
+    mode: str,
+    input_records: Sequence[Mapping[str, object]],
+    selection_rationale: str = "",
+    review_notes: Sequence[str] | None = None,
+) -> dict[str, object]:
+    normalized_notes = [str(note).strip() for note in (review_notes or []) if str(note).strip()]
+    review_queue = []
+    status_counts: dict[str, int] = {}
+    text_diff_count = 0
+    for index, result in enumerate(results):
+        status = str(result.get("status") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        fields = result.get("fields") if isinstance(result.get("fields"), Sequence) else []
+        diff = result.get("diff") if isinstance(result.get("diff"), Mapping) else {}
+        if diff.get("included"):
+            text_diff_count += 1
+        left = result.get("left") if isinstance(result.get("left"), Mapping) else {}
+        right = result.get("right") if isinstance(result.get("right"), Mapping) else {}
+        review_queue.append(
+            {
+                "comparison_id": str(result.get("comparison_id") or f"compare-{index + 1:04d}"),
+                "baseline_label": str(left.get("label") or ""),
+                "comparison_label": str(right.get("label") or ""),
+                "baseline_path": str(left.get("path") or result.get("left_path") or ""),
+                "comparison_path": str(right.get("path") or result.get("right_path") or ""),
+                "status": status,
+                "different_field_count": sum(
+                    1 for field in fields if isinstance(field, Mapping) and field.get("status") == "different"
+                ),
+                "text_diff_included": bool(diff.get("included")),
+                "review_status": "unreviewed",
+                "report_decision": "pending",
+                "selection_rationale": selection_rationale,
+                "review_note": normalized_notes[index] if index < len(normalized_notes) else "",
+                "required_actions": [
+                    "verify source hashes for both compared files",
+                    "record why this comparison matters before report inclusion",
+                    "use specialized viewers for binary, image, SQLite, mailbox, or timeline-aware differences",
+                ],
+            }
+        )
+    input_inventory = [
+        {
+            "label": str(record.get("label") or ""),
+            "path": str(record.get("path") or ""),
+            "size": record.get("size"),
+            "sha256": str((record.get("hashes") if isinstance(record.get("hashes"), Mapping) else {}).get("sha256") or ""),
+        }
+        for record in input_records
+    ]
+    return {
+        "profile_version": "multi-evidence-compare-review-v1",
+        "selected_track": "bounded-file-compare-review",
+        "mode": mode,
+        "input_count": len(input_records),
+        "result_count": len(results),
+        "status_counts": dict(sorted(status_counts.items())),
+        "text_diff_count": text_diff_count,
+        "selection_rationale": selection_rationale,
+        "selection_rationale_required": True,
+        "review_notes": normalized_notes,
+        "review_note_count": len(normalized_notes),
+        "input_inventory": input_inventory,
+        "review_queue": review_queue,
+        "review_queue_count": len(review_queue),
+        "persistent_compare_notes": False,
+        "binary_structure_aware_diff": False,
+        "image_visual_diff": False,
+        "sqlite_table_aware_diff": False,
+        "timeline_aware_compare": False,
+        "commercial_release_blocked": True,
+        "reporting_status": "compare-review-validation-required",
+        "required_before_report": [
+            "persist compare notes and analyst selection rationale in the Case DB",
+            "attach source-row citations and source hashes for every compared item",
+            "run specialized semantic diff viewers for non-text evidence before making report-grade claims",
+            "attach a trusted expected-diff manifest before claiming compare output is validated",
+        ],
+    }
 
 
 def build_compare_trusted_diff(
@@ -346,6 +479,7 @@ def compare_commercial_uplift_evidence(
     core_accuracy_gates: Sequence[Mapping[str, object]],
     max_text_bytes: int,
     diff_context: int,
+    review_profile: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     passed = []
     for gate in core_accuracy_gates:
@@ -358,6 +492,7 @@ def compare_commercial_uplift_evidence(
         "persistent-compare-notes",
         COMPARE_TRUSTED_DIFF_BLOCKER,
     ]
+    review_profile = review_profile if isinstance(review_profile, Mapping) else {}
     return {
         "batch_id": "commercial-uplift-051-055",
         "item_numbers": [52],
@@ -382,6 +517,11 @@ def compare_commercial_uplift_evidence(
             "result_count": len(results),
             "a_b_c_baseline_compare": mode == "multi",
             "bounded_text_diff": True,
+            "compare_review_profile_present": bool(review_profile),
+            "review_queue_count": int(review_profile.get("review_queue_count") or 0),
+            "selection_rationale_present": bool(review_profile.get("selection_rationale")),
+            "review_note_count": int(review_profile.get("review_note_count") or 0),
+            "persistent_compare_notes": bool(review_profile.get("persistent_compare_notes")),
             "binary_structure_aware_diff": False,
             "timeline_aware_compare": False,
         },

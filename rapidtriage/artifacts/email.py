@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import email
 import hashlib
+import json
 import re
 from email.message import EmailMessage
 from email import policy
@@ -14,6 +15,7 @@ from ..core.submission import compute_hashes
 from .review import build_forensic_review
 
 PARSER_VERSION = "email-artifacts-v2"
+FUNCTIONAL_SOURCE_BATCH_ID = "commercial-uplift-046-050"
 EMAIL_SUFFIXES = {".eml", ".emlx", ".mbox", ".msg", ".pst", ".ost"}
 MAX_MBOX_MESSAGES = 200
 CONTAINER_SCAN_LIMIT = 16 * 1024 * 1024
@@ -94,6 +96,24 @@ EMAIL_FORMAT_PROFILES = {
         "native_decode": False,
         "known_gaps": ["mapi-properties", "embedded-attachments", "rtf-body", "recipient-tables"],
     },
+}
+EMAIL_MAILBOX_STRATEGY_TRACKS = {
+    "eml": "mime-message-parse-known-answer-validation",
+    "emlx": "apple-mail-message-plus-envelope-index-validation",
+    "mbox": "bounded-mbox-parse-threading-validation",
+    "maildir": "maildir-message-folder-state-validation",
+    "pst": "pst-libpff-or-outlook-export-diff-required",
+    "ost": "ost-libpff-or-outlook-export-diff-required",
+    "msg": "msg-mapi-property-export-diff-required",
+}
+EMAIL_REQUIRED_TOOLS_BY_FORMAT = {
+    "pst": ["libpff/pffexport", "readpst", "Outlook/Microsoft Purview export"],
+    "ost": ["libpff/pffexport", "Outlook cached mailbox export", "Microsoft Purview export"],
+    "msg": ["libpff/pffexport", "Outlook MSG export", "MAPI property decoder"],
+    "mbox": ["python-email", "Thunderbird or vendor MBOX ground truth"],
+    "eml": ["python-email", "ground-truth EML fixture"],
+    "emlx": ["python-email", "Apple Mail envelope/index ground truth"],
+    "maildir": ["python-email", "Maildir folder-state ground truth"],
 }
 
 
@@ -190,15 +210,25 @@ def collect_mail_container(path: Path) -> ArtifactRecord:
     emails = sorted({item.decode("ascii", errors="ignore") for item in EMAIL_RE.findall(blob)})[:MAX_CONTAINER_CANDIDATES]
     subjects = sorted({decode_bytes(item) for item in SUBJECT_RE.findall(blob) if decode_bytes(item)})[:MAX_CONTAINER_CANDIDATES]
     strings = bounded_strings(blob)[:MAX_CONTAINER_CANDIDATES]
+    source_format = path.suffix.lower().lstrip(".")
+    mapi_profile = mapi_container_review_profile(
+        source_format=source_format,
+        scan_bytes=len(blob),
+        emails=emails,
+        subjects=subjects,
+        strings=strings,
+    )
     return build_mailbox_record(
         path,
         source_hashes,
-        source_format=path.suffix.lower().lstrip("."),
+        source_format=source_format,
         message_count=0,
         validation_checks={
             "bounded_scan_bytes": min(len(blob), CONTAINER_SCAN_LIMIT),
             "email_candidate_count": len(emails),
             "subject_candidate_count": len(subjects),
+            "bounded_candidate_inventory_present": bool(emails or subjects or strings),
+            "mapi_container_review_profile_emitted": bool(mapi_profile),
             "native_mailbox_decoding_available": False,
             "commercial_parser_validated": False,
         },
@@ -206,6 +236,7 @@ def collect_mail_container(path: Path) -> ArtifactRecord:
             "email_candidates": emails,
             "subject_candidates": subjects,
             "string_candidates": strings,
+            **({"mapi_container_review_profile": mapi_profile} if mapi_profile else {}),
             "risk_flags": ["mailbox-container-candidate"] + (["email-address-candidates"] if emails else []),
         },
     )
@@ -221,6 +252,35 @@ def build_message_record(
 ) -> ArtifactRecord:
     body_preview, body_hash, body_truncated = message_body_summary(message)
     attachments = attachment_summaries(message)
+    validation_checks = {
+        "headers_parsed": True,
+        "body_present": bool(body_preview),
+        "attachment_metadata_only": True,
+        "commercial_parser_validated": False,
+    }
+    strategy_profile = email_mailbox_strategy_profile(
+        source_format,
+        source_path=path,
+        message_count=1,
+        attachment_count=len(attachments),
+        validation_checks=validation_checks,
+    )
+    citation_manifest = build_email_expansion_citation_manifest(
+        source_format=source_format,
+        source_path=path,
+        source_hashes=source_hashes,
+        details={
+            "source_index": source_index,
+            "message_id": header_value(message, "Message-ID"),
+            "subject": header_value(message, "Subject"),
+            "from": header_value(message, "From"),
+            "to": header_value(message, "To"),
+            "date": header_value(message, "Date"),
+            "body_sha256": body_hash,
+            "attachment_count": len(attachments),
+            "attachments": attachments,
+        },
+    )
     details = {
         "parser": "email-artifacts",
         "parser_version": PARSER_VERSION,
@@ -240,12 +300,10 @@ def build_message_record(
         "body_truncated": body_truncated,
         "attachment_count": len(attachments),
         "attachments": attachments,
-        "validation_checks": {
-            "headers_parsed": True,
-            "body_present": bool(body_preview),
-            "attachment_metadata_only": True,
-            "commercial_parser_validated": False,
-        },
+        "validation_checks": validation_checks,
+        "email_mailbox_strategy_profile": strategy_profile,
+        "email_expansion_citation_manifest": citation_manifest,
+        "email_expansion_citation_manifest_hash": citation_manifest["manifest_sha256"],
         "email_validation_matrix": email_validation_matrix(source_format, {"headers_parsed": True, "body_present": bool(body_preview)}),
         "email_report_grade_assessment": email_report_grade_assessment(source_format),
         "commercial_uplift_evidence": email_commercial_uplift_evidence(
@@ -257,12 +315,9 @@ def build_message_record(
                 "message_id": header_value(message, "Message-ID"),
                 "subject": header_value(message, "Subject"),
                 "attachment_count": len(attachments),
-                "validation_checks": {
-                    "headers_parsed": True,
-                    "body_present": bool(body_preview),
-                    "attachment_metadata_only": True,
-                    "commercial_parser_validated": False,
-                },
+                "email_expansion_citation_manifest": citation_manifest,
+                "validation_checks": validation_checks,
+                "email_mailbox_strategy_profile": strategy_profile,
             },
         ),
         "email_native_capabilities": dict(EMAIL_NATIVE_CAPABILITIES),
@@ -278,12 +333,9 @@ def build_message_record(
                 "subject": header_value(message, "Subject"),
                 "body_sha256": body_hash,
                 "attachments": attachments,
-                "validation_checks": {
-                    "headers_parsed": True,
-                    "body_present": bool(body_preview),
-                    "attachment_metadata_only": True,
-                    "commercial_parser_validated": False,
-                },
+                "email_expansion_citation_manifest": citation_manifest,
+                "validation_checks": validation_checks,
+                "email_mailbox_strategy_profile": strategy_profile,
             },
         ),
         "forensic_review": email_forensic_review(
@@ -318,6 +370,25 @@ def build_mailbox_record(
     validation_checks: dict[str, object],
     extra_details: dict[str, object] | None = None,
 ) -> ArtifactRecord:
+    strategy_profile = email_mailbox_strategy_profile(
+        source_format,
+        source_path=path,
+        message_count=message_count,
+        attachment_count=int((extra_details or {}).get("attachment_count") or 0),
+        validation_checks=validation_checks,
+    )
+    detail_seed = {
+        "mailbox_name": path.name,
+        "message_count": message_count,
+        "validation_checks": validation_checks,
+        **(extra_details or {}),
+    }
+    citation_manifest = build_email_expansion_citation_manifest(
+        source_format=source_format,
+        source_path=path,
+        source_hashes=source_hashes,
+        details=detail_seed,
+    )
     details = {
         "parser": "email-artifacts",
         "parser_version": PARSER_VERSION,
@@ -327,6 +398,9 @@ def build_mailbox_record(
         "mailbox_name": path.name,
         "message_count": message_count,
         "validation_checks": validation_checks,
+        "email_mailbox_strategy_profile": strategy_profile,
+        "email_expansion_citation_manifest": citation_manifest,
+        "email_expansion_citation_manifest_hash": citation_manifest["manifest_sha256"],
         "email_validation_matrix": email_validation_matrix(source_format, validation_checks),
         "email_report_grade_assessment": email_report_grade_assessment(source_format),
         "commercial_uplift_evidence": email_commercial_uplift_evidence(
@@ -336,7 +410,9 @@ def build_mailbox_record(
                 "source_path": str(path.resolve()),
                 "mailbox_name": path.name,
                 "message_count": message_count,
+                "email_expansion_citation_manifest": citation_manifest,
                 "validation_checks": validation_checks,
+                "email_mailbox_strategy_profile": strategy_profile,
                 **(extra_details or {}),
             },
         ),
@@ -350,7 +426,9 @@ def build_mailbox_record(
                 "source_path": str(path.resolve()),
                 "mailbox_name": path.name,
                 "message_count": message_count,
+                "email_expansion_citation_manifest": citation_manifest,
                 "validation_checks": validation_checks,
+                "email_mailbox_strategy_profile": strategy_profile,
                 **(extra_details or {}),
             },
         ),
@@ -415,6 +493,167 @@ def attachment_summaries(message: EmailMessage) -> list[dict[str, object]]:
     return attachments[:100]
 
 
+def build_email_expansion_citation_manifest(
+    *,
+    source_format: str,
+    source_path: Path,
+    source_hashes: Mapping[str, str],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    message_citations: list[dict[str, object]] = []
+    if details.get("message_id") is not None or details.get("subject") is not None:
+        message_payload = {
+            "source_format": source_format,
+            "source_path": str(source_path.resolve()),
+            "source_sha256": source_hashes.get("sha256", ""),
+            "source_index": details.get("source_index"),
+            "message_id": str(details.get("message_id") or ""),
+            "subject": str(details.get("subject") or ""),
+            "subject_sha256": sha256_text(str(details.get("subject") or "")) if details.get("subject") else "",
+            "from": str(details.get("from") or ""),
+            "to": str(details.get("to") or ""),
+            "date": str(details.get("date") or ""),
+            "body_sha256": str(details.get("body_sha256") or ""),
+            "attachment_count": int(details.get("attachment_count") or 0),
+        }
+        message_citations.append(
+            {
+                **message_payload,
+                "row_hash": stable_email_sha256(message_payload),
+                "source_viewer_locator": {
+                    "viewer": "email-message",
+                    "source_path": str(source_path.resolve()),
+                    "source_index": details.get("source_index"),
+                    "message_id": str(details.get("message_id") or ""),
+                },
+                "validation_status": "message-citation-candidate",
+            }
+        )
+    attachment_citations = [
+        email_attachment_citation(source_path=source_path, source_hashes=source_hashes, attachment=item, source_index=index)
+        for index, item in enumerate(details.get("attachments") or [])
+        if isinstance(item, Mapping)
+    ]
+    candidate_citations = email_container_candidate_citations(
+        source_path=source_path,
+        source_hashes=source_hashes,
+        details=details,
+    )
+    manifest: dict[str, object] = {
+        "manifest_version": "email-expansion-citation-manifest-v1",
+        "item_number": 49,
+        "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
+        "gap_id": "#49",
+        "commercial_gap_ids": ["#36", "#49"],
+        "source_format": source_format,
+        "source_path": str(source_path.resolve()),
+        "source_sha256": source_hashes.get("sha256", ""),
+        "mailbox_name": str(details.get("mailbox_name") or source_path.name),
+        "message_count": int(details.get("message_count") or len(message_citations)),
+        "message_citation_count": len(message_citations),
+        "attachment_citation_count": len(attachment_citations),
+        "candidate_citation_count": len(candidate_citations),
+        "message_citations": message_citations,
+        "attachment_citations": attachment_citations,
+        "candidate_citations": candidate_citations,
+        "large_data_controls": {
+            "max_mbox_messages": MAX_MBOX_MESSAGES,
+            "container_scan_limit": CONTAINER_SCAN_LIMIT,
+            "max_container_candidates": MAX_CONTAINER_CANDIDATES,
+            "native_mapi_decode_claimed": False,
+            "candidate_rows_bounded": len(candidate_citations) >= MAX_CONTAINER_CANDIDATES,
+        },
+        "review_workflow": {
+            "default_view": "thread-or-candidate-list",
+            "metadata_collapsed_by_default": True,
+            "source_viewer": "email-or-bounded-container",
+            "required_before_report": [
+                "open the original message or trusted mailbox export row before final citation",
+                "validate PST/OST/MSG rows with libpff/readpst/Outlook/Purview or equivalent trusted export",
+                "validate threading, deduplication, attachments, and deleted item semantics with known-answer mailboxes",
+                "review legal privilege and scope before exporting mailbox content",
+            ],
+        },
+        "validation_status": "implemented-validation-required",
+    }
+    manifest["manifest_sha256"] = stable_email_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def email_attachment_citation(
+    *,
+    source_path: Path,
+    source_hashes: Mapping[str, str],
+    attachment: Mapping[str, object],
+    source_index: int,
+) -> dict[str, object]:
+    payload = {
+        "source_path": str(source_path.resolve()),
+        "source_sha256": source_hashes.get("sha256", ""),
+        "source_index": source_index,
+        "filename": str(attachment.get("filename") or ""),
+        "content_type": str(attachment.get("content_type") or ""),
+        "size": int(attachment.get("size") or 0),
+        "sha256": str(attachment.get("sha256") or ""),
+    }
+    return {
+        **payload,
+        "row_hash": stable_email_sha256(payload),
+        "source_viewer_locator": {
+            "viewer": "email-attachment",
+            "source_path": str(source_path.resolve()),
+            "attachment_index": source_index,
+            "filename": payload["filename"],
+        },
+        "validation_status": "attachment-metadata-citation-candidate",
+    }
+
+
+def email_container_candidate_citations(
+    *,
+    source_path: Path,
+    source_hashes: Mapping[str, str],
+    details: Mapping[str, object],
+) -> list[dict[str, object]]:
+    citations: list[dict[str, object]] = []
+    for candidate_type, key in (("email", "email_candidates"), ("subject", "subject_candidates"), ("string", "string_candidates")):
+        for index, value in enumerate(details.get(key) or []):
+            if len(citations) >= MAX_CONTAINER_CANDIDATES:
+                return citations
+            text = str(value or "")
+            payload = {
+                "candidate_type": candidate_type,
+                "candidate_index": index,
+                "preview": text[:240],
+                "value_sha256": sha256_text(text) if text else "",
+                "source_path": str(source_path.resolve()),
+                "source_sha256": source_hashes.get("sha256", ""),
+                "source_format": source_path.suffix.lower().lstrip("."),
+            }
+            citations.append(
+                {
+                    **payload,
+                    "row_hash": stable_email_sha256(payload),
+                    "source_viewer_locator": {
+                        "viewer": "bounded-container-string",
+                        "source_path": str(source_path.resolve()),
+                        "candidate_type": candidate_type,
+                        "candidate_index": index,
+                        "offset_known": False,
+                    },
+                    "validation_status": "bounded-container-candidate",
+                }
+            )
+    return citations
+
+
+def stable_email_sha256(payload: Mapping[str, object]) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def strip_emlx_length_prefix(data: bytes) -> bytes:
     first_line, separator, rest = data.partition(b"\n")
     if separator and first_line.strip().isdigit():
@@ -450,6 +689,70 @@ def bounded_strings(blob: bytes) -> list[str]:
             seen.add(text)
             result.append(text)
     return result
+
+
+def mapi_container_review_profile(
+    *,
+    source_format: str,
+    scan_bytes: int,
+    emails: list[str],
+    subjects: list[str],
+    strings: list[str],
+) -> dict[str, object]:
+    if source_format not in {"pst", "ost", "msg"}:
+        return {}
+    folder_candidates = [
+        item
+        for item in strings
+        if any(token in item.lower() for token in ("inbox", "sent items", "deleted items", "drafts", "outbox", "archive"))
+    ][:50]
+    message_class_candidates = [
+        item
+        for item in strings
+        if any(token in item.lower() for token in ("ipm.note", "ipm.appointment", "ipm.contact", "message class"))
+    ][:50]
+    attachment_candidates = [
+        item
+        for item in strings
+        if any(token in item.lower() for token in (".pdf", ".doc", ".xls", ".ppt", ".zip", ".jpg", ".png", "attachment"))
+    ][:50]
+    deleted_candidates = [
+        item
+        for item in strings
+        if any(token in item.lower() for token in ("deleted items", "recoverable items", "dumpster", "purges", "deletions"))
+    ][:50]
+    return {
+        "profile_version": "mapi-container-review-v1",
+        "source_format": source_format,
+        "scan_window_bytes": int(scan_bytes),
+        "scan_window_limit": CONTAINER_SCAN_LIMIT,
+        "bounded_inventory_only": True,
+        "email_candidate_count": len(emails),
+        "subject_candidate_count": len(subjects),
+        "string_candidate_count": len(strings),
+        "folder_path_candidate_count": len(folder_candidates),
+        "message_class_candidate_count": len(message_class_candidates),
+        "attachment_name_candidate_count": len(attachment_candidates),
+        "deleted_item_hint_count": len(deleted_candidates),
+        "candidate_samples": {
+            "folder_paths": folder_candidates[:10],
+            "message_classes": message_class_candidates[:10],
+            "attachments": attachment_candidates[:10],
+            "deleted_item_hints": deleted_candidates[:10],
+        },
+        "native_object_decode_status": "not-implemented",
+        "folder_hierarchy_status": "candidate-strings-only",
+        "deleted_item_recovery_status": "not-performed",
+        "attachment_extraction_status": "candidate-strings-only",
+        "threading_status": "not-reconstructed",
+        "recommended_external_validation_tools": EMAIL_REQUIRED_TOOLS_BY_FORMAT.get(source_format, []),
+        "required_before_report": [
+            "decode PST/OST/MSG with libpff/readpst/Outlook/Purview or another trusted mailbox parser",
+            "diff folder tree, message count, subjects, recipients, timestamps, flags, and attachments against RapidTriage candidates",
+            "validate deleted/recoverable item handling and OST sync-state limitations with known-answer fixtures",
+            "treat these candidate strings as triage hints only until native object decoding and trusted diff pass",
+        ],
+    }
 
 
 def strip_html(value: str) -> str:
@@ -519,6 +822,56 @@ def email_validation_matrix(source_format: str, checks: dict[str, object]) -> li
     ]
 
 
+def email_mailbox_strategy_profile(
+    source_format: str,
+    *,
+    source_path: Path,
+    message_count: int,
+    attachment_count: int,
+    validation_checks: Mapping[str, object],
+) -> dict[str, object]:
+    profile = email_format_profile(source_format)
+    native_container = source_format in {"pst", "ost", "msg"}
+    blockers = [
+        "email-known-answer-corpus-not-attached",
+        EMAIL_TRUSTED_DIFF_BLOCKER,
+        "thread-dedup-timezone-validation-required",
+    ]
+    if native_container:
+        blockers.extend(
+            [
+                "native-mapi-container-object-decode-not-implemented",
+                "folder-tree-message-flags-deleted-items-not-validated",
+            ]
+        )
+    if attachment_count or native_container:
+        blockers.append("attachment-content-and-nested-message-validation-required")
+    return {
+        "profile_version": "email-mailbox-strategy-v1",
+        "source_format": source_format,
+        "source_name": source_path.name,
+        "format_family": profile["family"],
+        "support_tier": profile["support_tier"],
+        "selected_track": EMAIL_MAILBOX_STRATEGY_TRACKS.get(source_format, "generic-mailbox-inventory-validation"),
+        "native_object_decode_available": bool(profile["native_decode"]),
+        "bounded_inventory_only": native_container,
+        "message_count": int(message_count),
+        "attachment_count": int(attachment_count),
+        "required_tools": EMAIL_REQUIRED_TOOLS_BY_FORMAT.get(source_format, ["format-specific trusted parser/export"]),
+        "message_content_reportable": False,
+        "deleted_item_recovery_complete": False,
+        "folder_hierarchy_complete": not native_container and source_format not in {"emlx", "maildir"},
+        "commercial_parser_validated": bool(validation_checks.get("commercial_parser_validated")),
+        "blockers": blockers,
+        "required_before_report": [
+            "attach a trusted mailbox export/native parser diff for selected rows",
+            "validate folder hierarchy, deleted items, duplicates, threading, timezone, and attachments",
+            "record privilege/scope review before exporting or reporting mailbox content",
+            "preserve source hash and parser/tool version for every cited message",
+        ],
+    }
+
+
 def email_report_grade_assessment(source_format: str) -> dict[str, object]:
     return {
         "status": "validation-required",
@@ -541,6 +894,11 @@ def email_commercial_uplift_evidence(
 ) -> dict[str, object]:
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
     trusted_diff = details.get("email_trusted_diff") if isinstance(details.get("email_trusted_diff"), Mapping) else {}
+    citation_manifest = (
+        details.get("email_expansion_citation_manifest")
+        if isinstance(details.get("email_expansion_citation_manifest"), Mapping)
+        else {}
+    )
     matrix = email_validation_matrix(source_format, validation)
     issue_matrix = email_issue_matrix(source_format)
     passed_validation_matrix_ids = [str(item.get("id")) for item in matrix if item.get("passed")]
@@ -550,6 +908,13 @@ def email_commercial_uplift_evidence(
     return {
         "batch_id": "commercial-uplift-036-040",
         "item_numbers": [36],
+        "functional_priority_profile": email_expansion_functional_profile(
+            source_format=source_format,
+            source_hashes=source_hashes,
+            details=details,
+            validation=validation,
+            trusted_diff=trusted_diff,
+        ),
         "implementation_track": "email-mailbox-parser-validation",
         "objective": "Expose email/PST/OST/MBOX parsing evidence, mailbox bounds, and report-grade blockers without claiming native MAPI parity.",
         "reportability_decision": email_reportability_decision(
@@ -566,7 +931,13 @@ def email_commercial_uplift_evidence(
             f"source_sha256:{source_hashes.get('sha256', '')}",
             f"source_index:{details.get('source_index', '')}",
             f"mailbox_name:{details.get('mailbox_name', '')}",
+            f"citation_manifest_sha256:{citation_manifest.get('manifest_sha256', '')}",
         ],
+        "email_mailbox_strategy_profile": (
+            dict(details["email_mailbox_strategy_profile"])
+            if isinstance(details.get("email_mailbox_strategy_profile"), Mapping)
+            else {}
+        ),
         "passed_validation_matrix_ids": passed_validation_matrix_ids,
         "failed_validation_matrix_ids": failed_validation_matrix_ids,
         "passed_issue_matrix_ids": passed_issue_matrix_ids,
@@ -583,11 +954,89 @@ def email_commercial_uplift_evidence(
             "max_container_candidates": MAX_CONTAINER_CANDIDATES,
             "message_count": int(details.get("message_count") or 0),
             "attachment_count": int(details.get("attachment_count") or 0),
+            "mapi_container_review_profile_present": bool(details.get("mapi_container_review_profile")),
+            "citation_manifest_hash": str(citation_manifest.get("manifest_sha256") or ""),
+            "citation_row_count": int(citation_manifest.get("message_citation_count") or 0)
+            + int(citation_manifest.get("attachment_citation_count") or 0)
+            + int(citation_manifest.get("candidate_citation_count") or 0),
             "native_pst_ost_msg_object_decode": False,
             "broad_mailbox_known_answer_corpus_required": True,
         },
         "next_internal_step": "Add libpff/native MAPI object decoding, folder/deleted item recovery, attachment hashing, and mailbox known-answer corpus validation.",
         "external_evidence_required": True,
+    }
+
+
+def email_expansion_functional_profile(
+    *,
+    source_format: str,
+    source_hashes: Mapping[str, str],
+    details: Mapping[str, object],
+    validation: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    profile = email_format_profile(source_format)
+    native_decode = bool(profile.get("native_decode"))
+    message_count = int(details.get("message_count") or (1 if details.get("message_id") else 0))
+    failed_checks: list[str] = []
+    if not source_hashes.get("sha256"):
+        failed_checks.append("email-source-sha256-missing")
+    if source_format in {"pst", "ost", "msg"} and not native_decode:
+        failed_checks.append("pst-ost-msg-native-object-decode-not-implemented")
+    if not validation.get("commercial_parser_validated"):
+        failed_checks.append("email-known-answer-corpus-not-attached")
+    if trusted_diff.get("status") != "pass":
+        failed_checks.append(EMAIL_TRUSTED_DIFF_BLOCKER)
+    citation_manifest = (
+        details.get("email_expansion_citation_manifest")
+        if isinstance(details.get("email_expansion_citation_manifest"), Mapping)
+        else {}
+    )
+    if not citation_manifest.get("manifest_sha256"):
+        failed_checks.append("email-expansion-citation-manifest-not-emitted")
+    passed_checks = [
+        "eml-emlx-maildir-message-parse",
+        "mbox-bounded-message-parse",
+        "pst-ost-msg-bounded-string-inventory",
+        "email-source-hashing",
+        "attachment-metadata-hashing",
+    ]
+    if citation_manifest.get("manifest_sha256"):
+        passed_checks.append("email-expansion-citation-manifest-emitted")
+    if int(citation_manifest.get("candidate_citation_count") or 0) > 0:
+        passed_checks.append("bounded-container-candidate-citations-emitted")
+    return {
+        "item_number": 49,
+        "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
+        "status": "complete" if not failed_checks else "partial",
+        "implemented_controls": {
+            "source_format": source_format,
+            "format_family": str(profile.get("family") or ""),
+            "support_tier": str(profile.get("support_tier") or ""),
+            "native_decode": native_decode,
+            "message_count": message_count,
+            "attachment_count": int(details.get("attachment_count") or 0),
+            "email_candidate_count": int(details.get("email_candidate_count") or 0),
+            "source_sha256_present": bool(source_hashes.get("sha256")),
+            "citation_manifest_hash": str(citation_manifest.get("manifest_sha256") or ""),
+            "message_citation_count": int(citation_manifest.get("message_citation_count") or 0),
+            "attachment_citation_count": int(citation_manifest.get("attachment_citation_count") or 0),
+            "candidate_citation_count": int(citation_manifest.get("candidate_citation_count") or 0),
+            "supported_formats": sorted(EMAIL_SUFFIXES | {"maildir"}),
+            "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+            "strategy_track": str(
+                details.get("email_mailbox_strategy_profile", {}).get("selected_track")
+                if isinstance(details.get("email_mailbox_strategy_profile"), Mapping)
+                else ""
+            ),
+        },
+        "passed_validation_check_ids": passed_checks,
+        "failed_validation_check_ids": failed_checks,
+        "reportability_decision": {
+            "allowed_use": "email-mailbox-and-message-triage-pivot",
+            "commercial_claim_allowed": not failed_checks,
+            "operator_warning": "Use libpff/vendor mailbox exports and known-answer corpora before PST/OST/MSG or deleted-item report claims.",
+        },
     }
 
 
@@ -651,8 +1100,16 @@ def email_core_accuracy_gates(
     satisfied: list[str] = []
     if source_format and (details.get("message_id") is not None or details.get("mailbox_name")):
         satisfied.append("mailbox/message source profile detection")
+    if details.get("email_mailbox_strategy_profile"):
+        satisfied.append("mailbox strategy profile")
+    if details.get("email_expansion_citation_manifest"):
+        satisfied.append("email expansion citation manifest")
     if validation.get("headers_parsed") or validation.get("parsed_message_count") is not None or details.get("email_candidates"):
         satisfied.append("message header/body/attachment inventory")
+    if details.get("mapi_container_review_profile"):
+        satisfied.append("MAPI container bounded review profile")
+    if validation.get("bounded_candidate_inventory_present"):
+        satisfied.append("bounded mailbox candidate inventory")
     if source_format in {"pst", "ost", "msg"} or not EMAIL_NATIVE_CAPABILITIES["native_pst_ost_msg_object_decode"]:
         satisfied.append("PST/OST native limitation warning")
     if not validation.get("commercial_parser_validated"):

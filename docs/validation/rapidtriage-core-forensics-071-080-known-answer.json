@@ -11,7 +11,7 @@
       "status": "pass",
       "backlog_items": [71],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Parser failures preserve isolated parser_errors, failed parser JSON output, run continuation warnings, summary counts, trusted crash-corpus diff status, and #71 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Parser failures preserve isolated parser_errors, error hashes, crash context, parser-error inventory head hash, failed parser JSON output, run continuation warnings, summary counts, trusted crash-corpus diff status, and #71 core_accuracy_gates."]},
       "notes": "Internal fixture pass; native process sandboxing, trusted crash-corpus manifests, and corrupt-input fuzz corpus remain blockers."
     },
     {
@@ -22,7 +22,7 @@
       "status": "pass",
       "backlog_items": [72],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Run summaries preserve memory cap configuration, RSS readings, stage-boundary enforcement, fail-fast warnings, hard-limit caveats, trusted RSS diff status, and #72 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Run summaries preserve memory cap configuration, RSS readings, utilization/over-cap policy profiles, stage-boundary enforcement, fail-fast warnings, hard-limit caveats, trusted RSS diff status, and #72 core_accuracy_gates."]},
       "notes": "Internal fixture pass; hard OS memory controls, trusted RSS manifests, and platform RSS validation remain blockers."
     },
     {
@@ -33,7 +33,7 @@
       "status": "pass",
       "backlog_items": [73],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Source previews preserve read-only bounded preview metadata, active-content blocking, no network execution, cap metadata, OS sandbox warning, trusted no-exec diff status, and #73 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Source previews preserve read-only bounded preview metadata, active-content blocking, no network execution, cap metadata, preview-sandbox policy profiles, escaped bounded renderer strategy, OS sandbox warning, trusted no-exec diff status, and #73 core_accuracy_gates."]},
       "notes": "Internal fixture pass; renderer/codecs/macros and trusted no-exec preview manifests still require external sandbox validation."
     },
     {
@@ -44,7 +44,7 @@
       "status": "pass",
       "backlog_items": [74],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["SQLite outputs preserve performance pragmas, table profiles, searchable text column counts, bounded row previews, large-corpus warnings, trusted query-plan diff status, and #74 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["SQLite outputs preserve performance pragmas, table profiles, searchable text column counts, bounded row previews, source preview query-plan profiles, Case DB query-plan head hashes, large-corpus warnings, trusted query-plan diff status, and #74 core_accuracy_gates."]},
       "notes": "Internal fixture pass; trusted query-plan manifests, 10M-row query-plan, and WAL/deleted-row validation remain blockers."
     },
     {
@@ -55,8 +55,8 @@
       "status": "pass",
       "backlog_items": [75],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Run summaries preserve bounded worker count, deterministic outputs, per-parser capture, resume-aware scheduling, local-threadpool warning, trusted scheduler diff status, and #75 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; trusted scheduler manifests, distributed scheduling, and TB-scale backpressure validation remain blockers."
+      "expected": {"required_assertions": ["Run summaries preserve bounded worker count, deterministic outputs, per-parser capture, resume-aware scheduling, scheduler run manifest hash, per-parser duration telemetry, local-threadpool warning, trusted scheduler diff status, and #75 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; trusted scheduler manifests, distributed scheduling, live telemetry UI/stream, and TB-scale backpressure validation remain blockers."
     },
     {
       "id": "core-forensics-076-hash-cache-fixture",
@@ -66,7 +66,7 @@
       "status": "pass",
       "backlog_items": [76],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_files.py", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["Hash outputs preserve MD5/SHA1/SHA256, path-size-mtime cache metadata, hit/miss counters, hash-cache assessment, persistent-cache warning, trusted hash-cache manifest diff helpers/gates, and #76 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Hash outputs preserve MD5/SHA1/SHA256, path-size-mtime-inode cache metadata, hit/miss/invalidation counters, hash-cache-manifest-v1 path-hash entries, manifest hash, hash-cache assessment, persistent-cache warning, trusted hash-cache manifest diff helpers/gates, and #76 core_accuracy_gates."]},
       "notes": "Internal fixture pass; persistent content-addressed cache, trusted hash-cache manifests, and large-case hit-ratio validation remain blockers."
     },
     {
@@ -77,8 +77,8 @@
       "status": "pass",
       "backlog_items": [77],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_files.py"],
-      "expected": {"required_assertions": ["File scans preserve same-size bucketing, bounded SHA256 confirmation, duplicate group counts, representative paths, suppression warnings, trusted duplicate file manifest diff helpers/gates, and #77 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; fuzzy/media duplicate validation, trusted duplicate group manifests, and analyst suppression UX remain blockers."
+      "expected": {"required_assertions": ["File scans preserve same-size bucketing, bounded SHA256 confirmation, duplicate group counts, stable group IDs/fingerprints, representative paths, not-suppressed analyst-review policy, duplicate-content-manifest-v1 manifest hashes, trusted duplicate file manifest diff helpers/gates, and #77 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; fuzzy/media duplicate validation, trusted external duplicate group manifests, and analyst suppression UX remain blockers."
     },
     {
       "id": "core-forensics-078-pagination-fixture",
@@ -88,8 +88,8 @@
       "status": "pass",
       "backlog_items": [78],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py"],
-      "expected": {"required_assertions": ["API pages preserve cursor tokens, offset/limit/total metadata, next/previous cursors, bounded rows, snapshot warning, trusted pagination cursor manifest diff helpers/gates, and #78 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; snapshot-isolated cursors, trusted pagination manifests, and endpoint-wide pagination compatibility remain blockers."
+      "expected": {"required_assertions": ["API pages preserve cursor tokens, offset/limit/total metadata, next/previous cursors, bounded rows, corrected last-page has_more semantics, pagination-cursor-manifest-v1 page-window IDs/manifest hashes, snapshot warning, trusted pagination cursor manifest diff helpers/gates, and #78 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; snapshot-isolated cursors, trusted external pagination manifests, and endpoint-wide pagination compatibility remain blockers."
     },
     {
       "id": "core-forensics-079-ui-virtualization-fixture",
@@ -99,8 +99,8 @@
       "status": "pass",
       "backlog_items": [79],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py", "rapidtriage/web/static/app.js"],
-      "expected": {"required_assertions": ["API pagination and web UI preserve bounded DOM row windows, visible-row disclosure, keyboard/filter flow, API pagination links, virtual-scroller warning, trusted UI virtualization manifest diff helpers/gates, and #79 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; true virtual scroller, trusted browser row-window manifests, viewport persistence, and browser e2e performance evidence remain blockers."
+      "expected": {"required_assertions": ["API pagination and web UI preserve bounded DOM row windows, ui-virtualization-manifest-v1 row-window IDs/manifest hashes, visible-row disclosure, previous/next 300-row windows, keyboard/filter flow, API pagination links, virtual-scroller warning, trusted UI virtualization manifest diff helpers/gates, and #79 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; true virtual scroller, trusted browser row-window manifests, persisted viewport restoration across reloads, and browser e2e performance evidence remain blockers."
     },
     {
       "id": "core-forensics-080-cancel-retry-fixture",
@@ -110,7 +110,7 @@
       "status": "pass",
       "backlog_items": [80],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Job payloads preserve queued cancellation, running cancel request records, failed/canceled retry support, persisted cancel flags, partial-output warnings, trusted cancellation/retry transition diff helpers/gates, and #80 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Job payloads preserve queued cancellation, running cancel request records, failed/canceled retry support, persisted cancel flags, retry_lineage_profile, job-partial-output-policy-v1, cancellation-retry-manifest-v1 hashes, trusted cancellation/retry transition diff helpers/gates, and #80 core_accuracy_gates."]},
       "notes": "Internal fixture pass; parser-level cancellation under load, trusted cancellation/retry transition manifests, and partial-output cleanup/resume validation remain blockers."
     }
   ]

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -17,7 +18,11 @@ from .forensic_accuracy import build_accuracy_gate
 DEFAULT_CLOUD_BEARER_TOKEN_ENV = "RAPIDTRIAGE_CLOUD_BEARER_TOKEN"
 DEFAULT_CLOUD_API_TIMEOUT_SECONDS = 30
 DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES = 50 * 1024 * 1024
+DEFAULT_CLOUD_API_MAX_RETRY_ATTEMPTS = 1
+DEFAULT_CLOUD_API_BACKOFF_SECONDS = 0.0
+FUNCTIONAL_EXPANSION_BATCH_ID = "commercial-uplift-056-060"
 ALLOWED_METHODS = {"GET", "POST"}
+RETRYABLE_HTTP_STATUS = {408, 425, 429, 500, 502, 503, 504}
 CLOUD_API_NATIVE_CAPABILITIES = {
     "manifest_driven_https_requests": True,
     "dry_run_validation": True,
@@ -110,6 +115,7 @@ def run_cloud_api_collection(
                     "dry_run": True,
                     "headers": redact_headers(prepared["headers"]),
                     "credential_handling": request_credential_handling(prepared),
+                    "request_acquisition_profile": cloud_api_request_acquisition_profile(prepared),
                 }
             )
             continue
@@ -130,6 +136,9 @@ def run_cloud_api_collection(
         "skipped_count": len(skipped),
         "dry_run": dry_run,
     }
+    provider_scope_profile = cloud_api_provider_scope_profile(manifest)
+    summary["provider_scope_profile_present"] = True
+    summary["provider_scope_inventory_captured"] = bool(provider_scope_profile.get("scope_inventory_captured"))
     credential_handling = {
         "bearer_token_env": bearer_token_env,
         "tokens_written_to_output": False,
@@ -137,11 +146,14 @@ def run_cloud_api_collection(
         "credential_storage": "environment-variable-only",
         "commercial_gap_ids": ["#41"],
         "scope_capture_status": "not-captured",
+        "controlled_reveal_policy": "disabled-by-default",
+        "raw_secret_reveal_allowed": False,
         "secure_token_vault_integrated": False,
         "token_rotation_audit_present": False,
         "audit_required": True,
         "legal_warning": "Use only with authorized cloud accounts/API scopes; do not paste tokens into manifests or reports.",
     }
+    credential_handling["credential_strategy_profile"] = cloud_credential_strategy_profile(credential_handling)
     credential_handling["credential_security_assessment"] = cloud_credential_security_assessment(credential_handling)
     credential_handling["forensic_review"] = cloud_api_forensic_review(
         gap_id="#41",
@@ -159,6 +171,11 @@ def run_cloud_api_collection(
             "Provider OAuth consent, scopes, rotation, revocation, and legal authority must be recorded for report-grade use.",
         ],
     )
+    credential_handling["credential_authority_profile"] = cloud_credential_authority_profile(
+        credential_handling=credential_handling,
+        provider_scope_profile=provider_scope_profile,
+        requests=collected,
+    )
     credential_handling["core_accuracy_gates"] = cloud_credential_core_accuracy_gates(
         manifest_path=manifest_path,
         credential_handling=credential_handling,
@@ -170,6 +187,24 @@ def run_cloud_api_collection(
         requests=collected,
     )
     api_report_grade = cloud_api_report_grade_assessment()
+    collection_strategy_profile = cloud_api_collection_strategy_profile(
+        manifest_path=manifest_path,
+        summary=summary,
+        credential_handling=credential_handling,
+        requests=collected,
+        provider_scope_profile=provider_scope_profile,
+    )
+    acquisition_manifest = cloud_api_acquisition_manifest(
+        manifest_path=manifest_path,
+        output_dir=output_dir,
+        responses_dir=responses_dir,
+        summary=summary,
+        credential_handling=credential_handling,
+        requests=collected,
+        provider_scope_profile=provider_scope_profile,
+        collection_strategy_profile=collection_strategy_profile,
+    )
+    summary["cloud_api_acquisition_manifest_hash"] = acquisition_manifest["manifest_sha256"]
     payload = {
         "command": "cloud-collect",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -179,19 +214,31 @@ def run_cloud_api_collection(
         "responses_dir": str(responses_dir.resolve()),
         "summary": summary,
         "credential_handling": credential_handling,
+        "cloud_api_provider_scope_profile": provider_scope_profile,
         "requests": collected,
         "skipped": skipped,
         "commercial_grade_ready": False,
         "commercial_gap_ids": ["#40"],
         "cloud_api_validation_matrix": cloud_api_validation_matrix(summary, credential_handling),
         "cloud_api_report_grade_assessment": api_report_grade,
+        "cloud_api_collection_strategy_profile": collection_strategy_profile,
+        "cloud_api_acquisition_manifest": acquisition_manifest,
         "commercial_uplift_evidence": cloud_api_commercial_uplift_evidence(
             manifest_path=manifest_path,
             output_dir=output_dir,
             summary=summary,
             credential_handling=credential_handling,
             requests=collected,
+            provider_scope_profile=provider_scope_profile,
             report_grade=api_report_grade,
+        ),
+        "functional_priority_profile": cloud_api_acquisition_functional_profile(
+            manifest_path=manifest_path,
+            output_dir=output_dir,
+            summary=summary,
+            credential_handling=credential_handling,
+            requests=collected,
+            provider_scope_profile=provider_scope_profile,
         ),
         "cloud_api_native_capabilities": dict(CLOUD_API_NATIVE_CAPABILITIES),
         "core_accuracy_gates": cloud_api_core_accuracy_gates(
@@ -262,6 +309,8 @@ def prepare_request(
     body = request_def.get("body")
     if body not in (None, "") and not isinstance(body, (str, bytes, Mapping, list)):
         raise CloudApiCollectionError(f"unsupported request body for {name}")
+    retry_config = normalize_retry_config(request_def.get("retry"))
+    pagination_config = normalize_pagination_config(request_def.get("pagination"))
     return {
         "name": name,
         "service": service,
@@ -270,6 +319,8 @@ def prepare_request(
         "headers": headers,
         "body": body,
         "bearer_token_env": bearer_env if bearer_token else "",
+        "retry": retry_config,
+        "pagination": pagination_config,
     }
 
 
@@ -299,33 +350,58 @@ def execute_request(
         "started_at": started_at,
         "request_headers": redact_headers(dict(prepared["headers"])),
         "credential_handling": request_credential_handling(prepared),
+        "request_acquisition_profile": cloud_api_request_acquisition_profile(prepared),
     }
-    try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-            content = response.read(max_response_bytes + 1)
-            truncated = len(content) > max_response_bytes
-            if truncated:
-                content = content[:max_response_bytes]
-            output_path = response_path_for(responses_dir, index, str(prepared["name"]), response.headers.get("Content-Type", ""))
-            output_path.write_bytes(content)
-            row.update(
-                {
-                    "status": int(response.status),
-                    "reason": response.reason,
-                    "content_type": response.headers.get("Content-Type", ""),
-                    "response_path": str(output_path.resolve()),
-                    "response_size": len(content),
-                    "response_sha256": compute_sha256(output_path),
-                    "truncated": truncated,
-                    "completed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-                }
-            )
-    except urllib.error.HTTPError as exc:
-        row.update({"error": "http-error", "status": exc.code, "reason": exc.reason})
-    except urllib.error.URLError as exc:
-        row.update({"error": "url-error", "reason": str(exc.reason)})
-    except OSError as exc:
-        row.update({"error": "io-error", "reason": str(exc)})
+    retry = prepared.get("retry") if isinstance(prepared.get("retry"), Mapping) else {}
+    max_attempts = int(retry.get("max_attempts") or DEFAULT_CLOUD_API_MAX_RETRY_ATTEMPTS)
+    retry_statuses = {int(status) for status in retry.get("retry_statuses", []) or []}
+    backoff_seconds = float(retry.get("backoff_seconds") or 0)
+    attempts: list[dict[str, object]] = []
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+                content = response.read(max_response_bytes + 1)
+                truncated = len(content) > max_response_bytes
+                if truncated:
+                    content = content[:max_response_bytes]
+                output_path = response_path_for(responses_dir, index, str(prepared["name"]), response.headers.get("Content-Type", ""))
+                output_path.write_bytes(content)
+                attempts.append({"attempt": attempt, "status": int(response.status), "retryable": False})
+                row.update(
+                    {
+                        "status": int(response.status),
+                        "reason": response.reason,
+                        "content_type": response.headers.get("Content-Type", ""),
+                        "response_path": str(output_path.resolve()),
+                        "response_size": len(content),
+                        "response_sha256": compute_sha256(output_path),
+                        "truncated": truncated,
+                        "completed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                    }
+                )
+                break
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code in retry_statuses and attempt < max_attempts
+            attempts.append({"attempt": attempt, "error": "http-error", "status": exc.code, "retryable": retryable})
+            row.update({"error": "http-error", "status": exc.code, "reason": exc.reason})
+            if not retryable:
+                break
+        except urllib.error.URLError as exc:
+            retryable = attempt < max_attempts
+            attempts.append({"attempt": attempt, "error": "url-error", "reason": str(exc.reason), "retryable": retryable})
+            row.update({"error": "url-error", "reason": str(exc.reason)})
+            if not retryable:
+                break
+        except OSError as exc:
+            retryable = attempt < max_attempts
+            attempts.append({"attempt": attempt, "error": "io-error", "reason": str(exc), "retryable": retryable})
+            row.update({"error": "io-error", "reason": str(exc)})
+            if not retryable:
+                break
+        if attempt < max_attempts and backoff_seconds:
+            time.sleep(backoff_seconds)
+    row["attempts"] = attempts
+    row["attempt_count"] = len(attempts)
     return row
 
 
@@ -348,6 +424,52 @@ def normalize_headers(value: object) -> dict[str, str]:
     headers = {str(key): str(item) for key, item in value.items()}
     headers.setdefault("Accept", "application/json")
     return headers
+
+
+def normalize_retry_config(value: object) -> dict[str, object]:
+    if value in (None, ""):
+        return {
+            "max_attempts": DEFAULT_CLOUD_API_MAX_RETRY_ATTEMPTS,
+            "backoff_seconds": DEFAULT_CLOUD_API_BACKOFF_SECONDS,
+            "retry_statuses": sorted(RETRYABLE_HTTP_STATUS),
+        }
+    if not isinstance(value, Mapping):
+        raise CloudApiCollectionError("request retry must be a JSON object")
+    max_attempts = int(value.get("max_attempts") or value.get("attempts") or DEFAULT_CLOUD_API_MAX_RETRY_ATTEMPTS)
+    backoff_seconds = float(value.get("backoff_seconds") or value.get("backoff") or DEFAULT_CLOUD_API_BACKOFF_SECONDS)
+    if max_attempts < 1 or max_attempts > 5:
+        raise CloudApiCollectionError("request retry.max_attempts must be between 1 and 5")
+    if backoff_seconds < 0 or backoff_seconds > 30:
+        raise CloudApiCollectionError("request retry.backoff_seconds must be between 0 and 30")
+    statuses = value.get("retry_statuses") or value.get("statuses") or sorted(RETRYABLE_HTTP_STATUS)
+    if not isinstance(statuses, list):
+        raise CloudApiCollectionError("request retry.statuses must be a list")
+    retry_statuses = sorted({int(status) for status in statuses})
+    return {"max_attempts": max_attempts, "backoff_seconds": backoff_seconds, "retry_statuses": retry_statuses}
+
+
+def normalize_pagination_config(value: object) -> dict[str, object]:
+    if value in (None, ""):
+        return {
+            "mode": "none",
+            "max_pages": 1,
+            "next_link_field": "",
+            "delta_token_field": "",
+            "implemented": False,
+        }
+    if not isinstance(value, Mapping):
+        raise CloudApiCollectionError("request pagination must be a JSON object")
+    mode = text_value(value.get("mode") or "declared")
+    max_pages = int(value.get("max_pages") or 1)
+    if max_pages < 1 or max_pages > 1000:
+        raise CloudApiCollectionError("request pagination.max_pages must be between 1 and 1000")
+    return {
+        "mode": mode,
+        "max_pages": max_pages,
+        "next_link_field": text_value(value.get("next_link_field") or value.get("nextLinkField") or ""),
+        "delta_token_field": text_value(value.get("delta_token_field") or value.get("deltaTokenField") or ""),
+        "implemented": False,
+    }
 
 
 def redact_headers(headers: Mapping[str, object]) -> dict[str, str]:
@@ -375,8 +497,261 @@ def request_credential_handling(prepared: Mapping[str, object]) -> dict[str, obj
         "commercial_gap_ids": ["#41"],
         "secure_token_vault_integrated": False,
         "token_value_sha256_recorded": False,
+        "controlled_reveal_policy": "disabled-by-default",
+        "raw_secret_reveal_allowed": False,
         "legal_warning": "Credential-bearing requests are redacted in output. Confirm legal authority, API scopes, and token handling before collection.",
+        "credential_strategy_profile": {
+            "profile_version": "cloud-request-credential-strategy-v1",
+            "selected_track": "redacted-request-header-inventory",
+            "raw_secret_output_allowed": False,
+            "authority_audit_required": True,
+        },
     }
+
+
+def cloud_credential_strategy_profile(credential_handling: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "profile_version": "cloud-credential-strategy-v1",
+        "selected_track": "environment-token-redaction-with-external-authority-audit",
+        "credential_storage": str(credential_handling.get("credential_storage") or ""),
+        "bearer_token_env": str(credential_handling.get("bearer_token_env") or ""),
+        "raw_token_output_allowed": False,
+        "tokens_written_to_output": bool(credential_handling.get("tokens_written_to_output")),
+        "headers_redacted": bool(credential_handling.get("headers_redacted")),
+        "controlled_reveal_policy": str(credential_handling.get("controlled_reveal_policy") or "disabled-by-default"),
+        "raw_secret_reveal_allowed": bool(credential_handling.get("raw_secret_reveal_allowed")),
+        "secure_token_vault_integrated": bool(credential_handling.get("secure_token_vault_integrated")),
+        "token_rotation_audit_present": bool(credential_handling.get("token_rotation_audit_present")),
+        "scope_capture_status": str(credential_handling.get("scope_capture_status") or "not-captured"),
+        "blockers": [
+            "provider-oauth-consent-record-not-captured",
+            "provider-scope-inventory-not-captured",
+            "secure-token-vault-not-integrated",
+            "token-rotation-and-revocation-audit-not-captured",
+            CLOUD_CREDENTIAL_TRUSTED_DIFF_BLOCKER,
+        ],
+        "required_before_report": [
+            "record provider OAuth consent, scopes, account owner, and legal authority",
+            "store or broker tokens through an OS/enterprise secret vault for multi-user deployments",
+            "record token rotation/revocation audit and expiry policy",
+            "attach provider/vault/legal authority diff evidence before claiming enterprise credential handling",
+        ],
+    }
+
+
+def cloud_api_collection_strategy_profile(
+    *,
+    manifest_path: Path,
+    summary: Mapping[str, object],
+    credential_handling: Mapping[str, object],
+    requests: Iterable[Mapping[str, object]],
+    provider_scope_profile: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    request_rows = list(requests)
+    services = sorted({str(row.get("service") or "cloud-api") for row in request_rows if row.get("service")})
+    provider_scope_profile = provider_scope_profile or {}
+    pagination_declared = any(
+        isinstance(row.get("request_acquisition_profile"), Mapping)
+        and row.get("request_acquisition_profile", {}).get("pagination_mode") not in {"", "none"}
+        for row in request_rows
+    )
+    retry_declared = any(
+        isinstance(row.get("request_acquisition_profile"), Mapping)
+        and int(row.get("request_acquisition_profile", {}).get("retry_max_attempts") or 1) > 1
+        for row in request_rows
+    )
+    return {
+        "profile_version": "cloud-api-collection-strategy-v1",
+        "selected_track": "manifest-driven-bounded-api-collection",
+        "manifest_path": str(manifest_path.resolve()),
+        "services": services,
+        "provider_scope_profile": dict(provider_scope_profile),
+        "request_count": int(summary.get("request_count") or 0),
+        "collected_count": int(summary.get("collected_count") or 0),
+        "dry_run": bool(summary.get("dry_run")),
+        "max_response_bytes": DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES,
+        "timeout_seconds": DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
+        "request_retry_policy_declared": retry_declared,
+        "pagination_policy_declared": pagination_declared,
+        "response_hashing_enabled": bool(summary.get("dry_run")) or any(row.get("response_sha256") for row in request_rows),
+        "credential_strategy_track": (
+            credential_handling.get("credential_strategy_profile", {}).get("selected_track")
+            if isinstance(credential_handling.get("credential_strategy_profile"), Mapping)
+            else ""
+        ),
+        "provider_specific_oauth_flow": CLOUD_API_NATIVE_CAPABILITIES["provider_specific_oauth_flow"],
+        "provider_scope_discovery": CLOUD_API_NATIVE_CAPABILITIES["provider_scope_discovery"],
+        "pagination_backoff_delta_complete": CLOUD_API_NATIVE_CAPABILITIES["incremental_delta_collection"],
+        "message_or_object_reportable": False,
+        "blockers": [
+            "provider-specific-oauth-flow-not-implemented",
+            "provider-scope-discovery-and-consent-capture-not-implemented",
+            "pagination-backoff-delta-validation-required",
+            "provider-api-known-answer-corpus-not-attached",
+            CLOUD_API_TRUSTED_DIFF_BLOCKER,
+        ],
+        "required_before_report": [
+            "capture OAuth/device-flow consent, granted scopes, account ownership, and legal hold context",
+            "record provider API version, pagination, retry/backoff, delta token, and response schema behavior",
+            "hash every response and diff representative rows against provider-native admin/export views",
+            "document rate limits, incomplete pages, deleted-state, and retention limitations",
+        ],
+    }
+
+
+def cloud_api_provider_scope_profile(manifest: Mapping[str, object]) -> dict[str, object]:
+    provider = text_value(manifest.get("provider") or manifest.get("service") or "")
+    account = text_value(manifest.get("account") or manifest.get("account_id") or manifest.get("tenant") or "")
+    scopes = manifest.get("scopes") or manifest.get("scope") or []
+    if isinstance(scopes, str):
+        scope_values = [scopes]
+    elif isinstance(scopes, list):
+        scope_values = [text_value(item) for item in scopes if text_value(item)]
+    else:
+        scope_values = []
+    legal_authority = text_value(manifest.get("legal_authority") or manifest.get("authority_record_id") or "")
+    export_manifest = text_value(manifest.get("provider_export_manifest") or manifest.get("export_manifest") or "")
+    return {
+        "profile_version": "cloud-api-provider-scope-v1",
+        "provider": provider or "not-declared",
+        "account_or_tenant_declared": bool(account),
+        "account_or_tenant_sha256": hashlib.sha256(account.encode("utf-8")).hexdigest() if account else "",
+        "scope_count": len(scope_values),
+        "scope_hashes": [hashlib.sha256(scope.encode("utf-8")).hexdigest() for scope in scope_values],
+        "scope_inventory_captured": bool(scope_values),
+        "legal_authority_record_present": bool(legal_authority),
+        "provider_export_manifest_present": bool(export_manifest),
+        "provider_scope_discovery_status": "manifest-declared" if scope_values else "not-captured",
+        "oauth_consent_status": "external-record-required",
+        "legal_hold_status": "external-record-required",
+        "required_before_report": [
+            "capture provider, account or tenant, selected API scopes, consent record, and legal authority record",
+            "hash and preserve the provider export/API manifest plus original response package",
+            "validate scope inventory against provider admin/audit views before provider-complete claims",
+        ],
+    }
+
+
+def cloud_api_request_acquisition_profile(prepared: Mapping[str, object]) -> dict[str, object]:
+    retry = prepared.get("retry") if isinstance(prepared.get("retry"), Mapping) else {}
+    pagination = prepared.get("pagination") if isinstance(prepared.get("pagination"), Mapping) else {}
+    parsed = urllib.parse.urlparse(str(prepared.get("url") or ""))
+    return {
+        "profile_version": "cloud-api-request-acquisition-v1",
+        "service": text_value(prepared.get("service") or "cloud-api"),
+        "method": text_value(prepared.get("method") or "GET"),
+        "host_sha256": hashlib.sha256((parsed.netloc or "").encode("utf-8")).hexdigest() if parsed.netloc else "",
+        "path_template": parsed.path or "/",
+        "retry_max_attempts": int(retry.get("max_attempts") or DEFAULT_CLOUD_API_MAX_RETRY_ATTEMPTS),
+        "retry_backoff_seconds": float(retry.get("backoff_seconds") or DEFAULT_CLOUD_API_BACKOFF_SECONDS),
+        "retry_statuses": list(retry.get("retry_statuses") or sorted(RETRYABLE_HTTP_STATUS)),
+        "pagination_mode": text_value(pagination.get("mode") or "none"),
+        "pagination_max_pages": int(pagination.get("max_pages") or 1),
+        "next_link_field": text_value(pagination.get("next_link_field") or ""),
+        "delta_token_field": text_value(pagination.get("delta_token_field") or ""),
+        "pagination_execution_status": "declared-not-executed" if pagination.get("mode") not in {"", "none", None} else "not-configured",
+        "bounded_response_size": DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES,
+        "timeout_seconds": DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
+        "provider_specific_oauth_flow": False,
+        "required_before_report": [
+            "validate endpoint schema, pagination, retry/backoff, and delta-token behavior with provider known-answer data",
+            "compare response hashes and selected rows against provider-native export/admin views",
+            "record API version, scopes, rate-limit behavior, and legal-hold context",
+        ],
+    }
+
+
+def cloud_api_acquisition_manifest(
+    *,
+    manifest_path: Path,
+    output_dir: Path,
+    responses_dir: Path,
+    summary: Mapping[str, object],
+    credential_handling: Mapping[str, object],
+    requests: Iterable[Mapping[str, object]],
+    provider_scope_profile: Mapping[str, object],
+    collection_strategy_profile: Mapping[str, object],
+) -> dict[str, object]:
+    request_rows = list(requests)
+    request_locators = []
+    for row in request_rows[:1000]:
+        acquisition_profile = (
+            row.get("request_acquisition_profile")
+            if isinstance(row.get("request_acquisition_profile"), Mapping)
+            else {}
+        )
+        request_locators.append(
+            {
+                "index": int(row.get("index") or 0),
+                "name": text_value(row.get("name") or ""),
+                "service": text_value(row.get("service") or ""),
+                "method": text_value(row.get("method") or ""),
+                "url_sha256": text_value(row.get("url_sha256") or ""),
+                "response_path": text_value(row.get("response_path") or ""),
+                "response_sha256": text_value(row.get("response_sha256") or ""),
+                "status": int(row.get("status") or 0) if str(row.get("status") or "").isdigit() else 0,
+                "error": text_value(row.get("error") or ""),
+                "attempt_count": int(row.get("attempt_count") or 0),
+                "pagination_mode": text_value(acquisition_profile.get("pagination_mode") or ""),
+                "retry_max_attempts": int(acquisition_profile.get("retry_max_attempts") or 0),
+            }
+        )
+    manifest: dict[str, object] = {
+        "manifest_version": "cloud-api-acquisition-manifest-v1",
+        "item_number": 56,
+        "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
+        "manifest_path": str(manifest_path.resolve()),
+        "manifest_sha256_input": compute_sha256(manifest_path),
+        "output_dir": str(output_dir.resolve()),
+        "responses_dir": str(responses_dir.resolve()),
+        "dry_run": bool(summary.get("dry_run")),
+        "request_count": int(summary.get("request_count") or 0),
+        "collected_count": int(summary.get("collected_count") or 0),
+        "error_count": int(summary.get("error_count") or 0),
+        "skipped_count": int(summary.get("skipped_count") or 0),
+        "request_locator_count": len(request_locators),
+        "request_locators": request_locators,
+        "provider_scope_profile": dict(provider_scope_profile),
+        "collection_strategy_profile_hash": stable_cloud_api_json_sha256(collection_strategy_profile),
+        "credential_boundary": {
+            "credential_storage": text_value(credential_handling.get("credential_storage") or ""),
+            "headers_redacted": bool(credential_handling.get("headers_redacted")),
+            "tokens_written_to_output": bool(credential_handling.get("tokens_written_to_output")),
+            "raw_secret_reveal_allowed": bool(credential_handling.get("raw_secret_reveal_allowed")),
+            "secure_token_vault_integrated": bool(credential_handling.get("secure_token_vault_integrated")),
+            "controlled_reveal_policy": text_value(
+                credential_handling.get("controlled_reveal_policy") or "disabled-by-default"
+            ),
+        },
+        "large_data_controls": {
+            "request_locator_cap": 1000,
+            "request_locators_truncated": len(request_rows) > 1000,
+            "max_response_bytes": DEFAULT_CLOUD_API_MAX_RESPONSE_BYTES,
+            "timeout_seconds": DEFAULT_CLOUD_API_TIMEOUT_SECONDS,
+            "response_values_redacted_by_default": True,
+            "raw_tokens_never_serialized": True,
+        },
+        "commercial_blockers": [
+            "provider-oauth-device-flow-required",
+            "provider-scope-and-consent-proof-required",
+            "pagination-delta-execution-validation-required",
+            "provider-api-known-answer-diff-required",
+            "enterprise-token-vault-required-for-multi-user",
+        ],
+        "validation_status": "implemented-usable-validation-required",
+    }
+    manifest["manifest_sha256"] = stable_cloud_api_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def stable_cloud_api_json_sha256(value: Mapping[str, object] | list[object] | str) -> str:
+    if isinstance(value, str):
+        payload = value
+    else:
+        payload = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()
 
 
 def cloud_api_validation_matrix(summary: Mapping[str, object], credential_handling: Mapping[str, object]) -> list[dict[str, object]]:
@@ -422,6 +797,8 @@ def cloud_credential_security_assessment(credential_handling: Mapping[str, objec
         "tokens_written_to_output": bool(credential_handling.get("tokens_written_to_output")),
         "headers_redacted": bool(credential_handling.get("headers_redacted")),
         "credential_storage": str(credential_handling.get("credential_storage") or ""),
+        "controlled_reveal_policy": str(credential_handling.get("controlled_reveal_policy") or ""),
+        "raw_secret_reveal_allowed": bool(credential_handling.get("raw_secret_reveal_allowed")),
         "secure_token_vault_integrated": bool(credential_handling.get("secure_token_vault_integrated")),
         "token_rotation_audit_present": bool(credential_handling.get("token_rotation_audit_present")),
         "ready_for_court_report": False,
@@ -429,6 +806,63 @@ def cloud_credential_security_assessment(credential_handling: Mapping[str, objec
         "recommended_validation": [
             "Record provider OAuth consent, granted scopes, account owner, legal authority, and API version before collection.",
             "Use an OS/enterprise secret vault or short-lived token broker before report-grade multi-user deployment.",
+        ],
+    }
+
+
+def cloud_credential_authority_profile(
+    *,
+    credential_handling: Mapping[str, object],
+    provider_scope_profile: Mapping[str, object],
+    requests: Iterable[Mapping[str, object]],
+) -> dict[str, object]:
+    request_rows = list(requests)
+    sensitive_headers = sorted(
+        {
+            str(header)
+            for request in request_rows
+            for header in (
+                request.get("credential_handling", {}).get("sensitive_header_names", [])
+                if isinstance(request.get("credential_handling"), Mapping)
+                else []
+            )
+            if str(header)
+        }
+    )
+    return {
+        "profile_version": "cloud-credential-authority-v1",
+        "selected_track": "redacted-env-token-with-external-authority-records",
+        "provider_scope_profile_linked": bool(provider_scope_profile),
+        "provider": str(provider_scope_profile.get("provider") or "not-declared"),
+        "scope_inventory_captured": bool(provider_scope_profile.get("scope_inventory_captured")),
+        "scope_count": int(provider_scope_profile.get("scope_count") or 0),
+        "legal_authority_record_present": bool(provider_scope_profile.get("legal_authority_record_present")),
+        "oauth_consent_status": str(provider_scope_profile.get("oauth_consent_status") or "external-record-required"),
+        "controlled_reveal_policy": str(credential_handling.get("controlled_reveal_policy") or "disabled-by-default"),
+        "raw_secret_reveal_allowed": bool(credential_handling.get("raw_secret_reveal_allowed")),
+        "tokens_written_to_output": bool(credential_handling.get("tokens_written_to_output")),
+        "token_hash_or_secret_fingerprint_recorded": False,
+        "request_sensitive_header_count": len(sensitive_headers),
+        "request_sensitive_header_names": sensitive_headers,
+        "vault_integration_status": "integrated"
+        if credential_handling.get("secure_token_vault_integrated")
+        else "not-integrated",
+        "token_rotation_audit_status": "captured"
+        if credential_handling.get("token_rotation_audit_present")
+        else "not-captured",
+        "audit_required": bool(credential_handling.get("audit_required")),
+        "ready_for_court_report": False,
+        "blockers": [
+            "provider-oauth-consent-record-required",
+            "enterprise-vault-record-required",
+            "token-rotation-revocation-audit-required",
+            CLOUD_CREDENTIAL_TRUSTED_DIFF_BLOCKER,
+        ],
+        "required_before_report": [
+            "attach provider OAuth consent, granted scopes, account ownership, and legal authority records",
+            "record enterprise vault or token broker record IDs without storing raw token values",
+            "capture token rotation, revocation, and collection-time access audit evidence",
+            "attach a passing credential authority/audit diff before enterprise-vaulted or court-ready claims",
         ],
     }
 
@@ -453,6 +887,7 @@ def cloud_api_commercial_uplift_evidence(
     summary: Mapping[str, object],
     credential_handling: Mapping[str, object],
     requests: list[dict[str, object]],
+    provider_scope_profile: Mapping[str, object],
     report_grade: Mapping[str, object],
 ) -> dict[str, object]:
     matrix = cloud_api_validation_matrix(summary, credential_handling)
@@ -475,8 +910,16 @@ def cloud_api_commercial_uplift_evidence(
             f"manifest_path:{manifest_path.resolve()}",
             f"manifest_sha256:{compute_sha256(manifest_path)}",
             f"output_dir:{output_dir.resolve()}",
+            f"cloud_api_acquisition_manifest_sha256:{summary.get('cloud_api_acquisition_manifest_hash', '')}",
             *[f"response_sha256:{request.get('response_sha256')}" for request in requests[:5] if request.get("response_sha256")],
         ],
+        "cloud_api_collection_strategy_profile": cloud_api_collection_strategy_profile(
+            manifest_path=manifest_path,
+            summary=summary,
+            credential_handling=credential_handling,
+            requests=requests,
+            provider_scope_profile=provider_scope_profile,
+        ),
         "passed_validation_matrix_ids": passed_validation_matrix_ids,
         "failed_validation_matrix_ids": failed_validation_matrix_ids,
         "report_grade_status": str(report_grade.get("status") or ""),
@@ -492,12 +935,90 @@ def cloud_api_commercial_uplift_evidence(
             "request_count": int(summary.get("request_count") or 0),
             "collected_count": int(summary.get("collected_count") or 0),
             "dry_run": bool(summary.get("dry_run")),
+            "cloud_api_acquisition_manifest_hash": str(summary.get("cloud_api_acquisition_manifest_hash") or ""),
+            "provider_scope_inventory_captured": bool(provider_scope_profile.get("scope_inventory_captured")),
+            "provider_scope_profile_present": bool(provider_scope_profile),
             "provider_specific_oauth_flow": False,
             "incremental_delta_collection": False,
             "known_answer_cloud_api_corpus_required": True,
         },
         "next_internal_step": "Add provider OAuth/device flow, scope capture, pagination/backoff manifests, delta collection, and provider API known-answer validation.",
         "external_evidence_required": True,
+    }
+
+
+def cloud_api_acquisition_functional_profile(
+    *,
+    manifest_path: Path,
+    output_dir: Path,
+    summary: Mapping[str, object],
+    credential_handling: Mapping[str, object],
+    requests: Iterable[Mapping[str, object]],
+    provider_scope_profile: Mapping[str, object],
+) -> dict[str, object]:
+    request_rows = list(requests)
+    response_hash_count = sum(1 for row in request_rows if row.get("response_sha256"))
+    redacted_count = sum(
+        1
+        for row in request_rows
+        if isinstance(row.get("credential_handling"), Mapping)
+        and row.get("credential_handling", {}).get("sensitive_values_redacted")
+    )
+    failed_checks = [
+        check
+        for check, failed in {
+            "provider-oauth-device-flow-not-implemented": not CLOUD_API_NATIVE_CAPABILITIES[
+                "provider_specific_oauth_flow"
+            ],
+            "provider-scope-discovery-not-implemented": not CLOUD_API_NATIVE_CAPABILITIES["provider_scope_discovery"],
+            "incremental-pagination-delta-not-implemented": not CLOUD_API_NATIVE_CAPABILITIES[
+                "incremental_delta_collection"
+            ],
+            "secure-token-vault-not-integrated": not credential_handling.get("secure_token_vault_integrated"),
+            "trusted-provider-api-diff-required": True,
+        }.items()
+        if failed
+    ]
+    return {
+        "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
+        "item_number": 56,
+        "implementation_track": "cloud-api-acquisition",
+        "status": "usable-manifest-collector-not-provider-complete",
+        "manifest_path": str(manifest_path.resolve()),
+        "output_dir": str(output_dir.resolve()),
+        "implemented_controls": {
+            "manifest_driven_https_requests": CLOUD_API_NATIVE_CAPABILITIES["manifest_driven_https_requests"],
+            "dry_run_validation": CLOUD_API_NATIVE_CAPABILITIES["dry_run_validation"],
+            "credential_redaction": bool(credential_handling.get("headers_redacted")),
+            "environment_token_boundary": credential_handling.get("credential_storage") == "environment-variable-only",
+            "response_hashing": response_hash_count > 0 or bool(summary.get("dry_run")),
+            "bounded_response_size": CLOUD_API_NATIVE_CAPABILITIES["bounded_response_size"],
+            "provider_scope_manifest_profile": bool(provider_scope_profile),
+            "provider_scope_inventory_captured": bool(provider_scope_profile.get("scope_inventory_captured")),
+            "cloud_api_acquisition_manifest_emitted": bool(summary.get("cloud_api_acquisition_manifest_hash")),
+            "cloud_api_acquisition_manifest_hash": str(summary.get("cloud_api_acquisition_manifest_hash") or ""),
+            "local_only_default": True,
+        },
+        "evidence_counts": {
+            "request_count": int(summary.get("request_count") or 0),
+            "collected_count": int(summary.get("collected_count") or 0),
+            "validated_count": int(summary.get("validated_count") or 0),
+            "response_hash_count": response_hash_count,
+            "redacted_request_count": redacted_count,
+        },
+        "passed_validation_check_ids": [
+            check
+            for check, passed in {
+                "cloud-api-acquisition-manifest-emitted": bool(summary.get("cloud_api_acquisition_manifest_hash")),
+                "cloud-api-source-manifest-hashed": bool(compute_sha256(manifest_path)),
+                "cloud-api-credential-redaction-enabled": bool(credential_handling.get("headers_redacted")),
+                "cloud-api-local-output-boundary": True,
+            }.items()
+            if passed
+        ],
+        "failed_validation_check_ids": failed_checks,
+        "ready_for_court_report": False,
+        "next_internal_step": "Add provider-specific OAuth/device-flow capture, scope inventory, pagination/backoff policy, and provider known-answer response diffs.",
     }
 
 
@@ -548,6 +1069,11 @@ def cloud_credential_commercial_uplift_evidence(
     requests: list[dict[str, object]],
 ) -> dict[str, object]:
     assessment = cloud_credential_security_assessment(credential_handling)
+    authority_profile = (
+        credential_handling.get("credential_authority_profile")
+        if isinstance(credential_handling.get("credential_authority_profile"), Mapping)
+        else {}
+    )
     trusted_diff = (
         credential_handling.get("credential_trusted_diff")
         if isinstance(credential_handling.get("credential_trusted_diff"), Mapping)
@@ -584,11 +1110,21 @@ def cloud_credential_commercial_uplift_evidence(
             f"credential_storage:{credential_handling.get('credential_storage', '')}",
             f"bearer_token_env:{credential_handling.get('bearer_token_env', '')}",
         ],
+        "credential_strategy_profile": (
+            dict(credential_handling["credential_strategy_profile"])
+            if isinstance(credential_handling.get("credential_strategy_profile"), Mapping)
+            else {}
+        ),
+        "credential_authority_profile": dict(authority_profile),
         "passed_validation_check_ids": [
             "headers_redacted",
             "tokens_not_written",
+            "controlled_reveal_disabled",
+            "credential_authority_profile_present",
         ]
-        if credential_handling.get("headers_redacted") and not credential_handling.get("tokens_written_to_output")
+        if credential_handling.get("headers_redacted")
+        and not credential_handling.get("tokens_written_to_output")
+        and authority_profile
         else [],
         "failed_validation_check_ids": [
             "provider_oauth_consent_record",
@@ -606,6 +1142,13 @@ def cloud_credential_commercial_uplift_evidence(
         "large_data_controls": {
             "tokens_written_to_output": bool(credential_handling.get("tokens_written_to_output")),
             "headers_redacted": bool(credential_handling.get("headers_redacted")),
+            "controlled_reveal_disabled": credential_handling.get("controlled_reveal_policy")
+            == "disabled-by-default"
+            and not bool(credential_handling.get("raw_secret_reveal_allowed")),
+            "credential_authority_profile_present": bool(authority_profile),
+            "credential_authority_profile_linked_to_provider_scope": bool(
+                authority_profile.get("provider_scope_profile_linked")
+            ),
             "secure_token_vault_integrated": bool(credential_handling.get("secure_token_vault_integrated")),
             "token_rotation_audit_present": bool(credential_handling.get("token_rotation_audit_present")),
         },
@@ -636,6 +1179,11 @@ def cloud_credential_reportability_decision(
         "credential_storage": str(credential_handling.get("credential_storage") or ""),
         "headers_redacted": bool(credential_handling.get("headers_redacted")),
         "tokens_written_to_output": bool(credential_handling.get("tokens_written_to_output")),
+        "controlled_reveal_policy": str(credential_handling.get("controlled_reveal_policy") or ""),
+        "raw_secret_reveal_allowed": bool(credential_handling.get("raw_secret_reveal_allowed")),
+        "credential_authority_profile_present": isinstance(
+            credential_handling.get("credential_authority_profile"), Mapping
+        ),
         "ready_for_court_report": False,
         "required_before_report": [
             "attach OAuth consent and provider scope evidence",
@@ -659,6 +1207,8 @@ def cloud_api_core_accuracy_gates(
         f"manifest_sha256:{compute_sha256(manifest_path)}",
         f"output_dir:{output_dir.resolve()}",
     ]
+    if summary.get("cloud_api_acquisition_manifest_hash"):
+        evidence_refs.append(f"cloud_api_acquisition_manifest_sha256:{summary['cloud_api_acquisition_manifest_hash']}")
     for request in requests[:5]:
         if request.get("response_sha256"):
             evidence_refs.append(f"response_sha256:{request['response_sha256']}")
@@ -673,8 +1223,16 @@ def cloud_api_core_accuracy_gates(
         satisfied.append("manifest request validation")
     if bool(credential_handling.get("headers_redacted")) and not bool(credential_handling.get("tokens_written_to_output")):
         satisfied.append("credential redaction")
+    if credential_handling.get("credential_strategy_profile"):
+        satisfied.append("credential strategy profile")
+    if summary.get("provider_scope_profile_present") or any(
+        isinstance(request.get("request_acquisition_profile"), Mapping) for request in requests
+    ):
+        satisfied.append("request acquisition profile")
     if bool(summary.get("dry_run")) or any(request.get("response_sha256") for request in requests):
         satisfied.append("response hash/provenance")
+    if summary.get("cloud_api_acquisition_manifest_hash"):
+        satisfied.append("cloud API acquisition manifest")
     if not CLOUD_API_NATIVE_CAPABILITIES["incremental_delta_collection"]:
         satisfied.append("pagination/backoff limitation warning")
     if credential_handling.get("legal_warning") and not CLOUD_API_NATIVE_CAPABILITIES["provider_specific_oauth_flow"]:
@@ -791,6 +1349,20 @@ def cloud_credential_core_accuracy_gates(
         satisfied.append("rotation and revocation audit warning")
     if credential_handling.get("legal_warning") or credential_handling.get("audit_required"):
         satisfied.append("legal authority warning")
+    if credential_handling.get("credential_strategy_profile"):
+        satisfied.append("credential strategy profile")
+    authority_profile = (
+        credential_handling.get("credential_authority_profile")
+        if isinstance(credential_handling.get("credential_authority_profile"), Mapping)
+        else {}
+    )
+    if authority_profile:
+        satisfied.append("credential authority profile")
+        evidence_refs.append(f"authority_profile_version:{authority_profile.get('profile_version', '')}")
+    if credential_handling.get("controlled_reveal_policy") == "disabled-by-default" and not bool(
+        credential_handling.get("raw_secret_reveal_allowed")
+    ):
+        satisfied.append("controlled reveal disabled by default")
     trusted_diff = (
         credential_handling.get("credential_trusted_diff")
         if isinstance(credential_handling.get("credential_trusted_diff"), Mapping)

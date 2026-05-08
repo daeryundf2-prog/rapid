@@ -13,7 +13,7 @@ from ...core.models import ArtifactRecord
 from .common import build_forensic_review
 from .ese import build_ese_page_map, build_ese_string_pivots, probe_ese_database
 
-PARSER_VERSION = "windows-search-index-import-v6"
+PARSER_VERSION = "windows-search-index-import-v7"
 SEARCH_EDB_PATH = ("ProgramData", "Microsoft", "Search", "Data", "Applications", "Windows", "Windows.edb")
 SUPPORTED_EXPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 EXPORT_HINTS = ("windows.edb", "windows-search", "searchindex", "search-index", "edbexport", "winsearch")
@@ -122,7 +122,7 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
     page_map = build_ese_page_map(path, table_markers=WINDOWS_SEARCH_TABLE_MARKERS)
     content_candidates = build_search_content_candidates(pivots)
     table_families = detect_search_table_families(pivots)
-    row_candidates = build_search_row_candidates({**pivots, "content_candidates": content_candidates})
+    row_candidates = build_search_row_candidates({**pivots, "content_candidates": content_candidates, "ese_page_map": page_map})
     coverage_status = "ese-header-string-scan" if ese_header.get("header_readable") else "detected"
     validation_checks = {
         "ese_header_readable": bool(ese_header.get("header_readable")),
@@ -632,6 +632,9 @@ def build_edb_row_candidate_records(path: Path, inventory_details: Mapping[str, 
             "has_file_name": bool(file_name),
             "has_content_snippet": bool(content_snippet),
             "has_table_family_candidates": bool(table_families),
+            "has_page_source_citation": candidate.get("page_offset") is not None or bool(candidate.get("page_sha256")),
+            "has_field_presence_profile": bool(candidate.get("field_presence_profile")),
+            "has_page_local_table_markers": bool(candidate.get("page_table_marker_hits")),
             "row_level_decoding_available": False,
             "timestamps_decoded_from_native_rows": False,
             "deleted_state_decoded_from_native_rows": False,
@@ -663,6 +666,10 @@ def build_edb_row_candidate_records(path: Path, inventory_details: Mapping[str, 
                     "source_format": "ese-edb",
                     "source_hashes": source_hashes,
                     "source_index": index,
+                    "page_index": candidate.get("page_index", ""),
+                    "page_offset": candidate.get("page_offset", ""),
+                    "page_sha256": candidate.get("page_sha256", ""),
+                    "page_local_correlation": bool(candidate.get("page_local_correlation")),
                     "item_path": item_path,
                     "file_name": file_name,
                     "extension": extension_from_name(file_name or item_path),
@@ -670,6 +677,8 @@ def build_edb_row_candidate_records(path: Path, inventory_details: Mapping[str, 
                     "title": "",
                     "content_snippet": content_snippet[:1000],
                     "table_family_candidates": table_families,
+                    "page_table_marker_hits": dict(candidate.get("page_table_marker_hits") or {}),
+                    "field_presence_profile": dict(candidate.get("field_presence_profile") or {}),
                     "deleted_state": "candidate-marker-present" if has_deleted_markers else "not-decoded",
                     "timestamp": "",
                     "timestamp_source": "not-decoded-native-edb",
@@ -690,10 +699,14 @@ def build_edb_row_candidate_records(path: Path, inventory_details: Mapping[str, 
                             "source_path": str(path.resolve()),
                             "source_hashes": source_hashes,
                             "source_index": index,
+                            "page_offset": candidate.get("page_offset", ""),
+                            "page_sha256": candidate.get("page_sha256", ""),
                             "item_path": item_path,
                             "url": url,
                             "content_snippet": content_snippet,
                             "table_family_candidates": table_families,
+                            "field_presence_profile": dict(candidate.get("field_presence_profile") or {}),
+                            "page_table_marker_hits": dict(candidate.get("page_table_marker_hits") or {}),
                             "deleted_state": "candidate-marker-present" if has_deleted_markers else "not-decoded",
                             "candidate_basis": candidate.get("correlation_method", ""),
                             "validation_checks": validation_checks,
@@ -710,6 +723,8 @@ def build_edb_row_candidate_records(path: Path, inventory_details: Mapping[str, 
                             "artifact_type": "windows-search-edb-row-candidate",
                             "item_path": item_path,
                             "url": url,
+                            "page_offset": candidate.get("page_offset", ""),
+                            "page_sha256": candidate.get("page_sha256", ""),
                             "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                             "search_index_report_grade_assessment": report_grade,
                         }
@@ -721,6 +736,7 @@ def build_edb_row_candidate_records(path: Path, inventory_details: Mapping[str, 
                             f"path={item_path}" if item_path else "",
                             f"url={url}" if url else "",
                             f"file={file_name}" if file_name else "",
+                            f"page_offset={candidate.get('page_offset')}" if candidate.get("page_offset") not in (None, "") else "",
                         ],
                         validation_required=True,
                         report_grade_assessment=report_grade,
@@ -949,13 +965,19 @@ def build_search_content_candidates(pivots: Mapping[str, object], *, limit: int 
 
 
 def build_search_row_candidates(pivots: Mapping[str, object], *, limit: int = 50) -> list[dict[str, object]]:
+    page_rows = build_page_local_search_row_candidates(pivots, limit=limit)
     paths = [str(value) for value in pivots.get("path_candidates") or [] if str(value)]
     urls = [str(value) for value in pivots.get("url_candidates") or [] if str(value)]
     contents = [str(value) for value in pivots.get("content_candidates") or [] if str(value)]
     if not contents:
         contents = build_search_content_candidates(pivots)
-    rows: list[dict[str, object]] = []
-    seen: set[tuple[str, str, str]] = set()
+    rows: list[dict[str, object]] = list(page_rows)
+    seen: set[tuple[str, str, str]] = {
+        (str(row.get("item_path") or ""), str(row.get("url") or ""), str(row.get("content_snippet") or ""))
+        for row in page_rows
+    }
+    if page_rows or len(rows) >= limit:
+        return rows[:limit]
     if paths:
         for index, item_path in enumerate(paths[:limit]):
             content = contents[index] if index < len(contents) else (contents[0] if contents else "")
@@ -972,6 +994,59 @@ def build_search_row_candidates(pivots: Mapping[str, object], *, limit: int = 50
         add_search_row_candidate(rows, seen, "", "", content, "content-string-candidate")
         if len(rows) >= limit:
             return rows
+    return rows
+
+
+def build_page_local_search_row_candidates(pivots: Mapping[str, object], *, limit: int) -> list[dict[str, object]]:
+    page_map = pivots.get("ese_page_map") if isinstance(pivots.get("ese_page_map"), Mapping) else {}
+    page_samples = [sample for sample in page_map.get("page_samples") or [] if isinstance(sample, Mapping)]
+    rows: list[dict[str, object]] = []
+    seen: set[tuple[str, str, str, int]] = set()
+    for sample in page_samples:
+        path_candidates = [str(value) for value in sample.get("path_candidates") or [] if str(value)]
+        url_candidates = [str(value) for value in sample.get("url_candidates") or [] if str(value)]
+        content_candidates = [str(value) for value in sample.get("content_candidates") or [] if str(value)]
+        if not path_candidates and not url_candidates and not content_candidates:
+            continue
+        page_offset = int(sample.get("page_offset") or 0)
+        max_items = max(len(path_candidates), len(url_candidates), len(content_candidates), 1)
+        for index in range(max_items):
+            item_path = path_candidates[index] if index < len(path_candidates) else (path_candidates[0] if path_candidates else "")
+            url = url_candidates[index] if index < len(url_candidates) else (url_candidates[0] if url_candidates else "")
+            content = content_candidates[index] if index < len(content_candidates) else (content_candidates[0] if content_candidates else "")
+            key = (item_path, url, content, page_offset)
+            if key in seen or not any((item_path, url, content)):
+                continue
+            seen.add(key)
+            rows.append(
+                {
+                    "item_path": item_path,
+                    "file_name": filename_from_path(item_path),
+                    "url": url,
+                    "content_snippet": content[:1000],
+                    "path_source": "page-local-native-path-string" if item_path else "",
+                    "url_source": "page-local-native-url-string" if url else "",
+                    "content_source": "page-local-native-content-string" if content else "",
+                    "correlation_method": "page-local-path-url-content-correlation",
+                    "page_local_correlation": True,
+                    "page_index": int(sample.get("page_index") or 0),
+                    "page_offset": page_offset,
+                    "page_sha256": str(sample.get("page_sha256") or ""),
+                    "page_table_marker_hits": {
+                        str(family): [str(marker) for marker in markers]
+                        for family, markers in dict(sample.get("table_marker_hits") or {}).items()
+                    },
+                    "field_presence_profile": search_row_field_presence_profile(item_path, url, content, sample),
+                    "parser_confidence": search_row_candidate_confidence(
+                        item_path,
+                        url,
+                        content,
+                        "page-local-path-url-content-correlation",
+                    ),
+                }
+            )
+            if len(rows) >= limit:
+                return rows
     return rows
 
 
@@ -997,6 +1072,7 @@ def add_search_row_candidate(
             "url_source": "native-url-string" if url else "",
             "content_source": "native-content-string" if content else "",
             "correlation_method": method,
+            "field_presence_profile": search_row_field_presence_profile(item_path, url, content, {}),
             "parser_confidence": search_row_candidate_confidence(item_path, url, content, method),
         }
     )
@@ -1012,7 +1088,29 @@ def search_row_candidate_confidence(item_path: str, url: str, content: str, meth
         score += 0.12
     if method.startswith("path-content"):
         score += 0.08
+    if method.startswith("page-local"):
+        score += 0.12
     return round(min(score, 0.74), 2)
+
+
+def search_row_field_presence_profile(
+    item_path: str,
+    url: str,
+    content: str,
+    page_sample: Mapping[str, object],
+) -> dict[str, bool]:
+    marker_hits = dict(page_sample.get("table_marker_hits") or {}) if isinstance(page_sample, Mapping) else {}
+    return {
+        "item_path": bool(item_path),
+        "file_name": bool(filename_from_path(item_path)),
+        "url": bool(url),
+        "content_snippet": bool(content),
+        "page_offset": page_sample.get("page_offset") is not None if isinstance(page_sample, Mapping) else False,
+        "page_hash": bool(page_sample.get("page_sha256")) if isinstance(page_sample, Mapping) else False,
+        "property_store_marker": "property-store" in marker_hits,
+        "content_index_marker": "content-index" in marker_hits,
+        "deleted_state_marker": "deleted-state" in marker_hits,
+    }
 
 
 def page_candidate_confidence(
@@ -1051,6 +1149,9 @@ def search_index_validation_matrix(checks: Mapping[str, object]) -> list[dict[st
         "has_file_name": ("File name", "medium"),
         "has_content": ("Content", "medium"),
         "has_content_snippet": ("Content snippet", "medium"),
+        "has_page_source_citation": ("Page source citation", "high"),
+        "has_field_presence_profile": ("Field presence profile", "medium"),
+        "has_page_local_table_markers": ("Page-local table markers", "medium"),
         "has_timestamp": ("Timestamp", "high"),
         "ese_catalog_decoded": ("ESE catalog decoded", "critical"),
         "row_level_decoding_available": ("Row-level decoding", "critical"),
@@ -1195,11 +1296,15 @@ def windows_search_core_accuracy_gates(artifact_type: str, details: Mapping[str,
         satisfied.append("catalog/table/page mapping")
     if details.get("property_fields") or details.get("matched_markers") or details.get("table_marker_hits") or details.get("table_family") == "property-store":
         satisfied.append("property ID/name mapping")
+    if details.get("field_presence_profile") or checks.get("has_field_presence_profile"):
+        satisfied.append("field presence profile")
+    if details.get("page_table_marker_hits") or checks.get("has_page_local_table_markers"):
+        satisfied.append("page-local table marker correlation")
     if details.get("item_path") or details.get("url") or details.get("content_snippet") or details.get("path_candidates") or details.get("url_candidates") or details.get("content_candidates"):
         satisfied.append("path/URL/content correlation")
     if details.get("deleted_state") == "candidate-marker-present" or details.get("table_family") == "deleted-state" or "deleted-state" in list(details.get("table_family_candidates") or []):
         satisfied.append("deleted/index-state validation")
-    if details.get("page_offset") not in (None, "") or details.get("page_sha256") or checks.get("ese_page_map_built") or hashes.get("sha256"):
+    if details.get("page_offset") not in (None, "") or details.get("page_sha256") or checks.get("ese_page_map_built") or checks.get("has_page_source_citation") or hashes.get("sha256"):
         satisfied.append("page-level source citation")
     if trusted_diff.get("status") == "pass":
         satisfied.append("trusted Windows.edb parser diff pass")
@@ -1228,17 +1333,47 @@ def build_windows_edb_trusted_diff(
 def index_search_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
     indexed: dict[str, dict[str, str]] = {}
     for row in rows:
+        payload = search_diff_row_payload(row)
         normalized = {
-            "path": normalized_diff_value(first_alias(row, "item_path", "path", "file_path", "system.itempathdisplay", "url")),
-            "url": normalized_diff_value(first_alias(row, "url", "item_url", "itemurl")),
-            "content": normalized_diff_value(first_alias(row, "content", "content_snippet", "system.search.contents", "text")),
-            "deleted_state": normalized_diff_value(first_alias(row, "deleted_state", "isdeleted", "deleted", "index_state")),
-            "table": normalized_diff_value(first_alias(row, "table", "table_family", "table_name")),
+            "artifact_type": normalized_diff_value(first_alias(payload, "artifact_type")),
+            "path": normalized_diff_value(first_alias(payload, "item_path", "path", "file_path", "system.itempathdisplay")),
+            "url": normalized_diff_value(first_alias(payload, "url", "item_url", "itemurl", "system.itemurl")),
+            "content": normalized_diff_value(first_alias(payload, "content", "content_snippet", "system.search.contents", "text")),
+            "deleted_state": normalized_deleted_state(first_alias(payload, "deleted_state", "isdeleted", "deleted", "index_state")),
+            "table": normalized_diff_value(first_alias(payload, "table", "table_family", "table_name")),
+            "table_family_candidates": normalized_diff_list(
+                first_alias(payload, "table_family_candidates", "table_families", "TableFamilies")
+            ),
+            "page_offset": normalized_int_text(first_alias(payload, "page_offset", "PageOffset", "offset")),
+            "page_sha256": normalized_diff_value(first_alias(payload, "page_sha256", "PageSHA256", "page_hash")),
+            "page_index": normalized_int_text(first_alias(payload, "page_index", "PageIndex")),
+            "source_format": normalized_diff_value(first_alias(payload, "source_format", "SourceFormat")),
         }
-        key = normalized["path"] or normalized["url"] or normalized["content"]
+        key = search_diff_key(normalized)
         if key:
             indexed[key] = normalized
     return indexed
+
+
+def search_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
+    details = row.get("details") if isinstance(row.get("details"), Mapping) else {}
+    if not details:
+        return row
+    payload = dict(details)
+    for key, value in row.items():
+        if key == "details":
+            continue
+        payload.setdefault(key, value)
+    return payload
+
+
+def search_diff_key(normalized: Mapping[str, str]) -> str:
+    base = normalized.get("path") or normalized.get("url") or normalized.get("content")
+    if not base:
+        return ""
+    page_ref = normalized.get("page_sha256") or normalized.get("page_offset")
+    table_ref = normalized.get("table") or normalized.get("table_family_candidates")
+    return "|".join(value for value in (base, page_ref, table_ref) if value)
 
 
 def build_simple_trusted_row_diff(
@@ -1306,6 +1441,43 @@ def first_alias(row: Mapping[str, object], *aliases: str) -> object:
 
 def normalized_diff_value(value: object) -> str:
     return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
+
+
+def normalized_diff_list(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        parts = [part.strip() for part in re.split(r"[,;|]", value) if part.strip()]
+    elif isinstance(value, Sequence):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+    else:
+        parts = [str(value).strip()]
+    return "|".join(sorted({normalized_diff_value(part) for part in parts if part}))
+
+
+def normalized_int_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        return normalized_diff_value(text)
+
+
+def normalized_deleted_state(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    text = normalized_diff_value(value)
+    if text in {"1", "yes", "y", "deleted", "true"}:
+        return "true"
+    if text in {"0", "no", "n", "active", "present", "false"}:
+        return "false"
+    return text
 
 
 def detect_search_table_families(pivots: Mapping[str, object]) -> list[str]:

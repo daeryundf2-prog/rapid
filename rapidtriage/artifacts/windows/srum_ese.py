@@ -8,6 +8,7 @@ from typing import Iterable, Mapping
 from .ese import ESE_SCAN_READ_SIZE, read_prefix
 
 ESE_PAGE_SIZES = {2048, 4096, 8192, 16384, 32768}
+SRUM_ROW_CLUSTER_WINDOW_BYTES = 4096
 WINDOWS_PATH_RE = re.compile(r"(?i)(?:[a-z]:\\|\\\\)[^\x00\r\n\t\"'<>|]{4,260}")
 URL_RE = re.compile(r"(?i)https?://[^\s\x00\"'<>]{4,300}")
 SID_RE = re.compile(r"\bS-\d(?:-\d+){2,}\b")
@@ -141,15 +142,19 @@ def build_srum_row_candidates(string_hits: list[dict[str, object]]) -> list[dict
     seen: set[tuple[str, str, str, int]] = set()
     for hit in string_hits:
         value = str(hit.get("value") or "")
-        if not looks_like_srum_row_string(value):
+        if not looks_like_srum_row_string(value) and not looks_like_srum_row_cluster(hit, string_hits):
             continue
-        fields = extract_candidate_fields(value)
-        table_family = classify_row_table_family(value)
+        source_offset = int(hit.get("offset") or 0)
+        nearby = nearby_string_hits(string_hits, source_offset, SRUM_ROW_CLUSTER_WINDOW_BYTES)
+        combined_value = " ".join(str(item.get("value") or "") for item in nearby)
+        fields = extract_candidate_fields(combined_value)
+        table_family = classify_row_table_family(combined_value)
         key = (
             table_family,
             str(fields.get("app_id") or fields.get("executable_path") or ""),
             str(fields.get("timestamp") or ""),
-            int(hit.get("offset") or 0),
+            str(fields.get("user_sid") or fields.get("user") or ""),
+            str(fields.get("url") or ""),
         )
         if key in seen:
             continue
@@ -163,8 +168,12 @@ def build_srum_row_candidates(string_hits: list[dict[str, object]]) -> list[dict
             {
                 "table_family": table_family,
                 "candidate_basis": "bounded-native-string-row-cluster",
-                "source_offset": int(hit.get("offset") or 0),
+                "source_offset": source_offset,
                 "source_encoding": str(hit.get("encoding") or ""),
+                "cluster_window_bytes": SRUM_ROW_CLUSTER_WINDOW_BYTES,
+                "nearby_string_count": len(nearby),
+                "nearby_offsets": sorted({int(item.get("offset") or 0) for item in nearby})[:100],
+                "row_cluster_strings": [str(item.get("value") or "")[:240] for item in nearby[:12]],
                 "app_id": str(fields.get("app_id") or ""),
                 "executable_path": str(fields.get("executable_path") or ""),
                 "user": str(fields.get("user") or ""),
@@ -178,8 +187,9 @@ def build_srum_row_candidates(string_hits: list[dict[str, object]]) -> list[dict
                 "cpu_time": fields.get("cpu_time", 0),
                 "interface_luid": str(fields.get("interface_luid") or ""),
                 "network_profile": str(fields.get("network_profile") or ""),
+                "field_presence_profile": srum_field_presence_profile(fields),
                 "candidate_confidence": row_candidate_confidence(fields, table_family),
-                "raw_candidate": value[:2000],
+                "raw_candidate": combined_value[:2000],
             }
         )
     return candidates[:100]
@@ -199,9 +209,40 @@ def looks_like_srum_row_string(value: str) -> bool:
     return has_subject and has_srum_marker and has_counter_or_time
 
 
+def looks_like_srum_row_cluster(hit: Mapping[str, object], string_hits: list[dict[str, object]]) -> bool:
+    value = str(hit.get("value") or "")
+    source_offset = int(hit.get("offset") or 0)
+    nearby = nearby_string_hits(string_hits, source_offset, SRUM_ROW_CLUSTER_WINDOW_BYTES)
+    combined_value = " ".join(str(item.get("value") or "") for item in nearby)
+    lowered = combined_value.lower()
+    anchor_has_subject = bool(WINDOWS_PATH_RE.search(value) or SID_RE.search(value) or "application" in value.lower() or "appid" in value.lower())
+    cluster_has_subject = bool(WINDOWS_PATH_RE.search(combined_value) or SID_RE.search(combined_value))
+    cluster_has_srum_marker = any(
+        normalize_marker_text(marker) in normalize_marker_text(combined_value)
+        for markers in SRUM_TABLE_FAMILY_MARKERS.values()
+        for marker in markers
+    )
+    cluster_has_counter_or_time = bool(ISO_TIMESTAMP_RE.search(combined_value)) or any(
+        token in lowered for token in ("bytes", "energy", "cpu", "interfaceluid", "networkprofile")
+    )
+    return anchor_has_subject and cluster_has_subject and cluster_has_srum_marker and cluster_has_counter_or_time
+
+
+def nearby_string_hits(
+    string_hits: list[dict[str, object]],
+    source_offset: int,
+    window_bytes: int,
+) -> list[dict[str, object]]:
+    return [
+        hit
+        for hit in string_hits
+        if abs(int(hit.get("offset") or 0) - source_offset) <= window_bytes
+    ]
+
+
 def extract_candidate_fields(value: str) -> dict[str, object]:
     key_values = {normalize_key(match.group(1)): match.group(2).strip() for match in KEY_VALUE_RE.finditer(value)}
-    executable_path = first_regex(WINDOWS_PATH_RE, value)
+    executable_path = trim_windows_path_candidate(first_regex(WINDOWS_PATH_RE, value))
     url = first_regex(URL_RE, value)
     app_id = first_key_value(key_values, "application", "appid", "app", "executable", "executablepath") or executable_path
     return {
@@ -245,6 +286,20 @@ def row_candidate_confidence(fields: Mapping[str, object], table_family: str) ->
     if fields.get("bytes_sent") or fields.get("bytes_received") or fields.get("energy_usage") or fields.get("cpu_time"):
         score += 0.08
     return round(min(score, 0.62), 2)
+
+
+def srum_field_presence_profile(fields: Mapping[str, object]) -> dict[str, bool]:
+    return {
+        "app_id": bool(fields.get("app_id")),
+        "executable_path": bool(fields.get("executable_path")),
+        "user": bool(fields.get("user")),
+        "user_sid": bool(fields.get("user_sid")),
+        "timestamp": bool(fields.get("timestamp")),
+        "url": bool(fields.get("url")),
+        "network_counters": bool(fields.get("bytes_sent") or fields.get("bytes_received")),
+        "resource_counters": bool(fields.get("energy_usage") or fields.get("cpu_time")),
+        "network_context": bool(fields.get("interface_luid") or fields.get("network_profile")),
+    }
 
 
 def iter_printable_string_hits(blob: bytes) -> Iterable[dict[str, object]]:
@@ -302,6 +357,18 @@ def unique_string_hits(hits: Iterable[dict[str, object]]) -> Iterable[dict[str, 
 def first_regex(pattern: re.Pattern[str], value: str) -> str:
     match = pattern.search(value)
     return match.group(0).rstrip(".,);]") if match else ""
+
+
+def trim_windows_path_candidate(value: str) -> str:
+    if not value:
+        return ""
+    match = re.search(
+        r"(?i)\s+(?:srudbtable|application|appid|app|usersid|timestamp|bytessent|bytesreceived|interfaceluid|networkprofile|url|energyusage|cputime)\s*[:=]",
+        value,
+    )
+    if match:
+        return value[: match.start()].strip()
+    return value.strip()
 
 
 def first_key_value(values: Mapping[str, str], *keys: str) -> str:

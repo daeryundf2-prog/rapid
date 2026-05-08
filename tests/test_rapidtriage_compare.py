@@ -30,6 +30,8 @@ class RapidTriageCompareTests(unittest.TestCase):
         self.assertIn("--left-label", compare_help)
         self.assertIn("--right-label", compare_help)
         self.assertIn("--no-text-diff", compare_help)
+        self.assertIn("--selection-rationale", compare_help)
+        self.assertIn("--review-note", compare_help)
 
     def test_compare_command_outputs_hashes_text_diff_and_case_report_pivot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -52,6 +54,10 @@ class RapidTriageCompareTests(unittest.TestCase):
                 "suspect",
                 "--output",
                 str(output),
+                "--selection-rationale",
+                "Compare baseline and suspect credential note.",
+                "--review-note",
+                "Secret value changed and needs source verification.",
             )
 
             self.assertEqual(exit_code, 0, stdout)
@@ -67,6 +73,10 @@ class RapidTriageCompareTests(unittest.TestCase):
             self.assertEqual(compare_gate["gap_id"], "#52")
             self.assertIn("hash comparison", compare_gate["satisfied_checks"])
             self.assertIn("bounded text diff", compare_gate["satisfied_checks"])
+            self.assertIn("compare review profile", compare_gate["satisfied_checks"])
+            self.assertIn("comparison review queue", compare_gate["satisfied_checks"])
+            self.assertIn("selection rationale captured", compare_gate["satisfied_checks"])
+            self.assertIn("bounded compare notes captured", compare_gate["satisfied_checks"])
             self.assertIn("specialized diff limitation warning", compare_gate["satisfied_checks"])
             uplift = payload["commercial_uplift_evidence"]
             self.assertEqual(uplift["batch_id"], "commercial-uplift-051-055")
@@ -79,6 +89,19 @@ class RapidTriageCompareTests(unittest.TestCase):
             )
             self.assertIn("check:sqlite-table-aware-diff", uplift["reportability_decision"]["blockers"])
             self.assertTrue(uplift["large_data_controls"]["bounded_text_diff"])
+            self.assertTrue(uplift["large_data_controls"]["compare_review_profile_present"])
+            self.assertEqual(uplift["large_data_controls"]["review_queue_count"], 1)
+            self.assertTrue(uplift["large_data_controls"]["selection_rationale_present"])
+            self.assertEqual(uplift["large_data_controls"]["review_note_count"], 1)
+            self.assertFalse(uplift["large_data_controls"]["persistent_compare_notes"])
+            review_profile = payload["compare_review_profile"]
+            self.assertEqual(review_profile["profile_version"], "multi-evidence-compare-review-v1")
+            self.assertEqual(review_profile["review_queue_count"], 1)
+            self.assertEqual(review_profile["selection_rationale"], "Compare baseline and suspect credential note.")
+            self.assertEqual(review_profile["review_note_count"], 1)
+            self.assertFalse(review_profile["persistent_compare_notes"])
+            self.assertTrue(review_profile["commercial_release_blocked"])
+            self.assertEqual(review_profile["review_queue"][0]["report_decision"], "pending")
             result = payload["results"][0]
             self.assertEqual(result["status"], "different")
             self.assertEqual(result["left"]["hashes"].keys(), {"md5", "sha1", "sha256"})
@@ -151,6 +174,12 @@ class RapidTriageCompareTests(unittest.TestCase):
                 "host-b",
                 "--output",
                 str(output),
+                "--selection-rationale",
+                "Compare same setting across hosts.",
+                "--review-note",
+                "Host A matches baseline.",
+                "--review-note",
+                "Host B differs.",
             )
 
             self.assertEqual(exit_code, 0, stdout)
@@ -163,7 +192,14 @@ class RapidTriageCompareTests(unittest.TestCase):
             self.assertTrue(payload["compare_native_capabilities"]["a_b_c_baseline_compare"])
             self.assertEqual(payload["compare_report_grade_assessment"]["mode"], "multi")
             self.assertEqual(payload["core_accuracy_gates"][0]["gap_id"], "#52")
+            self.assertIn("compare review profile", payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("selection rationale captured", payload["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertTrue(payload["commercial_uplift_evidence"]["large_data_controls"]["a_b_c_baseline_compare"])
+            self.assertEqual(payload["commercial_uplift_evidence"]["large_data_controls"]["review_queue_count"], 2)
+            self.assertEqual(payload["summary"]["review_queue_count"], 2)
+            self.assertTrue(payload["summary"]["selection_rationale_present"])
+            self.assertEqual(payload["compare_review_profile"]["review_note_count"], 2)
+            self.assertEqual(payload["compare_review_profile"]["review_queue"][1]["review_note"], "Host B differs.")
             self.assertEqual(payload["results"][0]["right"]["label"], "host-a")
             self.assertEqual(payload["results"][1]["right"]["label"], "host-b")
             self.assertEqual(payload["summary"]["status_counts"]["same"], 1)

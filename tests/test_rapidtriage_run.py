@@ -15,11 +15,13 @@ from rapidtriage.core.run import (
     build_incremental_indexing_trusted_diff,
     build_memory_cap_trusted_diff,
     build_parser_crash_trusted_diff,
+    build_parser_scheduler_manifest,
     build_scheduler_trusted_diff,
     checkpoint_resume_core_accuracy_gates,
     incremental_indexing_core_accuracy_gates,
     isolated_parser_error_payload,
     memory_cap_enforcement_assessment,
+    memory_cap_policy_profile,
     parallel_parser_scheduler_assessment,
     parser_crash_isolation_assessment,
 )
@@ -142,10 +144,37 @@ class RapidTriageRunTests(unittest.TestCase):
             )
             self.assertEqual(payload["summary"]["parser_error_count"], 1)
             self.assertIn("#71", payload["parser_errors"][0]["commercial_gap_ids"])
+            self.assertRegex(payload["parser_errors"][0]["error_hash"], r"^[0-9a-f]{64}$")
+            self.assertEqual(
+                payload["parser_errors"][0]["crash_context"]["profile_version"],
+                "isolated-parser-crash-context-v1",
+            )
+            self.assertEqual(payload["parser_error_inventory"]["profile_version"], "parser-error-inventory-v1")
+            self.assertEqual(payload["parser_error_inventory"]["parser_error_count"], 1)
+            self.assertEqual(
+                payload["parser_crash_isolation_manifest"]["profile_version"],
+                "parser-crash-isolation-manifest-v1",
+            )
+            self.assertEqual(payload["parser_crash_isolation_manifest"]["item_number"], 28)
+            self.assertEqual(len(payload["parser_crash_isolation_manifest"]["manifest_hash"]), 64)
+            self.assertTrue(payload["parser_crash_isolation_manifest"]["run_continuation_expected"])
+            self.assertTrue(payload["parser_crash_isolation_manifest"]["quarantine_policy"]["safe_to_continue_later_stages"])
             self.assertIn("#71", payload["parser_crash_isolation"]["commercial_gap_ids"])
+            self.assertEqual(
+                payload["parser_crash_isolation"]["parser_crash_manifest_hash"],
+                payload["parser_crash_isolation_manifest"]["manifest_hash"],
+            )
             self.assertEqual(payload["parser_crash_isolation"]["core_accuracy_gates"][0]["gap_id"], "#71")
             self.assertIn(
                 "per-parser exception capture",
+                payload["parser_crash_isolation"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "parser error hash emitted",
+                payload["parser_crash_isolation"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "parser crash isolation manifest hash emitted",
                 payload["parser_crash_isolation"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             crash_diff = build_parser_crash_trusted_diff(payload, payload)
@@ -155,16 +184,49 @@ class RapidTriageRunTests(unittest.TestCase):
 
         assessment = memory_cap_enforcement_assessment(memory_cap_bytes=123456)
         self.assertEqual(assessment["memory_cap_bytes"], 123456)
+        self.assertEqual(assessment["memory_cap_policy_profile"]["profile_version"], "memory-cap-policy-profile-v1")
+        self.assertTrue(assessment["memory_cap_policy_profile"]["cap_configured"])
+        self.assertIn("utilization_percent", assessment["memory_cap_policy_profile"])
+        self.assertEqual(
+            assessment["memory_cap_enforcement_manifest"]["profile_version"],
+            "memory-cap-enforcement-manifest-v1",
+        )
+        self.assertEqual(assessment["memory_cap_enforcement_manifest"]["item_number"], 29)
+        self.assertEqual(assessment["memory_cap_enforcement_manifest"]["gap_id"], "#29")
+        self.assertEqual(assessment["memory_cap_enforcement_manifest"]["commercial_gap_ids"], ["#72"])
+        self.assertEqual(assessment["memory_cap_enforcement_manifest"]["enforcement_mode"], "python-process-stage-boundary-rss-check")
+        self.assertFalse(assessment["memory_cap_enforcement_manifest"]["hard_os_limit_configured"])
+        self.assertEqual(len(assessment["memory_cap_enforcement_manifest"]["manifest_hash"]), 64)
+        self.assertEqual(
+            assessment["memory_cap_manifest_hash"],
+            assessment["memory_cap_enforcement_manifest"]["manifest_hash"],
+        )
         self.assertIn("#72", assessment["commercial_gap_ids"])
         self.assertEqual(assessment["core_accuracy_gates"][0]["gap_id"], "#72")
         self.assertIn("memory cap configuration recorded", assessment["core_accuracy_gates"][0]["satisfied_checks"])
+        self.assertIn("memory cap policy profile emitted", assessment["core_accuracy_gates"][0]["satisfied_checks"])
+        self.assertIn("memory cap enforcement manifest hash emitted", assessment["core_accuracy_gates"][0]["satisfied_checks"])
         self.assertIn("trusted-memory-cap-rss-diff-missing", assessment["blockers"])
         memory_diff = build_memory_cap_trusted_diff(assessment, assessment)
         memory_assessment = memory_cap_enforcement_assessment(memory_cap_bytes=123456, trusted_diff=memory_diff)
         self.assertEqual(memory_diff["status"], "pass")
         self.assertIn("trusted memory cap/RSS diff pass", memory_assessment["core_accuracy_gates"][0]["satisfied_checks"])
-        scheduler = parallel_parser_scheduler_assessment(["browser", "windows"])
+
+        policy = memory_cap_policy_profile(memory_cap_bytes=100, current_rss_bytes=125)
+        self.assertTrue(policy["over_cap"])
+        self.assertEqual(policy["utilization_percent"], 125.0)
+        scheduler_manifest = build_parser_scheduler_manifest(
+            kinds=["browser", "windows"],
+            max_workers=2,
+            events=[],
+            pending_count=2,
+        )
+        scheduler = parallel_parser_scheduler_assessment(["browser", "windows"], scheduler_manifest=scheduler_manifest)
         self.assertIn("trusted-parser-scheduler-manifest-diff-missing", scheduler["blockers"])
+        self.assertIn("per-worker duration telemetry emitted", scheduler["core_accuracy_gates"][0]["satisfied_checks"])
+        self.assertEqual(scheduler["scheduler_manifest"]["profile"], "parser-scheduler-run-manifest-v1")
+        self.assertIn("events_head_hash", scheduler["scheduler_manifest"])
+        self.assertTrue(scheduler["scheduler_manifest"]["deterministic_order_verified"])
         scheduler_diff = build_scheduler_trusted_diff(scheduler, scheduler)
         scheduler_trusted = parallel_parser_scheduler_assessment(["browser", "windows"], trusted_diff=scheduler_diff)
         self.assertEqual(scheduler_diff["status"], "pass")
@@ -277,8 +339,163 @@ class RapidTriageRunTests(unittest.TestCase):
                 "stage-checkpoint-resume-triage-pivot",
             )
             self.assertIn("#71", summary_payload["processing"]["parser_crash_isolation"]["commercial_gap_ids"])
+            parser_crash_ledger_path = Path(summary_payload["outputs"]["parser_crash_isolation"])
+            self.assertTrue(parser_crash_ledger_path.is_file())
+            parser_crash_ledger = json.loads(parser_crash_ledger_path.read_text(encoding="utf-8"))
+            self.assertEqual(parser_crash_ledger["profile_version"], "parser-crash-isolation-ledger-v1")
+            self.assertEqual(parser_crash_ledger["item_number"], 71)
+            self.assertEqual(len(parser_crash_ledger["manifest_hash"]), 64)
+            self.assertTrue(parser_crash_ledger["run_continuation_verified"])
+            self.assertTrue(
+                parser_crash_ledger["isolation_policy"]["one_parser_error_does_not_abort_case_run"]
+            )
+            self.assertEqual(
+                summary_payload["processing"]["parser_crash_isolation"]["parser_crash_manifest_hash"],
+                parser_crash_ledger["manifest_hash"],
+            )
             self.assertIn("#72", summary_payload["processing"]["memory_cap_enforcement"]["commercial_gap_ids"])
+            memory_cap_ledger_path = Path(summary_payload["outputs"]["memory_cap_enforcement"])
+            self.assertTrue(memory_cap_ledger_path.is_file())
+            memory_cap_ledger = json.loads(memory_cap_ledger_path.read_text(encoding="utf-8"))
+            self.assertEqual(memory_cap_ledger["profile_version"], "memory-cap-enforcement-manifest-v1")
+            self.assertEqual(memory_cap_ledger["commercial_gap_ids"], ["#72"])
+            self.assertEqual(len(memory_cap_ledger["manifest_hash"]), 64)
+            self.assertEqual(
+                summary_payload["processing"]["memory_cap_enforcement"]["memory_cap_manifest_hash"],
+                memory_cap_ledger["manifest_hash"],
+            )
+            self.assertFalse(memory_cap_ledger["hard_os_limit_configured"])
+            preview_policy_path = Path(summary_payload["outputs"]["preview_sandbox_policy"])
+            self.assertTrue(preview_policy_path.is_file())
+            preview_policy = json.loads(preview_policy_path.read_text(encoding="utf-8"))
+            self.assertEqual(preview_policy["profile_version"], "preview-sandbox-run-policy-manifest-v1")
+            self.assertEqual(preview_policy["item_number"], 73)
+            self.assertFalse(preview_policy["policy"]["executes_content"])
+            self.assertFalse(preview_policy["policy"]["external_network_access"])
+            self.assertTrue(preview_policy["policy"]["active_content_blocking"])
+            self.assertEqual(
+                summary_payload["processing"]["preview_sandboxing"]["preview_sandbox_policy_manifest_hash"],
+                preview_policy["manifest_hash"],
+            )
+            sqlite_fts_path = Path(summary_payload["outputs"]["sqlite_fts_optimization"])
+            self.assertTrue(sqlite_fts_path.is_file())
+            sqlite_fts = json.loads(sqlite_fts_path.read_text(encoding="utf-8"))
+            self.assertEqual(sqlite_fts["profile_version"], "sqlite-fts-run-optimization-manifest-v1")
+            self.assertEqual(sqlite_fts["item_number"], 74)
+            self.assertIn("manifest_hash", sqlite_fts)
+            self.assertTrue(sqlite_fts["optimization_policy"]["cursor_pagination_required"])
+            self.assertFalse(sqlite_fts["optimization_policy"]["ten_million_row_regression_attached"])
+            self.assertEqual(
+                summary_payload["processing"]["sqlite_fts_optimization"]["sqlite_fts_optimization_manifest_hash"],
+                sqlite_fts["manifest_hash"],
+            )
             self.assertIn("#75", summary_payload["processing"]["parallel_parser_scheduler"]["commercial_gap_ids"])
+            scheduler_manifest = summary_payload["processing"]["parallel_parser_scheduler"]["scheduler_manifest"]
+            self.assertEqual(scheduler_manifest["profile"], "parser-scheduler-run-manifest-v1")
+            self.assertIn("manifest_hash", scheduler_manifest)
+            self.assertIn("events_head_hash", scheduler_manifest)
+            self.assertTrue(scheduler_manifest["deterministic_order_verified"])
+            self.assertEqual(scheduler_manifest["resource_policy"]["backpressure_window"], scheduler_manifest["max_workers"])
+            self.assertEqual(scheduler_manifest["deterministic_output_order"], list(summary_payload["safety"]["artifact_scheduler"]["manifest"]["deterministic_output_order"]))
+            self.assertTrue(scheduler_manifest["resource_policy"]["cpu_worker_limit"] <= 4)
+            self.assertTrue(scheduler_manifest["events"])
+            runtime_profiles = summary_payload["processing"]["runtime_defensibility_profiles"]
+            self.assertEqual(runtime_profiles["batch_id"], "commercial-uplift-071-075")
+            self.assertEqual(runtime_profiles["item_numbers"], [71, 72, 73, 74, 75])
+            self.assertFalse(runtime_profiles["ready_for_commercial_claim"])
+            self.assertIn("trusted-preview-no-exec-diff-missing", runtime_profiles["blockers"])
+            runtime_by_number = {profile["item_number"]: profile for profile in runtime_profiles["profiles"]}
+            self.assertEqual(runtime_by_number[71]["component"], "parser-crash-isolation")
+            self.assertTrue(runtime_by_number[71]["controls"]["isolated_error_payloads"])
+            self.assertEqual(runtime_by_number[72]["component"], "memory-cap-enforcement")
+            self.assertTrue(runtime_by_number[72]["controls"]["stage_boundary_checks"])
+            self.assertEqual(runtime_by_number[73]["component"], "preview-sandboxing")
+            self.assertTrue(runtime_by_number[73]["controls"]["active_content_blocking_declared"])
+            self.assertEqual(
+                runtime_by_number[73]["controls"]["run_preview_sandbox_policy_manifest_hash"],
+                preview_policy["manifest_hash"],
+            )
+            self.assertEqual(runtime_by_number[74]["component"], "large-sqlite-fts-optimization")
+            self.assertTrue(runtime_by_number[74]["controls"]["bounded_sqlite_preview_contract"])
+            self.assertEqual(
+                runtime_by_number[74]["controls"]["run_sqlite_fts_optimization_manifest_hash"],
+                sqlite_fts["manifest_hash"],
+            )
+            self.assertEqual(runtime_by_number[75]["component"], "parallel-parser-scheduler")
+            self.assertTrue(runtime_by_number[75]["controls"]["deterministic_output_paths"])
+            self.assertTrue(runtime_by_number[75]["controls"]["per_worker_duration_telemetry"])
+            self.assertEqual(runtime_by_number[75]["controls"]["scheduler_manifest_profile"], "parser-scheduler-run-manifest-v1")
+            self.assertEqual(
+                runtime_by_number[75]["controls"]["scheduler_events_head_hash"],
+                scheduler_manifest["events_head_hash"],
+            )
+            self.assertTrue(runtime_by_number[75]["controls"]["deterministic_order_verified"])
+            large_data_profiles = summary_payload["processing"]["functional_large_data_profiles"]
+            self.assertEqual(large_data_profiles["batch_id"], "commercial-uplift-026-030")
+            self.assertEqual(large_data_profiles["item_numbers"], [26, 28, 29, 30])
+            self.assertFalse(large_data_profiles["ready_for_commercial_claim"])
+            streaming_boundary = summary_payload["processing"]["streaming_parser_boundary"]
+            self.assertEqual(streaming_boundary["profile_version"], "streaming-parser-boundary-manifest-v1")
+            self.assertEqual(streaming_boundary["item_number"], 26)
+            self.assertEqual(len(streaming_boundary["manifest_hash"]), 64)
+            self.assertGreaterEqual(streaming_boundary["parser_stage_count"], 1)
+            self.assertGreaterEqual(streaming_boundary["bounded_stage_count"], 1)
+            self.assertEqual(streaming_boundary["streaming_safe_claim_count"], 0)
+            self.assertTrue(streaming_boundary["benchmark_required"])
+            self.assertTrue(streaming_boundary["policy"]["full_file_reads_are_reportable_only_when_explicitly_bounded"])
+            profile_by_number = {profile["item_number"]: profile for profile in large_data_profiles["profiles"]}
+            self.assertEqual(profile_by_number[26]["component"], "streaming-parser-boundary")
+            self.assertTrue(profile_by_number[26]["controls"]["stage_outputs_are_bounded_json"])
+            self.assertEqual(
+                profile_by_number[26]["controls"]["streaming_boundary_manifest_hash"],
+                streaming_boundary["manifest_hash"],
+            )
+            self.assertEqual(
+                profile_by_number[26]["controls"]["parser_stage_count"],
+                streaming_boundary["parser_stage_count"],
+            )
+            self.assertEqual(profile_by_number[26]["controls"]["streaming_safe_claim_count"], 0)
+            self.assertEqual(profile_by_number[28]["component"], "parser-crash-isolation")
+            self.assertTrue(profile_by_number[28]["controls"]["isolated_error_payloads"])
+            self.assertTrue(profile_by_number[28]["controls"]["parser_crash_isolation_manifest_available_for_errors"])
+            self.assertEqual(profile_by_number[29]["component"], "memory-cap-enforcement")
+            self.assertTrue(profile_by_number[29]["controls"]["rss_stage_boundary_checks"])
+            memory_cap_manifest = summary_payload["processing"]["memory_cap_enforcement"]["memory_cap_enforcement_manifest"]
+            self.assertEqual(memory_cap_manifest["profile_version"], "memory-cap-enforcement-manifest-v1")
+            self.assertEqual(memory_cap_manifest["item_number"], 29)
+            self.assertEqual(len(memory_cap_manifest["manifest_hash"]), 64)
+            self.assertEqual(
+                summary_payload["processing"]["memory_cap_enforcement"]["memory_cap_manifest_hash"],
+                memory_cap_manifest["manifest_hash"],
+            )
+            self.assertEqual(
+                profile_by_number[29]["controls"]["memory_cap_manifest_hash"],
+                memory_cap_manifest["manifest_hash"],
+            )
+            self.assertEqual(
+                profile_by_number[29]["controls"]["memory_cap_manifest_profile"],
+                "memory-cap-enforcement-manifest-v1",
+            )
+            self.assertEqual(profile_by_number[30]["component"], "incremental-indexing")
+            self.assertTrue(profile_by_number[30]["controls"]["resume_effective"])
+            self.assertGreaterEqual(profile_by_number[30]["controls"]["reused_output_count"], 5)
+            incremental_manifest = summary_payload["processing"]["incremental_indexing"]["incremental_indexing_manifest"]
+            self.assertEqual(incremental_manifest["profile_version"], "incremental-indexing-manifest-v1")
+            self.assertEqual(incremental_manifest["item_number"], 30)
+            self.assertEqual(incremental_manifest["gap_id"], "#30")
+            self.assertEqual(len(incremental_manifest["manifest_hash"]), 64)
+            self.assertEqual(
+                summary_payload["processing"]["incremental_indexing"]["incremental_indexing_manifest_hash"],
+                incremental_manifest["manifest_hash"],
+            )
+            self.assertEqual(
+                profile_by_number[30]["controls"]["incremental_indexing_manifest_hash"],
+                incremental_manifest["manifest_hash"],
+            )
+            self.assertEqual(
+                profile_by_number[30]["controls"]["incremental_indexing_manifest_profile"],
+                "incremental-indexing-manifest-v1",
+            )
             self.assertIn("#75", summary_payload["safety"]["artifact_scheduler"]["commercial_gap_ids"])
             self.assertEqual(summary_payload["processing"]["parser_crash_isolation"]["core_accuracy_gates"][0]["gap_id"], "#71")
             self.assertEqual(summary_payload["processing"]["memory_cap_enforcement"]["core_accuracy_gates"][0]["gap_id"], "#72")
@@ -291,11 +508,19 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertGreaterEqual(checkpoints["summary"]["reused_count"], 5)
             self.assertIn("#70", checkpoints["summary"]["commercial_gap_ids"])
             self.assertIn("#70", checkpoints["checkpoint_resume_assessment"]["commercial_gap_ids"])
+            self.assertEqual(checkpoints["checkpoint_integrity_profile"]["profile_version"], "checkpoint-integrity-profile-v1")
+            self.assertGreater(checkpoints["checkpoint_integrity_profile"]["checkpoint_count"], 0)
+            self.assertEqual(
+                checkpoints["checkpoint_integrity_profile"]["row_hash_count"],
+                checkpoints["summary"]["checkpoint_count"],
+            )
             self.assertEqual(checkpoints["core_accuracy_gates"][0]["gap_id"], "#70")
             self.assertIn("stage checkpoints emitted", checkpoints["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("checkpoint row hash emitted", checkpoints["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertEqual(checkpoints["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(checkpoints["commercial_uplift_evidence"]["item_numbers"], [70])
             self.assertIn("#70", checkpoints["checkpoints"][0]["commercial_gap_ids"])
+            self.assertRegex(checkpoints["checkpoints"][0]["row_hash"], r"^[0-9a-f]{64}$")
             self.assertEqual(checkpoints["checkpoints"][0]["core_accuracy_gates"][0]["gap_id"], "#70")
             self.assertEqual(
                 checkpoints["checkpoints"][0]["commercial_uplift_evidence"]["batch_id"],
@@ -306,6 +531,25 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertIn("#68", fingerprint["incremental_indexing_assessment"]["commercial_gap_ids"])
             self.assertEqual(fingerprint["core_accuracy_gates"][0]["gap_id"], "#68")
             self.assertIn("input fingerprint emitted", fingerprint["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("bounded per-file content hashes captured", fingerprint["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(fingerprint["content_hash_policy"]["profile_version"], "incremental-content-hash-policy-v1")
+            self.assertEqual(fingerprint["incremental_indexing_manifest"]["profile_version"], "incremental-indexing-manifest-v1")
+            self.assertEqual(fingerprint["incremental_indexing_manifest"]["item_number"], 30)
+            self.assertEqual(fingerprint["incremental_indexing_manifest"]["gap_id"], "#30")
+            self.assertEqual(len(fingerprint["incremental_indexing_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                fingerprint["incremental_indexing_assessment"]["incremental_indexing_manifest_hash"],
+                fingerprint["incremental_indexing_manifest"]["manifest_hash"],
+            )
+            self.assertIn(
+                "incremental indexing manifest hash emitted",
+                fingerprint["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertGreater(fingerprint["summary"]["content_hashed_file_count"], 0)
+            self.assertGreater(len(fingerprint["files"]), 0)
+            self.assertTrue(any(item.get("sha256") for item in fingerprint["files"]))
+            self.assertEqual(fingerprint["incremental_reuse_plan"]["profile_version"], "incremental-reuse-plan-v1")
+            self.assertEqual(fingerprint["incremental_reuse_plan"]["reindex_recommendation"], "safe-to-reuse-stage-outputs")
             self.assertEqual(fingerprint["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(fingerprint["commercial_uplift_evidence"]["item_numbers"], [68])
             self.assertIn(
@@ -345,6 +589,37 @@ class RapidTriageRunTests(unittest.TestCase):
             report_text = (output_dir / "rapidtriage-run-report.md").read_text(encoding="utf-8")
             self.assertIn("Resume/reuse outputs: True", report_text)
             self.assertIn("Reused outputs:", report_text)
+
+    def test_run_resume_changed_source_records_incremental_reuse_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "case-root"
+            output_dir = Path(tmp_dir) / "run-out"
+            root.mkdir(parents=True, exist_ok=True)
+            build_run_fixture(root)
+
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir)]), 0)
+            changed_file = root / "Users" / "alice" / "Documents" / "wire-transfer-notes.txt"
+            changed_file.write_text("changed password evidence for incremental reuse plan", encoding="utf-8")
+            self.assertEqual(main(["run", str(root), "--mode", "fraud", "--output-dir", str(output_dir), "--resume"]), 0)
+
+            summary_payload: dict[str, Any] = json.loads(
+                (output_dir / "rapidtriage-run-summary.json").read_text(encoding="utf-8")
+            )
+            self.assertFalse(summary_payload["safety"]["resume_effective"])
+            self.assertEqual(
+                summary_payload["safety"]["resume_disabled_reason"],
+                "input fingerprint changed; rebuilding stage outputs",
+            )
+            fingerprint = json.loads((output_dir / "rapidtriage-run-fingerprint.json").read_text(encoding="utf-8"))
+            plan = fingerprint["incremental_reuse_plan"]
+            self.assertEqual(plan["profile_version"], "incremental-reuse-plan-v1")
+            self.assertEqual(plan["reindex_recommendation"], "rebuild-affected-stages")
+            self.assertGreaterEqual(plan["counts"]["changed"], 1)
+            self.assertIn("Users/alice/Documents/wire-transfer-notes.txt", plan["changed"])
+            self.assertEqual(fingerprint["incremental_indexing_manifest"]["profile_version"], "incremental-indexing-manifest-v1")
+            self.assertEqual(fingerprint["incremental_indexing_manifest"]["reindex_recommendation"], "rebuild-affected-stages")
+            self.assertEqual(len(fingerprint["incremental_indexing_manifest"]["reuse_plan_hash"]), 64)
+            self.assertIn("changed-source reuse disabled", fingerprint["core_accuracy_gates"][0]["satisfied_checks"])
 
     def test_search_command_finds_keyword_across_completed_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

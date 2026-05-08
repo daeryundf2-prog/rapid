@@ -13,6 +13,7 @@ from .forensic_accuracy import build_accuracy_gate
 
 IMAGE_EXTS = set(CATEGORY_RULES["images"]["extensions"])
 SEARCH_FEATURE_GAP_ID = "#61"
+WORKBENCH_SEARCH_ITEM_NUMBER = 16
 SEARCH_NATIVE_CAPABILITIES = {
     "exact_search": True,
     "regex_search": True,
@@ -88,6 +89,7 @@ def run_unified_search(
 
     if limit:
         matches = matches[:limit]
+    matches = enrich_unified_search_matches(matches)
     source_counts: dict[str, int] = {}
     keyword_counts: dict[str, int] = {keyword: 0 for keyword in normalized}
     for match in matches:
@@ -98,6 +100,14 @@ def run_unified_search(
 
     core_accuracy_gates = search_core_accuracy_gates(matches=matches, options=search_options)
     report_grade = search_report_grade_assessment()
+    advanced_profile = advanced_search_profile(
+        keywords=normalized,
+        matches=matches,
+        options=search_options,
+        include_ocr=include_ocr,
+        include_analysis=include_analysis,
+        limit=limit,
+    )
     payload: Dict[str, object] = {
         "command": "search",
         "generated_at": dt.datetime.now().isoformat(),
@@ -124,7 +134,16 @@ def run_unified_search(
             "enabled": include_ocr,
             "errors": ocr_errors,
         },
+        "advanced_search_profile": advanced_profile,
         "search_native_capabilities": dict(SEARCH_NATIVE_CAPABILITIES),
+        "workbench_search_profile": workbench_search_profile(
+            matches=matches,
+            source_counts=source_counts,
+            include_ocr=include_ocr,
+            include_analysis=include_analysis,
+            limit=limit,
+            options=search_options,
+        ),
         "search_report_grade_assessment": report_grade,
         "core_accuracy_gates": core_accuracy_gates,
         "commercial_uplift_evidence": search_commercial_uplift_evidence(
@@ -138,6 +157,157 @@ def run_unified_search(
     if include_analysis:
         payload["analysis"] = build_search_analysis(matches, normalized)
     return payload
+
+
+def workbench_search_profile(
+    *,
+    matches: Sequence[Mapping[str, object]],
+    source_counts: Mapping[str, int],
+    include_ocr: bool,
+    include_analysis: bool,
+    limit: int,
+    options: Mapping[str, object],
+) -> dict[str, object]:
+    covered_sources = sorted(source for source, count in source_counts.items() if count)
+    target_sources = ["documents", "files", "web", "artifacts", "timeline", "indicators", "ocr"]
+    missing_sources = [source for source in target_sources if source not in covered_sources]
+    verification_summary = search_source_verification_summary(matches)
+    return {
+        "profile_version": "analyst-workbench-unified-search-v1",
+        "commercial_batch_id": "commercial-uplift-016-020",
+        "item_number": WORKBENCH_SEARCH_ITEM_NUMBER,
+        "objective": "One search result set across documents, file metadata, web/browser artifacts, normalized artifacts, timeline, indicators, and OCR sidecars.",
+        "implemented_sources": covered_sources,
+        "target_sources": target_sources,
+        "missing_sources_in_this_result": missing_sources,
+        "search_modes": {
+            "exact": True,
+            "regex": True,
+            "fuzzy": True,
+            "active_mode": str(options.get("search_mode") or "exact"),
+            "proximity_window": int(options.get("proximity_window") or 0),
+        },
+        "review_flow_contract": {
+            "match_pointer": True,
+            "path_for_viewer": True,
+            "matched_keywords": True,
+            "preview": True,
+            "metadata": True,
+            "source_verification_profile": True,
+        },
+        "source_verification_summary": verification_summary,
+        "large_data_controls": {
+            "bounded_result_limit": limit,
+            "returned_match_count": len(matches),
+            "ocr_optional": True,
+            "ocr_enabled": include_ocr,
+            "analysis_optional": True,
+            "analysis_enabled": include_analysis,
+        },
+        "reportability_decision": {
+            "decision": "do-not-report-search-hit-without-source-viewer-verification",
+            "allowed_use": "case-wide-triage-and-review-routing",
+            "required_before_report": [
+                "open source viewer for each report candidate",
+                "verify source hash or citation metadata",
+                "record review decision and limitation wording",
+            ],
+        },
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "large-case-search-latency-benchmark-required",
+            "case-db-and-run-search-result-parity-diff-required",
+            "source-viewer-verification-required-for-report-items",
+        ],
+    }
+
+
+def enrich_unified_search_matches(matches: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    enriched: list[dict[str, object]] = []
+    for index, match in enumerate(matches):
+        item = dict(match)
+        item["search_result_id"] = f"search-hit-{index + 1:06d}"
+        item["source_verification_profile"] = search_match_source_verification_profile(item)
+        enriched.append(item)
+    return enriched
+
+
+def search_match_source_verification_profile(match: Mapping[str, object]) -> dict[str, object]:
+    source = str(match.get("source") or "")
+    path = str(match.get("path") or "")
+    pointer = str(match.get("pointer") or "")
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), Mapping) else {}
+    source_hashes = metadata.get("source_hashes") if isinstance(metadata.get("source_hashes"), Mapping) else {}
+    source_sha256 = str(source_hashes.get("sha256") or metadata.get("sha256") or metadata.get("hash_sha256") or "")
+    viewer_supported = bool(path) and source in {"documents", "files", "web", "artifacts", "timeline", "indicators", "ocr"}
+    hash_or_pointer = bool(source_sha256 or pointer)
+    return {
+        "profile_version": "unified-search-source-verification-v1",
+        "source": source,
+        "path": path,
+        "pointer": pointer,
+        "source_sha256": source_sha256,
+        "viewer_supported": viewer_supported,
+        "current_file_search_supported": bool(path) and source in {"documents", "files", "ocr"},
+        "source_pointer_available": bool(pointer),
+        "source_hash_available": bool(source_sha256),
+        "ready_for_report_selection": viewer_supported and hash_or_pointer,
+        "required_before_report": [
+            "open source viewer",
+            "verify pointer/offset/table row against original source",
+            "record review decision and limitation text",
+            "capture source hash when available",
+        ],
+        "blockers": search_match_source_verification_blockers(
+            viewer_supported=viewer_supported,
+            pointer=pointer,
+            source_sha256=source_sha256,
+        ),
+    }
+
+
+def search_match_source_verification_blockers(*, viewer_supported: bool, pointer: str, source_sha256: str) -> list[str]:
+    blockers: list[str] = []
+    if not viewer_supported:
+        blockers.append("source-viewer-route-required")
+    if not pointer:
+        blockers.append("source-pointer-required")
+    if not source_sha256:
+        blockers.append("source-hash-recommended-before-report")
+    return blockers
+
+
+def search_source_verification_summary(matches: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    ready = 0
+    viewer_supported = 0
+    with_pointer = 0
+    with_hash = 0
+    blockers: dict[str, int] = {}
+    for match in matches:
+        profile = match.get("source_verification_profile") if isinstance(match.get("source_verification_profile"), Mapping) else {}
+        if profile.get("ready_for_report_selection"):
+            ready += 1
+        if profile.get("viewer_supported"):
+            viewer_supported += 1
+        if profile.get("source_pointer_available"):
+            with_pointer += 1
+        if profile.get("source_hash_available"):
+            with_hash += 1
+        for blocker in profile.get("blockers") or []:
+            blockers[str(blocker)] = blockers.get(str(blocker), 0) + 1
+    return {
+        "profile_version": "unified-search-source-verification-summary-v1",
+        "match_count": len(matches),
+        "viewer_supported_count": viewer_supported,
+        "source_pointer_count": with_pointer,
+        "source_hash_count": with_hash,
+        "ready_for_report_selection_count": ready,
+        "blocker_counts": [
+            {"value": key, "count": value}
+            for key, value in sorted(blockers.items(), key=lambda item: (-item[1], item[0]))
+        ],
+        "commercial_grade_ready": False,
+    }
 
 
 def search_commercial_uplift_evidence(
@@ -191,6 +361,90 @@ def search_commercial_uplift_evidence(
         },
         "reporting_status": "implemented-baseline-validation-required",
     }
+
+
+def advanced_search_profile(
+    *,
+    keywords: Sequence[str],
+    matches: Sequence[Mapping[str, object]],
+    options: Mapping[str, object],
+    include_ocr: bool,
+    include_analysis: bool,
+    limit: int,
+) -> dict[str, object]:
+    mode = normalize_search_mode(str(options.get("search_mode") or "exact"))
+    query_validation = validate_search_queries(keywords, search_mode=mode)
+    mode_counts: dict[str, int] = {}
+    proximity_matched_count = 0
+    for match in matches:
+        search_match = match.get("search_match") if isinstance(match.get("search_match"), Mapping) else {}
+        match_mode = str(search_match.get("mode") or mode)
+        mode_counts[match_mode] = mode_counts.get(match_mode, 0) + 1
+        proximity = search_match.get("proximity") if isinstance(search_match.get("proximity"), Mapping) else {}
+        if proximity.get("matched"):
+            proximity_matched_count += 1
+    return {
+        "profile_version": "advanced-search-profile-v1",
+        "commercial_gap_ids": [SEARCH_FEATURE_GAP_ID],
+        "active_mode": mode,
+        "query_count": len(keywords),
+        "query_validation": query_validation,
+        "match_mode_counts": mode_counts,
+        "proximity_matched_count": proximity_matched_count,
+        "controls": {
+            "exact_search": True,
+            "regex_search": True,
+            "fuzzy_levenshtein_search": True,
+            "simple_suffix_stemming": True,
+            "proximity_window_summary": True,
+            "fuzzy_distance": int(options.get("fuzzy_distance") or 0),
+            "proximity_window": int(options.get("proximity_window") or 0),
+            "include_ocr": include_ocr,
+            "include_analysis": include_analysis,
+            "result_limit": limit,
+        },
+        "source_verification_required": True,
+        "ready_for_court_report": False,
+        "review_warnings": advanced_search_review_warnings(mode=mode, options=options),
+        "report_use_warning": "Treat advanced search hits as triage until each opened source row, hash, parser limitation, and query false-positive review is recorded.",
+    }
+
+
+def validate_search_queries(keywords: Sequence[str], *, search_mode: str) -> list[dict[str, object]]:
+    mode = normalize_search_mode(search_mode)
+    output = []
+    for keyword in keywords:
+        record: dict[str, object] = {
+            "query": keyword,
+            "mode": mode,
+            "valid": True,
+            "warnings": [],
+        }
+        if mode == "regex":
+            try:
+                re.compile(keyword, flags=re.IGNORECASE | re.MULTILINE)
+            except re.error as exc:
+                record["valid"] = False
+                record["error"] = str(exc)
+                record["warnings"] = ["invalid-regex-pattern-will-match-nothing"]
+        elif mode == "fuzzy" and not is_simple_word(keyword):
+            record["warnings"] = ["fuzzy-search-is-word-token-based-for-this-query"]
+        elif mode == "exact" and not is_simple_word(keyword):
+            record["warnings"] = ["stemming-disabled-for-non-word-query"]
+        output.append(record)
+    return output
+
+
+def advanced_search_review_warnings(*, mode: str, options: Mapping[str, object]) -> list[str]:
+    warnings = ["open-source-viewer-and-verify-row-before-reporting"]
+    if mode == "regex":
+        warnings.append("regex-pattern-quality-and-false-positives-must-be-documented")
+    if mode == "fuzzy":
+        warnings.append("fuzzy-results-are-typo-tolerant-triage-not-exact-proof")
+    if int(options.get("proximity_window") or 0) > 0:
+        warnings.append("proximity-window-is-a-review-hint-not-causal-proof")
+    warnings.append(SEARCH_TRUSTED_DIFF_BLOCKER_61)
+    return warnings
 
 
 def search_reportability_decision(

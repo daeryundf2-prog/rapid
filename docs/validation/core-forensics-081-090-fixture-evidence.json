@@ -9,7 +9,7 @@
       "title": "NIST CFReDS/CFTT based known-answer tests",
       "test_files": ["tests/test_rapidtriage_ops.py", "tests/test_rapidtriage_core_forensics_accuracy.py"],
       "assertions": [
-        "Validation output preserves known-answer manifest ingestion, dataset status counts, evidence path checks, public corpus guidance, report-grade release gate, trusted known-answer manifest diff helpers/gates, and #81 core_accuracy_gates."
+        "Validation output preserves known-answer manifest ingestion, dataset status counts, expected assertions, evidence path checks, evidence file SHA256 values, dataset hashes, manifest digest, public corpus guidance, report-grade release gate, trusted known-answer manifest diff helpers/gates, and #81 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Real CFReDS/CFTT corpus runs, trusted known-answer manifests, and reviewer signoff for each report-grade parser claim."]
     },
@@ -18,7 +18,7 @@
       "title": "Parser-specific fixture corpus",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Validation output inventories parser areas, fixture/test counts, expected edge cases, coverage status, release gate, trusted fixture corpus manifest diff helpers/gates, and #82 core_accuracy_gates."
+        "Validation output inventories parser areas, fixture/test counts, fixture/test file SHA256 values, area manifest hashes, fixture_corpus_digest, expected edge cases, coverage status, release gate, trusted fixture corpus manifest diff helpers/gates, and #82 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Broader malformed, deleted, native, and versioned corpus coverage plus trusted fixture corpus manifests."]
     },
@@ -27,7 +27,7 @@
       "title": "Parser-specific false positive/false negative documentation",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Parser-family FP/FN notes preserve false-positive risks, false-negative risks, validation-required guidance, parser scope, quantification warning, trusted FP/FN risk register diff helpers/gates, and #83 core_accuracy_gates."
+        "Parser-family FP/FN notes preserve false-positive risks, false-negative risks, validation-required guidance, parser scope, quantification warning, risk_note_hash values, minimum quantification fields, reportability boundaries, parser-fp-fn-risk-register-v1 digest, trusted FP/FN risk register diff helpers/gates, and #83 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Quantified false-positive/false-negative rates by corpus and parser version plus a reviewed risk register."]
     },
@@ -36,7 +36,7 @@
       "title": "Independent validation report",
       "test_files": ["tests/test_rapidtriage_ops.py", "tests/test_rapidtriage_final_roadmap.py"],
       "assertions": [
-        "Validation output preserves independent report status, required signoffs, minimum sections, optional report hash/size, not-attached blocker, trusted independent validation signoff diff helpers/gates, and #84 core_accuracy_gates."
+        "Validation output preserves independent report status, required signoffs, signoff slots, minimum sections, minimum-section presence checks, optional report hash/size, independent-validation-report-manifest-v1 report manifest hash, not-attached blocker, trusted independent validation signoff diff helpers/gates, and #84 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Actual independent signed validation report and trusted signoff manifest for the release."]
     },
@@ -45,7 +45,7 @@
       "title": "Tool validation package automation",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Validation package outputs preserve JSON, Markdown, artifact hash manifest, known-answer/fixture sections, limitation warnings, trusted validation package manifest diff helpers/gates, and #85 core_accuracy_gates."
+        "Validation package outputs preserve JSON, Markdown, artifact hash manifest, validation-package-manifest-v1, artifact hash rows, package_manifest_hash, reproduction commands, known-answer/fixture sections, limitation warnings, trusted validation package manifest diff helpers/gates, and #85 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Operator-attached test logs, release evidence, trusted validation package manifests, and independent review."]
     },
@@ -54,7 +54,7 @@
       "title": "Chain-of-custody full workflow",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB report exports preserve evidence-source inventory, custody events, citation IDs, source status/hash fields, acquisition metadata limitations, trusted custody event manifest diff helpers/gates, and #86 core_accuracy_gates."
+        "Case DB report exports preserve evidence-source inventory, custody events, citation IDs, source status/hash fields, custody row hashes, custody-event-manifest-v1, custody manifest hash, acquisition metadata limitations, trusted custody event manifest diff helpers/gates, and #86 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Signed custody handoff forms, acquisition-device/write-blocker metadata, and trusted custody event manifests."]
     },
@@ -63,7 +63,7 @@
       "title": "Evidence acquisition hash workflow",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB report exports preserve evidence-source hashes, hash records, algorithms, calculation timestamps, missing-hash warnings, trusted acquisition hash manifest diff helpers/gates, and #87 core_accuracy_gates."
+        "Case DB report exports preserve evidence-source hashes, hash records, algorithms, calculation timestamps, per-row acquisition hash digests, acquisition-hash-manifest-v1 manifest hash, algorithm coverage, missing-hash warnings, trusted acquisition hash manifest diff helpers/gates, and #87 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Whole-device acquisition hash workflow, operator metadata, and trusted acquisition hash manifests."]
     },
@@ -72,7 +72,7 @@
       "title": "Analyst action immutable audit log",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB report exports preserve audit events, previous/event hash chain, actor/action/target/time fields, head hash, notarization warning, trusted audit hash-chain manifest diff helpers/gates, and #88 core_accuracy_gates."
+        "Case DB report exports preserve audit events, previous/event hash chain, actor/action/target/time fields, head hash, audit-hash-chain-manifest-v1 manifest hash, notarization warning, trusted audit hash-chain manifest diff helpers/gates, and #88 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Database-level append-only enforcement, trusted audit chain manifests, and external notarization/signing."]
     },
@@ -81,7 +81,7 @@
       "title": "Report reproducibility",
       "test_files": ["tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Report exports preserve stable payload hash, deterministic sorting, item/citation counts, volatile-field disclosure, replay warnings, trusted report replay manifest diff helpers/gates, and #89 core_accuracy_gates."
+        "Report exports preserve stable payload hash, deterministic sorting, item/citation counts, item/citation row digests, report-replay-manifest-v1 manifest hash, volatile-field disclosure, replay warnings, trusted report replay manifest diff helpers/gates, and #89 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Cross-platform same-input byte-level replay tests and trusted report replay manifests."]
     },
@@ -90,7 +90,7 @@
       "title": "Report item source provenance completeness",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Report items preserve source path, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, trusted report provenance manifest diff helpers/gates, and #90 core_accuracy_gates."
+        "Report items preserve source path, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, provenance row hashes, report-provenance-row-manifest-v1 manifest hashes, trusted report provenance manifest diff helpers/gates, and #90 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Completeness validation across every parser, trusted provenance manifests, and final report template review."]
     }

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import json
 import re
+import sqlite3
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -13,9 +16,12 @@ from ..core.submission import compute_hashes
 from .review import build_forensic_review
 
 PARSER_VERSION = "android-apk-v4"
+FUNCTIONAL_EXPANSION_BATCH_ID = "commercial-uplift-051-055"
 ANDROID_NAMESPACE = "{http://schemas.android.com/apk/res/android}"
 APK_STRING_SCAN_LIMIT = 1024 * 1024
 MAX_APP_DATA_FILES = 25_000
+MAX_ANDROID_SQLITE_TABLES = 80
+MAX_ANDROID_SQLITE_COLUMNS = 80
 APK_SUSPICIOUS_STRING_TERMS = (
     "DexClassLoader",
     "PathClassLoader",
@@ -152,6 +158,9 @@ def build_apk_record(path: Path) -> ArtifactRecord:
                 ),
             }
         )
+    details["android_parser_manifest"] = build_android_parser_manifest(details)
+    details["android_parser_manifest_hash"] = details["android_parser_manifest"]["manifest_sha256"]
+    details["core_accuracy_gates"] = android_core_accuracy_gates(30, details)
     details.setdefault(
         "forensic_review",
         android_forensic_review(
@@ -165,7 +174,6 @@ def build_apk_record(path: Path) -> ArtifactRecord:
             ],
         ),
     )
-    details.setdefault("core_accuracy_gates", android_core_accuracy_gates(30, details))
     details["commercial_uplift_evidence"] = android_commercial_uplift_evidence(details, gap_ids=[30])
     return ArtifactRecord(
         provider=AndroidApkProvider.name,
@@ -181,6 +189,7 @@ def parse_apk_zip(archive: zipfile.ZipFile) -> dict[str, object]:
     dex_entries = sorted(name for name in names if name.endswith(".dex"))
     native_libraries = sorted(name for name in names if name.startswith("lib/") and name.endswith(".so"))
     certificate_entries = sorted(name for name in names if name.startswith("META-INF/") and name.upper().endswith((".RSA", ".DSA", ".EC")))
+    signing_inventory = build_apk_signing_inventory(archive, names)
     manifest = parse_manifest(archive)
     permissions = sorted(manifest.get("permissions", []))
     string_pivots = scan_apk_string_pivots(archive, [*dex_entries, *native_libraries])
@@ -193,6 +202,16 @@ def parse_apk_zip(archive: zipfile.ZipFile) -> dict[str, object]:
         string_pivots=string_pivots,
     )
     validation_checks = apk_validation_checks(names, manifest, permissions, dex_entries, certificate_entries)
+    apk_profile = build_apk_analysis_profile(
+        names=names,
+        manifest=manifest,
+        permissions=permissions,
+        dex_entries=dex_entries,
+        native_libraries=native_libraries,
+        certificate_entries=certificate_entries,
+        signing_inventory=signing_inventory,
+        string_pivots=string_pivots,
+    )
     return {
         "valid_zip": True,
         "zip_entry_count": len(names),
@@ -201,6 +220,7 @@ def parse_apk_zip(archive: zipfile.ZipFile) -> dict[str, object]:
         "native_library_count": len(native_libraries),
         "native_libraries": native_libraries[:25],
         "certificate_entries": certificate_entries[:10],
+        "apk_signing_inventory": signing_inventory,
         "entry_hashes": apk_entry_hashes(archive, [*dex_entries[:25], *native_libraries[:25], *certificate_entries[:10]]),
         "native_architectures": native_architectures(native_libraries),
         "permissions": permissions,
@@ -208,6 +228,7 @@ def parse_apk_zip(archive: zipfile.ZipFile) -> dict[str, object]:
         "string_pivots": string_pivots,
         "risk_flags": risk_flags,
         "risk_score": score_risk(risk_flags, permissions, native_libraries, dex_entries, string_pivots),
+        "apk_analysis_profile": apk_profile,
         "validation_checks": validation_checks,
         "android_validation_matrix": android_validation_matrix(validation_checks),
         "android_report_grade_assessment": android_report_grade_assessment(["#30"]),
@@ -382,6 +403,7 @@ def build_android_app_data_record(path: Path, package: str) -> ArtifactRecord:
     resolved = path.resolve()
     stat_result = resolved.stat()
     category = android_app_data_category(path)
+    app_data_profile = build_android_app_data_profile(path, package, category)
     details = {
         "parser": "android-app-data-export",
         "parser_version": PARSER_VERSION,
@@ -393,18 +415,26 @@ def build_android_app_data_record(path: Path, package: str) -> ArtifactRecord:
         "package": package,
         "data_category": category,
         "risk_flags": android_app_data_risk_flags(path, category),
+        "android_app_data_profile": app_data_profile,
         "validation_checks": {
             "package_inferred_from_path": True,
             "file_payload_parsed": False,
             "secret_values_extracted": False,
             "source_hash_present": True,
             "app_specific_schema_version_tracked": True,
+            "sqlite_schema_inventory_present": bool(app_data_profile.get("sqlite_schema_inventory", {}).get("opened_readonly")),
+            "sample_values_redacted": True,
+            "android_artifact_matrix_present": True,
+            "backup_or_filesystem_layout_classified": bool(app_data_profile.get("source_layout_profile")),
         },
         "app_schema_profile": {
             "package": package,
             "data_category": category,
             "known_schema_validated": False,
             "schema_version": "unknown-exported-file",
+            "candidate_store_family": app_data_profile["candidate_store_family"],
+            "sqlite_table_count": app_data_profile.get("sqlite_schema_inventory", {}).get("table_count", 0),
+            "artifact_family_hints": app_data_profile.get("artifact_family_matrix", {}),
         },
         "android_validation_matrix": android_validation_matrix(
             {
@@ -437,6 +467,8 @@ def build_android_app_data_record(path: Path, package: str) -> ArtifactRecord:
         ],
         "legal_warning": "Inventory only. Do not infer app message/account contents from this row without authorized, validated app-specific parsing.",
     }
+    details["android_parser_manifest"] = build_android_parser_manifest(details)
+    details["android_parser_manifest_hash"] = details["android_parser_manifest"]["manifest_sha256"]
     details["core_accuracy_gates"] = [
         *android_core_accuracy_gates(29, details),
         *android_core_accuracy_gates(30, details),
@@ -467,6 +499,316 @@ def package_from_android_data_path(path: Path) -> str:
 
 def looks_like_android_package(value: str) -> bool:
     return "." in value and all(part and part.replace("_", "").isalnum() for part in value.split("."))
+
+
+def build_android_app_data_profile(path: Path, package: str, category: str) -> dict[str, object]:
+    lowered = str(path).lower()
+    candidate_family = "other"
+    if any(token in lowered for token in ("sms", "message", "chat", "conversation", "whatsapp", "kakao", "telegram", "line")):
+        candidate_family = "communication"
+    elif any(token in lowered for token in ("browser", "history", "cookie", "webview", "cache")):
+        candidate_family = "browser"
+    elif any(token in lowered for token in ("media", "image", "video", "audio", "thumb")):
+        candidate_family = "media"
+    sqlite_header = False
+    try:
+        sqlite_header = path.read_bytes()[:16] == b"SQLite format 3\x00"
+    except OSError:
+        sqlite_header = False
+    sqlite_inventory = build_android_sqlite_schema_inventory(path) if sqlite_header else {
+        "profile_version": "android-sqlite-schema-inventory-v1",
+        "opened_readonly": False,
+        "table_count": 0,
+        "total_row_count": 0,
+        "tables": [],
+        "values_redacted": True,
+        "read_policy": "schema-and-counts-only",
+    }
+    artifact_family_matrix = build_android_artifact_family_matrix(path, sqlite_inventory)
+    return {
+        "profile_version": "android-app-data-profile-v1",
+        "package": package,
+        "relative_path_hint": "/".join(path.parts[-6:]),
+        "data_category": category,
+        "candidate_store_family": candidate_family,
+        "sqlite_header_present": sqlite_header,
+        "sqlite_schema_inventory": sqlite_inventory,
+        "artifact_family_matrix": artifact_family_matrix,
+        "source_layout_profile": build_android_source_layout_profile(path, package),
+        "payload_decode_status": "not-decoded",
+        "secret_extraction_status": "not-performed",
+        "deleted_record_recovery_status": "not-validated",
+        "schema_validation_status": "known-answer-required",
+        "reporting_status": "inventory-only-validation-required",
+        "required_before_report": [
+            "validate package/path attribution against Android acquisition or backup manifest",
+            "decode only app-specific schemas with versioned known-answer fixtures",
+            "compare table/row inventory against ALEAPP/vendor export for the same source",
+            "preserve encrypted-store and deleted-record limitations if payload decoding is unavailable",
+        ],
+    }
+
+
+def build_android_parser_manifest(details: dict[str, object]) -> dict[str, object]:
+    apk_profile = details.get("apk_analysis_profile") if isinstance(details.get("apk_analysis_profile"), dict) else {}
+    app_data_profile = (
+        details.get("android_app_data_profile") if isinstance(details.get("android_app_data_profile"), dict) else {}
+    )
+    sqlite_inventory = (
+        app_data_profile.get("sqlite_schema_inventory")
+        if isinstance(app_data_profile.get("sqlite_schema_inventory"), dict)
+        else {}
+    )
+    hashes = details.get("hashes") if isinstance(details.get("hashes"), dict) else {}
+    artifact_type = "android-app-data" if details.get("source_format") == "android-export-file" else "android-apk"
+    viewer = "android-app-data-inventory" if artifact_type == "android-app-data" else "android-apk-inventory"
+    manifest: dict[str, object] = {
+        "manifest_version": "android-backup-app-data-parser-manifest-v1",
+        "item_number": 54,
+        "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
+        "artifact_type": artifact_type,
+        "source_path": str(details.get("source_path") or ""),
+        "source_format": str(details.get("source_format") or ""),
+        "source_size": int(details.get("source_size") or 0),
+        "source_sha256": str(hashes.get("sha256") or ""),
+        "package": str(details.get("package") or ""),
+        "data_category": str(details.get("data_category") or ""),
+        "source_viewer_locator": {
+            "viewer": viewer,
+            "source_path": str(details.get("source_path") or ""),
+            "package": str(details.get("package") or ""),
+            "source_format": str(details.get("source_format") or ""),
+        },
+        "apk_inventory": {
+            "manifest_format": str(details.get("manifest_format") or ""),
+            "permission_count": len(details.get("permissions") or []) if isinstance(details.get("permissions"), list) else 0,
+            "dangerous_permission_count": len(details.get("dangerous_permissions") or [])
+            if isinstance(details.get("dangerous_permissions"), list)
+            else 0,
+            "component_counts": details.get("component_counts") if isinstance(details.get("component_counts"), dict) else {},
+            "dex_count": int(details.get("dex_count") or 0),
+            "native_library_count": int(details.get("native_library_count") or 0),
+            "signing_inventory_present": isinstance(details.get("apk_signing_inventory"), dict),
+            "risk_score": int(details.get("risk_score") or 0),
+            "analysis_profile_status": apk_profile.get("validation_status", "inventory-only"),
+        },
+        "app_data_inventory": {
+            "candidate_store_family": app_data_profile.get("candidate_store_family", ""),
+            "sqlite_opened_readonly": bool(sqlite_inventory.get("opened_readonly")),
+            "sqlite_table_count": int(sqlite_inventory.get("table_count") or 0),
+            "sqlite_total_row_count": int(sqlite_inventory.get("total_row_count") or 0),
+            "values_redacted": bool(sqlite_inventory.get("values_redacted", True)),
+            "source_layout": (
+                app_data_profile.get("source_layout_profile", {}).get("layout")
+                if isinstance(app_data_profile.get("source_layout_profile"), dict)
+                else ""
+            ),
+            "artifact_family_matrix": app_data_profile.get("artifact_family_matrix", {}),
+        },
+        "secret_and_schema_boundary": {
+            "secret_values_extracted": bool(
+                details.get("validation_checks", {}).get("secret_values_extracted")
+                if isinstance(details.get("validation_checks"), dict)
+                else False
+            ),
+            "encrypted_store_decryption": False,
+            "deleted_record_recovery": False,
+            "app_specific_schema_validated": bool(
+                details.get("validation_checks", {}).get("app_schema_validated")
+                if isinstance(details.get("validation_checks"), dict)
+                else False
+            ),
+        },
+        "large_data_controls": {
+            "apk_string_scan_limit": APK_STRING_SCAN_LIMIT,
+            "max_app_data_files": MAX_APP_DATA_FILES,
+            "max_android_sqlite_tables": MAX_ANDROID_SQLITE_TABLES,
+            "max_android_sqlite_columns": MAX_ANDROID_SQLITE_COLUMNS,
+            "raw_values_redacted_by_default": True,
+        },
+        "commercial_blockers": [
+            "android-backup-payload-decoder-required",
+            "app-specific-schema-known-answer-required",
+            "binary-manifest-and-signature-chain-validation-required",
+            "deleted-record-and-encrypted-store-validation-required",
+        ],
+        "validation_status": "implemented-usable-validation-required",
+    }
+    manifest["manifest_sha256"] = stable_android_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def stable_android_json_sha256(value: dict[str, object] | list[object] | str) -> str:
+    if isinstance(value, str):
+        payload = value
+    else:
+        payload = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def build_android_source_layout_profile(path: Path, package: str) -> dict[str, object]:
+    parts = list(path.parts)
+    lowered = [part.lower() for part in parts]
+    layout = "unknown-export-layout"
+    for marker, label in (
+        (("android", "data"), "external-app-data"),
+        (("android", "media"), "external-app-media"),
+        (("data", "data"), "private-app-data"),
+    ):
+        for index in range(0, len(parts) - len(marker)):
+            if tuple(lowered[index : index + len(marker)]) == marker:
+                layout = label
+                break
+        if layout != "unknown-export-layout":
+            break
+    if "backup" in lowered or "apps" in lowered:
+        layout = f"{layout}+backup-export-hint" if layout != "unknown-export-layout" else "backup-export-hint"
+    return {
+        "profile_version": "android-source-layout-v1",
+        "layout": layout,
+        "package": package,
+        "package_path_attribution_status": "path-derived-review-required",
+        "relative_path_hint": "/".join(path.parts[-8:]),
+        "requires_acquisition_manifest": True,
+    }
+
+
+def build_android_sqlite_schema_inventory(path: Path) -> dict[str, object]:
+    tables: list[dict[str, object]] = []
+    opened = False
+    error = ""
+    try:
+        with contextlib.closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection:
+            opened = True
+            for table_name in android_sqlite_table_names(connection)[:MAX_ANDROID_SQLITE_TABLES]:
+                columns = android_sqlite_columns(connection, table_name)[:MAX_ANDROID_SQLITE_COLUMNS]
+                tables.append(
+                    {
+                        "table": table_name,
+                        "row_count": android_sqlite_row_count(connection, table_name),
+                        "columns": columns,
+                        "artifact_family": android_table_artifact_family(table_name, columns),
+                    }
+                )
+    except sqlite3.Error as exc:
+        error = str(exc)[:240]
+    total_rows = sum(int(table.get("row_count") or 0) for table in tables)
+    return {
+        "profile_version": "android-sqlite-schema-inventory-v1",
+        "opened_readonly": opened,
+        "table_count": len(tables),
+        "total_row_count": total_rows,
+        "tables": tables[:MAX_ANDROID_SQLITE_TABLES],
+        "values_redacted": True,
+        "read_policy": "schema-and-counts-only",
+        "sqlite_error": error,
+        "validation_status": "inventory-ready" if opened else "review-required",
+    }
+
+
+def build_android_artifact_family_matrix(path: Path, sqlite_inventory: dict[str, object]) -> dict[str, object]:
+    haystack = " ".join(
+        [
+            str(path).lower(),
+            *[
+                f"{table.get('table', '')} {' '.join(str(column) for column in table.get('columns', []))}".lower()
+                for table in sqlite_inventory.get("tables", [])
+                if isinstance(table, dict)
+            ],
+        ]
+    )
+    families = {
+        "sms": any(token in haystack for token in ("sms", "mms", "message", "thread")),
+        "call_log": any(token in haystack for token in ("call", "calls", "calllog")),
+        "contacts": any(token in haystack for token in ("contact", "contacts", "phonebook", "addr")),
+        "browser": any(token in haystack for token in ("browser", "history", "cookie", "webview", "url")),
+        "media": any(token in haystack for token in ("media", "image", "video", "audio", "thumbnail")),
+        "app_database": bool(sqlite_inventory.get("opened_readonly")),
+    }
+    return {
+        "profile_version": "android-artifact-family-matrix-v1",
+        "families": families,
+        "positive_families": [family for family, present in sorted(families.items()) if present],
+        "classification_basis": "path-table-column-names-only",
+        "values_redacted": True,
+        "content_claim_status": "not-decoded",
+    }
+
+
+def android_table_artifact_family(table_name: str, columns: list[str]) -> str:
+    haystack = f"{table_name} {' '.join(columns)}".lower()
+    if any(token in haystack for token in ("sms", "mms", "message", "thread", "chat", "conversation")):
+        return "message-or-chat"
+    if any(token in haystack for token in ("call", "calllog")):
+        return "call-log"
+    if any(token in haystack for token in ("contact", "phone", "addressbook", "addr")):
+        return "contacts"
+    if any(token in haystack for token in ("browser", "history", "cookie", "url", "webview")):
+        return "browser"
+    if any(token in haystack for token in ("media", "image", "video", "audio", "thumbnail")):
+        return "media"
+    if any(token in haystack for token in ("account", "token", "password", "secret", "credential")):
+        return "credential-or-account"
+    return "other"
+
+
+def android_sqlite_table_names(connection: sqlite3.Connection) -> list[str]:
+    rows = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def android_sqlite_columns(connection: sqlite3.Connection, table_name: str) -> list[str]:
+    safe_name = table_name.replace('"', '""')
+    rows = connection.execute(f'PRAGMA table_info("{safe_name}")').fetchall()
+    return [str(row[1]) for row in rows]
+
+
+def android_sqlite_row_count(connection: sqlite3.Connection, table_name: str) -> int | None:
+    safe_name = table_name.replace('"', '""')
+    try:
+        row = connection.execute(f'SELECT COUNT(*) FROM "{safe_name}"').fetchone()
+    except sqlite3.Error:
+        return None
+    return int(row[0]) if row else None
+
+
+def build_apk_analysis_profile(
+    *,
+    names: list[str],
+    manifest: dict[str, object],
+    permissions: list[str],
+    dex_entries: list[str],
+    native_libraries: list[str],
+    certificate_entries: list[str],
+    signing_inventory: dict[str, object],
+    string_pivots: list[dict[str, str]],
+) -> dict[str, object]:
+    pivot_counts: dict[str, int] = {}
+    for pivot in string_pivots:
+        pivot_type = str(pivot.get("type") or "")
+        pivot_counts[pivot_type] = pivot_counts.get(pivot_type, 0) + 1
+    return {
+        "profile_version": "apk-analysis-profile-v1",
+        "zip_entry_count": len(names),
+        "manifest_format": str(manifest.get("manifest_format") or ""),
+        "package": str(manifest.get("package") or ""),
+        "permission_count": len(permissions),
+        "dangerous_permission_count": len(dangerous_permissions(permissions)),
+        "dex_count": len(dex_entries),
+        "native_library_count": len(native_libraries),
+        "certificate_entry_count": len(certificate_entries),
+        "signing_block_entry_count": int(signing_inventory.get("entry_count") or 0),
+        "signing_inventory_status": str(signing_inventory.get("validation_status") or "review-required"),
+        "string_pivot_counts": dict(sorted(pivot_counts.items())),
+        "binary_manifest_decode_status": "decoded" if manifest.get("manifest_format") == "xml" else "not-decoded",
+        "signature_chain_validation_status": "signature-entry-inventory-only",
+        "dex_control_flow_status": "not-performed",
+        "reporting_status": "apk-risk-inventory-validation-required",
+    }
 
 
 def build_android_trusted_diff(
@@ -615,6 +957,56 @@ def apk_entry_hashes(archive: zipfile.ZipFile, entries: list[str]) -> list[dict[
     return hashes
 
 
+def build_apk_signing_inventory(archive: zipfile.ZipFile, names: list[str]) -> dict[str, object]:
+    signing_entries = sorted(
+        name
+        for name in names
+        if name.startswith("META-INF/")
+        and name.upper().endswith((".RSA", ".DSA", ".EC", ".SF", "MANIFEST.MF"))
+    )
+    entry_profiles: list[dict[str, object]] = []
+    for entry in signing_entries[:25]:
+        try:
+            blob = archive.read(entry)
+        except (KeyError, OSError, zipfile.BadZipFile):
+            continue
+        upper = entry.upper()
+        if upper.endswith((".RSA", ".DSA", ".EC")):
+            entry_type = "signature-block"
+        elif upper.endswith(".SF"):
+            entry_type = "signature-file"
+        elif upper.endswith("MANIFEST.MF"):
+            entry_type = "jar-manifest"
+        else:
+            entry_type = "other-meta-inf"
+        entry_profiles.append(
+            {
+                "entry": entry,
+                "entry_type": entry_type,
+                "size": len(blob),
+                "sha256": hashlib.sha256(blob).hexdigest(),
+            }
+        )
+    entry_types = sorted({str(profile.get("entry_type")) for profile in entry_profiles})
+    return {
+        "profile_version": "apk-signing-inventory-v1",
+        "entry_count": len(entry_profiles),
+        "entry_types": entry_types,
+        "entries": entry_profiles,
+        "signature_block_present": any(profile.get("entry_type") == "signature-block" for profile in entry_profiles),
+        "signature_file_present": any(profile.get("entry_type") == "signature-file" for profile in entry_profiles),
+        "jar_manifest_present": any(profile.get("entry_type") == "jar-manifest" for profile in entry_profiles),
+        "certificate_chain_parsed": False,
+        "signer_lineage_verified": False,
+        "validation_status": "entry-inventory-ready" if entry_profiles else "missing-or-v2-v3-only-review-required",
+        "required_before_report": [
+            "verify signer certificate chain and APK signing scheme with apksigner or apkanalyzer",
+            "compare signer digest, certificate subject, and signing lineage against trusted tool output",
+            "do not infer APK trust or malware status from META-INF entry presence alone",
+        ],
+    }
+
+
 def native_architectures(native_libraries: list[str]) -> list[str]:
     architectures = set()
     for entry in native_libraries:
@@ -702,6 +1094,7 @@ def android_commercial_uplift_evidence(details: dict[str, object], *, gap_ids: l
         if isinstance(details.get("android_trusted_diff"), dict)
         else {"status": "not-attached", "commercial_grade_evidence": False}
     )
+    android_manifest = details.get("android_parser_manifest") if isinstance(details.get("android_parser_manifest"), dict) else {}
     return {
         "batch_id": "commercial-uplift-026-030",
         "item_numbers": sorted(gap_ids),
@@ -715,6 +1108,13 @@ def android_commercial_uplift_evidence(details: dict[str, object], *, gap_ids: l
             trusted_diff=trusted_diff,
         ),
         "android_trusted_diff": trusted_diff,
+        "functional_priority_profiles": android_functional_expansion_profiles(
+            details,
+            gap_ids=sorted(gap_ids),
+            checks=checks,
+            hashes=hashes,
+            trusted_diff=trusted_diff,
+        ),
         "source_refs": [
             f"source_path:{details.get('source_path', '')}",
             f"source_format:{details.get('source_format', '')}",
@@ -730,12 +1130,97 @@ def android_commercial_uplift_evidence(details: dict[str, object], *, gap_ids: l
             "source_size": int(details.get("source_size") or 0),
             "dex_count": int(details.get("dex_count") or 0),
             "native_library_count": int(details.get("native_library_count") or 0),
+            "apk_profile_present": isinstance(details.get("apk_analysis_profile"), dict),
+            "android_app_data_profile_present": isinstance(details.get("android_app_data_profile"), dict),
+            "android_parser_manifest_hash": str(android_manifest.get("manifest_sha256") or ""),
+            "android_source_locator_present": isinstance(android_manifest.get("source_viewer_locator"), dict),
             "secret_values_extracted": bool(checks.get("secret_values_extracted")),
             "known_answer_android_corpus_required": True,
         },
         "next_internal_step": "Add binary AndroidManifest decoding, signature-chain verification, app-specific schema decoders, and Android known-answer validation.",
         "external_evidence_required": True,
     }
+
+
+def android_functional_expansion_profiles(
+    details: dict[str, object],
+    *,
+    gap_ids: list[int],
+    checks: dict[str, object],
+    hashes: dict[str, object],
+    trusted_diff: dict[str, object],
+) -> list[dict[str, object]]:
+    android_manifest = details.get("android_parser_manifest") if isinstance(details.get("android_parser_manifest"), dict) else {}
+    profiles = [
+        {
+            "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
+            "item_number": 52,
+            "implementation_track": "mobile-vendor-export-import",
+            "status": "usable-internal-triage-not-commercial-grade",
+            "source_tool": "android-apk-app-data",
+            "source_format": str(details.get("source_format") or ""),
+            "source_index": int(details.get("source_index") or 0),
+            "source_sha256": str(hashes.get("sha256") or ""),
+            "implemented_controls": {
+                "source_hash_preserved": bool(hashes.get("sha256")),
+                "source_row_identity_preserved": bool(details.get("source_path")),
+                "vendor_export_settings_verified": False,
+                "schema_version_registry_present": bool(details.get("package") or details.get("data_category")),
+                "android_parser_manifest_hash": str(android_manifest.get("manifest_sha256") or ""),
+                "android_parser_manifest_emitted": bool(android_manifest),
+                "source_viewer_locator_emitted": isinstance(android_manifest.get("source_viewer_locator"), dict),
+            },
+            "trusted_diff_status": str(trusted_diff.get("status") or "not-attached"),
+            "failed_validation_check_ids": [
+                "vendor-export-settings-not-verified",
+                "vendor-schema-not-validated",
+                "trusted-vendor-export-diff-required",
+            ],
+            "ready_for_court_report": False,
+        }
+    ]
+    if any(number in gap_ids for number in (29, 30)):
+        profiles.append(
+            {
+                "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
+                "item_number": 54,
+                "implementation_track": "android-backup-app-data-parser",
+                "status": "usable-internal-inventory-not-app-specific-commercial-grade",
+                "package": str(details.get("package") or ""),
+                "data_category": str(details.get("data_category") or ""),
+                "implemented_controls": {
+                    "sms_call_contact_browser_media_app_db_inventory": True,
+                    "package_path_attribution": bool(details.get("package") or details.get("source_path")),
+                    "apk_manifest_permission_inventory": True,
+                    "secret_values_extracted": bool(checks.get("secret_values_extracted")),
+                    "encrypted_store_limitation_recorded": True,
+                    "android_parser_manifest_hash": str(android_manifest.get("manifest_sha256") or ""),
+                    "android_parser_manifest_emitted": bool(android_manifest),
+                    "source_viewer_locator_emitted": isinstance(android_manifest.get("source_viewer_locator"), dict),
+                },
+                "failed_validation_check_ids": [
+                    check
+                    for check, failed in {
+                        "android-backup-payload-not-natively-decoded": not checks.get("android_backup_payload_decoded"),
+                        "app-specific-schema-not-validated": not checks.get("app_schema_validated"),
+                        "android-parser-manifest-not-emitted": not android_manifest,
+                        "deleted-record-known-answer-corpus-required": not checks.get("commercial_validation_corpus"),
+                    }.items()
+                    if failed
+                ],
+                "passed_validation_check_ids": [
+                    check
+                    for check, passed in {
+                        "android-parser-manifest-emitted": bool(android_manifest),
+                        "android-source-locator-emitted": isinstance(android_manifest.get("source_viewer_locator"), dict),
+                        "android-secret-boundary-recorded": not checks.get("secret_values_extracted"),
+                    }.items()
+                    if passed
+                ],
+                "ready_for_court_report": False,
+            }
+        )
+    return profiles
 
 
 def android_reportability_decision(
@@ -813,6 +1298,9 @@ def android_core_accuracy_gates(number: int, details: dict[str, object]) -> list
     hashes = details.get("hashes") if isinstance(details.get("hashes"), dict) else {}
     if hashes.get("sha256"):
         evidence_refs.append(f"source_sha256:{hashes['sha256']}")
+    android_manifest = details.get("android_parser_manifest") if isinstance(details.get("android_parser_manifest"), dict) else {}
+    if android_manifest.get("manifest_sha256"):
+        evidence_refs.append(f"android_parser_manifest_sha256:{android_manifest['manifest_sha256']}")
     validation = details.get("validation_checks") if isinstance(details.get("validation_checks"), dict) else {}
     risk_flags = details.get("risk_flags") if isinstance(details.get("risk_flags"), list) else []
     trusted_diff = details.get("android_trusted_diff") if isinstance(details.get("android_trusted_diff"), dict) else {}
@@ -828,6 +1316,20 @@ def android_core_accuracy_gates(number: int, details: dict[str, object]) -> list
             satisfied.append("encrypted-store limitation")
         if details.get("app_schema_profile") or validation.get("app_specific_schema_version_tracked"):
             satisfied.append("app-specific schema version tracking")
+        if details.get("android_app_data_profile"):
+            satisfied.append("android app-data profile")
+        profile = details.get("android_app_data_profile") if isinstance(details.get("android_app_data_profile"), dict) else {}
+        sqlite_inventory = profile.get("sqlite_schema_inventory") if isinstance(profile.get("sqlite_schema_inventory"), dict) else {}
+        if sqlite_inventory.get("opened_readonly") and sqlite_inventory.get("values_redacted"):
+            satisfied.append("SQLite schema inventory without value extraction")
+        if profile.get("artifact_family_matrix"):
+            satisfied.append("Android artifact family matrix")
+        if profile.get("source_layout_profile"):
+            satisfied.append("backup/filesystem layout classification")
+        if android_manifest:
+            satisfied.append("Android parser manifest")
+            if isinstance(android_manifest.get("source_viewer_locator"), dict):
+                satisfied.append("Android source locator")
         if trusted_diff.get("status") == "pass":
             satisfied.append("trusted Android artifact export diff pass")
     elif number == 30:
@@ -839,8 +1341,17 @@ def android_core_accuracy_gates(number: int, details: dict[str, object]) -> list
             satisfied.append("signature chain validation")
         if details.get("string_pivots") is not None or details.get("dex_count") is not None or details.get("native_library_count") is not None:
             satisfied.append("DEX/native string pivot bounds")
+        if details.get("apk_analysis_profile"):
+            satisfied.append("APK analysis profile")
+        signing_inventory = details.get("apk_signing_inventory")
+        if isinstance(signing_inventory, dict) and signing_inventory.get("entry_count"):
+            satisfied.append("APK signing entry inventory")
         if details.get("legal_warning") and details.get("commercial_grade_blockers"):
             satisfied.append("app-data schema and secret-handling warnings")
+        if android_manifest:
+            satisfied.append("Android parser manifest")
+            if isinstance(android_manifest.get("source_viewer_locator"), dict):
+                satisfied.append("Android source locator")
         if trusted_diff.get("status") == "pass":
             satisfied.append("trusted APK/tool analysis diff pass")
     return [build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs)]

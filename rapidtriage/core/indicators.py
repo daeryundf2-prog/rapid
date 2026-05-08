@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import csv
+import hashlib
 import ipaddress
 import json
 import re
@@ -285,6 +286,8 @@ def load_ti_feeds(paths: Sequence[Path]) -> tuple[dict[tuple[str, str], dict[str
             "format": resolved.suffix.lower().lstrip(".") or "text",
             "name": str(metadata.get("name") or metadata.get("source") or resolved.name),
             "version": str(metadata.get("version") or ""),
+            "sha256": sha256_file(resolved),
+            "size_bytes": resolved.stat().st_size,
             "indicator_count": 0,
             "local_only": True,
             "commercial_gap_ids": [IOC_TI_GAP_ID],
@@ -312,6 +315,97 @@ def load_ti_feeds(paths: Sequence[Path]) -> tuple[dict[tuple[str, str], dict[str
             }
         sources.append(feed_source)
     return feeds, sources
+
+
+def build_indicator_ti_enrichment_package(
+    indicators_payload: Mapping[str, object],
+    *,
+    ti_feeds: Sequence[Path],
+    include_unmatched: bool = False,
+    limit: int = 250,
+) -> dict[str, object]:
+    """Apply local TI feeds to an existing indicator payload for analyst review."""
+
+    raw_indicators = indicators_payload.get("indicators")
+    if not isinstance(raw_indicators, list):
+        raise IndicatorSummaryError("indicators payload does not include an indicators list")
+    if not ti_feeds:
+        raise IndicatorSummaryError("at least one local TI feed is required")
+
+    enrichment, ti_feed_sources = load_ti_feeds(ti_feeds)
+    reviewed: list[dict[str, object]] = []
+    matched_total = 0
+    severity_counts: Counter[str] = Counter()
+    type_counts: Counter[str] = Counter()
+    for raw_item in raw_indicators:
+        if not isinstance(raw_item, Mapping):
+            continue
+        indicator = dict(raw_item)
+        hit = lookup_ti_enrichment(indicator, enrichment)
+        type_counts[str(indicator.get("type") or "unknown")] += 1
+        if hit:
+            matched_total += 1
+            indicator["ti_enrichment"] = dict(hit)
+            indicator["risk_flags"] = sorted(set(indicator.get("risk_flags") or []) | {"ti-enriched"})
+            indicator["ti_review_status"] = "feed-match-review-required"
+            severity = str(hit.get("severity") or "unspecified")
+            severity_counts[severity] += 1
+        elif include_unmatched:
+            indicator["ti_review_status"] = "no-feed-match"
+        else:
+            continue
+        indicator["commercial_gap_ids"] = sorted(set(indicator.get("commercial_gap_ids") or []) | {IOC_TI_GAP_ID})
+        indicator["ready_for_court_report"] = False
+        reviewed.append(indicator)
+
+    returned = reviewed[: max(limit, 0)] if limit else reviewed
+    core_accuracy_gates = ioc_ti_core_accuracy_gates(indicators=reviewed, ti_feed_sources=ti_feed_sources)
+    assessment = ti_enrichment_assessment(ti_feed_sources=ti_feed_sources)
+    uplift = ioc_ti_commercial_uplift_evidence(
+        indicators=reviewed,
+        ti_feed_sources=ti_feed_sources,
+        core_accuracy_gates=core_accuracy_gates,
+        assessment=assessment,
+        max_indicators=limit,
+        max_sources_per_indicator=DEFAULT_MAX_SOURCES_PER_INDICATOR,
+    )
+    return {
+        "command": "indicator-ti-enrichment",
+        "profile_version": "ioc-ti-enrichment-review-package-v1",
+        "generated_at": dt.datetime.now().isoformat(),
+        "local_only": True,
+        "no_external_calls": True,
+        "options": {
+            "ti_feeds": [str(path) for path in ti_feeds],
+            "include_unmatched": include_unmatched,
+            "limit": limit,
+        },
+        "summary": {
+            "source_indicator_count": len([item for item in raw_indicators if isinstance(item, Mapping)]),
+            "matched_indicator_count": matched_total,
+            "returned_indicator_count": len(returned),
+            "ti_feed_count": len(ti_feed_sources),
+            "type_counts": dict(type_counts),
+            "severity_counts": dict(severity_counts),
+            "commercial_gap_ids": [IOC_TI_GAP_ID],
+            "commercial_grade_ready": False,
+        },
+        "ti_feed_sources": ti_feed_sources,
+        "ti_enrichment_assessment": assessment,
+        "core_accuracy_gates": core_accuracy_gates,
+        "commercial_uplift_evidence": uplift,
+        "reportability_decision": uplift["reportability_decision"],
+        "indicators": returned,
+        "truncated": len(returned) < len(reviewed),
+    }
+
+
+def sha256_file(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 def read_ti_json(path: Path) -> list[dict[str, object]]:

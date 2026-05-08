@@ -72,6 +72,8 @@ from .core.docs import build_manifest, run_docs_search, write_result
 from .core.doctor import format_doctor_text, run_doctor
 from .core.enterprise import build_enterprise_policy
 from .core.evidence import identify_evidence
+from .core.e01 import build_windows11_e01_known_answer_manifest
+from .core.e01_smoke import run_windows11_e01_smoke
 from .core.extract import DEFAULT_EXTRACT_MANIFEST_NAME, ExtractError, SUPPORTED_DOC_KINDS, run_extract
 from .core.files import ALL_FILE_CATEGORIES, FileScanError, run_files_scan
 from .core.indicators import IndicatorSummaryError, build_indicator_summary
@@ -659,6 +661,8 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--no-text-diff", action="store_true", help="Skip bounded text diff preview")
     compare.add_argument("--max-text-bytes", type=int, default=256 * 1024, help="Maximum per-file bytes for text diff preview")
     compare.add_argument("--diff-context", type=int, default=3, help="Unified diff context lines")
+    compare.add_argument("--selection-rationale", default="", help="Analyst rationale for why these evidence items are compared")
+    compare.add_argument("--review-note", action="append", help="Bounded review note for a comparison row (repeatable)")
     compare.add_argument("--json", action="store_true", help="Print JSON to stdout")
 
     extract = sub.add_parser(
@@ -970,15 +974,17 @@ def build_parser() -> argparse.ArgumentParser:
     case_review.add_argument("--case-id", required=True, help="Case ID to update")
     case_review.add_argument("--target-type", required=True, help="Target type from case-search result")
     case_review.add_argument("--target-id", required=True, help="Target id from case-search result")
-    case_review.add_argument("--status", default="unreviewed", help="Review status such as relevant, notable, excluded, or follow_up")
-    case_review.add_argument("--verification-status", default="unverified", help="Verification status such as source_opened, cross_checked, verified, or rejected")
+    case_review.add_argument("--status", help="Review status such as relevant, notable, excluded, or follow_up")
+    case_review.add_argument("--verification-status", help="Verification status such as source_opened, cross_checked, verified, or rejected")
     case_review.add_argument("--tag", action="append", help="Review tag (repeatable)")
-    case_review.add_argument("--note", default="", help="Review note")
-    case_review.add_argument("--reviewer", default="", help="Reviewer name")
-    case_review.add_argument("--assignee", default="", help="Analyst assigned to follow up this result")
-    case_review.add_argument("--priority", default="normal", help="Review priority: urgent, high, normal, or low")
-    case_review.add_argument("--due-at", default="", help="Optional due date/time for review follow-up")
-    case_review.add_argument("--include-in-report", action="store_true", help="Mark target as report candidate")
+    case_review.add_argument("--note", help="Review note")
+    case_review.add_argument("--reviewer", help="Reviewer name")
+    case_review.add_argument("--assignee", help="Analyst assigned to follow up this result")
+    case_review.add_argument("--priority", help="Review priority: urgent, high, normal, or low")
+    case_review.add_argument("--due-at", help="Optional due date/time for review follow-up")
+    report_flag = case_review.add_mutually_exclusive_group()
+    report_flag.add_argument("--include-in-report", dest="include_in_report", action="store_true", default=None, help="Mark target as report candidate")
+    report_flag.add_argument("--exclude-from-report", dest="include_in_report", action="store_false", help="Remove target from report candidates")
     case_review.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     case_db_report = sub.add_parser(
@@ -1016,6 +1022,56 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evidence.add_argument("source", help="Evidence source path to identify")
     evidence.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    e01_known_answer = sub.add_parser(
+        "e01-known-answer",
+        help="Build a Windows 11 E01 known-answer manifest draft",
+        description="Build a Windows 11 E01 known-answer manifest draft for single-case validation",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage e01-known-answer ./case.E01 --output ./windows11-e01-known-answer.json
+              rapidtriage e01-known-answer ./case.E01 --case-id CASE-001 --expected-partition-start-sector 2048 --expected-artifact "Security.evtx event 4624"
+            """
+        ),
+    )
+    e01_known_answer.add_argument("source", help="Windows 11 E01/Ex01 source image")
+    e01_known_answer.add_argument("--case-id", default="windows11-e01-known-answer", help="Case identifier for the manifest")
+    e01_known_answer.add_argument("--expected-partition-start-sector", type=int, help="Expected Windows filesystem start sector")
+    e01_known_answer.add_argument("--expected-artifact", action="append", default=[], help="Expected high-value artifact assertion; repeatable")
+    e01_known_answer.add_argument("--validation-command", action="append", default=[], help="Validation command to preserve in the manifest; repeatable")
+    e01_known_answer.add_argument("--output", help="Optional JSON output path")
+    e01_known_answer.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    e01_smoke = sub.add_parser(
+        "e01-smoke",
+        help="Run a Windows 11 E01 single-case workflow smoke report",
+        description="Run a Windows 11 E01 workflow smoke report from preflight through report generation",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+            Examples:
+              rapidtriage e01-smoke ./case.E01 --output-dir ./case-smoke --case-id CASE-001
+              rapidtriage e01-smoke ./case.E01 --output-dir ./case-smoke --expected-partition-start-sector 2048 --plan-only
+            """
+        ),
+    )
+    e01_smoke.add_argument("source", help="Windows 11 E01/Ex01 source image")
+    e01_smoke.add_argument("--output-dir", required=True, help="Directory for smoke report outputs")
+    e01_smoke.add_argument("--case-id", default="windows11-e01-smoke", help="Case identifier for the smoke report")
+    e01_smoke.add_argument("--mode", choices=sorted(SUPPORTED_RUN_MODES), default="hacking", help="Run mode for artifact triage")
+    e01_smoke.add_argument("--input-kind", choices=SUPPORTED_INPUT_ROOT_KINDS, help="Override input root kind")
+    e01_smoke.add_argument("--expected-partition-start-sector", type=int, help="Expected Windows filesystem start sector")
+    e01_smoke.add_argument("--expected-artifact", action="append", default=[], help="Expected high-value artifact assertion; repeatable")
+    e01_smoke.add_argument("--validation-command", action="append", default=[], help="Validation command to preserve in the manifest; repeatable")
+    e01_smoke.add_argument("--plan-only", action="store_true", help="Write preflight/known-answer files without attempting extraction")
+    e01_smoke.add_argument("--write-extracts", action="store_true", help="Allow extracted files to be written during the run stage")
+    e01_smoke.add_argument("--resume", action="store_true", help="Reuse resumable stage outputs when possible")
+    e01_smoke.add_argument("--max-file-count", type=int, default=0, help="Maximum extracted file count during run stage")
+    e01_smoke.add_argument("--max-extract-size-bytes", type=int, default=0, help="Maximum extracted byte budget during run stage")
+    e01_smoke.add_argument("--memory-cap-bytes", type=int, default=0, help="Soft memory cap for run stages")
+    e01_smoke.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     benchmark = sub.add_parser(
         "benchmark",
@@ -1386,6 +1442,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-extract-size-bytes", type=int, default=0, help="Cap total copied bytes per extract stage (0 means unlimited)")
     run.add_argument("--max-file-count", type=int, default=0, help="Cap copied files per extract stage (0 means unlimited)")
     run.add_argument("--memory-cap-bytes", type=int, default=0, help="Stop the run at safe stage boundaries if RSS exceeds this value (0 also honors RAPIDTRIAGE_MEMORY_CAP_BYTES when set)")
+    run.add_argument("--e01-partition-start-sector", type=int, help="Use this mmls partition start sector for direct E01/Ex01 recovery instead of the automatic recommendation")
     run.add_argument("--overwrite", action="store_true", help="Allow extract stages to overwrite existing output files")
     run.add_argument("--resume", action="store_true", help="Reuse valid existing stage JSON outputs in OUTPUT_DIR and rerun missing or invalid stages")
     add_rules_argument(run)
@@ -1897,6 +1954,7 @@ def main(argv=None) -> int:
                 run_payload = payload["run"]
                 print(f"Saved sample run summary JSON: {run_payload['summary']}")
                 print(f"Saved sample run report: {run_payload['report']}")
+                print(f"Saved training lab manifest: {run_payload['training_lab_manifest']}")
         return 0
 
     if args.command == "case-db":
@@ -2110,6 +2168,65 @@ def main(argv=None) -> int:
                     print(f"- {warning}")
         return 0
 
+    if args.command == "e01-known-answer":
+        payload = build_windows11_e01_known_answer_manifest(
+            Path(args.source),
+            case_id=args.case_id,
+            expected_partition_start_sector=args.expected_partition_start_sector,
+            expected_artifacts=args.expected_artifact,
+            validation_commands=args.validation_command,
+        )
+        if args.output:
+            write_result(payload, Path(args.output).expanduser().resolve())
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"E01 known-answer manifest: {payload['case_id']}")
+            print(f"Status: {payload['status']}")
+            print(f"Source: {payload['source_image']['path']}")
+            if args.output:
+                print(f"Saved: {Path(args.output).expanduser().resolve()}")
+            print(f"Manifest SHA256: {payload['manifest_sha256']}")
+            print("Next steps:")
+            for action in payload["operator_next_steps"]:
+                print(f"- {action}")
+        return 0
+
+    if args.command == "e01-smoke":
+        payload = run_windows11_e01_smoke(
+            Path(args.source),
+            output_dir=Path(args.output_dir),
+            case_id=args.case_id,
+            mode=args.mode,
+            input_kind=args.input_kind,
+            expected_partition_start_sector=args.expected_partition_start_sector,
+            expected_artifacts=args.expected_artifact,
+            validation_commands=args.validation_command,
+            execute=not args.plan_only,
+            read_only=not args.write_extracts,
+            resume=args.resume,
+            max_file_count=args.max_file_count,
+            max_extract_size_bytes=args.max_extract_size_bytes,
+            memory_cap_bytes=args.memory_cap_bytes,
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"E01 smoke report: {payload['case_id']}")
+            print(f"Status: {payload['status']}")
+            print(f"Source: {payload['source_path']}")
+            print(f"Saved: {payload['outputs']['smoke_report']['path']}")
+            print("Stages:")
+            for stage in payload["stages"]:
+                print(f"- {stage['id']}: {stage['status']}")
+            run_error = payload.get("run_error")
+            if isinstance(run_error, dict) and run_error.get("failure_guidance"):
+                guidance = run_error["failure_guidance"]
+                print(f"Run blocker: {guidance.get('title', run_error.get('error'))}")
+                for action in guidance.get("next_actions", []):
+                    print(f"- {action}")
+        return 0
+
     if args.command == "benchmark":
         try:
             payload = run_benchmark(
@@ -2301,6 +2418,14 @@ def main(argv=None) -> int:
                 print(
                     "Validation evidence attached: "
                     f"{validation_summary.get('items_with_passed_validation_evidence', 0)} items"
+                )
+            separation = payload.get("blocker_separation_profile")
+            if isinstance(separation, dict):
+                summary = separation.get("summary") if isinstance(separation.get("summary"), dict) else {}
+                print(
+                    "Blocker separation: "
+                    f"internal work {summary.get('internal_work_available', 0)}, "
+                    f"external/trusted evidence {summary.get('external_or_trusted_evidence_required', 0)}"
                 )
             if args.next_gate:
                 print(f"Focused next gate: {args.next_gate}")
@@ -2721,6 +2846,8 @@ def main(argv=None) -> int:
                     include_text_diff=not args.no_text_diff,
                     max_text_bytes=args.max_text_bytes,
                     diff_context=args.diff_context,
+                    selection_rationale=args.selection_rationale,
+                    review_notes=args.review_note,
                 )
             else:
                 payload = compare_many_paths(
@@ -2730,6 +2857,8 @@ def main(argv=None) -> int:
                     include_text_diff=not args.no_text_diff,
                     max_text_bytes=args.max_text_bytes,
                     diff_context=args.diff_context,
+                    selection_rationale=args.selection_rationale,
+                    review_notes=args.review_note,
                 )
         except CompareError as exc:
             parser.error(str(exc))
@@ -2748,6 +2877,8 @@ def main(argv=None) -> int:
                 "text_diff": not args.no_text_diff,
                 "max_text_bytes": args.max_text_bytes,
                 "diff_context": args.diff_context,
+                "selection_rationale": args.selection_rationale,
+                "review_note_count": len(args.review_note or []),
             },
             input_files=[(f"input:{index}", path) for index, path in enumerate(compare_paths_input, start=1)],
             output_files=[("compare-json", output)],
@@ -3411,6 +3542,7 @@ def main(argv=None) -> int:
                 max_extract_size_bytes=args.max_extract_size_bytes,
                 max_file_count=args.max_file_count,
                 memory_cap_bytes=args.memory_cap_bytes,
+                e01_partition_start_sector=getattr(args, "e01_partition_start_sector", None),
                 overwrite=args.overwrite,
                 resume=args.resume,
                 rule_set=rule_set,

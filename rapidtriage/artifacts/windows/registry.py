@@ -10,7 +10,7 @@ from typing import Iterable, Mapping, Sequence
 from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 
-PARSER_VERSION = "registry-normalized-v8"
+PARSER_VERSION = "registry-normalized-v10"
 REGISTRY_EXPORT_PATTERN = re.compile(r"^\[(?P<key>.+)]$")
 REGISTRY_VALUE_PATTERN = re.compile(r'^(?P<name>@|"[^"]+")=(?P<value>.*)$')
 REGISTRY_HIVE_SIGNATURE = b"regf"
@@ -258,6 +258,10 @@ def build_registry_hive_record(
             "recommended_parsers": ["RECmd", "Registry Explorer", "RegRipper", "Eric Zimmerman's Registry tools"],
             "native_header": dict(metadata),
             "registry_transaction_log_evidence": dict(metadata.get("transaction_log_evidence") or {}),
+            "registry_transaction_replay_profile": registry_transaction_replay_profile(
+                metadata.get("transaction_log_evidence") if isinstance(metadata.get("transaction_log_evidence"), Mapping) else {},
+                dirty=bool(metadata.get("dirty")),
+            ),
             "risk_flags": ["dirty-hive-sequence"] if metadata.get("dirty") else [],
             "risk_score": 30 if metadata.get("dirty") else 0,
             "raw_preview": f"{path.name} regf={regf_valid}",
@@ -539,6 +543,10 @@ def build_registry_key_tree_records(
                 "key_tree_path_evidence": path_evidence,
                 "registry_key_tree_relationships": relationship_profile,
                 "registry_transaction_log_evidence": dict(metadata.get("transaction_log_evidence") or {}),
+                "registry_transaction_replay_profile": registry_transaction_replay_profile(
+                    metadata.get("transaction_log_evidence") if isinstance(metadata.get("transaction_log_evidence"), Mapping) else {},
+                    dirty=bool(metadata.get("dirty")),
+                ),
                 "root_cell_offset": root_cell_offset,
                 "is_root_key": relationship_profile["is_root_key"],
                 "root_reachable": relationship_profile["root_reachable"],
@@ -570,6 +578,26 @@ def build_registry_key_tree_records(
                 "validation_flags": validation_flags,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
+                "registry_native_depth_readiness_profile": registry_native_depth_readiness_profile(
+                    family="key-tree",
+                    artifact_scope="key-tree-node",
+                    details={
+                        "source_path": str(path.resolve()),
+                        "source_hashes": dict(source_hashes),
+                        "hive_name": path.name,
+                        "hive_hint": hive_hint_from_path(path),
+                        "cell_offset": key_node.get("cell_offset", 0),
+                        "key_path": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+                        "name": key_node.get("name", ""),
+                        "key_path_confidence": path_confidence,
+                        "subkey_cell_offsets": subkey_offsets,
+                        "value_cell_offsets": value_offsets,
+                        "registry_validation_matrix": validation_matrix,
+                        "registry_report_grade_assessment": report_grade_assessment,
+                        "registry_transaction_log_evidence": dict(metadata.get("transaction_log_evidence") or {}),
+                        "registry_native_capabilities": REGISTRY_NATIVE_CAPABILITIES,
+                    },
+                ),
                 "core_accuracy_gates": core_accuracy_gates,
                 "commercial_uplift_evidence": registry_commercial_uplift_evidence(
                     gap_ids=["#4"],
@@ -677,9 +705,33 @@ def build_registry_key_recovery_records(
                 "registry_recovery_validation_profile": recovery_profile,
                 "registry_recovery_reportability_decision": recovery_profile["reportability_decision"],
                 "registry_transaction_log_evidence": dict(transaction_log_evidence),
+                "registry_transaction_replay_profile": registry_transaction_replay_profile(
+                    transaction_log_evidence,
+                    dirty=bool(metadata.get("dirty")),
+                ),
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
+                "registry_native_depth_readiness_profile": registry_native_depth_readiness_profile(
+                    family="deleted-cell",
+                    artifact_scope="key-recovery-candidate",
+                    details={
+                        "source_path": str(path.resolve()),
+                        "source_hashes": dict(source_hashes),
+                        "hive_name": path.name,
+                        "hive_hint": hive_hint_from_path(path),
+                        "cell_offset": candidate.get("cell_offset", 0),
+                        "key_path_candidate": f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+                        "name": candidate.get("name", ""),
+                        "allocation_status": candidate.get("allocation_status", ""),
+                        "candidate_kind": "deleted-or-free-key-cell",
+                        "registry_recovery_evidence": recovery_evidence,
+                        "registry_recovery_validation_profile": recovery_profile,
+                        "registry_validation_matrix": validation_matrix,
+                        "registry_report_grade_assessment": report_grade_assessment,
+                        "registry_transaction_log_evidence": dict(transaction_log_evidence),
+                    },
+                ),
                 "core_accuracy_gates": core_accuracy_gates,
                 "commercial_uplift_evidence": registry_commercial_uplift_evidence(
                     gap_ids=["#5"],
@@ -816,9 +868,34 @@ def build_registry_value_recovery_records(
                 "registry_recovery_validation_profile": recovery_profile,
                 "registry_recovery_reportability_decision": recovery_profile["reportability_decision"],
                 "registry_transaction_log_evidence": dict(transaction_log_evidence),
+                "registry_transaction_replay_profile": registry_transaction_replay_profile(
+                    transaction_log_evidence,
+                    dirty=bool(metadata.get("dirty")),
+                ),
                 "validation_required": True,
                 "registry_validation_matrix": validation_matrix,
                 "registry_report_grade_assessment": report_grade_assessment,
+                "registry_native_depth_readiness_profile": registry_native_depth_readiness_profile(
+                    family="deleted-cell",
+                    artifact_scope="value-recovery-candidate",
+                    details={
+                        "source_path": str(path.resolve()),
+                        "source_hashes": dict(source_hashes),
+                        "hive_name": path.name,
+                        "hive_hint": hive_hint_from_path(path),
+                        "cell_offset": candidate.get("cell_offset", 0),
+                        "name": candidate.get("name", ""),
+                        "allocation_status": candidate.get("allocation_status", ""),
+                        "candidate_kind": "deleted-or-free-value-cell",
+                        "parent_key_path_candidate": parent_path,
+                        "decoded_data_preview": decoded_data,
+                        "registry_recovery_evidence": recovery_evidence,
+                        "registry_recovery_validation_profile": recovery_profile,
+                        "registry_validation_matrix": validation_matrix,
+                        "registry_report_grade_assessment": report_grade_assessment,
+                        "registry_transaction_log_evidence": dict(transaction_log_evidence),
+                    },
+                ),
                 "core_accuracy_gates": core_accuracy_gates,
                 "commercial_uplift_evidence": registry_commercial_uplift_evidence(
                     gap_ids=["#5"],
@@ -983,6 +1060,20 @@ def registry_recovery_validation_profile(
         "parent_confidence": str(recovery_evidence.get("parent_confidence") or ""),
         "decoded_data_present": bool(recovery_evidence.get("decoded_data_present")),
         "failed_validation_checks": failed_checks,
+        "independent_validation_status": "required",
+        "false_positive_controls": [
+            "positive-size-free-cell-confirmation",
+            "cell-signature-confirmation",
+            "allocator-context-review",
+            "parent-or-path-link-review",
+            "second-parser-offset-diff",
+            "known-answer-deleted-cell-corpus",
+        ],
+        "false_positive_risk": "high" if failed_checks else "medium-validation-required",
+        "analyst_wording": (
+            "Report as a deleted/free registry cell candidate only; do not state that the key/value was deleted "
+            "until independent offset, allocator, transaction-log, and corpus validation pass."
+        ),
         "reportable_without_secondary_validation": False,
         "reportability_decision": reportability_decision,
         "required_independent_checks": sorted(set(required_checks)),
@@ -1202,6 +1293,142 @@ def registry_commercial_uplift_evidence(
     }
 
 
+def registry_native_depth_readiness_profile(
+    *,
+    family: str,
+    artifact_scope: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    validation_matrix = (
+        details.get("registry_validation_matrix")
+        if isinstance(details.get("registry_validation_matrix"), list)
+        else []
+    )
+    report_grade = (
+        details.get("registry_report_grade_assessment")
+        if isinstance(details.get("registry_report_grade_assessment"), Mapping)
+        else {}
+    )
+    transaction_log_evidence = (
+        details.get("transaction_log_evidence")
+        if isinstance(details.get("transaction_log_evidence"), Mapping)
+        else details.get("registry_transaction_log_evidence")
+        if isinstance(details.get("registry_transaction_log_evidence"), Mapping)
+        else {}
+    )
+    recovery_profile = (
+        details.get("recovery_profile")
+        if isinstance(details.get("recovery_profile"), Mapping)
+        else details.get("registry_recovery_validation_profile")
+        if isinstance(details.get("registry_recovery_validation_profile"), Mapping)
+        else {}
+    )
+    decoded_components = registry_depth_components(family, details, transaction_log_evidence, recovery_profile)
+    total_components = len(decoded_components)
+    decoded_count = sum(1 for value in decoded_components.values() if value)
+    blockers = sorted(
+        set(str(item) for item in report_grade.get("blockers") or [])
+        | set(REGISTRY_REPORT_GRADE_BLOCKERS)
+    )
+    return {
+        "profile_version": "registry-native-depth-readiness-v1",
+        "parser_version": PARSER_VERSION,
+        "family": family,
+        "artifact_scope": artifact_scope,
+        "commercial_grade_ready": False,
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "status": "triage-depth-improved-report-grade-blocked",
+        "depth_score": round(decoded_count / total_components, 3) if total_components else 0.0,
+        "decoded_component_count": decoded_count,
+        "total_component_count": total_components,
+        "decoded_components": decoded_components,
+        "validation_summary": {
+            "passed_ids": [
+                str(item.get("id"))
+                for item in validation_matrix
+                if isinstance(item, Mapping) and item.get("passed")
+            ],
+            "failed_ids": [
+                str(item.get("id"))
+                for item in validation_matrix
+                if isinstance(item, Mapping) and not item.get("passed")
+            ],
+            "transaction_log_status": str(transaction_log_evidence.get("status") or "unknown"),
+            "transaction_log_replay_applied": bool(transaction_log_evidence.get("transaction_log_replay_applied")),
+            "recovery_validation_status": str(recovery_profile.get("independent_validation_status") or ""),
+        },
+        "source_citation_requirements": [
+            "source_path",
+            "source_sha256",
+            "parser_version",
+            "hive_name",
+            "cell_offset",
+            "key_path_or_value_name",
+            "transaction_log_status",
+            "validation_status",
+        ],
+        "source_provenance": {
+            "source_path": str(details.get("source_path") or ""),
+            "source_sha256": (
+                details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+            ).get("sha256", ""),
+            "hive_name": str(details.get("hive_name") or ""),
+            "hive_hint": str(details.get("hive_hint") or ""),
+            "cell_offset": details.get("cell_offset", ""),
+            "key_path": str(details.get("key_path") or details.get("key_path_candidate") or ""),
+            "value_name": str(details.get("name") or ""),
+        },
+        "blockers": blockers,
+        "next_internal_actions": [
+            "Implement LOG1/LOG2 transaction replay or attach explicit absence proof.",
+            "Diff key paths/value ownership/deleted-cell offsets against RECmd or Registry Explorer output.",
+            "Validate deleted/free cells against known-answer allocated, deleted, overwritten, and false-positive hive fixtures.",
+            "Decode binary value/security descriptor structures before report-grade claims.",
+        ],
+        "analyst_warning": (
+            "Use registry rows as source-linked triage/review pivots until transaction replay, trusted parser diff, "
+            "and deleted-cell corpus evidence are attached."
+        ),
+    }
+
+
+def registry_depth_components(
+    family: str,
+    details: Mapping[str, object],
+    transaction_log_evidence: Mapping[str, object],
+    recovery_profile: Mapping[str, object],
+) -> dict[str, bool]:
+    if family == "key-tree":
+        return {
+            "regf_header": bool(details.get("registry_native_capabilities", {}).get("regf_header", False))
+            if isinstance(details.get("registry_native_capabilities"), Mapping)
+            else True,
+            "hbin_cell_walk": True,
+            "nk_key_cell_decode": bool(details.get("name") or details.get("key_path")),
+            "parent_chain_path_reconstruction": bool(details.get("key_path_confidence") == "parent-chain"),
+            "subkey_list_linking": bool(details.get("subkey_cell_offsets") is not None),
+            "value_list_linking": bool(details.get("value_cell_offsets") is not None),
+            "transaction_log_context_recorded": bool(transaction_log_evidence.get("status")),
+            "transaction_log_replay": bool(transaction_log_evidence.get("transaction_log_replay_applied")),
+            "trusted_key_tree_diff": False,
+        }
+    return {
+        "regf_header": True,
+        "hbin_cell_walk": True,
+        "deleted_free_cell_candidate_labeling": bool(details.get("allocation_status") == "free-or-deleted-candidate"),
+        "cell_signature_confirmed": str(details.get("candidate_kind") or "").startswith("deleted-or-free")
+        or bool((details.get("registry_recovery_evidence") or {}).get("cell_signature"))
+        if isinstance(details.get("registry_recovery_evidence"), Mapping)
+        else bool(details.get("candidate_kind")),
+        "parent_or_path_context": bool(details.get("parent_key_path_candidate") or details.get("key_path_candidate")),
+        "inline_value_preview": bool(details.get("decoded_data_preview")),
+        "recovery_reportability_decision": bool(recovery_profile.get("reportability_decision")),
+        "transaction_log_context_recorded": bool(transaction_log_evidence.get("status")),
+        "transaction_log_replay": bool(transaction_log_evidence.get("transaction_log_replay_applied")),
+        "trusted_deleted_cell_diff": False,
+    }
+
+
 def registry_commercial_blocker_analysis(blockers: Sequence[object]) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for raw in blockers:
@@ -1387,6 +1614,7 @@ def build_registry_deleted_cell_diff(
 
 
 def _normalize_registry_key_tree_node(node: Mapping[str, object]) -> tuple[str, dict[str, str]]:
+    node = _registry_row_payload(node)
     key_path = str(node.get("key_path") or node.get("path") or node.get("key") or "").strip()
     if not key_path:
         return "", {}
@@ -1406,6 +1634,7 @@ def _normalize_registry_key_tree_node(node: Mapping[str, object]) -> tuple[str, 
 
 
 def _normalize_registry_deleted_cell_candidate(candidate: Mapping[str, object]) -> tuple[str, dict[str, str]]:
+    candidate = _registry_row_payload(candidate)
     offset = str(candidate.get("cell_offset") or candidate.get("offset") or candidate.get("byte_offset") or "").strip()
     if not offset:
         return "", {}
@@ -1428,6 +1657,20 @@ def _normalize_registry_deleted_cell_candidate(candidate: Mapping[str, object]) 
             str(candidate.get("parent_key_path_candidate") or candidate.get("parent_key_path") or "")
         ),
     }
+
+
+def _registry_row_payload(record: Mapping[str, object]) -> Mapping[str, object]:
+    """Accept flat registry exports and RapidTriage artifact rows with nested details."""
+
+    details = record.get("details") if isinstance(record.get("details"), Mapping) else {}
+    if not details:
+        return record
+    flattened = dict(details)
+    for key, value in record.items():
+        if key == "details":
+            continue
+        flattened.setdefault(key, value)
+    return flattened
 
 
 def _normalize_registry_numeric_string(value: str) -> str:
@@ -1504,6 +1747,12 @@ def build_registry_user_activity_from_reg(
     if classification is None:
         return None
     decoded_values = decode_user_activity_values(key, values)
+    normalized_rows = build_normalized_user_activity_rows(
+        key=key,
+        classification=classification,
+        decoded_values=decoded_values,
+        source_format="reg",
+    )
     risk_flags = user_activity_risk_flags(classification["category"], key, decoded_values)
     return ArtifactRecord(
         provider=WindowsRegistryProvider.name,
@@ -1526,6 +1775,16 @@ def build_registry_user_activity_from_reg(
             "value_count": len(values),
             "value_names": sorted(values),
             "decoded_values": decoded_values,
+            "normalized_activity_rows": normalized_rows,
+            "normalized_activity_row_count": len(normalized_rows),
+            "registry_user_activity_profile": registry_user_activity_profile(
+                source_format="reg",
+                key=key,
+                classification=classification,
+                decoded_values=decoded_values,
+                normalized_rows=normalized_rows,
+                metadata={"source_hashes": dict(source_hashes), "regf_valid": True},
+            ),
             "parser_confidence": 0.86,
             "evidence_strength": "registry-export-key",
             "risk_flags": risk_flags,
@@ -1554,6 +1813,12 @@ def build_registry_user_activity_from_hive_strings(
         if key in emitted:
             continue
         emitted.add(key)
+        normalized_rows = build_normalized_user_activity_rows(
+            key=value,
+            classification=classification,
+            decoded_values={},
+            source_format="registry-hive",
+        )
         risk_flags = user_activity_risk_flags(classification["category"], value, {})
         yield ArtifactRecord(
             provider=WindowsRegistryProvider.name,
@@ -1575,6 +1840,16 @@ def build_registry_user_activity_from_hive_strings(
                 "activity_label": classification["label"],
                 "string_index": index,
                 "string_value": value,
+                "normalized_activity_rows": normalized_rows,
+                "normalized_activity_row_count": len(normalized_rows),
+                "registry_user_activity_profile": registry_user_activity_profile(
+                    source_format="registry-hive",
+                    key=value,
+                    classification=classification,
+                    decoded_values={},
+                    normalized_rows=normalized_rows,
+                    metadata=metadata,
+                ),
                 "parser_confidence": 0.52 if metadata.get("regf_valid") else 0.25,
                 "evidence_strength": "registry-hive-string-candidate",
                 "risk_flags": risk_flags,
@@ -1885,25 +2160,256 @@ def decode_user_activity_values(key: str, values: Mapping[str, str]) -> dict[str
     lowered_key = key.lower()
     for name, raw_value in sorted(values.items()):
         cleaned = clean_reg_value(raw_value)
-        item: dict[str, object] = {"raw": cleaned}
+        payload_bytes = reg_export_hex_to_bytes(cleaned)
+        payload_strings = extract_utf16le_strings(payload_bytes)[:8] if payload_bytes else []
+        item: dict[str, object] = {
+            "raw": cleaned,
+            "value_name": name,
+            "mru_position": mru_position_from_value_name(name),
+        }
+        if payload_bytes:
+            item["binary_payload"] = {
+                "byte_count": len(payload_bytes),
+                "sha256": hashlib.sha256(payload_bytes).hexdigest(),
+                "utf16le_strings": payload_strings,
+                "decode_status": "bounded-payload-hash-and-string-scan",
+            }
         if "userassist" in lowered_key:
             item["decoded_name"] = decode_rot13_registry_value_name(name)
+            item["activity_value"] = item["decoded_name"]
             item["note"] = "UserAssist value names are ROT13 encoded; binary counters require a dedicated parser for run counts and timestamps."
         elif "typedurls" in lowered_key or "typedpaths" in lowered_key:
             item["typed_value"] = cleaned
+            item["activity_value"] = cleaned
         elif "runmru" in lowered_key:
             item["command"] = cleaned
+            item["activity_value"] = cleaned
         elif "run" in lowered_key:
             item["command"] = cleaned
             item["executable_hint"] = executable_hint(cleaned)
+            item["activity_value"] = cleaned
+        elif "recentdocs" in lowered_key:
+            item["recent_document_hint"] = payload_strings[0] if payload_strings else cleaned
+            item["activity_value"] = item["recent_document_hint"]
+        elif "opensavepidlmru" in lowered_key or "lastvisitedpidlmru" in lowered_key:
+            item["file_dialog_hint"] = payload_strings[0] if payload_strings else cleaned
+            item["activity_value"] = item["file_dialog_hint"]
+        elif "mountpoints2" in lowered_key:
+            item["mount_point_hint"] = name.strip("#")
+            item["activity_value"] = item["mount_point_hint"]
+        elif "\\network\\" in lowered_key:
+            item["network_share_hint"] = key.split("\\Network\\", 1)[-1] if "\\Network\\" in key else cleaned
+            item["activity_value"] = item["network_share_hint"]
         else:
             item["value"] = cleaned
+            item["activity_value"] = cleaned
         decoded[name] = item
     return decoded
 
 
+def build_normalized_user_activity_rows(
+    *,
+    key: str,
+    classification: Mapping[str, str],
+    decoded_values: Mapping[str, object],
+    source_format: str,
+) -> list[dict[str, object]]:
+    category = str(classification.get("category") or "")
+    label = str(classification.get("label") or "")
+    if not decoded_values:
+        return [
+            {
+                "activity_family": category,
+                "activity_label": label,
+                "key": key,
+                "value_name": "",
+                "display_value": key,
+                "source_format": source_format,
+                "confidence": 0.52 if source_format == "registry-hive" else 0.7,
+                "reportability": "triage-pivot",
+                "normalization_status": "key-or-string-only",
+                "citation": {"registry_key": key, "value_name": ""},
+            }
+        ]
+    rows: list[dict[str, object]] = []
+    for value_name, raw_item in sorted(decoded_values.items()):
+        item = raw_item if isinstance(raw_item, Mapping) else {"activity_value": str(raw_item)}
+        display_value = str(
+            item.get("activity_value")
+            or item.get("typed_value")
+            or item.get("command")
+            or item.get("recent_document_hint")
+            or item.get("file_dialog_hint")
+            or item.get("value")
+            or item.get("raw")
+            or ""
+        )
+        payload = item.get("binary_payload") if isinstance(item.get("binary_payload"), Mapping) else {}
+        rows.append(
+            {
+                "activity_family": category,
+                "activity_label": label,
+                "key": key,
+                "value_name": str(value_name),
+                "display_value": display_value,
+                "source_format": source_format,
+                "mru_position": item.get("mru_position"),
+                "binary_payload_sha256": str(payload.get("sha256") or ""),
+                "binary_payload_byte_count": int(payload.get("byte_count") or 0),
+                "confidence": 0.86 if source_format == "reg" else 0.52,
+                "reportability": "review-pivot" if source_format == "reg" else "triage-pivot",
+                "normalization_status": "value-normalized",
+                "citation": {"registry_key": key, "value_name": str(value_name)},
+            }
+        )
+    return rows
+
+
+def registry_user_activity_profile(
+    *,
+    source_format: str,
+    key: str,
+    classification: Mapping[str, str],
+    decoded_values: Mapping[str, object],
+    normalized_rows: Sequence[Mapping[str, object]] | None = None,
+    metadata: Mapping[str, object],
+) -> dict[str, object]:
+    category = str(classification.get("category") or "")
+    decoded_count = len(decoded_values)
+    normalized_rows = list(normalized_rows or [])
+    reg_export = source_format == "reg"
+    regf_valid = bool(metadata.get("regf_valid", reg_export))
+    source_hashes = metadata.get("source_hashes") if isinstance(metadata.get("source_hashes"), Mapping) else {}
+    return {
+        "profile_version": "registry-user-activity-normalization-v1",
+        "commercial_batch_id": "commercial-uplift-011-015",
+        "item_number": 11,
+        "target_artifacts": [
+            "UserAssist",
+            "RecentDocs",
+            "RunMRU",
+            "TypedURLs",
+            "TypedPaths",
+            "OpenSavePidlMRU",
+            "LastVisitedPidlMRU",
+            "ShellBags",
+            "MountPoints2",
+            "Network",
+            "ComDlg32",
+        ],
+        "activity_category": category,
+        "activity_label": str(classification.get("label") or ""),
+        "matched_pattern": str(classification.get("matched_pattern") or ""),
+        "source_format": source_format,
+        "current_decode_level": "normalized-values" if reg_export else "native-hive-string-pivot",
+        "decoded_value_count": decoded_count,
+        "normalized_activity_row_count": len(normalized_rows),
+        "normalized_activity_schema": {
+            "fields": [
+                "activity_family",
+                "activity_label",
+                "key",
+                "value_name",
+                "display_value",
+                "mru_position",
+                "binary_payload_sha256",
+                "citation",
+            ],
+            "safe_for_search_index": True,
+            "binary_payload_policy": "hash-and-bounded-string-scan-only",
+        },
+        "target_artifact_coverage": user_activity_target_coverage(category, key, decoded_values),
+        "source_integrity": {
+            "source_sha256": source_hashes.get("sha256", ""),
+            "regf_valid": regf_valid,
+            "key_or_string_present": bool(key),
+        },
+        "reportability_decision": {
+            "decision": "review-grade-user-activity-pivot" if reg_export else "do-not-report-as-final-user-activity",
+            "allowed_use": "searchable-user-activity-row",
+            "validation_required": not reg_export,
+            "required_before_report": [
+                "replay NTUSER.DAT/UsrClass.dat LOG transaction files when present",
+                "decode binary UserAssist/ShellBag/MRU payloads with source offsets",
+                "cross-check timestamps and user attribution against profile path and account SID",
+                "diff critical rows against RECmd/ShellBagsExplorer/UserAssist parser output",
+            ],
+        },
+        "large_data_controls": {
+            "normalized_row_is_small": True,
+            "raw_binary_payloads_are_not_expanded": True,
+            "safe_for_case_db_indexing": True,
+        },
+        "analyst_wording": (
+            "Registry export row normalized into a user activity artifact."
+            if reg_export
+            else "Hive string pivot only; treat as a lead until a native key/value parser confirms the path and values."
+        ),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "native-user-hive-binary-payload-decode-required",
+            "ntuser-usrclass-transaction-log-replay-required",
+            "trusted-user-activity-parser-diff-required",
+        ],
+    }
+
+
 def decode_rot13_registry_value_name(value: str) -> str:
     return value.translate(ROT13_TRANS)
+
+
+def reg_export_hex_to_bytes(value: str) -> bytes:
+    text = value.strip()
+    if not text.lower().startswith("hex"):
+        return b""
+    _, _, body = text.partition(":")
+    if not body:
+        return b""
+    cleaned = re.sub(r"[^0-9a-fA-F]", "", body)
+    if len(cleaned) < 2:
+        return b""
+    if len(cleaned) % 2:
+        cleaned = cleaned[:-1]
+    try:
+        return bytes.fromhex(cleaned)
+    except ValueError:
+        return b""
+
+
+def mru_position_from_value_name(value_name: str) -> int | None:
+    try:
+        return int(value_name)
+    except ValueError:
+        match = re.search(r"(\d+)$", value_name)
+        return int(match.group(1)) if match else None
+
+
+def user_activity_target_coverage(
+    category: str,
+    key: str,
+    decoded_values: Mapping[str, object],
+) -> dict[str, object]:
+    lowered_key = key.lower()
+    value_text = " ".join(str(item) for item in decoded_values.values()).lower()
+    combined = f"{lowered_key} {value_text}"
+    targets = {
+        "UserAssist": category == "execution" or "userassist" in combined,
+        "RecentDocs": category == "recent-document" or "recentdocs" in combined,
+        "RunMRU": category == "run-dialog-mru" or "runmru" in combined,
+        "TypedURLs": category == "browser-typed-url" or "typedurls" in combined,
+        "TypedPaths": category == "typed-path" or "typedpaths" in combined,
+        "OpenSavePidlMRU": category == "file-dialog-mru" or "opensavepidlmru" in combined,
+        "LastVisitedPidlMRU": category == "file-dialog-mru" or "lastvisitedpidlmru" in combined,
+        "ShellBags": category == "shellbag" or "bagmru" in combined or "\\bags" in combined,
+        "MountPoints2": category == "mounted-device" or "mountpoints2" in combined,
+        "Network": category == "network-share" or "\\network\\" in combined,
+        "ComDlg32": "comdlg32" in combined,
+    }
+    return {
+        "matched_targets": [name for name, matched in targets.items() if matched],
+        "missing_in_this_row": [name for name, matched in targets.items() if not matched],
+        "coverage_note": "Coverage is row-local; full case coverage is summarized by registry-summary user_activity_entries.",
+    }
 
 
 def user_activity_risk_flags(category: object, key: str, decoded_values: Mapping[str, object]) -> list[str]:
@@ -2427,12 +2933,16 @@ def registry_transaction_log_evidence(path: Path) -> dict[str, object]:
                 continue
             seen_present.add(identity)
             resolved = candidate.resolve()
+            header = parse_registry_transaction_log_header(candidate)
             present.append(
                 {
                     "path": str(resolved),
                     "name": candidate.name,
                     "size": stat.st_size,
                     "hashes": file_hashes(candidate),
+                    "header": header,
+                    "signature_status": header["signature_status"],
+                    "replay_readiness": registry_transaction_log_replay_readiness(header, stat.st_size),
                 }
             )
         else:
@@ -2441,14 +2951,36 @@ def registry_transaction_log_evidence(path: Path) -> dict[str, object]:
         status = "present-not-replayed"
     else:
         status = "absent"
+    expected_names = [candidate.name for candidate in candidates]
+    valid_log_count = sum(1 for item in present if item.get("signature_status") == "recognized-transaction-log")
+    invalid_log_count = len(present) - valid_log_count
+    replay_inputs = registry_transaction_replay_inputs(present)
     return {
         "profile_version": "registry-transaction-log-evidence-v1",
         "status": status,
         "transaction_log_replay_applied": False,
+        "replay_policy": "detect-and-disclose-only",
+        "replay_status": "not-applied",
         "present_count": len(present),
+        "recognized_log_count": valid_log_count,
+        "unrecognized_log_count": invalid_log_count,
         "missing_count": len(missing),
         "present_logs": present,
         "missing_log_names": missing,
+        "expected_log_names": expected_names,
+        "replay_inputs": replay_inputs,
+        "transaction_context_quality": registry_transaction_context_quality(
+            present_count=len(present),
+            recognized_log_count=valid_log_count,
+            expected_names=expected_names,
+            missing_names=missing,
+        ),
+        "impact_statement": (
+            "Transaction logs are present but not replayed; recent committed or rolled-back key/value changes may "
+            "be absent from native rows until replay or second-parser comparison is attached."
+            if present
+            else "No adjacent transaction logs were found; native rows reflect the hive file as supplied, but absence should be confirmed against collection scope."
+        ),
         "commercial_blocker": "transaction-log-replay-not-implemented",
         "validation_guidance": (
             "LOG1/LOG2 presence is recorded so analysts can distinguish absent transaction context from "
@@ -2465,6 +2997,159 @@ def registry_transaction_log_candidates(path: Path) -> list[Path]:
         path.with_name(f"{path.name}.log1"),
         path.with_name(f"{path.name}.log2"),
     ]
+
+
+def parse_registry_transaction_log_header(path: Path) -> dict[str, object]:
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(512)
+    except OSError as exc:
+        return {
+            "profile_version": "registry-transaction-log-header-v1",
+            "signature": "",
+            "signature_hex": "",
+            "signature_status": "unreadable",
+            "read_error": str(exc)[:200],
+            "header_size_observed": 0,
+            "likely_log_version": "unknown",
+            "sequence_number": 0,
+            "hive_sequence_hint": 0,
+            "flags": 0,
+        }
+    signature = header[:4]
+    signature_text = signature.decode("ascii", errors="replace")
+    recognized = signature in {b"HvLE", b"HvLG", b"regf"}
+    likely_version = "windows-registry-transaction-log" if signature in {b"HvLE", b"HvLG"} else "legacy-or-hive-like"
+    if not recognized:
+        likely_version = "unknown"
+    return {
+        "profile_version": "registry-transaction-log-header-v1",
+        "signature": signature_text,
+        "signature_hex": signature.hex(),
+        "signature_status": "recognized-transaction-log" if signature in {b"HvLE", b"HvLG"} else ("hive-like-header" if signature == b"regf" else "unrecognized"),
+        "read_error": "",
+        "header_size_observed": len(header),
+        "likely_log_version": likely_version,
+        "sequence_number": read_u32(header, 4),
+        "hive_sequence_hint": read_u32(header, 8),
+        "flags": read_u32(header, 12),
+    }
+
+
+def registry_transaction_log_replay_readiness(header: Mapping[str, object], size: int) -> dict[str, object]:
+    recognized = header.get("signature_status") == "recognized-transaction-log"
+    sufficient_size = size >= 512
+    return {
+        "profile_version": "registry-transaction-log-replay-readiness-v1",
+        "header_recognized": recognized,
+        "size_bytes": size,
+        "minimum_header_present": sufficient_size,
+        "candidate_for_future_replay": bool(recognized and sufficient_size),
+        "blockers": []
+        if recognized and sufficient_size
+        else [
+            blocker
+            for blocker, failed in (
+                ("transaction-log-header-not-recognized", not recognized),
+                ("transaction-log-header-too-small", not sufficient_size),
+            )
+            if failed
+        ],
+    }
+
+
+def registry_transaction_replay_inputs(present_logs: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    names = {str(item.get("name") or "").lower(): item for item in present_logs}
+    log1 = next((item for name, item in names.items() if name.endswith(".log1")), None)
+    log2 = next((item for name, item in names.items() if name.endswith(".log2")), None)
+    valid_logs = [
+        item
+        for item in present_logs
+        if isinstance(item.get("replay_readiness"), Mapping)
+        and item["replay_readiness"].get("candidate_for_future_replay")
+    ]
+    return {
+        "profile_version": "registry-transaction-replay-inputs-v1",
+        "log1_present": log1 is not None,
+        "log2_present": log2 is not None,
+        "recognized_replay_input_count": len(valid_logs),
+        "complete_log_pair_present": log1 is not None and log2 is not None,
+        "ready_for_future_internal_replay": bool(valid_logs),
+        "replay_input_names": [str(item.get("name") or "") for item in valid_logs],
+        "remaining_before_internal_replay": [
+            "implement HvLE/HvLG log block replay",
+            "verify sequence handling against dirty hive base block",
+            "diff replayed hive tree against Registry Explorer/RECmd output",
+        ],
+    }
+
+
+def registry_transaction_context_quality(
+    *,
+    present_count: int,
+    recognized_log_count: int,
+    expected_names: Sequence[str],
+    missing_names: Sequence[str],
+) -> dict[str, object]:
+    if present_count == 0:
+        level = "absent"
+    elif recognized_log_count == present_count:
+        level = "recognized-logs-present"
+    elif recognized_log_count:
+        level = "mixed-recognized-and-unrecognized"
+    else:
+        level = "present-but-unrecognized"
+    return {
+        "profile_version": "registry-transaction-context-quality-v1",
+        "level": level,
+        "present_count": present_count,
+        "recognized_log_count": recognized_log_count,
+        "expected_count": len(expected_names),
+        "missing_count": len(missing_names),
+        "analyst_note": (
+            "Recognized LOG files are available as replay inputs, but RapidTriage has not applied replay."
+            if recognized_log_count
+            else "No recognized LOG replay input is available from the supplied collection."
+        ),
+    }
+
+
+def registry_transaction_replay_profile(transaction_log_evidence: Mapping[str, object], *, dirty: bool = False) -> dict[str, object]:
+    status = str(transaction_log_evidence.get("status") or "unknown")
+    replay_applied = bool(transaction_log_evidence.get("transaction_log_replay_applied"))
+    required = status == "present-not-replayed" or dirty
+    replay_inputs = (
+        transaction_log_evidence.get("replay_inputs")
+        if isinstance(transaction_log_evidence.get("replay_inputs"), Mapping)
+        else {}
+    )
+    quality = (
+        transaction_log_evidence.get("transaction_context_quality")
+        if isinstance(transaction_log_evidence.get("transaction_context_quality"), Mapping)
+        else {}
+    )
+    blockers = []
+    if required and not replay_applied:
+        blockers.append("transaction-log-replay-or-second-parser-diff-required")
+    if dirty:
+        blockers.append("dirty-hive-sequence-requires-transaction-context")
+    return {
+        "profile_version": "registry-transaction-replay-profile-v1",
+        "transaction_log_status": status,
+        "transaction_log_replay_applied": replay_applied,
+        "dirty_hive_sequence": dirty,
+        "replay_required_for_report_grade": required,
+        "replay_policy": "detect-and-disclose-only",
+        "recognized_replay_input_count": int(replay_inputs.get("recognized_replay_input_count") or 0),
+        "complete_log_pair_present": bool(replay_inputs.get("complete_log_pair_present")),
+        "transaction_context_quality": str(quality.get("level") or ""),
+        "blockers": sorted(set(blockers)),
+        "impact_statement": str(transaction_log_evidence.get("impact_statement") or ""),
+        "required_before_report": [
+            "apply LOG1/LOG2 replay with verified parser",
+            "or attach second-parser/export diff proving current hive rows",
+        ] if required else ["document transaction log absence and collection scope"],
+    }
 
 
 def registry_key_tree_validation_matrix(

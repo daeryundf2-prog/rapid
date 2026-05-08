@@ -11,7 +11,7 @@
       "status": "pass",
       "backlog_items": [81],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py", "tests/test_rapidtriage_core_forensics_accuracy.py"],
-      "expected": {"required_assertions": ["Validation output preserves manifest ingestion, dataset counts, evidence-path checks, public corpus guidance, release gate, trusted known-answer manifest diff helpers/gates, and #81 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Validation output preserves manifest ingestion, dataset counts, expected assertions, evidence-path checks, evidence file SHA256 values, dataset hashes, manifest digest, public corpus guidance, release gate, trusted known-answer manifest diff helpers/gates, and #81 core_accuracy_gates."]},
       "notes": "Internal fixture pass; public CFReDS/CFTT corpus execution, trusted known-answer manifests, and reviewer signoff remain blockers."
     },
     {
@@ -22,7 +22,7 @@
       "status": "pass",
       "backlog_items": [82],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Parser fixture corpus output preserves parser areas, fixture/test counts, expected edge cases, coverage status, release gate, trusted fixture corpus manifest diff helpers/gates, and #82 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Parser fixture corpus output preserves parser areas, fixture/test counts, fixture/test file SHA256 values, area manifest hashes, fixture_corpus_digest, expected edge cases, coverage status, release gate, trusted fixture corpus manifest diff helpers/gates, and #82 core_accuracy_gates."]},
       "notes": "Internal fixture pass; broader malformed/deleted/versioned corpus and trusted fixture corpus manifests remain blockers."
     },
     {
@@ -33,7 +33,7 @@
       "status": "pass",
       "backlog_items": [83],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Parser FP/FN notes preserve false-positive risks, false-negative risks, validation-required guidance, parser scope, quantification warning, trusted FP/FN risk register diff helpers/gates, and #83 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Parser FP/FN notes preserve false-positive risks, false-negative risks, validation-required guidance, parser scope, quantification warning, risk_note_hash values, minimum quantification fields, reportability boundaries, parser-fp-fn-risk-register-v1 digest, trusted FP/FN risk register diff helpers/gates, and #83 core_accuracy_gates."]},
       "notes": "Internal fixture pass; quantified FP/FN rates and reviewed risk register remain blockers."
     },
     {
@@ -44,7 +44,7 @@
       "status": "pass",
       "backlog_items": [84],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py", "tests/test_rapidtriage_final_roadmap.py"],
-      "expected": {"required_assertions": ["Independent validation report output preserves status, required signoffs, minimum sections, optional report hash/size, not-attached blocker, trusted independent validation signoff diff helpers/gates, and #84 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Independent validation report output preserves status, required signoffs, signoff slots, minimum sections, minimum-section presence checks, optional report hash/size, independent-validation-report-manifest-v1 report manifest hash, not-attached blocker, trusted independent validation signoff diff helpers/gates, and #84 core_accuracy_gates."]},
       "notes": "Internal fixture pass; actual third-party signed validation and trusted signoff manifest remain operator-owned."
     },
     {
@@ -55,7 +55,7 @@
       "status": "pass",
       "backlog_items": [85],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Validation package outputs preserve JSON, Markdown, artifact hash manifest, known-answer/fixture sections, package limitation warning, trusted validation package manifest diff helpers/gates, and #85 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Validation package outputs preserve JSON, Markdown, artifact hash manifest, validation-package-manifest-v1, artifact hash rows, package_manifest_hash, reproduction commands, known-answer/fixture sections, package limitation warning, trusted validation package manifest diff helpers/gates, and #85 core_accuracy_gates."]},
       "notes": "Internal fixture pass; attached release test logs, trusted package manifests, and independent review remain blockers."
     },
     {
@@ -66,7 +66,7 @@
       "status": "pass",
       "backlog_items": [86],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report export preserves evidence-source inventory, custody events, citation IDs, source status/hash fields, acquisition metadata warning, trusted custody event manifest diff helpers/gates, and #86 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Case DB report export preserves evidence-source inventory, custody events, citation IDs, source status/hash fields, custody row hashes, custody-event-manifest-v1, custody manifest hash, acquisition metadata warning, trusted custody event manifest diff helpers/gates, and #86 core_accuracy_gates."]},
       "notes": "Internal fixture pass; signed handoff/acquisition metadata and trusted custody event manifests remain blockers."
     },
     {
@@ -77,7 +77,7 @@
       "status": "pass",
       "backlog_items": [87],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report export preserves evidence-source hashes, hash records, algorithms, calculation timestamps, missing-hash warning, trusted acquisition hash manifest diff helpers/gates, and #87 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Case DB report export preserves evidence-source hashes, hash records, algorithms, calculation timestamps, per-row acquisition hash digests, acquisition-hash-manifest-v1 manifest hash, algorithm coverage, missing-hash warning, trusted acquisition hash manifest diff helpers/gates, and #87 core_accuracy_gates."]},
       "notes": "Internal fixture pass; whole-device acquisition hash metadata and trusted acquisition hash manifests remain blockers."
     },
     {
@@ -88,7 +88,7 @@
       "status": "pass",
       "backlog_items": [88],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report export preserves audit events, previous/event hash chain, actor/action/target/time fields, head hash, notarization warning, trusted audit hash-chain manifest diff helpers/gates, and #88 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Case DB report export preserves audit events, previous/event hash chain, actor/action/target/time fields, head hash, audit-hash-chain-manifest-v1 manifest hash, notarization warning, trusted audit hash-chain manifest diff helpers/gates, and #88 core_accuracy_gates."]},
       "notes": "Internal fixture pass; DB-level append-only enforcement, trusted audit chain manifests, and external notarization remain blockers."
     },
     {
@@ -99,7 +99,7 @@
       "status": "pass",
       "backlog_items": [89],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Report export preserves stable payload hash, deterministic sorting, item/citation counts, volatile-field disclosure, replay warning, trusted report replay manifest diff helpers/gates, and #89 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Report export preserves stable payload hash, deterministic sorting, item/citation counts, item/citation row digests, report-replay-manifest-v1 manifest hash, volatile-field disclosure, replay warning, trusted report replay manifest diff helpers/gates, and #89 core_accuracy_gates."]},
       "notes": "Internal fixture pass; cross-platform same-input replay validation and trusted report replay manifests remain blockers."
     },
     {
@@ -110,7 +110,7 @@
       "status": "pass",
       "backlog_items": [90],
       "evidence_paths": ["docs/validation/core-forensics-081-090-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Report items preserve source paths, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, trusted report provenance manifest diff helpers/gates, and #90 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["Report items preserve source paths, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, provenance row hashes, report-provenance-row-manifest-v1 manifest hashes, trusted report provenance manifest diff helpers/gates, and #90 core_accuracy_gates."]},
       "notes": "Internal fixture pass; completeness validation across every parser and trusted provenance manifests remain blockers."
     }
   ]

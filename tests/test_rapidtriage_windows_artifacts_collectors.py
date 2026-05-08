@@ -16,34 +16,57 @@ from rapidtriage.artifacts.windows.eventlog import (
     native_evtx_core_accuracy_gates,
     native_evtx_promoted_fields,
 )
+from rapidtriage.artifacts.windows.execution import (
+    build_execution_artifact_trusted_diff,
+    collect_amcache_candidate_clusters,
+    collect_bam_dam_candidate_clusters,
+    collect_shimcache_candidate_clusters,
+    iter_registry_like_string_occurrences,
+)
 from rapidtriage.artifacts.windows.registry import (
     build_registry_deleted_cell_diff,
     build_registry_key_tree_diff,
+    collect_reg_export,
     collect_registry_hive,
 )
 from rapidtriage.artifacts.windows.filesystem import (
     build_mft_trusted_diff,
     build_usn_trusted_diff,
+    decode_mft_runlist,
     ntfs_core_accuracy_gates,
+    parse_mft_attribute,
+    parse_usn_record_at,
+    parse_usn_record_scan,
 )
 from rapidtriage.artifacts.windows.browser import (
     ai_transcript_core_accuracy_gates,
+    ai_transcript_commercial_uplift_evidence,
     browser_core_accuracy_gates,
     build_ai_transcript_trusted_diff,
     build_browser_storage_trusted_diff,
     build_browser_timeline_trusted_diff,
 )
-from rapidtriage.artifacts.windows.prefetch import build_prefetch_trusted_diff, prefetch_core_accuracy_gates
+from rapidtriage.artifacts.windows.prefetch import (
+    build_prefetch_trusted_diff,
+    prefetch_core_accuracy_gates,
+    prefetch_header_hints,
+)
 from rapidtriage.artifacts.windows.recent_files import (
     build_jumplist_trusted_diff,
     build_lnk_trusted_diff,
     jumplist_core_accuracy_gates,
     lnk_core_accuracy_gates,
+    parse_destlist_metadata,
+    parse_lnk_extra_data,
 )
 from rapidtriage.artifacts.windows.search_index import (
+    build_search_row_candidates,
     build_windows_edb_trusted_diff,
     windows_search_core_accuracy_gates,
 )
+from rapidtriage.artifacts.windows.srum_ese import build_srum_row_candidates
+from rapidtriage.artifacts.windows.os_account import decode_sam_binary_field
+from rapidtriage.artifacts.windows.os_account import build_os_account_trusted_diff
 from rapidtriage.artifacts.windows.shellbags import (
     WindowsShellbagsProvider,
     build_shellbag_trusted_diff,
@@ -57,6 +80,151 @@ FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "rapidtriage" / "w
 
 
 class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
+    def test_mft_nonresident_runlist_preview_decodes_runs_and_sparse_segments(self) -> None:
+        runlist = bytes([0x11, 0x03, 0x05, 0x21, 0x02, 0x01, 0x00, 0x01, 0x04, 0x00])
+
+        decoded = decode_mft_runlist(runlist)
+
+        self.assertEqual(decoded["status"], "decoded-preview")
+        self.assertEqual(decoded["run_count"], 3)
+        self.assertEqual(decoded["terminator_offset"], 9)
+        self.assertEqual(decoded["runs"][0]["cluster_count"], 3)
+        self.assertEqual(decoded["runs"][0]["absolute_lcn"], 5)
+        self.assertEqual(decoded["runs"][1]["absolute_lcn"], 6)
+        self.assertTrue(decoded["runs"][2]["sparse"])
+
+        attribute = bytearray(0x40 + len(runlist))
+        attribute[0:4] = (0x80).to_bytes(4, "little")
+        attribute[4:8] = len(attribute).to_bytes(4, "little")
+        attribute[8] = 1
+        attribute[14:16] = (7).to_bytes(2, "little")
+        attribute[24:32] = (8).to_bytes(8, "little")
+        attribute[32:34] = (0x40).to_bytes(2, "little")
+        attribute[40:48] = (4096 * 9).to_bytes(8, "little")
+        attribute[48:56] = (4096 * 9).to_bytes(8, "little")
+        attribute[56:64] = (4096 * 9).to_bytes(8, "little")
+        attribute[0x40:] = runlist
+
+        parsed = parse_mft_attribute(bytes(attribute), 0)
+
+        self.assertEqual(parsed["nonresident_metadata"]["runlist_decode_status"], "decoded-preview")
+        self.assertEqual(parsed["data"]["runlist_decode_status"], "decoded-preview")
+        self.assertEqual(parsed["data"]["runlist_preview"][0]["absolute_lcn"], 5)
+        self.assertTrue(parsed["data"]["runlist_preview"][2]["sparse"])
+
+    def test_mft_attribute_list_decodes_extension_reference_without_claiming_resolution(self) -> None:
+        entry = bytearray(32)
+        entry[0:4] = (0x80).to_bytes(4, "little")
+        entry[4:6] = (32).to_bytes(2, "little")
+        entry[8:16] = (4).to_bytes(8, "little")
+        entry[16:24] = ((9 << 48) | 321).to_bytes(8, "little")
+        entry[24:26] = (7).to_bytes(2, "little")
+        attribute = bytearray(0x18 + len(entry))
+        attribute[0:4] = (0x20).to_bytes(4, "little")
+        attribute[4:8] = len(attribute).to_bytes(4, "little")
+        attribute[14:16] = (4).to_bytes(2, "little")
+        attribute[16:20] = len(entry).to_bytes(4, "little")
+        attribute[20:22] = (0x18).to_bytes(2, "little")
+        attribute[0x18:] = entry
+
+        parsed = parse_mft_attribute(bytes(attribute), 0)
+
+        self.assertEqual(parsed["attribute_list"]["status"], "decoded")
+        self.assertFalse(parsed["attribute_list"]["resolved"])
+        self.assertEqual(parsed["attribute_list"]["entries"][0]["attribute_type_name"], "$DATA")
+        self.assertEqual(parsed["attribute_list"]["entries"][0]["lowest_vcn"], 4)
+        self.assertEqual(parsed["attribute_list"]["entries"][0]["extension_reference_decoded"]["record_number"], 321)
+        self.assertEqual(parsed["attribute_list"]["entries"][0]["extension_reference_decoded"]["sequence_number"], 9)
+
+    def test_usn_v4_extent_record_preserves_extent_cursor_evidence(self) -> None:
+        record = bytearray(80)
+        record[0:4] = (80).to_bytes(4, "little")
+        record[4:6] = (4).to_bytes(2, "little")
+        record[6:8] = (0).to_bytes(2, "little")
+        record[8:24] = (0x1234).to_bytes(16, "little")
+        record[24:40] = (0x1200).to_bytes(16, "little")
+        record[40:48] = (9001).to_bytes(8, "little")
+        record[48:52] = (0x00000002 | 0x80000000).to_bytes(4, "little")
+        record[52:56] = (0).to_bytes(4, "little")
+        record[56:60] = (0).to_bytes(4, "little")
+        record[60:62] = (1).to_bytes(2, "little")
+        record[62:64] = (16).to_bytes(2, "little")
+        record[64:72] = (4096).to_bytes(8, "little")
+        record[72:80] = (8192).to_bytes(8, "little")
+
+        parsed = parse_usn_record_at(bytes(record), 0)
+
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(parsed["major_version"], 4)
+        self.assertEqual(parsed["next_record_cursor"], 80)
+        self.assertEqual(parsed["file_name_decode_status"], "not-present-usn-v4")
+        self.assertEqual(parsed["v4_extent_count"], 1)
+        self.assertEqual(parsed["v4_extents"][0]["file_offset"], 4096)
+        self.assertEqual(parsed["v4_extents"][0]["byte_length"], 8192)
+        self.assertTrue(parsed["validation_checks"]["v4_extent_bounds_valid"])
+        self.assertTrue(parsed["validation_checks"]["v4_no_filename_by_design"])
+
+        scan = parse_usn_record_scan(b"\x00\x00" + bytes(record))
+        self.assertEqual(scan["first_record_offset"], 2)
+        self.assertEqual(scan["records"][0]["major_version"], 4)
+        self.assertFalse(scan["next_cursor_available"])
+
+    def test_jumplist_destlist_marks_unlinked_entries_as_review_only_candidates(self) -> None:
+        path = r"C:\Users\alice\Documents\missing.docx"
+        encoded_path = path.encode("utf-16le")
+        entry = bytearray(114 + len(encoded_path))
+        entry[112:114] = len(path).to_bytes(2, "little")
+        entry[114:] = encoded_path
+        destlist = bytearray(32)
+        destlist[0:4] = (1).to_bytes(4, "little")
+        destlist[4:8] = (1).to_bytes(4, "little")
+        destlist.extend(entry)
+
+        metadata = parse_destlist_metadata(
+            [
+                {
+                    "name": "DestList",
+                    "path": "Root Entry/DestList",
+                    "index": 1,
+                    "size": len(destlist),
+                    "start_sector": 3,
+                    "data": bytes(destlist),
+                }
+            ]
+        )
+
+        self.assertEqual(metadata["destlist_parse_status"], "parsed-candidate")
+        self.assertEqual(metadata["destlist_entry_candidate_count"], 1)
+        self.assertEqual(metadata["destlist_unlinked_entry_candidate_count"], 1)
+        self.assertEqual(metadata["destlist_deleted_or_unlinked_entry_review_status"], "candidate-review-only-not-recovered")
+        self.assertEqual(metadata["destlist_unlinked_entry_candidates"][0]["path_candidate"], path)
+        self.assertTrue(metadata["destlist_validation_checks"]["deleted_or_unlinked_entry_review_available"])
+
+    def test_prefetch_mam_compression_status_is_detected_without_false_scca_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pf = Path(tmp_dir) / "COMPRESSED.EXE-12345678.pf"
+            blob = bytearray(128)
+            blob[0:4] = b"MAM\x04"
+            blob[4:8] = (4096).to_bytes(4, "little")
+            pf.write_bytes(bytes(blob))
+
+            hints = prefetch_header_hints(pf)
+
+            self.assertFalse(hints["binary_format_detected"])
+            self.assertEqual(hints["prefetch_compression"]["format"], "windows-prefetch-mam")
+            self.assertEqual(hints["prefetch_compression"]["declared_uncompressed_size"], 4096)
+            self.assertTrue(hints["prefetch_validation_checks"]["compressed_prefetch_detected"])
+            self.assertTrue(hints["prefetch_validation_checks"]["compressed_prefetch_status_recorded"])
+            gate = prefetch_core_accuracy_gates(
+                {
+                    "source_path": str(pf),
+                    "validation_checks": hints["prefetch_validation_checks"],
+                    **hints,
+                }
+            )[0]
+            self.assertIn("compressed PF handling", gate["satisfied_checks"])
+
     def test_core_filesystem_and_activity_trusted_diffs_gate_commercial_claims(self) -> None:
         edb_diff = build_windows_edb_trusted_diff(
             [
@@ -233,6 +401,925 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertFalse(mft_diff["trusted_tool_recognized"])
         self.assertIn("mft-trusted-record-diff-required", mft_diff["reportability_decision"]["blockers"])
 
+    def test_windows_edb_trusted_diff_accepts_nested_page_row_candidates(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "windows-search-edb-row-candidate",
+                "details": {
+                    "item_path": r"C:\Users\alice\Documents\Case Notes.docx",
+                    "url": "https://example.test/case",
+                    "content_snippet": "encoded powershell investigation notes",
+                    "deleted_state": False,
+                    "table_family_candidates": ["property-store", "content-index"],
+                    "page_index": 7,
+                    "page_offset": 28672,
+                    "page_sha256": "a" * 64,
+                    "source_format": "ese-edb",
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "System.ItemPathDisplay": r"C:\Users\alice\Documents\Case Notes.docx",
+                "System.ItemUrl": "https://example.test/case",
+                "System.Search.Contents": "encoded powershell investigation notes",
+                "IsDeleted": "0",
+                "TableFamilies": "content-index; property-store",
+                "PageIndex": "7",
+                "PageOffset": "0x7000",
+                "PageSHA256": "a" * 64,
+                "SourceFormat": "ese-edb",
+            }
+        ]
+
+        diff = build_windows_edb_trusted_diff(rapid_rows, trusted_rows, trusted_tool="WinSearchDBAnalyzer")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+
+    def test_windows_edb_trusted_diff_reports_page_and_deleted_state_mismatches(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "windows-search-edb-row-candidate",
+                "details": {
+                    "item_path": r"C:\Users\alice\Documents\Case Notes.docx",
+                    "deleted_state": False,
+                    "table_family_candidates": ["property-store"],
+                    "page_offset": 28672,
+                    "page_sha256": "b" * 64,
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "System.ItemPathDisplay": r"C:\Users\alice\Documents\Case Notes.docx",
+                "IsDeleted": "true",
+                "TableFamilies": "property-store",
+                "PageOffset": 28672,
+                "PageSHA256": "b" * 64,
+            }
+        ]
+
+        diff = build_windows_edb_trusted_diff(rapid_rows, trusted_rows, trusted_tool="WinSearchDBAnalyzer")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "deleted_state")
+
+    def test_mft_trusted_diff_accepts_nested_native_rows_with_attributes(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "mft-record",
+                "details": {
+                    "record_number": 42,
+                    "sequence_number": 7,
+                    "parent_reference": 5,
+                    "file_path": r"C:\Users\alice\Documents\case.txt",
+                    "deleted_hint": False,
+                    "timestamp": "2024-01-02T03:04:05Z",
+                    "record_offset": 43008,
+                    "attribute_types": ["$STANDARD_INFORMATION", "$FILE_NAME", "$DATA"],
+                    "data_attributes": [
+                        {
+                            "resident": False,
+                            "runlist_decode_status": "decoded-preview",
+                        }
+                    ],
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "EntryNumber": "42",
+                "SequenceNumber": "7",
+                "ParentEntryNumber": "5",
+                "FullPath": r"C:\Users\alice\Documents\case.txt",
+                "Deleted": "false",
+                "Created0x10": "2024-01-02T03:04:05Z",
+                "Offset": "0xa800",
+                "Attributes": "$DATA; $FILE_NAME; $STANDARD_INFORMATION",
+                "DataRunStatus": "decoded-preview",
+            }
+        ]
+
+        diff = build_mft_trusted_diff(rapid_rows, trusted_rows, trusted_tool="MFTECmd")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+
+    def test_mft_trusted_diff_reports_sequence_and_parent_mismatches(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "mft-record",
+                "details": {
+                    "record_number": "42",
+                    "sequence_number": "7",
+                    "parent_reference": "5",
+                    "file_path": r"C:\Users\alice\Documents\case.txt",
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "EntryNumber": "42",
+                "SequenceNumber": "9",
+                "ParentEntryNumber": "5",
+                "FullPath": r"C:\Users\alice\Documents\case.txt",
+            }
+        ]
+
+        diff = build_mft_trusted_diff(rapid_rows, trusted_rows, trusted_tool="MFTECmd")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "sequence_number")
+
+    def test_usn_trusted_diff_accepts_nested_v4_extent_rows(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "usn-record",
+                "details": {
+                    "usn": 9001,
+                    "file_reference_number": 42,
+                    "parent_file_reference_number": 5,
+                    "major_version": 4,
+                    "record_cursor": 128,
+                    "reason_flags": ["DATA_EXTEND", "CLOSE"],
+                    "source_info_flags": ["DATA_MANAGEMENT"],
+                    "file_attribute_names": ["ARCHIVE"],
+                    "usn_record_evidence": {
+                        "change_evidence": {
+                            "v4_extent_evidence": {
+                                "extent_count": 2,
+                            }
+                        }
+                    },
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "USN": "9001",
+                "FRN": "42",
+                "ParentFRN": "5",
+                "MajorVersion": "4",
+                "RecordOffset": "0x80",
+                "Reason": "CLOSE|DATA_EXTEND",
+                "SourceInfo": "DATA_MANAGEMENT",
+                "FileAttributes": "ARCHIVE",
+                "ExtentCount": "2",
+            }
+        ]
+
+        diff = build_usn_trusted_diff(rapid_rows, trusted_rows, trusted_tool="UsnJrnl2Csv")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+
+    def test_usn_trusted_diff_reports_reason_flag_mismatch(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "usn-record",
+                "details": {
+                    "usn": "9001",
+                    "file_reference_number": "42",
+                    "file_name": "case.txt",
+                    "reason_flags": ["FILE_CREATE", "CLOSE"],
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "USN": "9001",
+                "FRN": "42",
+                "FileName": "case.txt",
+                "Reason": "FILE_DELETE|CLOSE",
+            }
+        ]
+
+        diff = build_usn_trusted_diff(rapid_rows, trusted_rows, trusted_tool="UsnJrnl2Csv")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "reason")
+
+    def test_jumplist_trusted_diff_accepts_nested_destinations_and_destlist_fields(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "jumplist-automatic",
+                "details": {
+                    "application_id_hash": "a1b2",
+                    "destinations": [
+                        {
+                            "stream_path": "7",
+                            "target_path": r"C:\Users\alice\Documents\case.txt",
+                            "destlist_entry_index_candidate": 3,
+                            "destlist_entry_offset_candidate": 4096,
+                            "destlist_hostname_candidates": [{"hostname_candidate": "ALICE-PC"}],
+                            "destlist_validation_status": "candidate-linked-lnk-stream",
+                            "timestamp": "2024-01-02T03:04:05Z",
+                        }
+                    ],
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "AppID": "a1b2",
+                "EntryNumber": "3",
+                "StreamPath": "7",
+                "TargetPath": r"C:\Users\alice\Documents\case.txt",
+                "EntryOffset": "0x1000",
+                "Hostname": "ALICE-PC",
+                "ValidationStatus": "candidate-linked-lnk-stream",
+                "LastAccessed": "2024-01-02T03:04:05Z",
+            }
+        ]
+
+        diff = build_jumplist_trusted_diff(rapid_rows, trusted_rows, trusted_tool="JLECmd")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+
+    def test_jumplist_trusted_diff_reports_destlist_offset_mismatch(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "jumplist-automatic",
+                "details": {
+                    "application_id_hash": "a1b2",
+                    "destlist_metadata": {
+                        "destlist_entry_candidates": [
+                            {
+                                "index": 3,
+                                "entry_offset": 4096,
+                                "path_candidate": r"C:\Users\alice\Documents\case.txt",
+                                "hostname_candidates": [{"hostname_candidate": "ALICE-PC"}],
+                            }
+                        ]
+                    },
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "AppID": "a1b2",
+                "EntryNumber": "3",
+                "TargetPath": r"C:\Users\alice\Documents\case.txt",
+                "EntryOffset": "0x1200",
+                "Hostname": "ALICE-PC",
+            }
+        ]
+
+        diff = build_jumplist_trusted_diff(rapid_rows, trusted_rows, trusted_tool="JLECmd")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "entry_offset")
+
+    def test_shellbag_trusted_diff_accepts_nested_native_evidence_rows(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "shellbag-native-candidate",
+                "details": {
+                    "hive_name": "NTUSER.DAT",
+                    "shellbag_evidence": {
+                        "key_evidence": {
+                            "source_key_path": r"Software\Microsoft\Windows\Shell\BagMRU\0",
+                            "shellbag_section": "bagmru",
+                            "allocation_status": "allocated",
+                            "cell_offset": 4096,
+                            "hbin_offset": 8192,
+                            "transaction_log_status": "not-present",
+                        },
+                        "relationship_evidence": {
+                            "bag_id_candidates": ["42"],
+                            "node_id_candidates": ["0"],
+                        },
+                        "activity_evidence": {
+                            "path_candidates": [r"C:\Users\alice\Documents"],
+                            "primary_timestamp": "2024-01-02T03:04:05Z",
+                        },
+                    },
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "Hive": "NTUSER.DAT",
+                "KeyPath": r"Software\Microsoft\Windows\Shell\BagMRU\0",
+                "Section": "bagmru",
+                "Bag": "42",
+                "Node": "0",
+                "FolderPath": r"C:\Users\alice\Documents",
+                "LastWriteTime": "2024-01-02T03:04:05Z",
+                "CellOffset": "0x1000",
+                "HbinOffset": "0x2000",
+                "AllocationStatus": "allocated",
+                "TransactionStatus": "not-present",
+            }
+        ]
+
+        diff = build_shellbag_trusted_diff(rapid_rows, trusted_rows, trusted_tool="ShellBagsExplorer")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+
+    def test_shellbag_trusted_diff_reports_cell_offset_mismatch(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "shellbag-native-candidate",
+                "details": {
+                    "source_key_path": r"Software\Microsoft\Windows\Shell\BagMRU\0",
+                    "bag_id_candidates": ["42"],
+                    "node_id_candidates": ["0"],
+                    "cell_offset": 4096,
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "KeyPath": r"Software\Microsoft\Windows\Shell\BagMRU\0",
+                "Bag": "42",
+                "Node": "0",
+                "CellOffset": "0x1200",
+            }
+        ]
+
+        diff = build_shellbag_trusted_diff(rapid_rows, trusted_rows, trusted_tool="ShellBagsExplorer")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "cell_offset")
+
+    def test_prefetch_trusted_diff_accepts_nested_version_and_metric_fields(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "prefetch-file",
+                "details": {
+                    "executable_hint": "POWERSHELL.EXE",
+                    "prefetch_hash": "12345678",
+                    "run_count": 3,
+                    "last_run_at": "2024-04-01T09:10:11+00:00",
+                    "last_run_times": ["2024-04-01T09:10:11+00:00", "2024-03-31T08:00:00+00:00"],
+                    "prefetch_version": 30,
+                    "prefetch_version_metadata": {"layout_name": "windows-10"},
+                    "declared_file_size": 4096,
+                    "referenced_paths": [r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"],
+                    "volume_candidates": [{"volume_device_path": r"\DEVICE\HARDDISKVOLUME3"}],
+                    "file_reference_candidates": [{"file_reference": "42-7"}],
+                    "prefetch_compression": {
+                        "format": "plain-or-unknown",
+                        "decompression_status": "not-needed",
+                    },
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "Executable": "POWERSHELL.EXE",
+                "Hash": "12345678",
+                "RunCount": "3",
+                "LastRun": "2024-04-01T09:10:11+00:00",
+                "PreviousRunTimes": "2024-03-31T08:00:00+00:00;2024-04-01T09:10:11+00:00",
+                "Version": "30",
+                "LayoutName": "windows-10",
+                "DeclaredFileSize": "0x1000",
+                "ReferencedPaths": r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                "VolumeDevicePath": r"\DEVICE\HARDDISKVOLUME3",
+                "FileReference": "42-7",
+                "CompressionFormat": "plain-or-unknown",
+                "DecompressionStatus": "not-needed",
+            }
+        ]
+
+        diff = build_prefetch_trusted_diff(rapid_rows, trusted_rows, trusted_tool="PECmd")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+
+    def test_prefetch_trusted_diff_reports_version_mismatch(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "prefetch-file",
+                "details": {
+                    "executable_hint": "POWERSHELL.EXE",
+                    "prefetch_hash": "12345678",
+                    "prefetch_version": 30,
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "Executable": "POWERSHELL.EXE",
+                "Hash": "12345678",
+                "Version": "23",
+            }
+        ]
+
+        diff = build_prefetch_trusted_diff(rapid_rows, trusted_rows, trusted_tool="PECmd")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "prefetch_version")
+
+    def test_lnk_trusted_diff_accepts_nested_linkinfo_tracker_property_store(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "recent-shortcut",
+                "details": {
+                    "target_path": r"C:\Users\alice\Documents\case.txt",
+                    "working_dir": r"C:\Users\alice\Documents",
+                    "command_line_arguments": "/safe",
+                    "target_created_at": "2024-01-02T03:04:05+00:00",
+                    "target_accessed_at": "2024-01-03T03:04:05+00:00",
+                    "target_modified_at": "2024-01-04T03:04:05+00:00",
+                    "description": "Case shortcut",
+                    "relative_path": r"..\Documents\case.txt",
+                    "icon_location": r"C:\Windows\System32\shell32.dll,1",
+                    "link_flag_names": ["HasLinkInfo", "IsUnicode"],
+                    "file_attribute_names": ["ARCHIVE"],
+                    "target_file_size": 1234,
+                    "show_command": 1,
+                    "hot_key": 0,
+                    "link_info": {
+                        "local_base_path": r"C:\Users\alice\Documents\case.txt",
+                        "common_path_suffix": r"case.txt",
+                    },
+                    "tracker_data": {
+                        "machine_id": "ALICE-PC",
+                        "droid_file_identifier": "11111111-2222-3333-4444-555555555555",
+                        "birth_droid_file_identifier": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                    },
+                    "property_store_blocks": [
+                        {
+                            "embedded_paths": [r"C:\Users\alice\Documents\case.txt"],
+                            "string_candidates": ["Case shortcut"],
+                        }
+                    ],
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "TargetPath": r"C:\Users\alice\Documents\case.txt",
+                "WorkingDirectory": r"C:\Users\alice\Documents",
+                "Arguments": "/safe",
+                "CreationTime": "2024-01-02T03:04:05+00:00",
+                "AccessTime": "2024-01-03T03:04:05+00:00",
+                "ModifiedTime": "2024-01-04T03:04:05+00:00",
+                "Description": "Case shortcut",
+                "RelativePath": r"..\Documents\case.txt",
+                "IconLocation": r"C:\Windows\System32\shell32.dll,1",
+                "Flags": "HasLinkInfo;IsUnicode",
+                "Attributes": "ARCHIVE",
+                "FileSize": "1234",
+                "ShowCommand": "1",
+                "HotKey": "0",
+                "LocalBasePath": r"C:\Users\alice\Documents\case.txt",
+                "CommonPathSuffix": r"case.txt",
+                "MachineID": "ALICE-PC",
+                "DroidFileIdentifier": "11111111-2222-3333-4444-555555555555",
+                "BirthDroidFileIdentifier": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                "PropertyStorePaths": r"C:\Users\alice\Documents\case.txt",
+                "PropertyStoreStrings": "Case shortcut",
+            }
+        ]
+
+        diff = build_lnk_trusted_diff(rapid_rows, trusted_rows, trusted_tool="LECmd")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+
+    def test_lnk_trusted_diff_reports_tracker_guid_mismatch(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "recent-shortcut",
+                "details": {
+                    "target_path": r"C:\Users\alice\Documents\case.txt",
+                    "tracker_data": {
+                        "droid_file_identifier": "11111111-2222-3333-4444-555555555555",
+                    },
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "TargetPath": r"C:\Users\alice\Documents\case.txt",
+                "DroidFileIdentifier": "99999999-2222-3333-4444-555555555555",
+            }
+        ]
+
+        diff = build_lnk_trusted_diff(rapid_rows, trusted_rows, trusted_tool="LECmd")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "tracker_droid_file")
+
+    def test_system_trusted_diff_accepts_nested_family_specific_rows(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "task-scheduler-task",
+                "details": {
+                    "task_uri": r"\SecurityUpdater",
+                    "command": "powershell.exe",
+                    "arguments": "-EncodedCommand AAA",
+                    "working_directory": r"C:\Users\alice",
+                    "user_id": "S-1-5-21-1000",
+                    "run_level": "HighestAvailable",
+                    "hidden": True,
+                    "trigger_types": ["CalendarTrigger"],
+                    "risk_flags": ["task-string:powershell"],
+                },
+            },
+            {
+                "artifact_type": "defender-support-log",
+                "details": {
+                    "source_path": r"C:\ProgramData\Microsoft\Windows Defender\Support\MPLog.log",
+                    "interesting_entry_count": 1,
+                    "interesting_entries": ["Threat detected: Trojan Test"],
+                    "risk_flags": ["defender:threat"],
+                },
+            },
+            {
+                "artifact_type": "firewall-log-row",
+                "details": {
+                    "timestamp": "2024-01-02T03:04:05+00:00",
+                    "action": "DROP",
+                    "protocol": "TCP",
+                    "src_ip": "10.0.0.5",
+                    "dst_ip": "203.0.113.8",
+                    "dst_port": "443",
+                    "direction": "outbound",
+                },
+            },
+            {
+                "artifact_type": "wer-report",
+                "details": {
+                    "application_name": "bad.exe",
+                    "event_name": "APPCRASH",
+                    "exception_code": "0xc0000005",
+                    "event_time": "2024-01-02T03:04:05+00:00",
+                    "bucket_id": "abc",
+                },
+            },
+            {
+                "artifact_type": "wmi-repository-inventory",
+                "details": {
+                    "source_path": r"C:\Windows\System32\wbem\Repository\OBJECTS.DATA",
+                    "wmi_persistence_terms": ["commandlineeventconsumer"],
+                    "path_pivots": [r"C:\Users\alice\evil.ps1"],
+                    "risk_flags": ["wmi-string:commandlineeventconsumer"],
+                },
+            },
+        ]
+        trusted_rows = [
+            {
+                "Family": "Task Scheduler",
+                "TaskURI": r"\SecurityUpdater",
+                "Command": "powershell.exe",
+                "Arguments": "-EncodedCommand AAA",
+                "WorkingDirectory": r"C:\Users\alice",
+                "UserID": "S-1-5-21-1000",
+                "RunLevel": "HighestAvailable",
+                "Hidden": "true",
+                "TriggerTypes": "CalendarTrigger",
+            },
+            {
+                "Family": "Defender",
+                "SourcePath": r"C:\ProgramData\Microsoft\Windows Defender\Support\MPLog.log",
+                "InterestingEntryCount": "1",
+                "InterestingEntries": "Threat detected: Trojan Test",
+                "RiskFlags": "defender:threat",
+            },
+            {
+                "Family": "Firewall",
+                "Timestamp": "2024-01-02T03:04:05+00:00",
+                "Action": "DROP",
+                "Protocol": "TCP",
+                "SrcIP": "10.0.0.5",
+                "DstIP": "203.0.113.8",
+                "DstPort": 443,
+                "Direction": "outbound",
+            },
+            {
+                "Family": "WER",
+                "Application": "bad.exe",
+                "EventName": "APPCRASH",
+                "ExceptionCode": "0xc0000005",
+                "EventTime": "2024-01-02T03:04:05+00:00",
+                "BucketId": "abc",
+            },
+            {
+                "Family": "WMI",
+                "SourcePath": r"C:\Windows\System32\wbem\Repository\OBJECTS.DATA",
+                "PersistenceTerms": "commandlineeventconsumer",
+                "PathPivots": r"C:\Users\alice\evil.ps1",
+                "RiskFlags": "wmi-string:commandlineeventconsumer",
+            },
+        ]
+
+        diff = build_system_trusted_diff(rapid_rows, trusted_rows, trusted_tool="Velociraptor")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 5)
+        self.assertEqual(diff["mismatch_count"], 0)
+
+    def test_system_trusted_diff_blocks_family_specific_mismatches(self) -> None:
+        diff = build_system_trusted_diff(
+            [
+                {
+                    "artifact_type": "wer-report",
+                    "details": {
+                        "application_name": "bad.exe",
+                        "event_name": "APPCRASH",
+                        "event_time": "2024-01-02T03:04:05+00:00",
+                        "bucket_id": "abc",
+                        "exception_code": "0xc0000005",
+                    },
+                }
+            ],
+            [
+                {
+                    "Family": "WER",
+                    "Application": "bad.exe",
+                    "EventName": "APPCRASH",
+                    "EventTime": "2024-01-02T03:04:05+00:00",
+                    "BucketId": "abc",
+                    "ExceptionCode": "0xe0434352",
+                }
+            ],
+            trusted_tool="Velociraptor",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "exception_code")
+
+    def test_browser_storage_trusted_diff_accepts_nested_inventory_rows(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "browser-storage-inventory",
+                "details": {
+                    "browser": "chrome",
+                    "profile": "Default",
+                    "storage_inventory": [
+                        {
+                            "storage_type": "cache",
+                            "storage_name": "cache-data",
+                            "relative_path": r"Cache\Cache_Data",
+                            "artifact_hint": "browser-cache-inventory",
+                            "file_count": 2,
+                            "total_bytes": 4096,
+                            "is_file": False,
+                            "sensitive": False,
+                            "sample_files": [{"hashes": {"sha256": "a" * 64}}],
+                            "inventory_truncated": False,
+                        },
+                        {
+                            "storage_type": "extension",
+                            "storage_name": "extensions",
+                            "relative_path": "Extensions",
+                            "artifact_hint": "browser-extension-inventory",
+                            "file_count": 1,
+                            "total_bytes": 2048,
+                            "is_file": False,
+                            "sensitive": False,
+                            "sample_files": [{"hashes": {"sha256": "b" * 64}}],
+                            "inventory_truncated": False,
+                        },
+                        {
+                            "storage_type": "cookie",
+                            "storage_name": "network-cookies",
+                            "relative_path": r"Network\Cookies",
+                            "artifact_hint": "browser-cookie-store-inventory",
+                            "file_count": 1,
+                            "total_bytes": 8192,
+                            "is_file": True,
+                            "sensitive": True,
+                            "sample_files": [{"hashes": {"sha256": "c" * 64}}],
+                            "inventory_truncated": False,
+                        },
+                    ],
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "Browser": "Chrome",
+                "Profile": "Default",
+                "Type": "cache",
+                "Name": "cache-data",
+                "RelativePath": r"Cache\Cache_Data",
+                "ArtifactHint": "browser-cache-inventory",
+                "FileCount": "2",
+                "TotalBytes": "4096",
+                "IsFile": "false",
+                "Sensitive": "false",
+                "SampleHashes": "a" * 64,
+                "InventoryTruncated": "false",
+            },
+            {
+                "Browser": "Chrome",
+                "Profile": "Default",
+                "Type": "extension",
+                "Name": "extensions",
+                "RelativePath": "Extensions",
+                "ArtifactHint": "browser-extension-inventory",
+                "FileCount": "1",
+                "TotalBytes": "2048",
+                "IsFile": "false",
+                "Sensitive": "false",
+                "SampleHashes": "b" * 64,
+                "InventoryTruncated": "false",
+            },
+            {
+                "Browser": "Chrome",
+                "Profile": "Default",
+                "Type": "cookie",
+                "Name": "network-cookies",
+                "RelativePath": r"Network\Cookies",
+                "ArtifactHint": "browser-cookie-store-inventory",
+                "FileCount": "1",
+                "TotalBytes": "8192",
+                "IsFile": "true",
+                "Sensitive": "true",
+                "SampleHashes": "c" * 64,
+                "InventoryTruncated": "false",
+            },
+        ]
+
+        diff = build_browser_storage_trusted_diff(rapid_rows, trusted_rows, trusted_tool="Hindsight")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 3)
+        self.assertEqual(diff["mismatch_count"], 0)
+
+    def test_browser_storage_trusted_diff_blocks_inventory_field_mismatches(self) -> None:
+        diff = build_browser_storage_trusted_diff(
+            [
+                {
+                    "artifact_type": "browser-storage-inventory",
+                    "details": {
+                        "browser": "chrome",
+                        "profile": "Default",
+                        "storage_inventory": [
+                            {
+                                "storage_type": "cache",
+                                "storage_name": "cache-data",
+                                "relative_path": r"Cache\Cache_Data",
+                                "file_count": 2,
+                            }
+                        ],
+                    },
+                }
+            ],
+            [
+                {
+                    "Browser": "chrome",
+                    "Profile": "Default",
+                    "Type": "cache",
+                    "Name": "cache-data",
+                    "RelativePath": r"Cache\Cache_Data",
+                    "FileCount": 9,
+                }
+            ],
+            trusted_tool="Hindsight",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "file_count")
+
+    def test_browser_timeline_trusted_diff_accepts_nested_unified_timeline_rows(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "browser-summary",
+                "details": {
+                    "browser": "chrome",
+                    "profile": "Default",
+                    "unified_timeline": [
+                        {
+                            "timeline_type": "visit",
+                            "timestamp": "2024-04-01T09:10:11+00:00",
+                            "url": "https://example.test/search?q=rapid",
+                            "title": "Example Search",
+                            "domain": "example.test",
+                            "transition": "typed",
+                            "visit_count": 3,
+                            "typed_count": 1,
+                            "ai_service": "",
+                            "source_table": "history",
+                            "source_index": 0,
+                        },
+                        {
+                            "timeline_type": "download",
+                            "timestamp": "2024-04-01T09:09:00+00:00",
+                            "url": "https://example.test/a.zip",
+                            "domain": "example.test",
+                            "target_path": r"C:\Users\alice\Downloads\a.zip",
+                            "total_bytes": 12345,
+                            "state": 1,
+                            "ended_at": "2024-04-01T09:09:05+00:00",
+                            "source_table": "downloads",
+                            "source_index": 0,
+                        },
+                    ],
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "Browser": "Chrome",
+                "Profile": "Default",
+                "Type": "visit",
+                "VisitTime": "2024-04-01T09:10:11+00:00",
+                "URL": "https://example.test/search?q=rapid",
+                "Title": "Example Search",
+                "Domain": "example.test",
+                "Transition": "typed",
+                "VisitCount": "3",
+                "TypedCount": "1",
+                "SourceTable": "history",
+                "SourceIndex": "0",
+            },
+            {
+                "Browser": "Chrome",
+                "Profile": "Default",
+                "Type": "download",
+                "StartTime": "2024-04-01T09:09:00+00:00",
+                "URL": "https://example.test/a.zip",
+                "Domain": "example.test",
+                "DownloadPath": r"C:\Users\alice\Downloads\a.zip",
+                "TotalBytes": "12345",
+                "State": "1",
+                "EndTime": "2024-04-01T09:09:05+00:00",
+                "SourceTable": "downloads",
+                "SourceIndex": "0",
+            },
+        ]
+
+        diff = build_browser_timeline_trusted_diff(rapid_rows, trusted_rows, trusted_tool="BrowserHistoryView")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 2)
+        self.assertEqual(diff["mismatch_count"], 0)
+
+    def test_browser_timeline_trusted_diff_blocks_nested_timeline_mismatches(self) -> None:
+        diff = build_browser_timeline_trusted_diff(
+            [
+                {
+                    "artifact_type": "browser-summary",
+                    "details": {
+                        "browser": "chrome",
+                        "profile": "Default",
+                        "unified_timeline": [
+                            {
+                                "timeline_type": "visit",
+                                "timestamp": "2024-04-01T09:10:11+00:00",
+                                "url": "https://example.test/",
+                                "transition": "typed",
+                            }
+                        ],
+                    },
+                }
+            ],
+            [
+                {
+                    "Browser": "chrome",
+                    "Profile": "Default",
+                    "Type": "visit",
+                    "VisitTime": "2024-04-01T09:10:11+00:00",
+                    "URL": "https://example.test/",
+                    "Transition": "link",
+                }
+            ],
+            trusted_tool="BrowserHistoryView",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "transition")
+
     def test_prefetch_lnk_system_and_browser_trusted_diffs_gate_commercial_claims(self) -> None:
         prefetch_diff = build_prefetch_trusted_diff(
             [{"executable_hint": "POWERSHELL.EXE", "prefetch_hash": "12345678", "run_count": "3"}],
@@ -340,6 +1427,11 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             trusted_rows,
             trusted_tool="ChatGPT export",
         )
+        candidate_manifest = {
+            "manifest_sha256": "b" * 64,
+            "candidate_citation_count": 2,
+            "pair_citations": [{"pair_id": "pair-1"}],
+        }
 
         self.assertEqual(transcript_diff["status"], "pass")
         self.assertTrue(transcript_diff["commercial_grade_evidence"])
@@ -357,10 +1449,208 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 },
                 "source_summary": {"source_sha256s": ["a" * 64]},
                 "ai_transcript_trusted_diff": transcript_diff,
+                "ai_transcript_candidate_manifest": candidate_manifest,
             }
         )[0]
         self.assertIn("trusted AI transcript export diff pass", gate["satisfied_checks"])
+        self.assertIn("AI transcript candidate manifest", gate["satisfied_checks"])
         self.assertNotIn("trusted AI transcript export diff pass", gate["missing_required_checks"])
+        uplift = ai_transcript_commercial_uplift_evidence(
+            {
+                "source_path": r"C:\Users\alice",
+                "browser": "chrome",
+                "profile": "Default",
+                "conversation_rows": [
+                    {"direction": "question", "ai_service": "ChatGPT", "text": "Q", "source_sha256": "a" * 64},
+                    {"direction": "answer", "ai_service": "ChatGPT", "text": "A", "source_sha256": "a" * 64},
+                ],
+                "transcript": {
+                    "complete_pair_count": 1,
+                    "question_count": 1,
+                    "answer_count": 1,
+                    "completeness_score": 1.0,
+                },
+                "source_summary": {"source_file_count": 1, "service_counts": {"ChatGPT": 2}},
+                "ai_transcript_candidate_manifest": candidate_manifest,
+                "transcript_validation_checks": {
+                    "has_candidate_transcript_rows": True,
+                    "service_side_export_validated": False,
+                },
+                "ai_transcript_trusted_diff": transcript_diff,
+            }
+        )
+        self.assertEqual(uplift["functional_priority_profile"]["item_number"], 48)
+        self.assertEqual(
+            uplift["functional_priority_profile"]["implemented_controls"]["candidate_manifest_hash"],
+            "b" * 64,
+        )
+        self.assertIn(
+            "ai-transcript-candidate-manifest-emitted",
+            uplift["functional_priority_profile"]["passed_validation_check_ids"],
+        )
+        self.assertIn(
+            "service-side-ai-export-not-validated",
+            uplift["functional_priority_profile"]["failed_validation_check_ids"],
+        )
+
+    def test_ai_transcript_trusted_diff_accepts_nested_transcript_pairs(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "ai-conversation-candidate",
+                "details": {
+                    "ai_service": "Claude",
+                    "browser": "chrome",
+                    "profile": "Default",
+                    "transcript_pairs": [
+                        {
+                            "pair_id": "pair-1",
+                            "ai_service": "Claude",
+                            "question": "What happened before the download?",
+                            "answer": "The login event happened first.",
+                            "source_sha256s": ["a" * 64],
+                            "question_source_path": "IndexedDB/000001.ldb",
+                            "answer_source_path": "IndexedDB/000001.ldb",
+                            "pairing_evidence": {
+                                "question_source_offset": 128,
+                                "answer_source_offset": 256,
+                                "storage_area": "IndexedDB",
+                            },
+                            "pairing_confidence": "high-candidate",
+                            "confidence": 0.92,
+                        }
+                    ],
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "Service": "Claude",
+                "Question": "What happened before the download?",
+                "Answer": "The login event happened first.",
+                "SourceSha256": "a" * 64,
+                "QuestionSourcePath": "IndexedDB/000001.ldb",
+                "AnswerSourcePath": "IndexedDB/000001.ldb",
+                "QuestionSourceOffset": "128",
+                "AnswerSourceOffset": "256",
+                "StorageArea": "IndexedDB",
+                "PairingConfidence": "high-candidate",
+                "Confidence": "0.92",
+                "PairId": "pair-1",
+            }
+        ]
+
+        diff = build_ai_transcript_trusted_diff(rapid_rows, trusted_rows, trusted_tool="Claude export")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertEqual(diff["mismatch_count"], 0)
+
+    def test_ai_transcript_trusted_diff_accepts_nested_conversation_rows(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "ai-conversation-candidate",
+                "details": {
+                    "conversation_rows": [
+                        {
+                            "direction": "question",
+                            "ai_service": "Gemini",
+                            "text": "Find suspicious URLs.",
+                            "source_path": "Local Storage/leveldb/000003.log",
+                            "source_sha256": "b" * 64,
+                            "source_offset": 32,
+                            "storage_area": "Local Storage",
+                            "confidence": 0.91,
+                        },
+                        {
+                            "direction": "answer",
+                            "ai_service": "Gemini",
+                            "text": "The suspicious URL is https://bad.example/.",
+                            "source_path": "Local Storage/leveldb/000003.log",
+                            "source_sha256": "b" * 64,
+                            "source_offset": 96,
+                            "storage_area": "Local Storage",
+                            "confidence": 0.9,
+                        },
+                    ]
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "Service": "Gemini",
+                "Question": "Find suspicious URLs.",
+                "Answer": "The suspicious URL is https://bad.example/.",
+                "SourceSha256": "b" * 64,
+                "QuestionSourcePath": "Local Storage/leveldb/000003.log",
+                "AnswerSourcePath": "Local Storage/leveldb/000003.log",
+                "QuestionSourceOffset": "32",
+                "AnswerSourceOffset": "96",
+                "StorageArea": "Local Storage",
+                "PairingConfidence": "high-candidate",
+            }
+        ]
+
+        diff = build_ai_transcript_trusted_diff(rapid_rows, trusted_rows, trusted_tool="Gemini export")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+
+    def test_ai_transcript_trusted_diff_blocks_nested_pair_mismatches(self) -> None:
+        diff = build_ai_transcript_trusted_diff(
+            [
+                {
+                    "artifact_type": "ai-conversation-candidate",
+                    "details": {
+                        "transcript_pairs": [
+                            {
+                                "ai_service": "Perplexity",
+                                "question": "Q",
+                                "answer": "A",
+                                "source_sha256s": ["c" * 64],
+                            }
+                        ]
+                    },
+                }
+            ],
+            [
+                {
+                    "Service": "Perplexity",
+                    "Question": "Q",
+                    "Answer": "A",
+                    "SourceSha256": "d" * 64,
+                }
+            ],
+            trusted_tool="Perplexity export",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "source_sha256s")
+
+    def test_lnk_property_store_extra_data_preserves_review_candidates(self) -> None:
+        payload = (
+            b"\x05\xd5\xcd\xd5\x9c\x2e\x1b\x10\x93\x97\x08\x00\x2b\x2c\xf9\xae"
+            + r"C:\Users\alice\Documents\Case Notes.docx".encode("utf-16le")
+        )
+        block = (
+            (len(payload) + 8).to_bytes(4, "little")
+            + (0xA0000009).to_bytes(4, "little")
+            + payload
+            + b"\x00\x00\x00\x00"
+        )
+
+        blocks, tracker = parse_lnk_extra_data(block, 0)
+
+        self.assertEqual(tracker, {})
+        self.assertEqual(blocks[0]["type"], "PropertyStoreDataBlock")
+        property_store = blocks[0]["property_store_data"]
+        self.assertEqual(property_store["parse_status"], "parsed-candidate")
+        self.assertIn(r"C:\Users\alice\Documents\Case Notes.docx", property_store["embedded_paths"])
+        self.assertTrue(property_store["guid_candidates"])
+        self.assertEqual(property_store["reportability"], "review-only")
 
     def test_prefetch_lnk_system_and_browser_trusted_diffs_block_mismatches(self) -> None:
         prefetch_diff = build_prefetch_trusted_diff(
@@ -389,6 +1679,443 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(ai_diff["status"], "diffs-present")
         self.assertFalse(ai_diff["trusted_tool_recognized"])
         self.assertIn("ai-transcript-trusted-export-diff-required", ai_diff["reportability_decision"]["blockers"])
+
+    def test_native_amcache_clusters_path_hash_timestamp_and_metadata(self) -> None:
+        payload = (
+            "C:\\Program Files\\Example\\app.exe\x00"
+            "0123456789abcdef0123456789abcdef01234567\x00"
+            "Example Publisher\x00"
+            "2024-04-01T02:03:04Z\x00"
+        ).encode("utf-16le")
+        occurrences = list(iter_registry_like_string_occurrences(b"\x00" * 64 + payload))
+
+        clusters = collect_amcache_candidate_clusters(occurrences)
+
+        self.assertEqual(len(clusters), 1)
+        cluster = clusters[0]
+        self.assertEqual(cluster["executable_path"], r"C:\Program Files\Example\app.exe")
+        self.assertEqual(cluster["sha1_candidates"], ["0123456789abcdef0123456789abcdef01234567"])
+        self.assertEqual(cluster["timestamp_candidates"], ["2024-04-01T02:03:04+00:00"])
+        self.assertIn("Example Publisher", cluster["metadata_candidates"])
+        self.assertGreater(cluster["source_offset"], 0)
+        self.assertGreaterEqual(cluster["parser_confidence"], 0.6)
+
+    def test_amcache_trusted_diff_accepts_nested_artifact_rows(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "amcache-entry",
+                "details": {
+                    "source_format": "reg",
+                    "executable_path": r"C:\Program Files\Example\app.exe",
+                    "timestamp": "2024-04-01T02:03:04Z",
+                    "timestamp_source": "InventoryApplicationFile.LastModified",
+                    "program_name": "Example App",
+                    "publisher": "Example Publisher",
+                    "sha1": "0123456789abcdef0123456789abcdef01234567",
+                    "file_description": "Example Application Binary",
+                    "product_name": "Example Suite",
+                    "execution_caveat": "Amcache is not standalone proof of execution.",
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "SourceFormat": "reg",
+                "Path": r"C:\Program Files\Example\app.exe",
+                "LastModified": "2024-04-01T02:03:04+00:00",
+                "TimestampSource": "inventoryapplicationfile.lastmodified",
+                "Name": "Example App",
+                "Publisher": "Example Publisher",
+                "SHA1": "0123456789abcdef0123456789abcdef01234567",
+                "FileDescription": "Example Application Binary",
+                "ProductName": "Example Suite",
+                "Warning": "Amcache is not standalone proof of execution.",
+            }
+        ]
+
+        diff = build_execution_artifact_trusted_diff(
+            rapid_rows,
+            trusted_rows,
+            trusted_tool="AmcacheParser",
+            artifact_family="amcache",
+        )
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertIn("publisher", diff["compare_fields"])
+
+    def test_amcache_trusted_diff_blocks_metadata_mismatch(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "amcache-entry",
+                "details": {
+                    "executable_path": r"C:\Program Files\Example\app.exe",
+                    "timestamp": "2024-04-01T02:03:04+00:00",
+                    "sha1": "0123456789abcdef0123456789abcdef01234567",
+                    "publisher": "Example Publisher",
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "Path": r"C:\Program Files\Example\app.exe",
+                "LastModified": "2024-04-01T02:03:04+00:00",
+                "SHA1": "0123456789abcdef0123456789abcdef01234567",
+                "Publisher": "Different Publisher",
+            }
+        ]
+
+        diff = build_execution_artifact_trusted_diff(
+            rapid_rows,
+            trusted_rows,
+            trusted_tool="AmcacheParser",
+            artifact_family="amcache",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field_diffs"][0]["field"], "publisher")
+
+    def test_native_shimcache_clusters_preserve_order_offsets_and_caveat_metadata(self) -> None:
+        payload = (
+            "ControlSet001\\Control\\Session Manager\\AppCompatCache\x00"
+            "C:\\Users\\alice\\AppData\\Roaming\\legacy.exe\x00"
+            "LastModified=2024-04-01T03:04:05Z\x00"
+            "C:\\Windows\\System32\\cleanmgr.exe\x00"
+        ).encode("utf-16le")
+        occurrences = list(iter_registry_like_string_occurrences(b"\x00" * 64 + payload))
+
+        clusters = collect_shimcache_candidate_clusters(occurrences)
+
+        self.assertEqual(len(clusters), 2)
+        self.assertEqual(clusters[0]["cache_order"], 0)
+        self.assertTrue(clusters[0]["executable_path"].endswith("legacy.exe"))
+        self.assertGreater(clusters[0]["source_offset"], 0)
+        self.assertEqual(clusters[0]["timestamp_candidates"], ["2024-04-01T03:04:05+00:00"])
+        self.assertIn("AppCompatCache", " ".join(clusters[0]["nearby_metadata_candidates"]))
+        self.assertTrue(clusters[1]["executable_path"].endswith("cleanmgr.exe"))
+
+    def test_shimcache_trusted_diff_accepts_nested_artifact_rows_with_order_and_offset(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "shimcache-entry",
+                "details": {
+                    "source_format": "system-hive-native-shimcache-scan",
+                    "source_key": r"SYSTEM\ControlSet001\Control\Session Manager\AppCompatCache",
+                    "source_offset": 8192,
+                    "cache_order": 0,
+                    "executable_path": r"C:\Users\alice\AppData\Roaming\legacy.exe",
+                    "timestamp": "2024-04-01T03:04:05Z",
+                    "timestamp_source": "native-shimcache-nearby-string-timestamp-candidate",
+                    "os_build": "22631",
+                    "shimcache_evidence": {
+                        "execution_caveat": "ShimCache/AppCompatCache can show program presence/order, but it is not standalone proof of execution.",
+                    },
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "SourceFormat": "system-hive-native-shimcache-scan",
+                "SourceKey": r"SYSTEM\ControlSet001\Control\Session Manager\AppCompatCache",
+                "SourceOffset": "0x2000",
+                "CacheOrder": "0",
+                "Path": r"C:\Users\alice\AppData\Roaming\legacy.exe",
+                "LastModified": "2024-04-01T03:04:05+00:00",
+                "TimestampSource": "native-shimcache-nearby-string-timestamp-candidate",
+                "OSBuild": "22631",
+                "Warning": "ShimCache/AppCompatCache can show program presence/order, but it is not standalone proof of execution.",
+            }
+        ]
+
+        diff = build_execution_artifact_trusted_diff(
+            rapid_rows,
+            trusted_rows,
+            trusted_tool="AppCompatCacheParser",
+            artifact_family="shimcache-appcompatcache",
+        )
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertIn("cache_order", diff["compare_fields"])
+
+    def test_shimcache_trusted_diff_blocks_order_mismatch(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "shimcache-entry",
+                "details": {
+                    "source_offset": 8192,
+                    "cache_order": 0,
+                    "executable_path": r"C:\Users\alice\AppData\Roaming\legacy.exe",
+                    "timestamp": "2024-04-01T03:04:05+00:00",
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "SourceOffset": 8192,
+                "CacheOrder": 1,
+                "Path": r"C:\Users\alice\AppData\Roaming\legacy.exe",
+                "LastModified": "2024-04-01T03:04:05+00:00",
+            }
+        ]
+
+        diff = build_execution_artifact_trusted_diff(
+            rapid_rows,
+            trusted_rows,
+            trusted_tool="AppCompatCacheParser",
+            artifact_family="shimcache-appcompatcache",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field_diffs"][0]["field"], "cache_order")
+
+    def test_native_bam_dam_clusters_preserve_sid_path_timestamp_and_source(self) -> None:
+        payload = (
+            "SYSTEM\\CurrentControlSet\\Services\\bam\\State\\UserSettings\\S-1-5-21-1000\x00"
+            "\\Device\\HarddiskVolume3\\Users\\alice\\AppData\\Roaming\\evil.exe\x00"
+            "LastExecution=2024-04-01T06:07:08Z\x00"
+        ).encode("utf-16le")
+        occurrences = list(iter_registry_like_string_occurrences(b"\x00" * 64 + payload))
+
+        clusters = collect_bam_dam_candidate_clusters(occurrences)
+
+        self.assertEqual(len(clusters), 1)
+        cluster = clusters[0]
+        self.assertEqual(cluster["user_sid"], "S-1-5-21-1000")
+        self.assertTrue(cluster["executable_path"].endswith("evil.exe"))
+        self.assertGreater(cluster["source_offset"], 0)
+        self.assertEqual(cluster["timestamp_candidates"], ["2024-04-01T06:07:08+00:00"])
+        self.assertIn("Services\\bam", " ".join(cluster["nearby_metadata_candidates"]))
+        self.assertGreaterEqual(cluster["parser_confidence"], 0.6)
+
+    def test_bam_dam_trusted_diff_accepts_nested_artifact_rows_with_sid_and_device_path(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "bam-entry",
+                "details": {
+                    "source_format": "system-hive-native-bam-dam-scan",
+                    "source_key": r"SYSTEM\CurrentControlSet\Services\bam\State\UserSettings\S-1-5-21-1000",
+                    "source_offset": 12288,
+                    "device_path": r"\Device\HarddiskVolume3\Users\alice\AppData\Roaming\evil.exe",
+                    "user_sid": "S-1-5-21-1000",
+                    "timestamp": "2024-04-01T06:07:08Z",
+                    "timestamp_source": "native-bam-dam-nearby-string-timestamp-candidate",
+                    "bam_dam_evidence": {
+                        "execution_caveat": "BAM/DAM is a strong recent-execution pivot but should be correlated with Prefetch, SRUM, UserAssist, and event logs.",
+                    },
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "SourceFormat": "system-hive-native-bam-dam-scan",
+                "SourceKey": r"SYSTEM\CurrentControlSet\Services\bam\State\UserSettings\S-1-5-21-1000",
+                "SourceOffset": "0x3000",
+                "DevicePath": r"\Device\HarddiskVolume3\Users\alice\AppData\Roaming\evil.exe",
+                "UserSid": "S-1-5-21-1000",
+                "LastExecution": "2024-04-01T06:07:08+00:00",
+                "TimestampSource": "native-bam-dam-nearby-string-timestamp-candidate",
+                "Warning": "BAM/DAM is a strong recent-execution pivot but should be correlated with Prefetch, SRUM, UserAssist, and event logs.",
+            }
+        ]
+
+        diff = build_execution_artifact_trusted_diff(
+            rapid_rows,
+            trusted_rows,
+            trusted_tool="RECmd BAM parser",
+            artifact_family="bam-dam",
+        )
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertIn("device_path", diff["compare_fields"])
+
+    def test_bam_dam_trusted_diff_blocks_sid_mismatch(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "bam-entry",
+                "details": {
+                    "device_path": r"\Device\HarddiskVolume3\Users\alice\AppData\Roaming\evil.exe",
+                    "user_sid": "S-1-5-21-1000",
+                    "timestamp": "2024-04-01T06:07:08+00:00",
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "DevicePath": r"\Device\HarddiskVolume3\Users\alice\AppData\Roaming\evil.exe",
+                "UserSid": "S-1-5-21-2000",
+                "LastExecution": "2024-04-01T06:07:08+00:00",
+            }
+        ]
+
+        diff = build_execution_artifact_trusted_diff(
+            rapid_rows,
+            trusted_rows,
+            trusted_tool="RECmd",
+            artifact_family="bam-dam",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field_diffs"][0]["field"], "user_sid")
+
+    def test_native_srum_row_candidates_merge_nearby_split_strings(self) -> None:
+        hits = [
+            {"value": r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "offset": 4096, "encoding": "utf-16le"},
+            {"value": "SruDbTable=NetworkUsage", "offset": 4200, "encoding": "utf-16le"},
+            {"value": "UserSid=S-1-5-21-1000 Timestamp=2024-04-01T05:06:07Z", "offset": 4300, "encoding": "utf-16le"},
+            {"value": "BytesSent=512 BytesReceived=2048 InterfaceLuid=12 NetworkProfile=CorpWiFi", "offset": 4400, "encoding": "utf-16le"},
+        ]
+
+        candidates = build_srum_row_candidates(hits)
+
+        self.assertEqual(len(candidates), 1)
+        candidate = candidates[0]
+        self.assertEqual(candidate["table_family"], "network-usage")
+        self.assertTrue(candidate["app_id"].endswith("powershell.exe"))
+        self.assertEqual(candidate["user_sid"], "S-1-5-21-1000")
+        self.assertEqual(candidate["timestamp"], "2024-04-01T05:06:07+00:00")
+        self.assertEqual(candidate["bytes_received"], 2048)
+        self.assertEqual(candidate["nearby_string_count"], 4)
+        self.assertTrue(candidate["field_presence_profile"]["network_counters"])
+        self.assertGreaterEqual(candidate["candidate_confidence"], 0.6)
+
+    def test_srum_trusted_diff_accepts_nested_network_usage_rows(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "srum-network-usage",
+                "details": {
+                    "source_format": "csv",
+                    "app_id": "powershell.exe",
+                    "user": "alice",
+                    "timestamp": "2024-04-01T05:06:07Z",
+                    "timestamp_source": "srum-export-row",
+                    "srum_table_family": "network-usage",
+                    "bytes_sent": 512,
+                    "bytes_received": 2048,
+                    "interface_luid": "12",
+                    "network_profile": "CorpWiFi",
+                    "srum_usage_evidence": {
+                        "table_family": "network-usage",
+                        "app_id": "powershell.exe",
+                        "user": "alice",
+                        "timestamp": "2024-04-01T05:06:07+00:00",
+                        "counter_values": {
+                            "bytes_sent": 512,
+                            "bytes_received": 2048,
+                            "interface_luid": "12",
+                            "network_profile": "CorpWiFi",
+                        },
+                    },
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "SourceFormat": "csv",
+                "AppId": "powershell.exe",
+                "User": "alice",
+                "Timestamp": "2024-04-01T05:06:07+00:00",
+                "TimestampSource": "srum-export-row",
+                "TableFamily": "network-usage",
+                "BytesSent": "512.0",
+                "BytesReceived": "2048",
+                "InterfaceLuid": "12",
+                "NetworkProfile": "CorpWiFi",
+            }
+        ]
+
+        diff = build_execution_artifact_trusted_diff(
+            rapid_rows,
+            trusted_rows,
+            trusted_tool="SrumECmd",
+            artifact_family="srum",
+        )
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertIn("bytes_received", diff["compare_fields"])
+
+    def test_srum_trusted_diff_reports_counter_field_mismatch(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "srum-row-candidate",
+                "details": {
+                    "app_id": "powershell.exe",
+                    "timestamp": "2024-04-01T05:06:07+00:00",
+                    "table_family": "network-usage",
+                    "bytes_received": 2048,
+                    "counter_candidates": {"bytes_received": 2048},
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "AppId": "powershell.exe",
+                "Timestamp": "2024-04-01T05:06:07+00:00",
+                "TableFamily": "network-usage",
+                "BytesReceived": 1024,
+            }
+        ]
+
+        diff = build_execution_artifact_trusted_diff(
+            rapid_rows,
+            trusted_rows,
+            trusted_tool="SrumECmd",
+            artifact_family="srum",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        fields = [item["field"] for item in diff["mismatches"][0]["field_diffs"]]
+        self.assertIn("bytes_received", fields)
+
+    def test_windows_edb_row_candidates_prefer_page_local_source_citation(self) -> None:
+        rows = build_search_row_candidates(
+            {
+                "path_candidates": [r"C:\Users\alice\Documents\Case Notes.docx"],
+                "url_candidates": ["https://example.com/browser-history"],
+                "content_candidates": ["encoded powershell investigation notes"],
+                "ese_page_map": {
+                    "page_samples": [
+                        {
+                            "page_index": 7,
+                            "page_offset": 28672,
+                            "page_sha256": "a" * 64,
+                            "path_candidates": [r"C:\Users\alice\Documents\Case Notes.docx"],
+                            "url_candidates": ["https://example.com/browser-history"],
+                            "content_candidates": ["encoded powershell investigation notes"],
+                            "table_marker_hits": {
+                                "property-store": ["system.itempathdisplay"],
+                                "content-index": ["system.search.contents"],
+                                "deleted-state": ["isdeleted"],
+                            },
+                        }
+                    ]
+                },
+            }
+        )
+
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["correlation_method"], "page-local-path-url-content-correlation")
+        self.assertEqual(row["page_offset"], 28672)
+        self.assertEqual(row["page_sha256"], "a" * 64)
+        self.assertTrue(row["field_presence_profile"]["item_path"])
+        self.assertTrue(row["field_presence_profile"]["content_index_marker"])
+        self.assertTrue(row["field_presence_profile"]["deleted_state_marker"])
+        self.assertGreaterEqual(row["parser_confidence"], 0.7)
 
     def test_native_evtx_binxml_promotes_duplicate_event_data_without_losing_order(self) -> None:
         value_fields = [
@@ -583,6 +2310,65 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(diff["mismatch_count"], 0)
         self.assertEqual(diff["reportability_decision"]["decision"], "record-diff-passed")
 
+    def test_evtx_diffs_accept_nested_rapidtriage_artifact_rows(self) -> None:
+        rapid_artifact = {
+            "artifact_type": "eventlog-event",
+            "details": {
+                "record_id": "42",
+                "event_id": "4624",
+                "provider_name": "Microsoft-Windows-Security-Auditing",
+                "channel": "Security",
+                "computer": "host01",
+                "event_created_at": "2024-01-02T03:04:05+00:00",
+                "event_message": "Alice logged on from 10.0.0.5",
+                "message_rendering": {"message": "Alice logged on from 10.0.0.5"},
+                "evtx_record_offset": 8192,
+                "evtx_record_sha256": "b" * 64,
+                "evtx_declared_size": 256,
+                "evtx_allocation_status": "allocated-or-live-record",
+                "evtx_recovery_status": "recoverable-record",
+            },
+        }
+        trusted = [
+            {
+                "event_record_id": "42",
+                "eventid": "4624",
+                "provider": "Microsoft-Windows-Security-Auditing",
+                "log_name": "Security",
+                "hostname": "host01",
+                "time_created": "2024-01-02T03:04:05+00:00",
+                "message": "Alice logged on from 10.0.0.5",
+            }
+        ]
+        oracle = [
+            {
+                "record_offset": 8192,
+                "record_sha256": "b" * 64,
+                "declared_size": 256,
+                "allocation_status": "allocated-or-live-record",
+                "recovery_status": "recoverable-record",
+            }
+        ]
+
+        record_diff = build_evtx_trusted_tool_record_diff([rapid_artifact], trusted, trusted_tool="EvtxECmd")
+        message_diff = build_evtx_message_rendering_diff(
+            [rapid_artifact],
+            [{"event_record_id": "42", "rendered_message": "Alice logged on from 10.0.0.5"}],
+            trusted_tool="Windows Event Viewer",
+        )
+        recovery_diff = build_evtx_recovery_corpus_diff(
+            [rapid_artifact],
+            oracle,
+            oracle="hand-labeled deleted EVTX fixture",
+        )
+
+        self.assertEqual(record_diff["status"], "pass")
+        self.assertEqual(message_diff["status"], "pass")
+        self.assertEqual(recovery_diff["status"], "pass")
+        self.assertTrue(record_diff["commercial_grade_evidence"])
+        self.assertTrue(message_diff["commercial_grade_evidence"])
+        self.assertTrue(recovery_diff["commercial_grade_evidence"])
+
     def test_evtx_trusted_tool_record_diff_blocks_mismatches_and_gaps(self) -> None:
         rapid = [
             {"record_id": "1", "event_id": "4624", "provider_name": "Security", "channel": "Security"},
@@ -688,6 +2474,12 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                     "UsrClass.dat",
                 )
             )
+            transaction_log = bytearray(512)
+            transaction_log[0:4] = b"HvLE"
+            transaction_log[4:8] = (8).to_bytes(4, "little")
+            transaction_log[8:12] = (7).to_bytes(4, "little")
+            transaction_log[12:16] = (1).to_bytes(4, "little")
+            (hive_path.parent / "UsrClass.dat.LOG1").write_bytes(bytes(transaction_log))
 
             records = list(WindowsShellbagsProvider().collect(Path(tmp_dir)))
             native = [record for record in records if record.artifact_type == "shellbag-native-candidate"]
@@ -713,6 +2505,17 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("ShellBags", key_tree.details["forensic_review"]["artifact_goal"])
             self.assertTrue(key_tree.details["validation_checks"]["regf_header_valid"])
             self.assertFalse(key_tree.details["validation_checks"]["binary_shell_item_decoding_available"])
+            self.assertTrue(key_tree.details["validation_checks"]["transaction_log_context_recorded"])
+            self.assertTrue(key_tree.details["validation_checks"]["transaction_log_input_present"])
+            self.assertEqual(key_tree.details["registry_transaction_log_evidence"]["recognized_log_count"], 1)
+            self.assertEqual(
+                key_tree.details["registry_transaction_replay_profile"]["transaction_log_status"],
+                "present-not-replayed",
+            )
+            self.assertEqual(
+                key_tree.details["shellbag_evidence"]["key_evidence"]["transaction_log_status"],
+                "present-not-replayed",
+            )
             self.assertFalse(key_tree.details["commercial_grade_ready"])
             self.assertIn("#15", key_tree.details["shellbag_report_grade_assessment"]["commercial_gap_ids"])
             self.assertFalse(key_tree.details["shellbag_native_capabilities"]["binary_shell_item_decode"])
@@ -722,6 +2525,7 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("BagMRU/Bags relationship", shellbag_gate["satisfied_checks"])
             self.assertIn("timestamp source labeling", shellbag_gate["satisfied_checks"])
             self.assertIn("UsrClass/NTUSER correlation", shellbag_gate["satisfied_checks"])
+            self.assertIn("transaction log context recorded", shellbag_gate["satisfied_checks"])
             self.assertIn("deleted/slack validation warning", shellbag_gate["satisfied_checks"])
             self.assertIn("shell item binary decoding", shellbag_gate["missing_required_checks"])
             shellbag_uplift = key_tree.details["commercial_uplift_evidence"]
@@ -754,7 +2558,12 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                     ],
                 )
             )
-            (hive_path.parent / "NTUSER.DAT.LOG1").write_bytes(b"registry transaction log fixture")
+            transaction_log = bytearray(512)
+            transaction_log[0:4] = b"HvLE"
+            transaction_log[4:8] = (8).to_bytes(4, "little")
+            transaction_log[8:12] = (7).to_bytes(4, "little")
+            transaction_log[12:16] = (1).to_bytes(4, "little")
+            (hive_path.parent / "NTUSER.DAT.LOG1").write_bytes(bytes(transaction_log))
 
             records = list(collect_registry_hive(hive_path))
 
@@ -793,8 +2602,66 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 hive_inventory.details["registry_transaction_log_evidence"]["status"],
                 "present-not-replayed",
             )
+            self.assertEqual(
+                hive_inventory.details["registry_transaction_replay_profile"]["profile_version"],
+                "registry-transaction-replay-profile-v1",
+            )
+            self.assertEqual(
+                hive_inventory.details["registry_transaction_replay_profile"]["transaction_log_status"],
+                "present-not-replayed",
+            )
+            self.assertTrue(
+                hive_inventory.details["registry_transaction_replay_profile"]["replay_required_for_report_grade"]
+            )
+            self.assertIn(
+                "transaction-log-replay-or-second-parser-diff-required",
+                hive_inventory.details["registry_transaction_replay_profile"]["blockers"],
+            )
             self.assertEqual(run_key.details["registry_transaction_log_evidence"]["present_count"], 1)
+            self.assertEqual(run_key.details["registry_transaction_log_evidence"]["recognized_log_count"], 1)
+            self.assertEqual(run_key.details["registry_transaction_log_evidence"]["unrecognized_log_count"], 0)
             self.assertFalse(run_key.details["registry_transaction_log_evidence"]["transaction_log_replay_applied"])
+            self.assertEqual(run_key.details["registry_transaction_log_evidence"]["replay_policy"], "detect-and-disclose-only")
+            self.assertIn("NTUSER.DAT.LOG1", run_key.details["registry_transaction_log_evidence"]["expected_log_names"])
+            self.assertIn("not replayed", run_key.details["registry_transaction_log_evidence"]["impact_statement"])
+            self.assertEqual(
+                run_key.details["registry_transaction_log_evidence"]["present_logs"][0]["header"]["signature"],
+                "HvLE",
+            )
+            self.assertEqual(
+                run_key.details["registry_transaction_log_evidence"]["present_logs"][0]["signature_status"],
+                "recognized-transaction-log",
+            )
+            self.assertTrue(
+                run_key.details["registry_transaction_log_evidence"]["present_logs"][0]["replay_readiness"][
+                    "candidate_for_future_replay"
+                ]
+            )
+            self.assertEqual(
+                run_key.details["registry_transaction_log_evidence"]["replay_inputs"][
+                    "recognized_replay_input_count"
+                ],
+                1,
+            )
+            self.assertTrue(
+                run_key.details["registry_transaction_log_evidence"]["replay_inputs"][
+                    "ready_for_future_internal_replay"
+                ]
+            )
+            self.assertEqual(
+                run_key.details["registry_transaction_log_evidence"]["transaction_context_quality"]["level"],
+                "recognized-logs-present",
+            )
+            self.assertEqual(
+                run_key.details["registry_transaction_replay_profile"]["transaction_log_status"],
+                "present-not-replayed",
+            )
+            self.assertEqual(run_key.details["registry_transaction_replay_profile"]["recognized_replay_input_count"], 1)
+            self.assertFalse(run_key.details["registry_transaction_replay_profile"]["complete_log_pair_present"])
+            self.assertEqual(
+                run_key.details["registry_transaction_replay_profile"]["transaction_context_quality"],
+                "recognized-logs-present",
+            )
             self.assertEqual(
                 run_key.details["registry_transaction_log_evidence"]["present_logs"][0]["name"],
                 "NTUSER.DAT.LOG1",
@@ -836,6 +2703,16 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 key_uplift["large_data_controls"]["transaction_log_replay_required_for_commercial_claims"]
             )
             self.assertEqual(key_uplift["key_tree_diff"]["status"], "not-attached")
+            key_depth = run_key.details["registry_native_depth_readiness_profile"]
+            self.assertEqual(key_depth["profile_version"], "registry-native-depth-readiness-v1")
+            self.assertEqual(key_depth["family"], "key-tree")
+            self.assertEqual(key_depth["artifact_scope"], "key-tree-node")
+            self.assertFalse(key_depth["commercial_grade_ready"])
+            self.assertTrue(key_depth["decoded_components"]["parent_chain_path_reconstruction"])
+            self.assertTrue(key_depth["decoded_components"]["value_list_linking"])
+            self.assertFalse(key_depth["decoded_components"]["transaction_log_replay"])
+            self.assertEqual(key_depth["validation_summary"]["transaction_log_status"], "present-not-replayed")
+            self.assertIn("source_sha256", key_depth["source_citation_requirements"])
 
             value_recovery = next(
                 record
@@ -877,6 +2754,18 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn(
                 "parent-key-link-confirmation",
                 value_recovery.details["registry_recovery_validation_profile"]["required_independent_checks"],
+            )
+            self.assertEqual(
+                value_recovery.details["registry_recovery_validation_profile"]["independent_validation_status"],
+                "required",
+            )
+            self.assertIn(
+                "known-answer-deleted-cell-corpus",
+                value_recovery.details["registry_recovery_validation_profile"]["false_positive_controls"],
+            )
+            self.assertIn(
+                "candidate only",
+                value_recovery.details["registry_recovery_validation_profile"]["analyst_wording"],
             )
             value_reportability = value_recovery.details["registry_recovery_reportability_decision"]
             self.assertEqual(value_reportability["decision"], "do-not-report-as-fact")
@@ -921,6 +2810,16 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             )
             self.assertEqual(value_uplift["deleted_cell_diff"]["status"], "not-attached")
             self.assertTrue(value_uplift["external_evidence_required"])
+            value_depth = value_recovery.details["registry_native_depth_readiness_profile"]
+            self.assertEqual(value_depth["profile_version"], "registry-native-depth-readiness-v1")
+            self.assertEqual(value_depth["family"], "deleted-cell")
+            self.assertEqual(value_depth["artifact_scope"], "value-recovery-candidate")
+            self.assertFalse(value_depth["commercial_grade_ready"])
+            self.assertTrue(value_depth["decoded_components"]["deleted_free_cell_candidate_labeling"])
+            self.assertTrue(value_depth["decoded_components"]["inline_value_preview"])
+            self.assertFalse(value_depth["decoded_components"]["trusted_deleted_cell_diff"])
+            self.assertEqual(value_depth["validation_summary"]["recovery_validation_status"], "required")
+            self.assertIn("cell_offset", value_depth["source_citation_requirements"])
             key_recovery = next(
                 record
                 for record in records
@@ -970,6 +2869,60 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertTrue(diff["commercial_grade_evidence"])
         self.assertEqual(diff["matched_count"], 1)
         self.assertEqual(diff["reportability_decision"]["decision"], "key-tree-diff-passed")
+
+    def test_registry_diffs_accept_nested_rapidtriage_artifact_rows(self) -> None:
+        rapid_key_artifact = {
+            "artifact_type": "registry-key-tree-node",
+            "details": {
+                "key_path": r"HKEY_CURRENT_USER\Software\Run",
+                "value_names": ["SecurityUpdater"],
+                "last_written_at": "2024-04-01T04:05:06+00:00",
+                "root_reachable": True,
+            },
+        }
+        trusted_key = [
+            {
+                "key": r"HKCU\Software\Run",
+                "value_names": "SecurityUpdater",
+                "last_write_time": "2024-04-01T04:05:06+00:00",
+                "root_reachable": True,
+            }
+        ]
+        rapid_deleted_artifact = {
+            "artifact_type": "registry-value-recovery-candidate",
+            "details": {
+                "cell_offset": "0x3000",
+                "candidate_class": "deleted-value-cell",
+                "name": "SecurityUpdater",
+                "decoded_data_preview": "1",
+                "parent_key_path_candidate": r"HKCU\Software\Run",
+            },
+        }
+        oracle_deleted = [
+            {
+                "offset": 12288,
+                "candidate_class": "deleted-value-cell",
+                "value_name": "SecurityUpdater",
+                "data_preview": "1",
+                "parent_key_path": r"HKEY_CURRENT_USER\Software\Run",
+            }
+        ]
+
+        key_diff = build_registry_key_tree_diff(
+            [rapid_key_artifact],
+            trusted_key,
+            trusted_tool="Registry Explorer",
+        )
+        deleted_diff = build_registry_deleted_cell_diff(
+            [rapid_deleted_artifact],
+            oracle_deleted,
+            oracle="hand-labeled deleted registry fixture",
+        )
+
+        self.assertEqual(key_diff["status"], "pass")
+        self.assertEqual(deleted_diff["status"], "pass")
+        self.assertTrue(key_diff["commercial_grade_evidence"])
+        self.assertTrue(deleted_diff["commercial_grade_evidence"])
 
     def test_registry_key_tree_diff_blocks_value_and_path_mismatches(self) -> None:
         rapid = [{"key_path": r"HKCU\Software\Run", "value_names": ["SecurityUpdater"]}]
@@ -1021,6 +2974,161 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
         self.assertEqual(diff["mismatch_count"], 1)
         self.assertIn("registry-deleted-cell-cross-tool-diff-required", diff["reportability_decision"]["blockers"])
 
+    def test_registry_user_activity_normalizes_mru_dialog_network_and_device_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            reg_path = Path(tmp_dir) / "NTUSER-activity.reg"
+            recent_doc = ",".join(f"{byte:02x}" for byte in "report.docx\x00".encode("utf-16le"))
+            reg_path.write_text(
+                f"""Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\RunMRU]
+"a"="notepad.exe C:\\\\Users\\\\alice\\\\notes.txt"
+"MRUList"="a"
+
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\RecentDocs\\.docx]
+"0"=hex:{recent_doc}
+"MRUListEx"=hex:00,00,00,00,ff,ff,ff,ff
+
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ComDlg32\\OpenSavePidlMRU\\docx]
+"0"=hex:{recent_doc}
+
+[HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\##USBSTOR#Disk&Ven_Test&Prod_Flash#123456]
+"LabelFromReg"="CASEUSB"
+
+[HKEY_CURRENT_USER\\Network\\Z]
+"RemotePath"="\\\\\\\\fileserver\\\\cases"
+""",
+                encoding="utf-16",
+            )
+
+            records = [record for record in collect_reg_export(reg_path) if record.artifact_type == "registry-user-activity"]
+
+            categories = {record.details["user_activity_category"] for record in records}
+            self.assertIn("run-dialog-mru", categories)
+            self.assertIn("recent-document", categories)
+            self.assertIn("file-dialog-mru", categories)
+            self.assertIn("mounted-device", categories)
+            self.assertIn("network-share", categories)
+            run_mru = next(record for record in records if record.details["user_activity_category"] == "run-dialog-mru")
+            run_mru_command = next(row for row in run_mru.details["normalized_activity_rows"] if row["value_name"] == "a")
+            self.assertEqual(run_mru_command["display_value"], r"notepad.exe C:\\Users\\alice\\notes.txt")
+            recent = next(record for record in records if record.details["user_activity_category"] == "recent-document")
+            recent_row = next(row for row in recent.details["normalized_activity_rows"] if row["value_name"] == "0")
+            self.assertEqual(recent.details["decoded_values"]["0"]["recent_document_hint"], "report.docx")
+            self.assertEqual(recent_row["display_value"], "report.docx")
+            self.assertEqual(len(recent_row["binary_payload_sha256"]), 64)
+            file_dialog = next(record for record in records if record.details["user_activity_category"] == "file-dialog-mru")
+            self.assertIn("OpenSavePidlMRU", file_dialog.details["registry_user_activity_profile"]["target_artifact_coverage"]["matched_targets"])
+            mounted = next(record for record in records if record.details["user_activity_category"] == "mounted-device")
+            self.assertIn("MountPoints2", mounted.details["registry_user_activity_profile"]["target_artifact_coverage"]["matched_targets"])
+            network = next(record for record in records if record.details["user_activity_category"] == "network-share")
+            self.assertEqual(network.details["decoded_values"]["RemotePath"]["network_share_hint"], "Z")
+            self.assertTrue(
+                all(record.details["registry_user_activity_profile"]["normalized_activity_schema"]["safe_for_search_index"] for record in records)
+            )
+
+    def test_sam_v_value_decodes_layout_string_candidates_without_secret_output(self) -> None:
+        def put_descriptor(raw: bytearray, descriptor_offset: int, relative_offset: int, text: str) -> int:
+            encoded = text.encode("utf-16le")
+            raw[descriptor_offset : descriptor_offset + 4] = relative_offset.to_bytes(4, "little")
+            raw[descriptor_offset + 4 : descriptor_offset + 8] = len(encoded).to_bytes(4, "little")
+            raw[descriptor_offset + 8 : descriptor_offset + 12] = len(encoded).to_bytes(4, "little")
+            absolute = 0xCC + relative_offset
+            raw[absolute : absolute + len(encoded)] = encoded
+            return relative_offset + len(encoded)
+
+        raw = bytearray(0xCC + 256)
+        cursor = put_descriptor(raw, 0x0C, 0, "alice")
+        cursor = put_descriptor(raw, 0x18, cursor, "Alice Example")
+        put_descriptor(raw, 0x60, cursor, r"C:\Users\alice")
+        reg_hex = ",".join(f"{byte:02x}" for byte in raw)
+
+        decoded = decode_sam_binary_field("V", f"hex:{reg_hex}")
+
+        self.assertTrue(decoded["decoded"])
+        self.assertEqual(decoded["layout_validation_status"], "layout-string-candidates-present")
+        self.assertEqual(decoded["layout_string_fields"]["user_name"], "alice")
+        self.assertEqual(decoded["layout_string_fields"]["full_name"], "Alice Example")
+        self.assertEqual(decoded["layout_string_fields"]["profile_path"], r"C:\Users\alice")
+        self.assertTrue(all("decoded_text" in item for item in decoded["layout_field_candidates"]))
+        self.assertIn("trusted SAM parser", decoded["reportability_warning"])
+
+    def test_os_account_trusted_diff_accepts_nested_artifact_rows(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "windows-account-lifecycle",
+                "details": {
+                    "user_name": "alice",
+                    "rid": "0x3e8",
+                    "admin_hint": True,
+                    "account_disabled_hint": False,
+                },
+            },
+            {
+                "artifact_type": "windows-group-membership",
+                "details": {
+                    "group_name": "Administrators",
+                    "member_sids": ["S-1-5-21-1000"],
+                    "member_names": ["alice"],
+                    "privileged_group": True,
+                },
+            },
+            {
+                "artifact_type": "windows-privilege-assignment",
+                "details": {
+                    "privilege": "SeRemoteInteractiveLogonRight",
+                    "assigned_sids": ["S-1-5-32-544"],
+                },
+            },
+        ]
+        trusted_rows = [
+            {"account_name": "alice", "account_rid": "1000", "is_admin": True, "disabled": False},
+            {
+                "group_name": "Administrators",
+                "member_sids": "S-1-5-21-1000",
+                "member_names": "alice",
+                "privileged_group": True,
+            },
+            {"right": "SeRemoteInteractiveLogonRight", "assigned_principal_sids": ["S-1-5-32-544"]},
+        ]
+
+        diff = build_os_account_trusted_diff(rapid_rows, trusted_rows, trusted_tool="RECmd")
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["trusted_tool_recognized"])
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 3)
+        self.assertEqual(diff["mismatch_count"], 0)
+        self.assertEqual(diff["reportability_decision"]["decision"], "os-account-diff-passed")
+
+    def test_os_account_trusted_diff_blocks_group_membership_mismatch(self) -> None:
+        rapid_rows = [
+            {
+                "artifact_type": "windows-group-membership",
+                "details": {
+                    "group_name": "Administrators",
+                    "member_sids": ["S-1-5-21-1000"],
+                    "member_names": ["alice"],
+                    "privileged_group": True,
+                },
+            }
+        ]
+        trusted_rows = [
+            {
+                "group_name": "Administrators",
+                "member_sids": ["S-1-5-21-2000"],
+                "member_names": ["bob"],
+                "privileged_group": True,
+            }
+        ]
+
+        diff = build_os_account_trusted_diff(rapid_rows, trusted_rows, trusted_tool="Registry Explorer")
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertIn("sam-security-system-trusted-diff-required", diff["reportability_decision"]["blockers"])
+
     def test_manifest_collects_browser_and_recent_file_artifacts_from_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "windows_artifacts"
@@ -1063,6 +3171,20 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
 """,
                 encoding="utf-16",
             )
+            amcache = root / "Windows" / "AppCompat" / "Programs" / "Amcache.hve"
+            amcache.parent.mkdir(parents=True, exist_ok=True)
+            amcache.write_bytes(
+                build_minimal_registry_hive(
+                    datetime(2024, 4, 1, 2, 3, 4, tzinfo=timezone.utc),
+                    "Amcache.hve",
+                    [
+                        r"C:\Program Files\Example\app.exe",
+                        "0123456789abcdef0123456789abcdef01234567",
+                        "Example Publisher",
+                        "2024-04-01T02:03:04Z",
+                    ],
+                )
+            )
             output = Path(tmp_dir) / "manifest.json"
 
             exit_code = main(["manifest", str(root), "--output", str(output)])
@@ -1082,6 +3204,50 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(chrome["details"]["download_count"], 1)
             self.assertEqual(chrome["details"]["downloads"][0]["source_url"], "https://download.example.com/report.zip")
             self.assertEqual(chrome["details"]["downloads"][0]["target_path"], r"C:\Users\alice\Downloads\report.zip")
+            functional_profiles = {
+                item["item_number"]: item
+                for item in chrome["details"]["commercial_uplift_evidence"]["functional_priority_profiles"]
+            }
+            self.assertEqual(functional_profiles[46]["batch_id"], "commercial-uplift-046-050")
+            self.assertEqual(functional_profiles[46]["implemented_controls"]["history_count"], 2)
+            self.assertEqual(len(functional_profiles[46]["implemented_controls"]["row_citation_manifest_hash"]), 64)
+            self.assertEqual(functional_profiles[46]["implemented_controls"]["row_citation_count"], 3)
+            self.assertEqual(functional_profiles[46]["implemented_controls"]["row_locator_count"], 3)
+            self.assertIn(
+                "browser-row-citation-manifest-emitted",
+                functional_profiles[46]["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "sqlite-source-viewer-locators-emitted",
+                functional_profiles[46]["passed_validation_check_ids"],
+            )
+            self.assertIn(
+                "trusted-browser-timeline-diff-required",
+                functional_profiles[46]["failed_validation_check_ids"],
+            )
+            citation_manifest = chrome["details"]["browser_history_download_citation_manifest"]
+            self.assertEqual(citation_manifest["download_citations"][0]["source_table"], "downloads")
+            self.assertEqual(citation_manifest["download_citations"][0]["source_row_id"], 1)
+            self.assertEqual(citation_manifest["download_citations"][0]["source_viewer_locator"]["viewer"], "sqlite")
+            self.assertEqual(
+                chrome["details"]["commercial_uplift_evidence"]["large_data_controls"]["row_citation_manifest_hash"],
+                citation_manifest["manifest_sha256"],
+            )
+            self.assertEqual(functional_profiles[47]["item_number"], 47)
+            self.assertEqual(len(functional_profiles[47]["implemented_controls"]["storage_citation_manifest_hash"]), 64)
+            self.assertEqual(
+                functional_profiles[47]["implemented_controls"]["storage_citation_count"],
+                chrome["details"]["browser_storage_inventory_count"],
+            )
+            self.assertIn(
+                "browser-storage-citation-manifest-emitted",
+                functional_profiles[47]["passed_validation_check_ids"],
+            )
+            storage_citation_manifest = chrome["details"]["browser_storage_citation_manifest"]
+            self.assertEqual(storage_citation_manifest["manifest_version"], "browser-storage-citation-manifest-v1")
+            self.assertEqual(storage_citation_manifest["item_number"], 47)
+            self.assertEqual(len(storage_citation_manifest["manifest_sha256"]), 64)
+            self.assertEqual(storage_citation_manifest["citation_row_count"], chrome["details"]["browser_storage_inventory_count"])
 
             firefox = browser_keys[("firefox", "default-release")]
             self.assertEqual(firefox["artifact_type"], "browser-history")
@@ -1217,10 +3383,21 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("persistence", categories)
             self.assertIn("shellbag", categories)
             userassist = next(artifact for artifact in user_activity if artifact["details"]["user_activity_category"] == "execution")
+            self.assertEqual(userassist["details"]["registry_user_activity_profile"]["item_number"], 11)
+            self.assertEqual(
+                userassist["details"]["registry_user_activity_profile"]["reportability_decision"]["allowed_use"],
+                "searchable-user-activity-row",
+            )
+            self.assertFalse(userassist["details"]["registry_user_activity_profile"]["commercial_grade_ready"])
             self.assertEqual(
                 userassist["details"]["decoded_values"][r"P:\Hfref\nyvpr\NccQngn\Ebnzvat\rivy.rkr"]["decoded_name"],
                 r"C:\Users\alice\AppData\Roaming\evil.exe",
             )
+            self.assertEqual(
+                userassist["details"]["normalized_activity_rows"][0]["display_value"],
+                r"C:\Users\alice\AppData\Roaming\evil.exe",
+            )
+            self.assertTrue(userassist["details"]["registry_user_activity_profile"]["normalized_activity_schema"]["safe_for_search_index"])
             typed_url = next(artifact for artifact in user_activity if artifact["details"]["user_activity_category"] == "browser-typed-url")
             self.assertEqual(typed_url["details"]["decoded_values"]["url1"]["typed_value"], "https://example.test/login")
             hive_shellbag = next(
@@ -1230,6 +3407,11 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 and artifact["details"]["user_activity_category"] == "shellbag"
             )
             self.assertTrue(hive_shellbag["details"]["validation_required"])
+            self.assertEqual(hive_shellbag["details"]["registry_user_activity_profile"]["current_decode_level"], "native-hive-string-pivot")
+            self.assertEqual(
+                hive_shellbag["details"]["registry_user_activity_profile"]["reportability_decision"]["decision"],
+                "do-not-report-as-final-user-activity",
+            )
             usb_key = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-usb")
             self.assertEqual(usb_key["details"]["usb_device"]["serial_hint"], "1234567890")
             summary = next(artifact for artifact in registry_provider["artifacts"] if artifact["artifact_type"] == "registry-summary")
@@ -1274,6 +3456,22 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertEqual(prefetch_provider["artifacts"][0]["details"]["prefetch_hash"], "12345678")
             self.assertEqual(prefetch_provider["artifacts"][0]["details"]["coverage_status"], "detected")
             self.assertEqual(len(prefetch_provider["artifacts"][0]["details"]["source_hashes"]["sha256"]), 64)
+
+            execution_provider = providers["windows-execution"]
+            execution_types = {artifact["artifact_type"] for artifact in execution_provider["artifacts"]}
+            self.assertIn("amcache-hive", execution_types)
+            self.assertIn("amcache-entry", execution_types)
+            native_amcache = next(
+                artifact
+                for artifact in execution_provider["artifacts"]
+                if artifact["artifact_type"] == "amcache-entry"
+                and artifact["details"]["source_format"] == "amcache-hive"
+            )
+            self.assertEqual(native_amcache["details"]["amcache_row_cluster_evidence"]["cluster_status"], "bounded-nearby-string-cluster")
+            self.assertGreaterEqual(native_amcache["details"]["source_offset"], 0)
+            self.assertIn("bounded Amcache row-cluster provenance", native_amcache["details"]["core_accuracy_gates"][0]["satisfied_checks"])
+            hive_amcache = next(artifact for artifact in execution_provider["artifacts"] if artifact["artifact_type"] == "amcache-hive")
+            self.assertGreaterEqual(hive_amcache["details"]["amcache_candidate_cluster_count"], 1)
 
             system_provider = providers["windows-system-artifacts"]
             system_types = {artifact["artifact_type"] for artifact in system_provider["artifacts"]}

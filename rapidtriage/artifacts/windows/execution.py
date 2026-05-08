@@ -16,11 +16,17 @@ from .ese import ESE_SCAN_READ_SIZE, build_ese_string_pivots, probe_ese_database
 from .os_account import decode_reg_export
 from .srum_ese import analyze_srudb_native
 
-PARSER_VERSION = "windows-execution-v8"
+PARSER_VERSION = "windows-execution-v10"
 REGISTRY_EXPORT_EXT = ".reg"
 SRUM_IMPORT_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 AMCACHE_HIVE_NAME = "AMCACHE.HVE"
+SYSTEM_HIVE_NAME = "SYSTEM"
 MAX_NATIVE_AMCACHE_SCAN_BYTES = 8 * 1024 * 1024
+AMCACHE_ROW_CLUSTER_WINDOW_BYTES = 4096
+MAX_NATIVE_SHIMCACHE_SCAN_BYTES = 8 * 1024 * 1024
+SHIMCACHE_ROW_CLUSTER_WINDOW_BYTES = 4096
+MAX_NATIVE_BAM_DAM_SCAN_BYTES = 8 * 1024 * 1024
+BAM_DAM_ROW_CLUSTER_WINDOW_BYTES = 4096
 POWERSHELL_HISTORY = ("AppData", "Roaming", "Microsoft", "Windows", "PowerShell", "PSReadLine", "ConsoleHost_history.txt")
 
 EXECUTION_KEYWORDS = {
@@ -46,7 +52,9 @@ EXECUTION_NATIVE_CAPABILITIES = {
     "amcache_export_mapping": True,
     "amcache_native_string_pivots": True,
     "shimcache_export_mapping": True,
+    "shimcache_native_string_pivots": True,
     "bam_export_mapping": True,
+    "bam_native_string_pivots": True,
     "srum_export_mapping": True,
     "srum_ese_header_probe": True,
     "srum_native_string_pivots": True,
@@ -83,6 +91,8 @@ class WindowsExecutionProvider:
         records = [
             *collect_execution_reg_exports(root),
             *collect_native_amcache_hives(root),
+            *collect_native_shimcache_system_hives(root),
+            *collect_native_bam_dam_system_hives(root),
             *collect_powershell_history(root),
             *collect_srum_imports(root),
             *collect_srum_dat_inventory(root),
@@ -313,6 +323,304 @@ def collect_native_amcache_hives(root: Path) -> Iterable[ArtifactRecord]:
         yield from build_native_amcache_records(path)
 
 
+def collect_native_shimcache_system_hives(root: Path) -> Iterable[ArtifactRecord]:
+    seen: set[Path] = set()
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.name.upper() != SYSTEM_HIVE_NAME:
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        yield from build_native_shimcache_records(path)
+
+
+def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
+    try:
+        stat_result = path.stat()
+        with path.open("rb") as handle:
+            blob = handle.read(min(stat_result.st_size, MAX_NATIVE_SHIMCACHE_SCAN_BYTES))
+    except OSError:
+        return
+
+    source_hashes = file_hashes(path)
+    occurrences = list(iter_registry_like_string_occurrences(blob))
+    strings = list(unique_preserve_order(item["text"] for item in occurrences))
+    appcompat_markers = [
+        item
+        for item in occurrences
+        if "appcompatcache" in str(item.get("text") or "").lower()
+        or "appcompatflags" in str(item.get("text") or "").lower()
+    ]
+    clusters = collect_shimcache_candidate_clusters(occurrences)
+    if not clusters and not appcompat_markers:
+        return
+    validation_checks = {
+        "has_executable_path": any(cluster.get("executable_path") for cluster in clusters),
+        "has_native_binary_path_candidates": bool(clusters),
+        "has_source_offsets": any(cluster.get("source_offset") is not None for cluster in clusters),
+        "has_cache_order": bool(clusters),
+        "has_timestamp_candidate": any(cluster.get("timestamp_candidates") for cluster in clusters),
+        "requires_correlation": True,
+        "requires_second_parser_validation": True,
+        "native_binary_layout_decoding_available": False,
+        "correlation_targets": execution_correlation_targets("shimcache-entry"),
+    }
+    report_grade = execution_report_grade_assessment(
+        execution_validation_matrix(validation_checks),
+        validation_required=True,
+        gap_ids=["#8"],
+        extra_blockers=["native-appcompatcache-layout-decoding-required", "os-build-layout-validation-required"],
+    )
+    for index, cluster in enumerate(clusters[:100]):
+        executable_path = str(cluster.get("executable_path") or "")
+        timestamp_candidates = [
+            str(value) for value in cluster.get("timestamp_candidates", []) if str(value)
+        ] if isinstance(cluster.get("timestamp_candidates"), list) else []
+        timestamp = timestamp_candidates[0] if timestamp_candidates else ""
+        row_checks = {
+            **validation_checks,
+            "has_executable_path": bool(executable_path),
+            "has_source_offset": cluster.get("source_offset") is not None,
+            "has_timestamp_candidate": bool(timestamp),
+            "has_nearby_metadata_candidates": bool(cluster.get("nearby_metadata_candidates")),
+        }
+        row_report_grade = execution_report_grade_assessment(
+            execution_validation_matrix(row_checks),
+            validation_required=True,
+            gap_ids=["#8"],
+            extra_blockers=["native-appcompatcache-layout-decoding-required", "os-build-layout-validation-required"],
+        )
+        core_accuracy_gates = execution_core_accuracy_gates(
+            "shimcache-entry",
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": source_hashes,
+                "source_index": index,
+                "source_format": "system-hive-native-shimcache-scan",
+                "executable_path": executable_path,
+                "timestamp": timestamp,
+                "source_offset": cluster.get("source_offset"),
+                "cache_order": cluster.get("cache_order"),
+                "validation_checks": row_checks,
+            },
+        )
+        yield ArtifactRecord(
+            provider=WindowsExecutionProvider.name,
+            artifact_type="shimcache-entry",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-shimcache-native-system-hive-scan",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "native-system-hive-string-pivot",
+                "reportability": "review",
+                "source_path": str(path.resolve()),
+                "source_format": "system-hive-native-shimcache-scan",
+                "source_hashes": source_hashes,
+                "source_index": index,
+                "source_offset": cluster.get("source_offset", 0),
+                "source_encoding": cluster.get("source_encoding", ""),
+                "cache_order": cluster.get("cache_order", index),
+                "executable_path": executable_path,
+                "timestamp": timestamp,
+                "timestamp_source": "native-shimcache-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
+                "nearby_metadata_candidates": cluster.get("nearby_metadata_candidates", []),
+                "shimcache_evidence": shimcache_entry_evidence(
+                    key="SYSTEM\\ControlSet*\\Control\\Session Manager\\AppCompatCache",
+                    executable_path=executable_path,
+                    timestamp=timestamp,
+                    timestamp_source="native-shimcache-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
+                    decoded_values={},
+                    source_format="system-hive-native-shimcache-scan",
+                    source_offset=int(cluster.get("source_offset") or 0),
+                    cache_order=int(cluster.get("cache_order") or index),
+                    nearby_metadata_candidates=[
+                        str(value) for value in cluster.get("nearby_metadata_candidates", [])
+                    ] if isinstance(cluster.get("nearby_metadata_candidates"), list) else [],
+                ),
+                "shimcache_execution_caveat_profile": shimcache_execution_caveat_profile(
+                    validation_checks=row_checks,
+                    report_grade=row_report_grade,
+                    executable_path=executable_path,
+                    timestamp=timestamp,
+                    source_format="system-hive-native-shimcache-scan",
+                ),
+                "evidence_strength": "program-presence-not-proof-of-execution",
+                "parser_confidence": float(cluster.get("parser_confidence") or 0.52),
+                "validation_required": True,
+                "validation_checks": row_checks,
+                "execution_validation_matrix": execution_validation_matrix(row_checks),
+                "execution_report_grade_assessment": row_report_grade,
+                "core_accuracy_gates": core_accuracy_gates,
+                "commercial_uplift_evidence": execution_commercial_uplift_evidence(
+                    "shimcache-entry",
+                    {
+                        "source_path": str(path.resolve()),
+                        "source_hashes": source_hashes,
+                        "source_index": index,
+                        "source_format": "system-hive-native-shimcache-scan",
+                        "execution_validation_matrix": execution_validation_matrix(row_checks),
+                        "execution_report_grade_assessment": row_report_grade,
+                    },
+                ),
+                "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
+                "execution_caveat": "Presence in ShimCache is not proof the executable ran.",
+                "validation_guidance": "Native SYSTEM hive scan preserves ShimCache/AppCompatCache path/order pivots only; validate OS build layout and trusted parser parity before report-grade use.",
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": row_report_grade["blockers"],
+                "risk_flags": execution_risk_flags("shimcache-entry", executable_path, {}),
+                "risk_score": min(100, len(execution_path_risk_flags(executable_path)) * 25 + 10),
+                "raw_preview": executable_path,
+            },
+        )
+
+
+def collect_native_bam_dam_system_hives(root: Path) -> Iterable[ArtifactRecord]:
+    seen: set[Path] = set()
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
+        if not path.is_file() or path.name.upper() != SYSTEM_HIVE_NAME:
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        yield from build_native_bam_dam_records(path)
+
+
+def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
+    try:
+        stat_result = path.stat()
+        with path.open("rb") as handle:
+            blob = handle.read(min(stat_result.st_size, MAX_NATIVE_BAM_DAM_SCAN_BYTES))
+    except OSError:
+        return
+
+    source_hashes = file_hashes(path)
+    occurrences = list(iter_registry_like_string_occurrences(blob))
+    markers = [
+        item
+        for item in occurrences
+        if "\\services\\bam\\" in str(item.get("text") or "").lower()
+        or "\\services\\dam\\" in str(item.get("text") or "").lower()
+    ]
+    clusters = collect_bam_dam_candidate_clusters(occurrences)
+    if not clusters and not markers:
+        return
+
+    for index, cluster in enumerate(clusters[:100]):
+        executable_path = str(cluster.get("executable_path") or "")
+        timestamp_candidates = [
+            str(value) for value in cluster.get("timestamp_candidates", []) if str(value)
+        ] if isinstance(cluster.get("timestamp_candidates"), list) else []
+        timestamp = timestamp_candidates[0] if timestamp_candidates else ""
+        user_sid = str(cluster.get("user_sid") or "")
+        source_key = str(cluster.get("source_key") or "SYSTEM\\CurrentControlSet\\Services\\bam\\State\\UserSettings")
+        row_checks = {
+            "has_executable_path": bool(executable_path),
+            "has_user_or_sid": bool(user_sid),
+            "has_user": bool(user_sid),
+            "has_timestamp": bool(timestamp),
+            "has_source_offset": cluster.get("source_offset") is not None,
+            "has_nearby_metadata_candidates": bool(cluster.get("nearby_metadata_candidates")),
+            "requires_correlation": True,
+            "native_binary_layout_decoding_available": False,
+            "correlation_targets": execution_correlation_targets("bam-entry"),
+        }
+        row_report_grade = execution_report_grade_assessment(
+            execution_validation_matrix(row_checks),
+            validation_required=True,
+            gap_ids=["#9"],
+            extra_blockers=["native-system-hive-bam-decoding-required", "bam-dam-filetime-row-validation-required"],
+        )
+        core_accuracy_gates = execution_core_accuracy_gates(
+            "bam-entry",
+            {
+                "source_path": str(path.resolve()),
+                "source_hashes": source_hashes,
+                "source_index": index,
+                "source_format": "system-hive-native-bam-dam-scan",
+                "source_key": source_key,
+                "executable_path": executable_path,
+                "device_path": executable_path,
+                "user_sid": user_sid,
+                "timestamp": timestamp,
+                "validation_checks": row_checks,
+            },
+        )
+        yield ArtifactRecord(
+            provider=WindowsExecutionProvider.name,
+            artifact_type="bam-entry",
+            path=str(path.resolve()),
+            supported=True,
+            details={
+                "parser": "windows-bam-dam-native-system-hive-scan",
+                "parser_version": PARSER_VERSION,
+                "coverage_status": "native-system-hive-string-pivot",
+                "reportability": "review",
+                "source_path": str(path.resolve()),
+                "source_format": "system-hive-native-bam-dam-scan",
+                "source_hashes": source_hashes,
+                "source_index": index,
+                "source_key": source_key,
+                "source_offset": cluster.get("source_offset", 0),
+                "source_encoding": cluster.get("source_encoding", ""),
+                "executable_path": executable_path,
+                "device_path": executable_path if executable_path.lower().startswith("\\device\\") else "",
+                "user_sid": user_sid,
+                "timestamp": timestamp,
+                "timestamp_source": "native-bam-dam-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
+                "nearby_metadata_candidates": cluster.get("nearby_metadata_candidates", []),
+                "bam_dam_evidence": bam_dam_entry_evidence(
+                    key=source_key,
+                    executable_path=executable_path,
+                    user_sid=user_sid,
+                    timestamp=timestamp,
+                    timestamp_source="native-bam-dam-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
+                    decoded_values={},
+                    source_format="system-hive-native-bam-dam-scan",
+                    source_offset=int(cluster.get("source_offset") or 0),
+                    nearby_metadata_candidates=[
+                        str(value) for value in cluster.get("nearby_metadata_candidates", [])
+                    ] if isinstance(cluster.get("nearby_metadata_candidates"), list) else [],
+                ),
+                "bam_dam_decode_profile": bam_dam_decode_profile(
+                    validation_checks=row_checks,
+                    report_grade=row_report_grade,
+                    executable_path=executable_path,
+                    user_sid=user_sid,
+                    timestamp=timestamp,
+                    timestamp_source="native-bam-dam-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot",
+                    source_format="system-hive-native-bam-dam-scan",
+                ),
+                "evidence_strength": "recent-execution-indicator-candidate",
+                "parser_confidence": float(cluster.get("parser_confidence") or 0.54),
+                "validation_required": True,
+                "validation_checks": row_checks,
+                "execution_validation_matrix": execution_validation_matrix(row_checks),
+                "execution_report_grade_assessment": row_report_grade,
+                "core_accuracy_gates": core_accuracy_gates,
+                "commercial_uplift_evidence": execution_commercial_uplift_evidence(
+                    "bam-entry",
+                    {
+                        "source_path": str(path.resolve()),
+                        "source_hashes": source_hashes,
+                        "source_index": index,
+                        "source_format": "system-hive-native-bam-dam-scan",
+                        "execution_validation_matrix": execution_validation_matrix(row_checks),
+                        "execution_report_grade_assessment": row_report_grade,
+                    },
+                ),
+                "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
+                "execution_caveat": "BAM/DAM should be correlated with other execution artifacts for final conclusions.",
+                "validation_guidance": "Native SYSTEM hive scan preserves BAM/DAM path/SID/timestamp pivots only; validate binary FILETIME row decoding before report-grade execution claims.",
+                "commercial_grade_ready": False,
+                "commercial_grade_blockers": row_report_grade["blockers"],
+                "risk_flags": execution_risk_flags("bam-entry", executable_path, {}),
+                "risk_score": min(100, len(execution_path_risk_flags(executable_path)) * 25 + 25),
+                "raw_preview": executable_path,
+            },
+        )
 def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
     try:
         stat_result = path.stat()
@@ -321,12 +629,22 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
     except OSError:
         return
     source_hashes = file_hashes(path)
-    strings = list(unique_preserve_order(iter_registry_like_strings(blob)))
-    path_candidates = [value for value in strings if looks_like_executable_path(value)][:100]
+    occurrences = list(iter_registry_like_string_occurrences(blob))
+    strings = list(unique_preserve_order(item["text"] for item in occurrences))
+    amcache_clusters = collect_amcache_candidate_clusters(occurrences)
+    path_candidates = [
+        str(cluster.get("executable_path") or "")
+        for cluster in amcache_clusters
+        if str(cluster.get("executable_path") or "")
+    ][:100]
+    if not path_candidates:
+        path_candidates = [value for value in strings if looks_like_executable_path(value)][:100]
     sha1_candidates = sorted(set(re.findall(r"(?i)\b[0-9a-f]{40}\b", "\n".join(strings))))[:100]
     hive_validation_checks = {
         "has_path_candidates": bool(path_candidates),
         "has_sha1_candidates": bool(sha1_candidates),
+        "has_row_cluster_candidates": bool(amcache_clusters),
+        "has_source_offsets": any(cluster.get("source_offset") is not None for cluster in amcache_clusters),
         "native_schema_decoding_available": False,
         "requires_second_parser_validation": True,
     }
@@ -364,7 +682,9 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
             "extracted_string_count": len(strings),
             "path_candidates": path_candidates,
             "sha1_candidates": sha1_candidates,
-            "amcache_hive_evidence": amcache_hive_evidence(path_candidates, sha1_candidates, strings),
+            "amcache_candidate_clusters": amcache_clusters[:100],
+            "amcache_candidate_cluster_count": len(amcache_clusters),
+            "amcache_hive_evidence": amcache_hive_evidence(path_candidates, sha1_candidates, strings, amcache_clusters),
             "amcache_schema_profile": amcache_schema_profile(
                 source_format="amcache-hive",
                 timestamp_source="not_available_native_string_pivot",
@@ -399,10 +719,25 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
             "raw_preview": " ".join(strings[:25])[:2000],
         },
     )
+    clusters_by_path = {normalize_execution_path(str(cluster.get("executable_path") or "")): cluster for cluster in amcache_clusters}
     for index, candidate in enumerate(path_candidates[:100]):
+        cluster = clusters_by_path.get(normalize_execution_path(candidate), {})
+        cluster_sha1_candidates = [
+            str(value) for value in cluster.get("sha1_candidates", []) if str(value)
+        ] if isinstance(cluster.get("sha1_candidates"), list) else []
+        row_sha1_candidates = sorted(set([*cluster_sha1_candidates, *sha1_candidates]))[:100]
+        timestamp_candidates = [
+            str(value) for value in cluster.get("timestamp_candidates", []) if str(value)
+        ] if isinstance(cluster.get("timestamp_candidates"), list) else []
+        timestamp = timestamp_candidates[0] if timestamp_candidates else ""
+        timestamp_source = "native-amcache-nearby-string-timestamp-candidate" if timestamp else "not_available_native_string_pivot"
         entry_validation_checks = {
             "has_executable_path": bool(candidate),
-            "has_hash_candidates": bool(sha1_candidates),
+            "has_hash_candidates": bool(row_sha1_candidates),
+            "has_row_cluster_candidate": bool(cluster),
+            "has_source_offset": cluster.get("source_offset") is not None,
+            "has_timestamp_candidate": bool(timestamp_candidates),
+            "has_nearby_metadata_candidates": bool(cluster.get("metadata_candidates")),
             "native_schema_decoding_available": False,
             "requires_second_parser_validation": True,
             "correlation_targets": execution_correlation_targets("amcache-entry"),
@@ -442,33 +777,37 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
                 "source_index": index,
                 "executable_path": candidate,
                 "program_name": display_name_for_execution_key(candidate),
-                "sha1_candidates": sha1_candidates,
+                "sha1_candidates": row_sha1_candidates,
+                "amcache_row_cluster_evidence": amcache_row_cluster_evidence(cluster),
                 "amcache_evidence": amcache_entry_evidence(
                     source_format="amcache-hive",
                     source_key="",
                     executable_path=candidate,
                     execution_fields={
                         "program_name": display_name_for_execution_key(candidate),
-                        "sha1": sha1_candidates[0] if sha1_candidates else "",
+                        "sha1": row_sha1_candidates[0] if row_sha1_candidates else "",
                     },
-                    timestamp="",
-                    timestamp_source="not_available_native_string_pivot",
+                    timestamp=timestamp,
+                    timestamp_source=timestamp_source,
                     decoded_values={},
-                    sha1_candidates=sha1_candidates,
+                    sha1_candidates=row_sha1_candidates,
                 ),
                 "amcache_schema_profile": amcache_schema_profile(
                     source_format="amcache-hive",
-                    timestamp_source="not_available_native_string_pivot",
+                    timestamp_source=timestamp_source,
                     validation_checks=entry_validation_checks,
                     report_grade=entry_report_grade,
                     executable_path=candidate,
-                    sha1=sha1_candidates[0] if sha1_candidates else "",
+                    sha1=row_sha1_candidates[0] if row_sha1_candidates else "",
                 ),
-                "timestamp": "",
-                "timestamp_source": "not_available_native_string_pivot",
+                "timestamp": timestamp,
+                "timestamp_source": timestamp_source,
+                "source_offset": cluster.get("source_offset", 0) if isinstance(cluster, Mapping) else 0,
+                "source_encoding": cluster.get("source_encoding", "") if isinstance(cluster, Mapping) else "",
+                "nearby_metadata_candidates": cluster.get("metadata_candidates", []) if isinstance(cluster, Mapping) else [],
                 "artifact_family": "amcache",
                 "evidence_strength": "program-presence-or-execution-candidate",
-                "parser_confidence": 0.44,
+                "parser_confidence": float(cluster.get("parser_confidence") or 0.44) if isinstance(cluster, Mapping) else 0.44,
                 "validation_required": True,
                 "validation_checks": entry_validation_checks,
                 "execution_validation_matrix": execution_validation_matrix(entry_validation_checks),
@@ -920,6 +1259,9 @@ def build_srum_database_row_candidate_records(path: Path, inventory_details: Map
             "has_user_or_sid": bool(candidate.get("user") or candidate.get("user_sid")),
             "has_timestamp_candidate": bool(candidate.get("timestamp")),
             "has_counter_candidates": bool(candidate.get("counter_candidates")),
+            "has_source_offset": candidate.get("source_offset") is not None,
+            "has_srum_row_cluster_context": bool(candidate.get("nearby_string_count")),
+            "has_srum_field_presence_profile": bool(candidate.get("field_presence_profile")),
             "row_level_decoding_available": False,
             "requires_srum_parser": True,
         }
@@ -967,6 +1309,10 @@ def build_srum_database_row_candidate_records(path: Path, inventory_details: Map
                 "candidate_basis": str(candidate.get("candidate_basis") or "bounded-native-string-row-cluster"),
                 "source_offset": int(candidate.get("source_offset") or 0),
                 "source_encoding": str(candidate.get("source_encoding") or ""),
+                "cluster_window_bytes": int(candidate.get("cluster_window_bytes") or 0),
+                "nearby_string_count": int(candidate.get("nearby_string_count") or 0),
+                "nearby_offsets": [int(value) for value in candidate.get("nearby_offsets") or []],
+                "row_cluster_strings": [str(value) for value in candidate.get("row_cluster_strings") or []],
                 "table_family": str(candidate.get("table_family") or "unknown"),
                 "app_id": app_id,
                 "executable_path": executable_path,
@@ -980,6 +1326,7 @@ def build_srum_database_row_candidate_records(path: Path, inventory_details: Map
                 "energy_usage": candidate.get("energy_usage", 0),
                 "cpu_time": candidate.get("cpu_time", 0),
                 "counter_candidates": dict(candidate.get("counter_candidates") or {}),
+                "field_presence_profile": dict(candidate.get("field_presence_profile") or {}),
                 "interface_luid": str(candidate.get("interface_luid") or ""),
                 "network_profile": str(candidate.get("network_profile") or ""),
                 "srum_row_evidence": srum_row_evidence(candidate),
@@ -1181,14 +1528,25 @@ def srum_pivot_evidence(candidate_kind: str, candidate_value: str, executable_pa
 
 def srum_row_evidence(candidate: Mapping[str, object]) -> dict[str, object]:
     counters = candidate.get("counter_candidates") if isinstance(candidate.get("counter_candidates"), Mapping) else {}
+    field_presence = (
+        candidate.get("field_presence_profile")
+        if isinstance(candidate.get("field_presence_profile"), Mapping)
+        else {}
+    )
     return {
         "candidate_basis": str(candidate.get("candidate_basis") or "bounded-native-string-row-cluster"),
         "source_offset": int(candidate.get("source_offset") or 0),
+        "source_encoding": str(candidate.get("source_encoding") or ""),
+        "cluster_window_bytes": int(candidate.get("cluster_window_bytes") or 0),
+        "nearby_string_count": int(candidate.get("nearby_string_count") or 0),
+        "nearby_offsets": [int(value) for value in candidate.get("nearby_offsets") or []][:100],
         "table_family": str(candidate.get("table_family") or "unknown"),
         "has_app_id": bool(candidate.get("app_id")),
         "has_timestamp_candidate": bool(candidate.get("timestamp")),
+        "field_presence_profile": dict(field_presence),
         "counter_candidate_names": sorted(str(key) for key in counters),
         "counter_candidate_count": len(counters),
+        "row_cluster_quality": "multi-string-context" if int(candidate.get("nearby_string_count") or 0) > 1 else "single-string-context",
         "row_level_decode_status": "not-implemented-string-cluster-only",
         "validation_required": True,
         "report_grade_ready": False,
@@ -1271,6 +1629,8 @@ def build_execution_summary(root: Path, records: Iterable[ArtifactRecord]) -> Ar
                 "command_line_samples": [],
                 "validation_required_count": 0,
                 "correlation_targets": set(),
+                "source_formats": set(),
+                "source_artifact_refs": [],
             },
         )
         group["signal_count"] = int(group["signal_count"]) + 1
@@ -1283,6 +1643,20 @@ def build_execution_summary(root: Path, records: Iterable[ArtifactRecord]) -> Ar
             cast_set(group["timestamps"]).add(str(details["timestamp"]))
         if details.get("source_path"):
             cast_set(group["source_paths"]).add(str(details["source_path"]))
+        if details.get("source_format"):
+            cast_set(group["source_formats"]).add(str(details["source_format"]))
+        refs = group.get("source_artifact_refs")
+        if isinstance(refs, list) and len(refs) < 25:
+            refs.append(
+                {
+                    "artifact_type": record.artifact_type,
+                    "source_path": str(details.get("source_path") or ""),
+                    "source_format": str(details.get("source_format") or ""),
+                    "timestamp": str(details.get("timestamp") or ""),
+                    "evidence_strength": str(details.get("evidence_strength") or ""),
+                    "validation_required": bool(details.get("validation_required")),
+                }
+            )
         for flag in details.get("risk_flags", []):
             cast_set(group["risk_flags"]).add(str(flag))
         if details.get("validation_required"):
@@ -1299,6 +1673,7 @@ def build_execution_summary(root: Path, records: Iterable[ArtifactRecord]) -> Ar
 
     normalized_groups = [normalize_execution_group(group) for group in groups.values()]
     normalized_groups.sort(key=lambda item: (-int(item["signal_count"]), str(item["display_name"]).lower()))
+    correlation_profile = execution_summary_correlation_profile(normalized_groups)
     return ArtifactRecord(
         provider=WindowsExecutionProvider.name,
         artifact_type="windows-execution-summary",
@@ -1312,6 +1687,7 @@ def build_execution_summary(root: Path, records: Iterable[ArtifactRecord]) -> Ar
             "source_path": str(root.resolve()),
             "group_count": len(normalized_groups),
             "groups": normalized_groups,
+            "execution_correlation_profile": correlation_profile,
             "native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
             "report_grade_status_counts": counter_items_from_mapping(report_grade_status_counts),
             "report_grade_blockers": EXECUTION_REPORT_GRADE_BLOCKERS,
@@ -1447,6 +1823,8 @@ def amcache_schema_profile(
     )
     return {
         "profile_version": "amcache-schema-v1",
+        "commercial_batch_id": "commercial-uplift-011-015",
+        "readiness_item_number": 15,
         "commercial_gap_id": "#7",
         "artifact_family": "amcache",
         "source_format": source_format,
@@ -1467,6 +1845,16 @@ def amcache_schema_profile(
             "sha1": sha1,
             "timestamp_source": timestamp_source,
         },
+        "execution_artifact_validation_profile": execution_artifact_validation_profile(
+            artifact_family="amcache",
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            evidence_fields={
+                "executable_path": executable_path,
+                "sha1": sha1,
+                "timestamp_source": timestamp_source,
+            },
+        ),
         "required_independent_checks": [
             "validate Amcache.hve schema map by Windows build",
             "decode row-level timestamps and distinguish install/presence/execution-related semantics",
@@ -1480,16 +1868,66 @@ def amcache_schema_profile(
     }
 
 
-def amcache_hive_evidence(path_candidates: list[str], sha1_candidates: list[str], strings: list[str]) -> dict[str, object]:
+def amcache_hive_evidence(
+    path_candidates: list[str],
+    sha1_candidates: list[str],
+    strings: list[str],
+    clusters: Sequence[Mapping[str, object]] | None = None,
+) -> dict[str, object]:
+    cluster_rows = list(clusters or [])
     return {
         "candidate_path_count": len(path_candidates),
         "candidate_sha1_count": len(sha1_candidates),
+        "candidate_row_cluster_count": len(cluster_rows),
+        "clustered_path_count": sum(1 for cluster in cluster_rows if cluster.get("executable_path")),
+        "clustered_hash_count": sum(1 for cluster in cluster_rows if cluster.get("sha1_candidates")),
+        "clustered_timestamp_candidate_count": sum(1 for cluster in cluster_rows if cluster.get("timestamp_candidates")),
         "candidate_program_names": sorted({display_name_for_execution_key(path) for path in path_candidates if path})[:100],
         "schema_decode_status": "not-implemented-string-pivot-only",
+        "row_cluster_status": "bounded-nearby-string-clusters" if cluster_rows else "not-available",
+        "row_cluster_window_bytes": AMCACHE_ROW_CLUSTER_WINDOW_BYTES,
         "string_sample_count": min(len(strings), 25),
         "report_grade_ready": False,
         "validation_required": True,
         "commercial_grade_blockers": ["native-amcache-schema-decoding-required", "row-level-timestamp-extraction-required"],
+    }
+
+
+def amcache_row_cluster_evidence(cluster: Mapping[str, object]) -> dict[str, object]:
+    if not cluster:
+        return {
+            "cluster_status": "not-available",
+            "validation_required": True,
+            "report_grade_ready": False,
+        }
+    return {
+        "cluster_status": "bounded-nearby-string-cluster",
+        "source_offset": int(cluster.get("source_offset") or 0),
+        "source_encoding": str(cluster.get("source_encoding") or ""),
+        "cluster_window_bytes": AMCACHE_ROW_CLUSTER_WINDOW_BYTES,
+        "nearby_string_count": int(cluster.get("nearby_string_count") or 0),
+        "nearby_offsets": [int(value) for value in cluster.get("nearby_offsets", []) if str(value).isdigit()][:25]
+        if isinstance(cluster.get("nearby_offsets"), list)
+        else [],
+        "sha1_candidates": [str(value) for value in cluster.get("sha1_candidates", [])][:25]
+        if isinstance(cluster.get("sha1_candidates"), list)
+        else [],
+        "timestamp_candidates": [str(value) for value in cluster.get("timestamp_candidates", [])][:25]
+        if isinstance(cluster.get("timestamp_candidates"), list)
+        else [],
+        "metadata_candidates": [str(value) for value in cluster.get("metadata_candidates", [])][:25]
+        if isinstance(cluster.get("metadata_candidates"), list)
+        else [],
+        "schema_decode_status": "not-implemented-cluster-only",
+        "row_level_timestamp_status": (
+            "nearby-string-timestamp-candidate" if cluster.get("timestamp_candidates") else "not-row-decoded"
+        ),
+        "validation_required": True,
+        "report_grade_ready": False,
+        "reportability_warning": (
+            "Nearby Amcache strings preserve review pivots, not decoded InventoryApplicationFile row semantics. "
+            "Validate with AmcacheParser/RECmd before report-grade use."
+        ),
     }
 
 
@@ -1512,6 +1950,56 @@ def amcache_timestamp_semantics(timestamp_source: str, source_format: str) -> st
     return "timestamp-candidate-validation-required"
 
 
+def execution_artifact_validation_profile(
+    *,
+    artifact_family: str,
+    validation_checks: Mapping[str, object],
+    report_grade: Mapping[str, object],
+    evidence_fields: Mapping[str, object],
+) -> dict[str, object]:
+    family_caveats = {
+        "amcache": "presence/install/execution-related pivot, not standalone execution proof",
+        "shimcache-appcompatcache": "presence/cache-order pivot; never standalone proof of execution",
+        "bam-dam": "recent execution pivot that still needs ControlSet/SID and cross-artifact correlation",
+        "srum-srudb-ese": "resource/network/application usage pivot requiring ESE row-level validation",
+    }
+    return {
+        "profile_version": "execution-artifact-validation-v1",
+        "commercial_batch_id": "commercial-uplift-011-015",
+        "item_number": 15,
+        "artifact_family": artifact_family,
+        "normalized_row_contract": {
+            "source_path_required": True,
+            "parser_version_required": True,
+            "timestamp_semantics_required": True,
+            "execution_caveat_required": True,
+            "correlation_targets_required": True,
+            "validation_matrix_required": True,
+        },
+        "evidence_fields": dict(evidence_fields),
+        "validation_summary": {
+            "passed_check_count": sum(1 for value in validation_checks.values() if bool(value)),
+            "failed_check_names": sorted(str(key) for key, value in validation_checks.items() if not bool(value)),
+            "report_grade_status": str(report_grade.get("status") or ""),
+        },
+        "analyst_caveat": family_caveats.get(artifact_family, "execution artifact requires source-specific validation"),
+        "required_before_report": [
+            "cross-correlate with at least one independent execution artifact family",
+            "preserve timestamp semantics and source artifact limitation wording in report citations",
+            "diff critical rows against trusted parser output or known-answer fixtures",
+            "validate Windows build/version-specific binary layouts where native decoding is used",
+        ],
+        "large_data_controls": {
+            "normalized_row_is_small": True,
+            "raw_binary_payloads_are_not_expanded": True,
+            "safe_for_case_db_indexing": True,
+        },
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": sorted(set(report_grade.get("blockers") or []) | {"execution-artifact-trusted-diff-required"}),
+    }
+
+
 def shimcache_entry_evidence(
     *,
     key: str,
@@ -1519,9 +2007,16 @@ def shimcache_entry_evidence(
     timestamp: str,
     timestamp_source: str,
     decoded_values: Mapping[str, str],
+    source_format: str = "reg",
+    source_offset: int | None = None,
+    cache_order: int | None = None,
+    nearby_metadata_candidates: Sequence[str] | None = None,
 ) -> dict[str, object]:
     return {
         "source_key": key,
+        "source_format": source_format,
+        "source_offset": source_offset,
+        "cache_order": cache_order,
         "normalized_path": normalize_execution_path(executable_path),
         "file_name": execution_file_name(executable_path),
         "path_present": bool(executable_path),
@@ -1530,6 +2025,9 @@ def shimcache_entry_evidence(
         "timestamp_semantics": "shimcache-timestamp-is-version-dependent-and-not-proof-of-execution" if timestamp else "not-available",
         "source_value_names": sorted(str(name) for name in decoded_values),
         "source_value_count": len(decoded_values),
+        "nearby_metadata_candidates": list(nearby_metadata_candidates or [])[:25],
+        "native_scan_status": "bounded-path-cluster" if source_format != "reg" else "registry-export-row",
+        "row_layout_decode_status": "not-implemented-native-layout-required" if source_format != "reg" else "source-export-mapping",
         "execution_caveat": "ShimCache/AppCompatCache can show program presence/order, but it is not standalone proof of execution.",
         "requires_os_version_layout_validation": True,
         "report_grade_ready": False,
@@ -1543,18 +2041,22 @@ def shimcache_execution_caveat_profile(
     report_grade: Mapping[str, object],
     executable_path: str,
     timestamp: str,
+    source_format: str = "reg",
 ) -> dict[str, object]:
     reportability_decision = execution_reportability_decision(
         artifact_type="shimcache-entry",
-        artifact_scope="shimcache-export",
+        artifact_scope="shimcache-export" if source_format == "reg" else "system-hive-native-shimcache-scan",
         report_grade=report_grade,
         validation_checks=validation_checks,
     )
     return {
         "profile_version": "shimcache-caveat-v1",
+        "commercial_batch_id": "commercial-uplift-011-015",
+        "readiness_item_number": 15,
         "commercial_gap_id": "#8",
         "artifact_family": "shimcache-appcompatcache",
-        "current_decode_level": "reg-export-mapping",
+        "source_format": source_format,
+        "current_decode_level": "reg-export-mapping" if source_format == "reg" else "native-system-hive-string-pivot",
         "standalone_execution_proof": False,
         "interpretation": "program-presence-and-cache-order-candidate",
         "timestamp_semantics": "os-version-dependent-and-not-proof-of-execution" if timestamp else "not-available",
@@ -1562,6 +2064,8 @@ def shimcache_execution_caveat_profile(
         "decoded_components": {
             "path_candidate": bool(executable_path),
             "timestamp_candidate": bool(timestamp),
+            "cache_order_candidate": bool(validation_checks.get("has_cache_order")),
+            "source_offset_candidate": bool(validation_checks.get("has_source_offset") or validation_checks.get("has_source_offsets")),
             "native_binary_layout_decode": bool(EXECUTION_NATIVE_CAPABILITIES["native_shimcache_binary_decode"]),
             "correlation_required": bool(validation_checks.get("requires_correlation", True)),
         },
@@ -1569,6 +2073,12 @@ def shimcache_execution_caveat_profile(
             "executable_path": executable_path,
             "timestamp": timestamp,
         },
+        "execution_artifact_validation_profile": execution_artifact_validation_profile(
+            artifact_family="shimcache-appcompatcache",
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            evidence_fields={"executable_path": executable_path, "timestamp": timestamp},
+        ),
         "required_independent_checks": [
             "select AppCompatCache binary layout by OS build",
             "validate cache order and timestamp interpretation against known-answer images",
@@ -1589,9 +2099,14 @@ def bam_dam_entry_evidence(
     timestamp: str,
     timestamp_source: str,
     decoded_values: Mapping[str, str],
+    source_format: str = "reg",
+    source_offset: int | None = None,
+    nearby_metadata_candidates: Sequence[str] | None = None,
 ) -> dict[str, object]:
     return {
         "source_key": key,
+        "source_format": source_format,
+        "source_offset": source_offset,
         "normalized_path": normalize_execution_path(executable_path),
         "file_name": execution_file_name(executable_path),
         "device_path": executable_path if executable_path.lower().startswith("\\device\\") else "",
@@ -1601,6 +2116,9 @@ def bam_dam_entry_evidence(
         "timestamp_semantics": "bam-dam-last-execution-filetime-candidate" if timestamp_source == "bam_value_filetime" else "timestamp-candidate-validation-required",
         "source_value_names": sorted(str(name) for name in decoded_values),
         "source_value_count": len(decoded_values),
+        "nearby_metadata_candidates": list(nearby_metadata_candidates or [])[:25],
+        "native_scan_status": "bounded-path-sid-cluster" if source_format != "reg" else "registry-export-row",
+        "row_layout_decode_status": "not-implemented-native-layout-required" if source_format != "reg" else "source-export-mapping",
         "execution_caveat": "BAM/DAM is a strong recent-execution pivot but should be correlated with Prefetch, SRUM, UserAssist, and event logs.",
         "requires_native_system_hive_validation": True,
         "report_grade_ready": False,
@@ -1616,18 +2134,22 @@ def bam_dam_decode_profile(
     user_sid: str,
     timestamp: str,
     timestamp_source: str,
+    source_format: str = "reg",
 ) -> dict[str, object]:
     reportability_decision = execution_reportability_decision(
         artifact_type="bam-entry",
-        artifact_scope="bam-dam-export",
+        artifact_scope="bam-dam-export" if source_format == "reg" else "system-hive-native-bam-dam-scan",
         report_grade=report_grade,
         validation_checks=validation_checks,
     )
     return {
         "profile_version": "bam-dam-decode-v1",
+        "commercial_batch_id": "commercial-uplift-011-015",
+        "readiness_item_number": 15,
         "commercial_gap_id": "#9",
         "artifact_family": "bam-dam",
-        "current_decode_level": "reg-export-mapping",
+        "source_format": source_format,
+        "current_decode_level": "reg-export-mapping" if source_format == "reg" else "native-system-hive-string-pivot",
         "decoded_components": {
             "sid": bool(user_sid),
             "path": bool(executable_path),
@@ -1644,6 +2166,17 @@ def bam_dam_decode_profile(
             "timestamp": timestamp,
             "timestamp_source": timestamp_source,
         },
+        "execution_artifact_validation_profile": execution_artifact_validation_profile(
+            artifact_family="bam-dam",
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            evidence_fields={
+                "user_sid": user_sid,
+                "executable_path": executable_path,
+                "timestamp": timestamp,
+                "timestamp_source": timestamp_source,
+            },
+        ),
         "required_independent_checks": [
             "decode SYSTEM hive BAM/DAM binary values natively",
             "validate SID/path/timestamp by Windows build and ControlSet",
@@ -1672,6 +2205,8 @@ def srum_ese_validation_profile(
     )
     return {
         "profile_version": "srum-ese-validation-v1",
+        "commercial_batch_id": "commercial-uplift-011-015",
+        "readiness_item_number": 15,
         "commercial_gap_id": "#10",
         "artifact_family": "srum-srudb-ese",
         "artifact_scope": artifact_scope,
@@ -1685,6 +2220,12 @@ def srum_ese_validation_profile(
             "native_catalog_decoding": bool(validation_checks.get("native_table_catalog_decoding_available")),
         },
         "evidence_fields": dict(evidence_fields),
+        "execution_artifact_validation_profile": execution_artifact_validation_profile(
+            artifact_family="srum-srudb-ese",
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            evidence_fields=evidence_fields,
+        ),
         "reportability_decision": reportability_decision,
         "required_independent_checks": [
             "decode ESE catalog pages and tagged columns",
@@ -1769,6 +2310,8 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
             satisfied.append("schema-version detection")
         if details.get("executable_path") or details.get("sha1") or details.get("sha1_candidates") or details.get("publisher"):
             satisfied.append("path/hash/publisher extraction")
+        if details.get("source_offset") or checks.get("has_row_cluster_candidate") or checks.get("has_row_cluster_candidates"):
+            satisfied.append("bounded Amcache row-cluster provenance")
         if details.get("timestamp_source") or checks.get("has_timestamp") or checks.get("requires_second_parser_validation"):
             satisfied.append("timestamp source labeling")
         satisfied.append("execution caveat wording")
@@ -1784,6 +2327,10 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
             satisfied.append("OS layout selection")
         if details.get("executable_path") or details.get("timestamp"):
             satisfied.append("path/timestamp/flag decoding")
+        if details.get("source_offset") is not None or checks.get("has_source_offset") or checks.get("has_source_offsets"):
+            satisfied.append("bounded native AppCompatCache path provenance")
+        if details.get("cache_order") is not None or checks.get("has_cache_order"):
+            satisfied.append("cache order preservation")
         if details.get("source_key") or details.get("source_index", "") != "":
             satisfied.append("entry order preservation")
         satisfied.append("not-proof-of-execution warning")
@@ -1801,6 +2348,8 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
             satisfied.append("device path normalization")
         if details.get("timestamp") or checks.get("has_timestamp"):
             satisfied.append("FILETIME validity")
+        if details.get("source_offset") is not None or checks.get("has_source_offset"):
+            satisfied.append("bounded native BAM/DAM path provenance")
         if "CurrentControlSet" in str(details.get("source_key") or ""):
             satisfied.append("ControlSet attribution")
         satisfied.append("execution-semantics warning")
@@ -1825,6 +2374,10 @@ def execution_core_accuracy_gates(artifact_type: str, details: Mapping[str, obje
             satisfied.append("counter/timestamp semantics")
         if details.get("row_candidate_count") or artifact_type == "srum-row-candidate":
             satisfied.append("native-row confidence scoring")
+        if details.get("nearby_string_count") or checks.get("has_srum_row_cluster_context"):
+            satisfied.append("bounded SRUM row-cluster context")
+        if details.get("field_presence_profile") or checks.get("has_srum_field_presence_profile"):
+            satisfied.append("SRUM field presence profile")
         if trusted_diff.get("status") == "pass":
             satisfied.append("trusted SRUM parser row diff pass")
         return [build_accuracy_gate(10, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
@@ -1903,6 +2456,8 @@ def execution_commercial_uplift_evidence(artifact_type: str, details: Mapping[st
         "large_data_controls": {
             "bounded_native_string_scan_bytes": MAX_NATIVE_AMCACHE_SCAN_BYTES
             if artifact_type in {"amcache-entry", "amcache-hive"}
+            else MAX_NATIVE_SHIMCACHE_SCAN_BYTES if artifact_type == "shimcache-entry"
+            else MAX_NATIVE_BAM_DAM_SCAN_BYTES if artifact_type == "bam-entry"
             else ESE_SCAN_READ_SIZE if artifact_type.startswith("srum-") else 0,
             "row_level_native_decode_required_for_commercial_claims": artifact_type.startswith("srum-"),
             "native_binary_layout_required_for_commercial_claims": artifact_type in {"shimcache-entry", "bam-entry"},
@@ -1950,6 +2505,16 @@ def execution_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, 
         "has_hash_candidates": ("Hash candidates", "medium"),
         "has_path_candidates": ("Path candidates", "medium"),
         "has_sha1_candidates": ("SHA1 candidates", "medium"),
+        "has_row_cluster_candidates": ("Amcache row cluster candidates", "medium"),
+        "has_row_cluster_candidate": ("Amcache row cluster candidate", "medium"),
+        "has_source_offsets": ("Source offsets", "medium"),
+        "has_source_offset": ("Source offset", "medium"),
+        "has_nearby_metadata_candidates": ("Nearby metadata candidates", "medium"),
+        "has_srum_row_cluster_context": ("SRUM row cluster context", "medium"),
+        "has_srum_field_presence_profile": ("SRUM field presence profile", "medium"),
+        "has_native_binary_path_candidates": ("Native binary path candidates", "medium"),
+        "has_cache_order": ("Cache order", "medium"),
+        "native_binary_layout_decoding_available": ("Native binary layout decoding", "critical"),
         "has_app_id": ("Application ID", "high"),
         "has_user": ("User", "medium"),
         "has_user_or_sid": ("User or SID", "medium"),
@@ -2052,7 +2617,34 @@ def build_execution_artifact_trusted_diff(
         rapid = rapid_by_key[key]
         trusted = trusted_by_key[key]
         field_diffs = []
-        for field in ("executable_path", "timestamp", "sha1", "user_sid", "counter_sha256", "semantics_warning"):
+        for field in (
+            "executable_path",
+            "device_path",
+            "timestamp",
+            "timestamp_source",
+            "sha1",
+            "user_sid",
+            "user",
+            "table_family",
+            "url",
+            "network_profile",
+            "interface_luid",
+            "bytes_sent",
+            "bytes_received",
+            "energy_usage",
+            "cpu_time",
+            "program_name",
+            "publisher",
+            "file_description",
+            "product_name",
+            "source_format",
+            "source_key",
+            "source_offset",
+            "cache_order",
+            "os_build",
+            "counter_sha256",
+            "semantics_warning",
+        ):
             left = rapid.get(field, "")
             right = trusted.get(field, "")
             if left or right:
@@ -2074,7 +2666,34 @@ def build_execution_artifact_trusted_diff(
         "artifact_family": str(artifact_family),
         "trusted_tool": tool_name,
         "trusted_tool_recognized": trusted_tool_recognized,
-        "compare_fields": ["executable_path", "timestamp", "sha1", "user_sid", "counter_sha256", "semantics_warning"],
+        "compare_fields": [
+            "executable_path",
+            "device_path",
+            "timestamp",
+            "timestamp_source",
+            "sha1",
+            "user_sid",
+            "user",
+            "table_family",
+            "url",
+            "network_profile",
+            "interface_luid",
+            "bytes_sent",
+            "bytes_received",
+            "energy_usage",
+            "cpu_time",
+            "program_name",
+            "publisher",
+            "file_description",
+            "product_name",
+            "source_format",
+            "source_key",
+            "source_offset",
+            "cache_order",
+            "os_build",
+            "counter_sha256",
+            "semantics_warning",
+        ],
         "rapid_row_count": len(rapid_by_key),
         "trusted_row_count": len(trusted_by_key),
         "matched_count": matched,
@@ -2099,31 +2718,202 @@ def build_execution_artifact_trusted_diff(
 
 
 def _normalize_execution_diff_row(row: Mapping[str, object], artifact_family: str) -> tuple[str, dict[str, str]]:
-    executable_path = str(row.get("executable_path") or row.get("path") or row.get("file_path") or row.get("app_id") or "").strip()
-    timestamp = str(row.get("timestamp") or row.get("last_run") or row.get("last_execution") or "").strip().replace("Z", "+00:00")
-    sha1 = str(row.get("sha1") or row.get("hash") or "").strip().lower()
-    user_sid = str(row.get("user_sid") or row.get("sid") or "").strip()
+    payload = execution_diff_row_payload(row)
+    executable_path = str(
+        execution_first_value(
+            payload,
+            "executable_path",
+            "path",
+            "file_path",
+            "FilePath",
+            "Path",
+            "app_id",
+            "AppId",
+            "device_path",
+            "DevicePath",
+        )
+        or ""
+    ).strip()
+    device_path = str(execution_first_value(payload, "device_path", "DevicePath") or "").strip().lower()
+    timestamp = str(
+        execution_first_value(payload, "timestamp", "last_run", "LastRun", "last_execution", "LastExecution", "LastModified")
+        or ""
+    ).strip().replace("Z", "+00:00")
+    timestamp_source = str(execution_first_value(payload, "timestamp_source", "TimestampSource") or "").strip().lower()
+    sha1 = str(execution_first_value(payload, "sha1", "SHA1", "hash", "Hash") or "").strip().lower()
+    user_sid = str(execution_first_value(payload, "user_sid", "UserSid", "sid", "SID") or "").strip()
+    user = str(execution_first_value(payload, "user", "User", "username", "UserName") or "").strip().lower()
+    table_family = str(
+        execution_first_value(payload, "table_family", "TableFamily", "srum_table_family", "SrumTableFamily") or ""
+    ).strip().lower()
+    url = str(execution_first_value(payload, "url", "URL", "Uri", "uri") or "").strip().lower()
+    network_profile = str(execution_first_value(payload, "network_profile", "NetworkProfile", "profile", "Profile") or "").strip().lower()
+    interface_luid = str(execution_first_value(payload, "interface_luid", "InterfaceLuid", "interface", "Interface") or "").strip().lower()
+    bytes_sent = normalize_number_text(execution_first_value(payload, "bytes_sent", "BytesSent"))
+    bytes_received = normalize_number_text(execution_first_value(payload, "bytes_received", "BytesReceived"))
+    energy_usage = normalize_number_text(execution_first_value(payload, "energy_usage", "EnergyUsage"))
+    cpu_time = normalize_number_text(execution_first_value(payload, "cpu_time", "CpuTime"))
+    program_name = str(execution_first_value(payload, "program_name", "ProgramName", "name", "Name") or "").strip().lower()
+    publisher = str(execution_first_value(payload, "publisher", "Publisher", "company", "CompanyName") or "").strip().lower()
+    file_description = str(
+        execution_first_value(payload, "file_description", "FileDescription", "description", "Description") or ""
+    ).strip().lower()
+    product_name = str(execution_first_value(payload, "product_name", "ProductName", "product", "Product") or "").strip().lower()
+    source_format = str(execution_first_value(payload, "source_format", "SourceFormat") or "").strip().lower()
+    source_key = str(execution_first_value(payload, "source_key", "SourceKey", "key", "Key") or "").strip().lower()
+    source_offset = normalize_int_text(execution_first_value(payload, "source_offset", "SourceOffset", "offset", "Offset"))
+    cache_order = normalize_int_text(execution_first_value(payload, "cache_order", "CacheOrder", "order", "Order"))
+    os_build = str(execution_first_value(payload, "os_build", "OSBuild", "windows_build", "WindowsBuild") or "").strip().lower()
     counters = {
-        "bytes_sent": row.get("bytes_sent", ""),
-        "bytes_received": row.get("bytes_received", ""),
-        "energy_usage": row.get("energy_usage", ""),
-        "cpu_time": row.get("cpu_time", ""),
+        "bytes_sent": bytes_sent,
+        "bytes_received": bytes_received,
+        "energy_usage": energy_usage,
+        "cpu_time": cpu_time,
     }
-    key_basis = "|".join(str(item) for item in (artifact_family, executable_path.lower(), timestamp, sha1, user_sid) if item)
+    key_parts: tuple[object, ...] = (artifact_family, executable_path.lower(), timestamp, sha1)
+    if str(artifact_family).lower() != "bam-dam":
+        key_parts = (*key_parts, user_sid)
+    key_basis = "|".join(str(item) for item in key_parts if item)
     if not key_basis:
         return "", {}
     counter_text = json.dumps(counters, sort_keys=True, ensure_ascii=True)
-    semantics_warning = str(row.get("execution_caveat") or row.get("semantics_warning") or row.get("warning") or "")
+    semantics_warning = str(
+        execution_first_value(payload, "execution_caveat", "semantics_warning", "warning", "Warning") or ""
+    )
     return hashlib.sha256(key_basis.encode("utf-8", errors="replace")).hexdigest(), {
         "executable_path": executable_path.lower(),
+        "device_path": device_path,
         "timestamp": timestamp,
+        "timestamp_source": timestamp_source,
         "sha1": sha1,
         "user_sid": user_sid,
+        "user": user,
+        "table_family": table_family,
+        "url": url,
+        "network_profile": network_profile,
+        "interface_luid": interface_luid,
+        "bytes_sent": bytes_sent,
+        "bytes_received": bytes_received,
+        "energy_usage": energy_usage,
+        "cpu_time": cpu_time,
+        "program_name": program_name,
+        "publisher": publisher,
+        "file_description": file_description,
+        "product_name": product_name,
+        "source_format": source_format,
+        "source_key": source_key,
+        "source_offset": source_offset,
+        "cache_order": cache_order,
+        "os_build": os_build,
         "counter_sha256": hashlib.sha256(counter_text.encode("utf-8")).hexdigest()
         if any(str(value) for value in counters.values())
         else "",
         "semantics_warning": re.sub(r"\s+", " ", semantics_warning).strip().lower(),
     }
+
+
+def execution_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
+    details = row.get("details") if isinstance(row.get("details"), Mapping) else {}
+    if not details:
+        return row
+    payload = dict(details)
+    for key, value in row.items():
+        if key == "details":
+            continue
+        payload.setdefault(key, value)
+    evidence = payload.get("amcache_evidence")
+    if isinstance(evidence, Mapping):
+        payload.setdefault("file_description", evidence.get("file_description", ""))
+        payload.setdefault("program_name", evidence.get("program_name", ""))
+        payload.setdefault("publisher", evidence.get("publisher", ""))
+        payload.setdefault("source_key", evidence.get("source_key", ""))
+        payload.setdefault("source_format", evidence.get("source_format", ""))
+        payload.setdefault("source_offset", evidence.get("source_offset", ""))
+        payload.setdefault("cache_order", evidence.get("cache_order", ""))
+        sha1_candidates = evidence.get("sha1_candidates")
+        if isinstance(sha1_candidates, Sequence) and not isinstance(sha1_candidates, (str, bytes)):
+            payload.setdefault("sha1", next((str(item) for item in sha1_candidates if str(item).strip()), ""))
+    evidence = payload.get("shimcache_evidence")
+    if isinstance(evidence, Mapping):
+        payload.setdefault("source_key", evidence.get("source_key", ""))
+        payload.setdefault("source_format", evidence.get("source_format", ""))
+        payload.setdefault("source_offset", evidence.get("source_offset", ""))
+        payload.setdefault("cache_order", evidence.get("cache_order", ""))
+        payload.setdefault("execution_caveat", evidence.get("execution_caveat", ""))
+        payload.setdefault("timestamp_source", evidence.get("timestamp_source", ""))
+    evidence = payload.get("bam_dam_evidence")
+    if isinstance(evidence, Mapping):
+        payload.setdefault("source_key", evidence.get("source_key", ""))
+        payload.setdefault("source_format", evidence.get("source_format", ""))
+        payload.setdefault("source_offset", evidence.get("source_offset", ""))
+        payload.setdefault("device_path", evidence.get("device_path", ""))
+        payload.setdefault("user_sid", evidence.get("user_sid", ""))
+        payload.setdefault("execution_caveat", evidence.get("execution_caveat", ""))
+        payload.setdefault("timestamp_source", evidence.get("timestamp_source", ""))
+    evidence = payload.get("srum_usage_evidence")
+    if isinstance(evidence, Mapping):
+        payload.setdefault("table_family", evidence.get("table_family", ""))
+        payload.setdefault("app_id", evidence.get("app_id", ""))
+        payload.setdefault("user", evidence.get("user", ""))
+        payload.setdefault("timestamp", evidence.get("timestamp", ""))
+        payload.setdefault("timestamp_source", evidence.get("timestamp_source", ""))
+        counters = evidence.get("counter_values")
+        if isinstance(counters, Mapping):
+            payload.setdefault("bytes_sent", counters.get("bytes_sent", ""))
+            payload.setdefault("bytes_received", counters.get("bytes_received", ""))
+            payload.setdefault("energy_usage", counters.get("energy_usage", ""))
+            payload.setdefault("cpu_time", counters.get("cpu_time", ""))
+            payload.setdefault("interface_luid", counters.get("interface_luid", ""))
+            payload.setdefault("network_profile", counters.get("network_profile", ""))
+    evidence = payload.get("srum_row_evidence")
+    if isinstance(evidence, Mapping):
+        payload.setdefault("table_family", evidence.get("table_family", ""))
+        counters = payload.get("counter_candidates")
+        if isinstance(counters, Mapping):
+            payload.setdefault("bytes_sent", counters.get("bytes_sent", ""))
+            payload.setdefault("bytes_received", counters.get("bytes_received", ""))
+            payload.setdefault("energy_usage", counters.get("energy_usage", ""))
+            payload.setdefault("cpu_time", counters.get("cpu_time", ""))
+    return payload
+
+
+def execution_first_value(row: Mapping[str, object], *keys: str) -> object:
+    for key in keys:
+        if key in row and row[key] not in (None, ""):
+            return row[key]
+    lowered = {str(key).lower(): value for key, value in row.items()}
+    for key in keys:
+        value = lowered.get(key.lower())
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalize_int_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        return text.lower()
+
+
+def normalize_number_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        number = float(text)
+    except ValueError:
+        return text.lower()
+    if number.is_integer():
+        return str(int(number))
+    return format(number, "g")
 
 
 def execution_gap_ids(artifact_type: str) -> list[str]:
@@ -2247,20 +3037,96 @@ def cast_set(value: object) -> set[str]:
 
 
 def normalize_execution_group(group: Mapping[str, object]) -> dict[str, object]:
+    signal_types = sorted(cast_set(group["signal_types"]))
+    source_formats = sorted(cast_set(group.get("source_formats")))
+    correlation_status = execution_group_correlation_status(signal_types)
+    validation_required_count = int(group.get("validation_required_count", 0) or 0)
     return {
         "executable_key": group["executable_key"],
         "display_name": group["display_name"],
         "signal_count": group["signal_count"],
-        "signal_types": sorted(cast_set(group["signal_types"])),
+        "signal_types": signal_types,
         "evidence_strengths": sorted(cast_set(group["evidence_strengths"])),
         "users": sorted(cast_set(group["users"])),
         "timestamps": sorted(cast_set(group["timestamps"])),
         "risk_flags": sorted(cast_set(group["risk_flags"])),
         "source_paths": sorted(cast_set(group["source_paths"])),
+        "source_formats": source_formats,
+        "source_artifact_refs": list(group.get("source_artifact_refs") or [])[:25],
         "command_line_samples": list(group.get("command_line_samples", [])),
-        "validation_required_count": group.get("validation_required_count", 0),
+        "validation_required_count": validation_required_count,
         "correlation_targets": sorted(cast_set(group.get("correlation_targets"))),
+        "correlation_profile": {
+            "profile_version": "execution-group-correlation-v1",
+            "status": correlation_status,
+            "independent_signal_type_count": len(signal_types),
+            "source_format_count": len(source_formats),
+            "standalone_execution_claim_allowed": correlation_status == "multi-signal-corroborated"
+            and validation_required_count == 0,
+            "needs_review": validation_required_count > 0 or correlation_status != "multi-signal-corroborated",
+            "blockers": execution_group_correlation_blockers(signal_types, validation_required_count),
+        },
     }
+
+
+def execution_group_correlation_status(signal_types: Sequence[str]) -> str:
+    signals = set(signal_types)
+    if len(signals) >= 2 and signals & {"bam-entry", "prefetch-file", "powershell-history-command", "srum-network-usage"}:
+        return "multi-signal-corroborated"
+    if len(signals) >= 2:
+        return "multi-signal-review-required"
+    return "single-signal-correlation-required"
+
+
+def execution_group_correlation_blockers(signal_types: Sequence[str], validation_required_count: int) -> list[str]:
+    blockers: set[str] = set()
+    signals = set(signal_types)
+    if len(signals) < 2:
+        blockers.add("execution-cross-artifact-correlation-required")
+    if "shimcache-entry" in signals:
+        blockers.add("shimcache-is-not-standalone-execution-proof")
+    if validation_required_count:
+        blockers.add("source-artifact-validation-required")
+    return sorted(blockers)
+
+
+def execution_summary_correlation_profile(groups: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    statuses = [str((group.get("correlation_profile") or {}).get("status") or "") for group in groups]
+    reportable_candidates = [
+        str(group.get("display_name") or "")
+        for group in groups
+        if (group.get("correlation_profile") or {}).get("standalone_execution_claim_allowed")
+    ]
+    review_required = [
+        str(group.get("display_name") or "")
+        for group in groups
+        if (group.get("correlation_profile") or {}).get("needs_review")
+    ]
+    return {
+        "profile_version": "execution-summary-correlation-v1",
+        "group_count": len(groups),
+        "status_counts": counter_items_from_sequence(statuses),
+        "reportable_candidate_count": len(reportable_candidates),
+        "review_required_count": len(review_required),
+        "reportable_candidates": reportable_candidates[:25],
+        "review_required": review_required[:25],
+        "commercial_grade_ready": False,
+        "blockers": [
+            "execution-known-answer-correlation-corpus-required",
+            "execution-artifact-trusted-diff-required",
+            "eventlog-prefetch-mft-correlation-required",
+        ],
+        "analyst_warning": "Treat summary correlation as a review aid; final execution conclusions require source artifact validation and trusted-tool/known-answer correlation.",
+    }
+
+
+def counter_items_from_sequence(values: Iterable[str]) -> list[dict[str, object]]:
+    counts: dict[str, int] = {}
+    for value in values:
+        if not value:
+            continue
+        counts[value] = counts.get(value, 0) + 1
+    return counter_items_from_mapping(counts)
 
 
 def iter_csv_rows(path: Path) -> Iterable[Mapping[str, object]]:
@@ -2372,6 +3238,11 @@ def iter_registry_like_strings(blob: bytes) -> Iterable[str]:
     yield from iter_utf16le_strings(blob)
 
 
+def iter_registry_like_string_occurrences(blob: bytes) -> Iterable[dict[str, object]]:
+    yield from iter_ascii_string_occurrences(blob)
+    yield from iter_utf16le_string_occurrences(blob)
+
+
 def iter_ascii_strings(blob: bytes, *, min_chars: int = 5) -> Iterable[str]:
     current = bytearray()
     for byte in blob:
@@ -2383,6 +3254,22 @@ def iter_ascii_strings(blob: bytes, *, min_chars: int = 5) -> Iterable[str]:
         current.clear()
     if len(current) >= min_chars:
         yield current.decode("ascii", errors="ignore")
+
+
+def iter_ascii_string_occurrences(blob: bytes, *, min_chars: int = 5) -> Iterable[dict[str, object]]:
+    current = bytearray()
+    start = 0
+    for index, byte in enumerate(blob):
+        if 32 <= byte <= 126:
+            if not current:
+                start = index
+            current.append(byte)
+            continue
+        if len(current) >= min_chars:
+            yield {"text": current.decode("ascii", errors="ignore"), "offset": start, "encoding": "ascii"}
+        current.clear()
+    if len(current) >= min_chars:
+        yield {"text": current.decode("ascii", errors="ignore"), "offset": start, "encoding": "ascii"}
 
 
 def iter_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> Iterable[str]:
@@ -2397,6 +3284,271 @@ def iter_utf16le_strings(blob: bytes, *, min_chars: int = 4) -> Iterable[str]:
         current.clear()
     if len(current) >= min_chars * 2:
         yield current.decode("utf-16le", errors="ignore").strip()
+
+
+def iter_utf16le_string_occurrences(blob: bytes, *, min_chars: int = 4) -> Iterable[dict[str, object]]:
+    current = bytearray()
+    start = 0
+    for index in range(0, len(blob) - 1, 2):
+        value = int.from_bytes(blob[index : index + 2], "little", signed=False)
+        if 32 <= value <= 126 or value in {9, 10, 13}:
+            if not current:
+                start = index
+            current.extend(blob[index : index + 2])
+            continue
+        if len(current) >= min_chars * 2:
+            text = current.decode("utf-16le", errors="ignore").strip()
+            if text:
+                yield {"text": text, "offset": start, "encoding": "utf-16le"}
+        current.clear()
+    if len(current) >= min_chars * 2:
+        text = current.decode("utf-16le", errors="ignore").strip()
+        if text:
+            yield {"text": text, "offset": start, "encoding": "utf-16le"}
+
+
+def collect_amcache_candidate_clusters(occurrences: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    path_occurrences = [
+        item
+        for item in occurrences
+        if looks_like_executable_path(str(item.get("text") or ""))
+    ]
+    clusters: dict[str, dict[str, object]] = {}
+    for item in path_occurrences:
+        executable_path = str(item.get("text") or "")
+        normalized_path = normalize_execution_path(executable_path)
+        if not normalized_path:
+            continue
+        source_offset = int(item.get("offset") or 0)
+        nearby = [
+            candidate
+            for candidate in occurrences
+            if abs(int(candidate.get("offset") or 0) - source_offset) <= AMCACHE_ROW_CLUSTER_WINDOW_BYTES
+        ]
+        sha1_candidates = sorted(
+            {
+                match.group(0).lower()
+                for candidate in nearby
+                for match in re.finditer(r"(?i)\b[0-9a-f]{40}\b", str(candidate.get("text") or ""))
+            }
+        )
+        timestamp_candidates = [
+            value
+            for _, value in sorted(
+                {
+                    (abs(int(candidate.get("offset") or 0) - source_offset), parsed)
+                    for candidate in nearby
+                    for parsed in [parse_timestamp_value(str(candidate.get("text") or ""))]
+                    if parsed
+                }
+            )
+        ]
+        metadata_candidates = amcache_metadata_candidates(executable_path, nearby)
+        existing = clusters.get(normalized_path)
+        cluster = {
+            "executable_path": executable_path,
+            "normalized_path": normalized_path,
+            "source_offset": source_offset,
+            "source_encoding": str(item.get("encoding") or ""),
+            "nearby_string_count": len(nearby),
+            "nearby_offsets": sorted({int(candidate.get("offset") or 0) for candidate in nearby})[:100],
+            "sha1_candidates": sha1_candidates,
+            "timestamp_candidates": timestamp_candidates,
+            "metadata_candidates": metadata_candidates,
+            "parser_confidence": min(
+                0.7,
+                0.45
+                + (0.08 if sha1_candidates else 0)
+                + (0.06 if timestamp_candidates else 0)
+                + (0.04 if metadata_candidates else 0),
+            ),
+        }
+        if existing is None or len(nearby) > int(existing.get("nearby_string_count") or 0):
+            clusters[normalized_path] = cluster
+    return sorted(clusters.values(), key=lambda row: (int(row.get("source_offset") or 0), str(row.get("normalized_path") or "")))[:100]
+
+
+def collect_shimcache_candidate_clusters(occurrences: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    path_occurrences = [
+        item
+        for item in occurrences
+        if looks_like_executable_path(str(item.get("text") or ""))
+    ]
+    clusters: dict[str, dict[str, object]] = {}
+    for cache_order, item in enumerate(sorted(path_occurrences, key=lambda row: int(row.get("offset") or 0))):
+        executable_path = str(item.get("text") or "")
+        normalized_path = normalize_execution_path(executable_path)
+        if not normalized_path:
+            continue
+        source_offset = int(item.get("offset") or 0)
+        nearby = [
+            candidate
+            for candidate in occurrences
+            if abs(int(candidate.get("offset") or 0) - source_offset) <= SHIMCACHE_ROW_CLUSTER_WINDOW_BYTES
+        ]
+        timestamp_candidates = [
+            value
+            for _, value in sorted(
+                {
+                    (abs(int(candidate.get("offset") or 0) - source_offset), parsed)
+                    for candidate in nearby
+                    for parsed in [parse_timestamp_value(str(candidate.get("text") or ""))]
+                    if parsed
+                }
+            )
+        ]
+        metadata_candidates = shimcache_metadata_candidates(executable_path, nearby)
+        existing = clusters.get(normalized_path)
+        cluster = {
+            "executable_path": executable_path,
+            "normalized_path": normalized_path,
+            "source_offset": source_offset,
+            "source_encoding": str(item.get("encoding") or ""),
+            "cache_order": cache_order,
+            "nearby_string_count": len(nearby),
+            "nearby_offsets": sorted({int(candidate.get("offset") or 0) for candidate in nearby})[:100],
+            "timestamp_candidates": timestamp_candidates,
+            "nearby_metadata_candidates": metadata_candidates,
+            "parser_confidence": min(
+                0.68,
+                0.5
+                + (0.06 if timestamp_candidates else 0)
+                + (0.04 if metadata_candidates else 0)
+                + (0.04 if "\\windows\\" in normalized_path or "\\program files" in normalized_path else 0),
+            ),
+        }
+        if existing is None or source_offset < int(existing.get("source_offset") or source_offset + 1):
+            clusters[normalized_path] = cluster
+    return sorted(clusters.values(), key=lambda row: (int(row.get("cache_order") or 0), int(row.get("source_offset") or 0)))[:100]
+
+
+def collect_bam_dam_candidate_clusters(occurrences: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    path_occurrences = [
+        item
+        for item in occurrences
+        if looks_like_executable_path(str(item.get("text") or ""))
+    ]
+    clusters: dict[str, dict[str, object]] = {}
+    for item in sorted(path_occurrences, key=lambda row: int(row.get("offset") or 0)):
+        executable_path = str(item.get("text") or "")
+        normalized_path = normalize_execution_path(executable_path)
+        if not normalized_path:
+            continue
+        source_offset = int(item.get("offset") or 0)
+        nearby = [
+            candidate
+            for candidate in occurrences
+            if abs(int(candidate.get("offset") or 0) - source_offset) <= BAM_DAM_ROW_CLUSTER_WINDOW_BYTES
+        ]
+        user_sid = next(
+            (
+                match.group(0)
+                for candidate in nearby
+                for match in re.finditer(r"S-\d(?:-\d+)+", str(candidate.get("text") or ""))
+            ),
+            "",
+        )
+        source_key = next(
+            (
+                str(candidate.get("text") or "")
+                for candidate in nearby
+                if "\\services\\bam\\" in str(candidate.get("text") or "").lower()
+                or "\\services\\dam\\" in str(candidate.get("text") or "").lower()
+            ),
+            "SYSTEM\\CurrentControlSet\\Services\\bam\\State\\UserSettings",
+        )
+        timestamp_candidates = [
+            value
+            for _, value in sorted(
+                {
+                    (abs(int(candidate.get("offset") or 0) - source_offset), parsed)
+                    for candidate in nearby
+                    for parsed in [parse_timestamp_value(str(candidate.get("text") or ""))]
+                    if parsed
+                }
+            )
+        ]
+        metadata_candidates = bam_dam_metadata_candidates(executable_path, nearby)
+        existing = clusters.get(normalized_path)
+        cluster = {
+            "executable_path": executable_path,
+            "normalized_path": normalized_path,
+            "source_offset": source_offset,
+            "source_encoding": str(item.get("encoding") or ""),
+            "source_key": source_key,
+            "user_sid": user_sid,
+            "nearby_string_count": len(nearby),
+            "nearby_offsets": sorted({int(candidate.get("offset") or 0) for candidate in nearby})[:100],
+            "timestamp_candidates": timestamp_candidates,
+            "nearby_metadata_candidates": metadata_candidates,
+            "parser_confidence": min(
+                0.72,
+                0.5
+                + (0.08 if user_sid else 0)
+                + (0.06 if timestamp_candidates else 0)
+                + (0.04 if normalized_path.startswith("\\device\\") else 0),
+            ),
+        }
+        if existing is None or bool(user_sid) > bool(existing.get("user_sid")):
+            clusters[normalized_path] = cluster
+    return sorted(clusters.values(), key=lambda row: (str(row.get("user_sid") or ""), int(row.get("source_offset") or 0)))[:100]
+
+
+def bam_dam_metadata_candidates(executable_path: str, nearby: Sequence[Mapping[str, object]]) -> list[str]:
+    blocked = {normalize_execution_path(executable_path)}
+    values: list[str] = []
+    for candidate in nearby:
+        text = " ".join(str(candidate.get("text") or "").split()).strip()
+        if not text or normalize_execution_path(text) in blocked:
+            continue
+        lowered = text.lower()
+        if looks_like_executable_path(text) or parse_timestamp_value(text):
+            continue
+        if len(text) < 3 or len(text) > 220:
+            continue
+        if "\\services\\bam\\" in lowered or "\\services\\dam\\" in lowered or re.search(r"S-\d(?:-\d+)+", text):
+            values.append(text)
+    return list(unique_preserve_order(values))[:25]
+
+
+def shimcache_metadata_candidates(executable_path: str, nearby: Sequence[Mapping[str, object]]) -> list[str]:
+    blocked = {normalize_execution_path(executable_path)}
+    values: list[str] = []
+    for candidate in nearby:
+        text = " ".join(str(candidate.get("text") or "").split()).strip()
+        if not text or normalize_execution_path(text) in blocked:
+            continue
+        lowered = text.lower()
+        if looks_like_executable_path(text):
+            continue
+        if parse_timestamp_value(text):
+            continue
+        if len(text) < 3 or len(text) > 200:
+            continue
+        if any(marker in lowered for marker in ("appcompatcache", "appcompatflags", "controlset", "session manager")):
+            values.append(text)
+            continue
+        if lowered.startswith(("windows ", "microsoft ", "program ")):
+            values.append(text)
+    return list(unique_preserve_order(values))[:25]
+
+
+def amcache_metadata_candidates(executable_path: str, nearby: Sequence[Mapping[str, object]]) -> list[str]:
+    blocked = {normalize_execution_path(executable_path)}
+    values: list[str] = []
+    for candidate in nearby:
+        text = " ".join(str(candidate.get("text") or "").split()).strip()
+        if not text or normalize_execution_path(text) in blocked:
+            continue
+        if looks_like_executable_path(text):
+            continue
+        if re.fullmatch(r"(?i)[0-9a-f]{40}", text):
+            continue
+        if parse_timestamp_value(text):
+            continue
+        if 3 <= len(text) <= 160:
+            values.append(text)
+    return list(unique_preserve_order(values))[:25]
 
 
 def unique_preserve_order(values: Iterable[str]) -> Iterable[str]:
@@ -2433,6 +3585,9 @@ def parse_timestamp_value(value: str) -> str:
     text = value.strip().strip('"')
     if re.match(r"^\d{4}-\d\d-\d\d[T ]", text):
         return text.replace("Z", "+00:00")
+    embedded_iso = re.search(r"\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:Z|[+-]\d\d:\d\d)?", text)
+    if embedded_iso:
+        return embedded_iso.group(0).replace("Z", "+00:00")
     if text.lower().startswith("hex(b):"):
         raw = parse_hex_bytes(text[7:])
         if len(raw) >= 8:

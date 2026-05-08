@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import shutil
 import sqlite3
@@ -64,6 +65,9 @@ def run_sample_workflow(
         read_only=read_only,
         overwrite=True,
     )
+    training_lab_manifest = build_training_lab_manifest(sample_payload, run_payload, mode=mode, read_only=read_only)
+    training_lab_path = sample_root / "rapidtriage-training-lab-manifest.json"
+    training_lab_path.write_text(json.dumps(training_lab_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {
         **sample_payload,
         "run": {
@@ -74,8 +78,82 @@ def run_sample_workflow(
             "timeline": run_payload["outputs"]["timeline"],
             "docs": run_payload["outputs"]["docs"],
             "files": run_payload["outputs"]["files"],
+            "training_lab_manifest": str(training_lab_path),
         },
     }
+
+
+def build_training_lab_manifest(
+    sample_payload: Dict[str, object],
+    run_payload: Dict[str, object],
+    *,
+    mode: str,
+    read_only: bool,
+) -> Dict[str, object]:
+    sample_root = Path(str(sample_payload["sample_root"]))
+    expected_path = Path(str(sample_payload["expected"]))
+    outputs = run_payload.get("outputs", {})
+    output_hashes: list[Dict[str, object]] = []
+    for label, raw_path in sorted(outputs.items()):
+        path = Path(str(raw_path))
+        if path.is_file():
+            output_hashes.append(
+                {
+                    "label": label,
+                    "path": str(path),
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "size_bytes": path.stat().st_size,
+                }
+            )
+        else:
+            output_hashes.append({"label": label, "path": str(path), "status": "missing"})
+    required_labels = {"summary", "report", "timeline", "docs", "files"}
+    missing_labels = sorted(
+        label
+        for label in required_labels
+        if not any(item.get("label") == label and item.get("sha256") for item in output_hashes)
+    )
+    expected = json.loads(expected_path.read_text(encoding="utf-8")) if expected_path.is_file() else {}
+    manifest: Dict[str, object] = {
+        "profile_version": "training-lab-workflow-manifest-v1",
+        "commercial_item_number": 67,
+        "commercial_gap_ids": ["#115", "#116"],
+        "commercial_claim_allowed": False,
+        "sample_root": str(sample_root),
+        "evidence_root": sample_payload["evidence_root"],
+        "mode": mode,
+        "read_only": read_only,
+        "workflow_steps": [
+            {"step": "create synthetic evidence", "status": "completed", "evidence": sample_payload["expected"]},
+            {"step": "run ingest and artifact extraction", "status": "completed", "evidence": outputs.get("summary")},
+            {"step": "search expected keywords", "status": "operator-exercise", "keywords": expected.get("keywords", [])},
+            {"step": "open source viewer and inspect hits", "status": "operator-exercise"},
+            {"step": "mark review candidates and notes", "status": "operator-exercise"},
+            {"step": "verify report and manifest hashes", "status": "completed", "evidence": "output_hashes"},
+        ],
+        "expected_keywords": expected.get("keywords", []),
+        "expected_outputs": expected.get("expected_outputs_when_run", []),
+        "output_hashes": output_hashes,
+        "missing_required_outputs": missing_labels,
+        "review_exercise": {
+            "minimum_report_candidates": 3,
+            "required_marks": ["relevant", "include-in-report", "needs-review"],
+            "required_notes": ["why selected", "source path checked", "limitation understood"],
+        },
+        "viewer_exercise": {
+            "required_viewers": ["source preview", "timeline", "file table", "browser artifacts", "report draft"],
+            "citation_check": "Every selected item must be traced back to a source path/hash in the run output.",
+        },
+        "external_training_blockers": [
+            "real-training-run-log-not-attached",
+            "analyst-scoring-rubric-results-not-attached",
+            "operator-training-signoff-not-attached",
+        ],
+    }
+    manifest["manifest_hash"] = hashlib.sha256(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    return manifest
 
 
 def build_sample_evidence(root: Path) -> None:

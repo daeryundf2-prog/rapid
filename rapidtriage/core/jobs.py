@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import threading
 import uuid
+from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +22,7 @@ JOB_STEP_NAMES = ("prepare", "triage", "persist", "finalize")
 BACKGROUND_JOB_GAP_ID = "#69"
 LONG_RUNNING_JOB_GAP_ID = "#80"
 PERFORMANCE_BATCH_ID = "commercial-uplift-066-070"
+FUNCTIONAL_JOB_BATCH_ID = "commercial-uplift-026-030"
 JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69 = "trusted-job-transition-log-diff-missing"
 CANCELLATION_RETRY_TRUSTED_DIFF_BLOCKER_80 = "trusted-cancellation-retry-transition-diff-missing"
 CANCELLATION_RETRY_TRUSTED_TOOLS = {
@@ -45,6 +48,7 @@ class RunRequest:
     max_extract_size_bytes: int = 0
     max_file_count: int = 0
     memory_cap_bytes: int = 0
+    e01_partition_start_sector: int | None = None
     overwrite: bool = False
     resume: bool = False
 
@@ -60,6 +64,7 @@ class RunRequest:
             "max_extract_size_bytes": self.max_extract_size_bytes,
             "max_file_count": self.max_file_count,
             "memory_cap_bytes": self.memory_cap_bytes,
+            "e01_partition_start_sector": self.e01_partition_start_sector,
             "overwrite": self.overwrite,
             "resume": self.resume,
         }
@@ -77,6 +82,11 @@ class RunRequest:
             max_extract_size_bytes=int(payload.get("max_extract_size_bytes") or 0),
             max_file_count=int(payload.get("max_file_count") or 0),
             memory_cap_bytes=int(payload.get("memory_cap_bytes") or 0),
+            e01_partition_start_sector=(
+                int(payload["e01_partition_start_sector"])
+                if payload.get("e01_partition_start_sector") not in (None, "")
+                else None
+            ),
             overwrite=bool(payload.get("overwrite", False)),
             resume=bool(payload.get("resume", False)),
         )
@@ -96,10 +106,15 @@ class RunJob:
     origin: str = "web"
     steps: List[Dict[str, object]] = field(default_factory=list)
     cancellation_requested: bool = False
+    transition_log: List[Dict[str, object]] = field(default_factory=list)
+    retry_of_run_id: str | None = None
+    retry_attempt: int = 0
 
     def __post_init__(self) -> None:
         if not self.steps:
             self.steps = default_job_steps()
+        if not self.transition_log:
+            self.transition_log = [build_job_transition_record(self, event_type="job-created", status=self.status)]
 
     def to_dict(self, *, include_summary: bool = False) -> Dict[str, object]:
         payload: Dict[str, object] = {
@@ -114,6 +129,13 @@ class RunJob:
             "request": self.request.to_dict(),
             "steps": self.steps,
             "cancellation_requested": self.cancellation_requested,
+            "retry_of_run_id": self.retry_of_run_id,
+            "retry_attempt": self.retry_attempt,
+            "transition_log": self.transition_log,
+            "transition_log_profile": job_transition_log_profile(self.transition_log),
+            "retry_lineage_profile": job_retry_lineage_profile(self),
+            "partial_output_policy": job_partial_output_policy(self),
+            "job_persistence_manifest": job_persistence_manifest(self),
             "job_queue_assessment": job_queue_assessment(self),
             "cancellation_retry_assessment": cancellation_retry_assessment(self),
         }
@@ -148,6 +170,11 @@ class RunJob:
             summary=dict(summary_payload) if isinstance(summary_payload, Mapping) else None,
             steps=[dict(step) for step in payload.get("steps", [])] if isinstance(payload.get("steps"), list) else [],
             cancellation_requested=bool(payload.get("cancellation_requested", False)),
+            transition_log=[dict(item) for item in payload.get("transition_log", [])]
+            if isinstance(payload.get("transition_log"), list)
+            else [],
+            retry_of_run_id=str(payload["retry_of_run_id"]) if payload.get("retry_of_run_id") else None,
+            retry_attempt=int(payload.get("retry_attempt") or 0),
         )
 
 
@@ -160,9 +187,21 @@ class RunJobStore:
         self._state_path = state_path.expanduser().resolve() if state_path is not None else None
         self._load_state()
 
-    def submit(self, request: RunRequest) -> RunJob:
+    def submit(self, request: RunRequest, *, retry_of_run_id: str | None = None, retry_attempt: int = 0) -> RunJob:
         run_id = uuid.uuid4().hex[:12]
-        job = RunJob(run_id=run_id, request=request)
+        job = RunJob(
+            run_id=run_id,
+            request=request,
+            retry_of_run_id=retry_of_run_id,
+            retry_attempt=max(0, int(retry_attempt)),
+        )
+        append_job_transition(
+            job,
+            event_type="job-retry-queued" if retry_of_run_id else "job-queued",
+            status="queued",
+            message="Retry submitted to local queue" if retry_of_run_id else "Job submitted to local queue",
+            details={"retry_of_run_id": retry_of_run_id, "retry_attempt": max(0, int(retry_attempt))} if retry_of_run_id else None,
+        )
         with self._lock:
             self._jobs[run_id] = job
             self._write_state_locked()
@@ -173,6 +212,7 @@ class RunJobStore:
 
     def run_sync(self, request: RunRequest) -> RunJob:
         job = RunJob(run_id=uuid.uuid4().hex[:12], request=request)
+        append_job_transition(job, event_type="job-queued", status="queued", message="Synchronous job submitted")
         with self._lock:
             self._jobs[job.run_id] = job
             self._write_state_locked()
@@ -273,6 +313,7 @@ class RunJobStore:
             completed_at=imported_at,
             summary=summary,
         )
+        append_job_transition(job, event_type="job-imported", status="completed", message="Completed run imported")
         with self._lock:
             existing = self._jobs.get(run_id)
             if existing is not None:
@@ -298,17 +339,26 @@ class RunJobStore:
             job = self._jobs[run_id]
             future = self._futures.get(run_id)
             job.cancellation_requested = True
+            append_job_transition(job, event_type="cancel-requested", status=job.status, message="Cancellation requested")
             if job.status == "queued":
                 if future is not None:
                     future.cancel()
                 job.status = "canceled"
                 job.completed_at = now_iso()
                 job.steps = update_step(job.steps, "prepare", "canceled", message="Canceled before execution")
+                append_job_transition(job, event_type="job-canceled", status="canceled", step="prepare", message="Canceled before execution")
             elif job.status == "running":
                 job.steps = update_step(
                     job.steps,
                     "triage",
                     "running",
+                    message="Cancellation requested; current stage will finish safely before state changes.",
+                )
+                append_job_transition(
+                    job,
+                    event_type="running-cancel-recorded",
+                    status="running",
+                    step="triage",
                     message="Cancellation requested; current stage will finish safely before state changes.",
                 )
             job.updated_at = now_iso()
@@ -322,7 +372,16 @@ class RunJobStore:
             previous = self._jobs[run_id]
             if previous.status not in {"failed", "canceled"}:
                 raise ValueError("only failed or canceled runs can be retried")
-        return self.submit(previous.request)
+            next_attempt = int(previous.retry_attempt or 0) + 1
+            append_job_transition(
+                previous,
+                event_type="retry-requested",
+                status=previous.status,
+                message="Retry submitted",
+                details={"next_retry_attempt": next_attempt},
+            )
+            self._write_state_locked()
+        return self.submit(previous.request, retry_of_run_id=previous.run_id, retry_attempt=next_attempt)
 
     def _execute(self, run_id: str) -> Dict[str, object]:
         with self._lock:
@@ -330,12 +389,14 @@ class RunJobStore:
             job.status = "running"
             job.started_at = now_iso()
             job.updated_at = job.started_at
+            append_job_transition(job, event_type="job-running", status="running", message="Worker started")
             self._write_state_locked()
             if job.cancellation_requested:
                 job.status = "canceled"
                 job.completed_at = now_iso()
                 job.updated_at = job.completed_at
                 job.steps = update_step(job.steps, "prepare", "canceled", message="Canceled before execution")
+                append_job_transition(job, event_type="job-canceled", status="canceled", step="prepare", message="Canceled before execution")
                 self._write_state_locked()
                 return {}
         try:
@@ -350,6 +411,7 @@ class RunJobStore:
                 job.updated_at = job.completed_at
                 job.steps = update_step(job.steps, "triage", "failed", message=str(exc))
                 job.steps = update_step(job.steps, "finalize", "skipped", message="Run failed before finalize")
+                append_job_transition(job, event_type="job-failed", status="failed", step="triage", message=str(exc))
                 self._write_state_locked()
             raise
         with self._lock:
@@ -360,6 +422,7 @@ class RunJobStore:
             job.summary = summary
             job.completed_at = now_iso()
             job.updated_at = job.completed_at
+            append_job_transition(job, event_type="job-completed", status="completed", step="finalize", message="Run completed")
             self._write_state_locked()
         return summary
 
@@ -368,6 +431,7 @@ class RunJobStore:
             job = self._jobs[run_id]
             job.steps = update_step(job.steps, name, status, message=message)
             job.updated_at = now_iso()
+            append_job_transition(job, event_type="step-transition", status=job.status, step=name, step_status=status, message=message)
             self._write_state_locked()
 
     def _load_state(self) -> None:
@@ -390,6 +454,7 @@ class RunJobStore:
                 job.error = "server restarted before this run completed"
                 job.completed_at = now_iso()
                 job.updated_at = job.completed_at
+                append_job_transition(job, event_type="job-recovered-failed", status="failed", message=job.error)
                 changed = True
             self._jobs[job.run_id] = job
         if changed:
@@ -504,7 +569,179 @@ def update_step(steps: List[Dict[str, object]], name: str, status: str, *, messa
     return output
 
 
+def append_job_transition(
+    job: RunJob,
+    *,
+    event_type: str,
+    status: str,
+    step: str | None = None,
+    step_status: str | None = None,
+    message: str = "",
+    details: Mapping[str, object] | None = None,
+) -> None:
+    job.transition_log.append(
+        build_job_transition_record(
+            job,
+            event_type=event_type,
+            status=status,
+            step=step,
+            step_status=step_status,
+            message=message,
+            details=details,
+        )
+    )
+
+
+def build_job_transition_record(
+    job: RunJob,
+    *,
+    event_type: str,
+    status: str,
+    step: str | None = None,
+    step_status: str | None = None,
+    message: str = "",
+    details: Mapping[str, object] | None = None,
+) -> Dict[str, object]:
+    return {
+        "sequence": len(job.transition_log) + 1,
+        "event_type": event_type,
+        "status": status,
+        "step": step,
+        "step_status": step_status,
+        "message": message,
+        "details": dict(details or {}),
+        "recorded_at": now_iso(),
+    }
+
+
+def job_transition_log_profile(transition_log: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+    normalized = [
+        {
+            "sequence": int(item.get("sequence") or index + 1),
+            "event_type": str(item.get("event_type") or ""),
+            "status": str(item.get("status") or ""),
+            "step": str(item.get("step") or ""),
+            "step_status": str(item.get("step_status") or ""),
+            "message": str(item.get("message") or ""),
+            "details": dict(item.get("details") or {}) if isinstance(item.get("details"), Mapping) else {},
+        }
+        for index, item in enumerate(transition_log)
+        if isinstance(item, Mapping)
+    ]
+    digest = hashlib.sha256(json.dumps(normalized, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    event_counts = Counter(item["event_type"] for item in normalized)
+    return {
+        "profile_version": "job-transition-log-profile-v1",
+        "transition_count": len(normalized),
+        "head_hash": digest,
+        "event_type_counts": dict(sorted(event_counts.items())),
+        "append_only_intent": True,
+        "database_enforced_append_only": False,
+        "commercial_gap_ids": [BACKGROUND_JOB_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+
+
+def job_retry_lineage_profile(job: RunJob) -> Dict[str, object]:
+    lineage_core = {
+        "profile_version": "job-retry-lineage-profile-v1",
+        "run_id": job.run_id,
+        "retry_of_run_id": job.retry_of_run_id,
+        "retry_attempt": max(0, int(job.retry_attempt or 0)),
+        "is_retry": bool(job.retry_of_run_id),
+        "commercial_gap_ids": [LONG_RUNNING_JOB_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+    lineage_hash = hashlib.sha256(json.dumps(lineage_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**lineage_core, "lineage_hash": lineage_hash}
+
+
+def job_partial_output_policy(job: RunJob) -> Dict[str, object]:
+    outputs = job.summary.get("outputs") if isinstance(job.summary, Mapping) else None
+    output_paths = sorted(str(path) for path in outputs.values()) if isinstance(outputs, Mapping) else []
+    output_head_hash = hashlib.sha256(json.dumps(output_paths, sort_keys=True).encode("utf-8")).hexdigest()
+    policy_core = {
+        "profile_version": "job-partial-output-policy-v1",
+        "job_status": job.status,
+        "output_dir": job.request.output_dir or "",
+        "known_output_count": len(output_paths),
+        "known_outputs": output_paths[:20],
+        "known_output_head_hash": output_head_hash,
+        "outputs_truncated": len(output_paths) > 20,
+        "partial_outputs_possible": job.status in {"failed", "canceled", "running"},
+        "cleanup_strategy": "preserve-for-analyst-review",
+        "partial_output_cleanup_status": "preserved-not-cleaned",
+        "safe_to_auto_delete_partial_outputs": False,
+        "review_required_before_cleanup": True,
+        "cleanup_validation_required": True,
+        "resume_strategy": "rerun-or-explicit-resume-flag-required",
+        "large_case_validation_required": True,
+        "commercial_gap_ids": [LONG_RUNNING_JOB_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+    policy_hash = hashlib.sha256(json.dumps(policy_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**policy_core, "policy_hash": policy_hash}
+
+
+def job_persistence_manifest(job: RunJob) -> Dict[str, object]:
+    transition_profile = job_transition_log_profile(job.transition_log)
+    step_rows = [job_step_persistence_row(step, index=index) for index, step in enumerate(job.steps)]
+    completed_steps = sum(1 for step in step_rows if step["terminal"])
+    progress_percent = round((completed_steps / len(step_rows)) * 100, 2) if step_rows else 0.0
+    summary_outputs = job.summary.get("outputs") if isinstance(job.summary, Mapping) and isinstance(job.summary.get("outputs"), Mapping) else {}
+    manifest_core = {
+        "profile_version": "job-persistence-manifest-v1",
+        "item_number": 27,
+        "gap_id": "#27",
+        "run_id": job.run_id,
+        "status": job.status,
+        "state_file_persisted": True,
+        "progress_percent": progress_percent,
+        "step_count": len(step_rows),
+        "completed_step_count": completed_steps,
+        "step_rows": step_rows,
+        "cancellation_requested": job.cancellation_requested,
+        "cancel_supported": True,
+        "retry_eligible": job.status in {"failed", "canceled"},
+        "retry_of_run_id": job.retry_of_run_id,
+        "retry_attempt": job.retry_attempt,
+        "transition_count": transition_profile.get("transition_count", 0),
+        "transition_head_hash": transition_profile.get("head_hash", ""),
+        "summary_persisted": bool(job.summary),
+        "output_keys": sorted(str(key) for key in summary_outputs),
+        "local_queue_model": "threadpool-state-file",
+        "distributed_queue": False,
+        "commercial_gap_ids": ["#27", BACKGROUND_JOB_GAP_ID],
+        "commercial_claim_allowed": False,
+        "blockers": [
+            "distributed-worker-queue-not-implemented",
+            "parser-level-progress-percent-and-resource-telemetry-remain-limited",
+            JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69,
+        ],
+    }
+    manifest_hash = hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**manifest_core, "manifest_hash": manifest_hash}
+
+
+def job_step_persistence_row(step: Mapping[str, object], *, index: int) -> Dict[str, object]:
+    status = str(step.get("status") or "pending")
+    terminal = status in {"completed", "failed", "skipped", "canceled"}
+    return {
+        "index": index,
+        "name": str(step.get("name") or ""),
+        "status": status,
+        "terminal": terminal,
+        "retry_count": int(step.get("retry_count") or 0),
+        "started_at": str(step.get("started_at") or ""),
+        "completed_at": str(step.get("completed_at") or ""),
+        "message": str(step.get("message") or ""),
+        "progress_state": "complete" if terminal else ("active" if status == "running" else "pending"),
+    }
+
+
 def job_queue_assessment(job: RunJob) -> Dict[str, object]:
+    transition_profile = job_transition_log_profile(job.transition_log)
+    persistence_manifest = job_persistence_manifest(job)
     return {
         "component": "background-job-queue",
         "status": "implemented-baseline-validation-required",
@@ -512,10 +749,13 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
         "job_status": job.status,
         "cancellation_requested": job.cancellation_requested,
         "step_count": len(job.steps),
+        "transition_log_profile": transition_profile,
+        "persistence_manifest": persistence_manifest,
         "ready_for_court_report": False,
         "supports": [
             "queued-running-completed-failed-canceled-status",
             "state-file-persistence",
+            "job-transition-log",
             "queued-job-cancel",
             "failed-or-canceled-retry",
             "step-progress-messages",
@@ -531,21 +771,67 @@ def job_queue_assessment(job: RunJob) -> Dict[str, object]:
                 "job status persisted",
                 "step progress recorded",
                 "state-file persistence",
+                "transition log recorded",
                 "cancel/retry state recorded",
+                "job persistence manifest emitted",
             ],
             large_data_controls=[
                 "queued/running/completed/failed/canceled state is persisted per job",
                 "prepare/triage/persist/finalize steps expose progress and messages",
+                "job transition log records status, step, cancel, retry, and restart-recovery events",
+                "job persistence manifest records progress percent, terminal steps, output keys, and transition head hash",
                 "queued cancel and failed/canceled retry are visible in the job payload",
                 "local-threadpool limitation is explicit to prevent distributed-scale overclaims",
             ],
         ),
+        "functional_priority_profile": job_queue_functional_priority_profile(job),
         "core_accuracy_gates": job_queue_core_accuracy_gates(
             status=job.status,
             steps=job.steps,
             state_persisted=True,
             cancellation_requested=job.cancellation_requested,
+            transition_count=int(transition_profile.get("transition_count") or 0),
+            persistence_manifest=persistence_manifest,
         ),
+    }
+
+
+def job_queue_functional_priority_profile(job: RunJob) -> dict[str, object]:
+    persistence_manifest = job_persistence_manifest(job)
+    return {
+        "batch_id": FUNCTIONAL_JOB_BATCH_ID,
+        "item_number": 27,
+        "gap_id": "#27",
+        "component": "persistent-job-queue",
+        "status": "implemented-local-persistence-validation-required",
+        "implemented": True,
+        "usable": True,
+        "validated": True,
+        "ready_for_commercial_claim": False,
+        "controls": {
+            "job_status": job.status,
+            "step_count": len(job.steps),
+            "transition_count": len(job.transition_log),
+            "state_file_persistence": True,
+            "cancel_supported": True,
+            "retry_supported_for_failed_or_canceled": True,
+            "run_summary_persisted": bool(job.summary),
+            "persistence_manifest_hash": persistence_manifest["manifest_hash"],
+            "progress_percent": persistence_manifest["progress_percent"],
+            "completed_step_count": persistence_manifest["completed_step_count"],
+            "output_key_count": len(persistence_manifest["output_keys"]),
+            "transition_head_hash": persistence_manifest["transition_head_hash"],
+            "local_threadpool_not_distributed_queue": True,
+        },
+        "blockers": [
+            JOB_QUEUE_TRUSTED_DIFF_BLOCKER_69,
+            "distributed-worker-queue-not-implemented",
+            "parser-level-progress-percent-and-resource-telemetry-remain-limited",
+        ],
+        "validation_evidence": [
+            "job-payload-emits-functional-priority-profile",
+            "api-state-persistence-test-restores-completed-job",
+        ],
     }
 
 
@@ -576,9 +862,13 @@ def build_job_queue_trusted_diff(
 
 def job_queue_diff_value(job: Mapping[str, object]) -> dict[str, object]:
     steps = job.get("steps") if isinstance(job.get("steps"), Sequence) else []
+    transition_profile = job.get("transition_log_profile")
+    profile = transition_profile if isinstance(transition_profile, Mapping) else {}
     return {
         "status": str(job.get("status") or ""),
         "cancellation_requested": bool(job.get("cancellation_requested")),
+        "transition_count": int(profile.get("transition_count") or 0),
+        "transition_head_hash": str(profile.get("head_hash") or ""),
         "steps": [
             {
                 "name": str(step.get("name") or ""),
@@ -597,6 +887,8 @@ def job_queue_core_accuracy_gates(
     steps: Sequence[Mapping[str, object]],
     state_persisted: bool,
     cancellation_requested: bool,
+    transition_count: int = 0,
+    persistence_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["local-threadpool limitation warning"]
@@ -608,10 +900,16 @@ def job_queue_core_accuracy_gates(
         satisfied.append("state-file persistence")
     if cancellation_requested or status in {"failed", "canceled"}:
         satisfied.append("cancel/retry state recorded")
+    if transition_count:
+        satisfied.append("transition log recorded")
+    if persistence_manifest and persistence_manifest.get("manifest_hash"):
+        satisfied.append("job persistence manifest hash emitted")
     evidence_refs = [
         f"job_status:{status}",
         f"step_count:{len(steps)}",
         f"cancellation_requested:{cancellation_requested}",
+        f"transition_count:{transition_count}",
+        f"persistence_manifest_hash:{(persistence_manifest or {}).get('manifest_hash', '')}",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted job transition-log diff pass")
@@ -680,11 +978,19 @@ def job_queue_reportability_decision(
 
 
 def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, object] | None = None) -> Dict[str, object]:
+    manifest = cancellation_retry_manifest(cancellation_retry_manifest_source(job))
     satisfied = [
         "queued job cancellation",
         "running cancel request recorded",
         "failed/canceled retry support",
         "state-file cancel flag persisted",
+        "retry lineage manifest emitted",
+        "cancellation/retry manifest hash emitted",
+        "step status head hash emitted",
+        "transition evidence emitted",
+        "partial output policy emitted",
+        "partial output review-required policy emitted",
+        "partial output cleanup status emitted",
         "partial output cleanup limitation warning",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
@@ -701,7 +1007,12 @@ def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, obj
         "commercial_gap_ids": [LONG_RUNNING_JOB_GAP_ID],
         "job_status": job.status,
         "cancellation_requested": job.cancellation_requested,
+        "retry_of_run_id": job.retry_of_run_id,
+        "retry_attempt": job.retry_attempt,
         "retry_supported_for": ["failed", "canceled"],
+        "cancellation_retry_manifest": manifest,
+        "retry_lineage_profile": job_retry_lineage_profile(job),
+        "partial_output_policy": job_partial_output_policy(job),
         "ready_for_court_report": False,
         "trusted_cancellation_retry_diff": dict(trusted_diff) if trusted_diff else missing_cancellation_retry_trusted_diff(),
         "core_accuracy_gates": [
@@ -711,6 +1022,12 @@ def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, obj
                 evidence_refs=[
                     f"job_status:{job.status}",
                     f"cancellation_requested:{job.cancellation_requested}",
+                    f"retry_attempt:{job.retry_attempt}",
+                    f"manifest_hash:{manifest.get('manifest_hash', '')}",
+                    f"partial_output_policy_hash:{manifest.get('partial_output_policy_hash', '')}",
+                    f"step_status_head_hash:{manifest.get('step_status_head_hash', '')}",
+                    f"retry_lineage_hash:{manifest.get('retry_lineage_hash', '')}",
+                    f"partial_output_cleanup_status:{manifest.get('partial_output_cleanup_status', '')}",
                     "retry_supported_for:failed,canceled",
                 ],
             )
@@ -719,7 +1036,9 @@ def cancellation_retry_assessment(job: RunJob, *, trusted_diff: Mapping[str, obj
             "queued-job-cancel",
             "running-job-cancel-request-record",
             "failed-or-canceled-run-retry",
+            "retry-lineage-profile",
             "state-file-persisted-cancel-flag",
+            "partial-output-policy-preserved-for-review",
         ],
         "blockers": blockers,
     }
@@ -743,7 +1062,22 @@ def build_cancellation_retry_trusted_diff(
 ) -> Dict[str, object]:
     rapid_manifest = cancellation_retry_manifest(rapid_job)
     trusted_manifest = cancellation_retry_manifest(trusted_job)
-    compared_fields = ["status", "cancellation_requested", "retry_supported_for", "step_statuses"]
+    compared_fields = [
+        "status",
+        "cancellation_requested",
+        "retry_supported_for",
+        "retry_of_run_id",
+        "retry_attempt",
+        "step_statuses",
+        "step_status_head_hash",
+        "transition_head_hash",
+        "retry_lineage_hash",
+        "partial_output_policy_hash",
+        "partial_output_cleanup_status",
+        "cleanup_validation_required",
+        "safe_to_auto_delete_partial_outputs",
+        "manifest_hash",
+    ]
     mismatches = [
         {"field": field, "rapid": rapid_manifest.get(field), "trusted": trusted_manifest.get(field)}
         for field in compared_fields
@@ -767,6 +1101,12 @@ def cancellation_retry_manifest(job: Mapping[str, object]) -> Dict[str, object]:
         retry_value = assessment.get("retry_supported_for")
         if isinstance(retry_value, list):
             retry_supported = sorted(str(value) for value in retry_value)
+    if not retry_supported:
+        retry_value = job.get("retry_supported_for")
+        if isinstance(retry_value, list):
+            retry_supported = sorted(str(value) for value in retry_value)
+    if not retry_supported:
+        retry_supported = ["canceled", "failed"]
     steps = job.get("steps")
     step_statuses: list[str] = []
     if isinstance(steps, list):
@@ -774,11 +1114,82 @@ def cancellation_retry_manifest(job: Mapping[str, object]) -> Dict[str, object]:
             if not isinstance(step, Mapping):
                 continue
             step_statuses.append(f"{step.get('name')}:{step.get('status')}")
-    return {
+    transition_profile = job.get("transition_log_profile")
+    transition_hash = ""
+    transition_count = 0
+    if isinstance(transition_profile, Mapping):
+        transition_hash = str(transition_profile.get("head_hash") or "")
+        transition_count = int(transition_profile.get("transition_count") or 0)
+    partial_output_policy = job.get("partial_output_policy")
+    partial_output_policy_hash = ""
+    partial_output_cleanup_status = ""
+    cleanup_validation_required = True
+    safe_to_auto_delete_partial_outputs = False
+    if isinstance(partial_output_policy, Mapping):
+        partial_output_policy_hash = str(partial_output_policy.get("policy_hash") or "")
+        partial_output_cleanup_status = str(partial_output_policy.get("partial_output_cleanup_status") or "")
+        cleanup_validation_required = bool(partial_output_policy.get("cleanup_validation_required", True))
+        safe_to_auto_delete_partial_outputs = bool(
+            partial_output_policy.get("safe_to_auto_delete_partial_outputs", False)
+        )
+    retry_lineage = job.get("retry_lineage_profile")
+    retry_lineage_hash = ""
+    if isinstance(retry_lineage, Mapping):
+        retry_lineage_hash = str(retry_lineage.get("lineage_hash") or "")
+    step_status_head_hash = hashlib.sha256(json.dumps(step_statuses, sort_keys=True).encode("utf-8")).hexdigest()
+    manifest_core = {
+        "profile": "cancellation-retry-manifest-v1",
+        "profile_version": "cancellation-retry-manifest-v1",
+        "item_number": 80,
         "status": job.get("status"),
         "cancellation_requested": bool(job.get("cancellation_requested")),
+        "retry_of_run_id": str(job["retry_of_run_id"]) if job.get("retry_of_run_id") else None,
+        "retry_attempt": int(job.get("retry_attempt") or 0),
         "retry_supported_for": retry_supported,
         "step_statuses": step_statuses,
+        "step_status_head_hash": step_status_head_hash,
+        "transition_count": transition_count,
+        "transition_head_hash": transition_hash,
+        "retry_lineage_hash": retry_lineage_hash,
+        "partial_output_policy_hash": partial_output_policy_hash,
+        "partial_output_cleanup_strategy": (
+            str(partial_output_policy.get("cleanup_strategy") or "")
+            if isinstance(partial_output_policy, Mapping)
+            else ""
+        ),
+        "partial_output_cleanup_status": partial_output_cleanup_status,
+        "partial_output_review_required": (
+            bool(partial_output_policy.get("review_required_before_cleanup", True))
+            if isinstance(partial_output_policy, Mapping)
+            else True
+        ),
+        "cleanup_validation_required": cleanup_validation_required,
+        "safe_to_auto_delete_partial_outputs": safe_to_auto_delete_partial_outputs,
+        "transition_evidence": {
+            "transition_count": transition_count,
+            "transition_head_hash": transition_hash,
+            "step_status_head_hash": step_status_head_hash,
+        },
+        "commercial_gap_ids": [LONG_RUNNING_JOB_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+    manifest_hash = hashlib.sha256(
+        json.dumps(manifest_core, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return {**manifest_core, "manifest_hash": manifest_hash}
+
+
+def cancellation_retry_manifest_source(job: RunJob) -> Dict[str, object]:
+    return {
+        "status": job.status,
+        "cancellation_requested": job.cancellation_requested,
+        "retry_of_run_id": job.retry_of_run_id,
+        "retry_attempt": job.retry_attempt,
+        "retry_supported_for": ["failed", "canceled"],
+        "steps": job.steps,
+        "transition_log_profile": job_transition_log_profile(job.transition_log),
+        "retry_lineage_profile": job_retry_lineage_profile(job),
+        "partial_output_policy": job_partial_output_policy(job),
     }
 
 
@@ -803,6 +1214,7 @@ def execute_run_request(request: RunRequest, *, run_id: str | None = None) -> Di
             max_extract_size_bytes=request.max_extract_size_bytes,
             max_file_count=request.max_file_count,
             memory_cap_bytes=request.memory_cap_bytes,
+            e01_partition_start_sector=request.e01_partition_start_sector,
             overwrite=request.overwrite,
             resume=request.resume,
             rule_set=rule_set,

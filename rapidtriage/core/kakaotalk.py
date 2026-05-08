@@ -34,6 +34,7 @@ KAKAOTALK_POSTPATCH_IKM_VERSION = "kakaotalk-windows-postpatch-ikm-v1"
 KAKAOTALK_POSTPATCH_V2_DEK_VERSION = "kakaotalk-windows-postpatch-v2-dek-v1"
 KAKAOTALK_MEDIA_INVENTORY_VERSION = "kakaotalk-windows-media-inventory-v1"
 KAKAOTALK_WINDOWS_COLLECT_VERSION = "kakaotalk-windows-collect-v1"
+KAKAOTALK_FUNCTIONAL_EXPANSION_BATCH_ID = "commercial-uplift-051-055"
 CHATLOG_PATTERN = re.compile(r"^chatlogs_(?P<chat_id>[0-9]+)\.edb$", re.IGNORECASE)
 MESSAGE_TABLE_HINTS = ("chat", "message", "log")
 TEXT_COLUMN_HINTS = ("message", "msg", "text", "content", "body")
@@ -182,6 +183,232 @@ class KakaoTalkKeyStoreParseError(ValueError):
     """Raised when a KakaoTalk key-store sidecar cannot be parsed safely."""
 
 
+def kakaotalk_windows_split_functional_profile(
+    *,
+    command: str,
+    summary: Mapping[str, object],
+    analysis_summary: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Describe the PC KakaoTalk strategy split without overstating decrypt coverage."""
+
+    analysis_summary = analysis_summary or {}
+    split_manifest = kakaotalk_windows_split_strategy_manifest(
+        command=command,
+        summary=summary,
+        analysis_summary=analysis_summary,
+    )
+    chat_database_count = int(summary.get("chat_database_count") or analysis_summary.get("chat_database_count") or 0)
+    opened_count = int(
+        summary.get("sqlite_open_count")
+        or summary.get("opened_database_count")
+        or analysis_summary.get("opened_database_count")
+        or analysis_summary.get("openable_edb_count")
+        or 0
+    )
+    memory_source_count = int(
+        summary.get("memory_source_count") or summary.get("memory_dump_count") or analysis_summary.get("memory_source_count") or 0
+    )
+    registry_export_count = int(summary.get("registry_export_count") or 0)
+    key_store_count = int(
+        summary.get("key_store_file_count") or summary.get("parsed_key_store_count") or analysis_summary.get("parsed_key_store_count") or 0
+    )
+    residue_count = int(
+        summary.get("postpatch_message_residue_count")
+        or summary.get("postpatch_memory_chat_message_residue_count")
+        or analysis_summary.get("postpatch_message_residue_count")
+        or 0
+    )
+    failed_checks: list[str] = []
+    if chat_database_count and opened_count == 0:
+        failed_checks.append("chatlogs-present-but-not-opened")
+    if memory_source_count == 0:
+        failed_checks.append("memory-dump-not-attached")
+    if registry_export_count == 0:
+        failed_checks.append("registry-export-not-attached")
+    if key_store_count == 0 and "key-store" in command:
+        failed_checks.append("post-bigbang-key-store-not-parsed")
+    if not split_manifest.get("manifest_sha256"):
+        failed_checks.append("kakaotalk-split-strategy-manifest-not-emitted")
+    failed_checks.extend(
+        [
+            "trusted-kakaotalk-tool-diff-required",
+            "known-answer-before-and-after-bigbang-corpus-required",
+        ]
+    )
+    return {
+        "batch_id": KAKAOTALK_FUNCTIONAL_EXPANSION_BATCH_ID,
+        "item_number": 51,
+        "implementation_track": "pc-kakaotalk-split-strategy",
+        "command": command,
+        "status": "usable-internal-triage-not-commercial-grade",
+        "implemented_controls": {
+            "legacy_edb_decrypt_workflow": True,
+            "post_bigbang_key_store_inventory": key_store_count > 0 or "key-store" in command,
+            "memory_sqlcipher_probe_workflow": command in {"kakaotalk-sqlcipher-probe", "kakaotalk-collect-windows"}
+            or memory_source_count > 0,
+            "registry_windows_edb_correlation_recorded": registry_export_count > 0 or command == "kakaotalk-collect-windows",
+            "raw_sensitive_keys_exported": False,
+            "separated_modes": [
+                "kakaotalk-decrypt",
+                "kakaotalk-userdir-bruteforce",
+                "kakaotalk-key-store-inspect",
+                "kakaotalk-sqlcipher-probe",
+                "kakaotalk-memory-carve",
+                "kakaotalk-collect-windows",
+            ],
+            "split_strategy_manifest_hash": split_manifest["manifest_sha256"],
+            "split_strategy_manifest_emitted": True,
+        },
+        "evidence_counts": {
+            "chat_database_count": chat_database_count,
+            "opened_database_count": opened_count,
+            "memory_source_count": memory_source_count,
+            "registry_export_count": registry_export_count,
+            "key_store_count": key_store_count,
+            "message_residue_count": residue_count,
+        },
+        "split_strategy_manifest": split_manifest,
+        "passed_validation_check_ids": [
+            "kakaotalk-split-strategy-manifest-emitted",
+            "legacy-post-bigbang-mode-separation-recorded",
+            "raw-sensitive-key-redaction-recorded",
+        ],
+        "failed_validation_check_ids": failed_checks,
+        "ready_for_court_report": False,
+        "next_internal_step": "Attach before/after-BigBang known-answer ZIPs and compare room/message/media counts against a trusted PC KakaoTalk extractor.",
+    }
+
+
+def kakaotalk_windows_split_strategy_manifest(
+    *,
+    command: str,
+    summary: Mapping[str, object],
+    analysis_summary: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    analysis_summary = analysis_summary or {}
+    chat_database_count = int(summary.get("chat_database_count") or analysis_summary.get("chat_database_count") or 0)
+    opened_count = int(
+        summary.get("sqlite_open_count")
+        or summary.get("opened_database_count")
+        or analysis_summary.get("opened_database_count")
+        or analysis_summary.get("openable_edb_count")
+        or 0
+    )
+    registry_export_count = int(summary.get("registry_export_count") or analysis_summary.get("registry_export_count") or 0)
+    memory_source_count = int(
+        summary.get("memory_source_count") or summary.get("memory_dump_count") or analysis_summary.get("memory_source_count") or 0
+    )
+    key_store_count = int(
+        summary.get("key_store_file_count") or summary.get("parsed_key_store_count") or analysis_summary.get("parsed_key_store_count") or 0
+    )
+    windows_edb_candidate_count = int(
+        summary.get("windows_edb_candidate_count")
+        or summary.get("edb_candidate_count")
+        or analysis_summary.get("windows_edb_candidate_count")
+        or 0
+    )
+    residue_count = int(
+        summary.get("postpatch_message_residue_count")
+        or summary.get("postpatch_memory_chat_message_residue_count")
+        or analysis_summary.get("postpatch_message_residue_count")
+        or 0
+    )
+    manifest: dict[str, object] = {
+        "manifest_version": "kakaotalk-windows-split-strategy-manifest-v1",
+        "item_number": 51,
+        "batch_id": KAKAOTALK_FUNCTIONAL_EXPANSION_BATCH_ID,
+        "command": command,
+        "strategy_goal": "Keep legacy EDB decrypt, post-BigBang key-store inventory, memory/registry/Windows.edb correlation, and limitation reporting as separate modes.",
+        "mode_statuses": {
+            "legacy_edb_decrypt": {
+                "implemented": True,
+                "active_for_command": command == "kakaotalk-decrypt",
+                "chat_database_count": chat_database_count,
+                "opened_database_count": opened_count,
+                "reporting_boundary": "message content is reportable only after SQLite header validation, source hashes, and trusted extractor/known-answer diff",
+            },
+            "userdir_bruteforce": {
+                "implemented": True,
+                "active_for_command": command == "kakaotalk-userdir-bruteforce",
+                "reporting_boundary": "UID discovery is an authentication-material candidate and must not be treated as message content",
+            },
+            "post_bigbang_key_store": {
+                "implemented": True,
+                "active_for_command": command == "kakaotalk-key-store-inspect",
+                "key_store_count": key_store_count,
+                "raw_sensitive_keys_exported": False,
+                "reporting_boundary": "wrapped DEK/IKM material is inventoried by hash/length only unless a lawful controlled reveal workflow is attached",
+            },
+            "sqlcipher_probe": {
+                "implemented": True,
+                "active_for_command": command == "kakaotalk-sqlcipher-probe",
+                "opened_database_count": opened_count,
+                "residue_count": residue_count,
+                "reporting_boundary": "SQLCipher-opened auxiliary stores and memory residues are review pivots until known-answer validated",
+            },
+            "memory_registry_windows_edb_correlation": {
+                "implemented": True,
+                "active_for_command": command in {"kakaotalk-memory-carve", "kakaotalk-collect-windows"},
+                "memory_source_count": memory_source_count,
+                "registry_export_count": registry_export_count,
+                "windows_edb_candidate_count": windows_edb_candidate_count,
+                "reporting_boundary": "cross-source hits strengthen triage confidence but do not independently decrypt chatLogs",
+            },
+            "authorized_windows_collection": {
+                "implemented": True,
+                "active_for_command": command == "kakaotalk-collect-windows",
+                "registry_export_count": registry_export_count,
+                "memory_source_count": memory_source_count,
+                "raw_sensitive_keys_exported": False,
+                "reporting_boundary": "collection package preserves source hashes and must be paired with Windows 11 smoke evidence",
+            },
+        },
+        "evidence_counts": {
+            "chat_database_count": chat_database_count,
+            "opened_database_count": opened_count,
+            "registry_export_count": registry_export_count,
+            "memory_source_count": memory_source_count,
+            "key_store_count": key_store_count,
+            "windows_edb_candidate_count": windows_edb_candidate_count,
+            "message_residue_count": residue_count,
+        },
+        "source_viewer_locators": [
+            {"section": "summary", "json_pointer": "/summary"},
+            {"section": "functional_priority_profile", "json_pointer": "/functional_priority_profile"},
+            {"section": "legacy_decrypt_entries", "json_pointer": "/entries"},
+            {"section": "post_bigbang_key_store", "json_pointer": "/key_stores"},
+            {"section": "sqlcipher_matches", "json_pointer": "/matches"},
+            {"section": "memory_carve", "json_pointer": "/postpatch_memory_carve"},
+        ],
+        "large_case_controls": {
+            "zip_member_max_bytes": MAX_ZIP_MEMBER_BYTES,
+            "zip_total_uncompressed_max_bytes": MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES,
+            "memory_key_material_scan_limit": KEY_MATERIAL_SCAN_LIMIT,
+            "memory_message_residue_limit_default": DEFAULT_MEMORY_MESSAGE_RESIDUE_LIMIT,
+            "raw_values_redacted_by_default": True,
+        },
+        "commercial_blockers": [
+            "before-and-after-bigbang-known-answer-zip-corpus-required",
+            "trusted-pc-kakaotalk-extractor-diff-required",
+            "windows-11-runtime-smoke-evidence-required",
+            "post-bigbang-key-unwrap-and-deleted-store-validation-required",
+        ],
+        "validation_status": "implemented-usable-validation-required",
+    }
+    manifest["manifest_sha256"] = stable_kakaotalk_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def stable_kakaotalk_json_sha256(value: Mapping[str, object] | Sequence[object] | str) -> str:
+    if isinstance(value, str):
+        payload = value
+    else:
+        payload = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()
+
+
 def run_kakaotalk_windows_collect(
     *,
     output_root: Path,
@@ -217,6 +444,14 @@ def run_kakaotalk_windows_collect(
     copy_directory_tree(source_root, collected_kakao_root)
     registry_exports = export_windows_kakaotalk_registry(registry_dir)
     memory_dumps = collect_windows_kakaotalk_memory_dumps(collection_dir) if include_memory_dump else []
+    functional_profile = kakaotalk_windows_split_functional_profile(
+        command="kakaotalk-collect-windows",
+        summary={
+            "chat_database_count": len(find_chatlog_databases(source_root)),
+            "registry_export_count": len(registry_exports),
+            "memory_dump_count": len(memory_dumps),
+        },
+    )
     metadata = {
         "parser": KAKAOTALK_WINDOWS_COLLECT_VERSION,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -228,6 +463,7 @@ def run_kakaotalk_windows_collect(
         "registry_export_count": len(registry_exports),
         "authorization_notice": "Collect only systems and accounts you are authorized to examine.",
         "sensitive_keys_exported": False,
+        "functional_priority_profile": functional_profile,
     }
     write_result(metadata, collection_dir / "collection_metadata.json")
     manifest_rows = write_collection_hash_manifest(collection_dir, collection_dir / "hash_manifest.csv")
@@ -256,6 +492,7 @@ def run_kakaotalk_windows_collect(
             "registry_exports": registry_exports,
             "memory_dumps": memory_dumps,
         },
+        "functional_priority_profile": functional_profile,
     }
     if analyze:
         report_dir.mkdir(parents=True, exist_ok=True)
@@ -275,6 +512,11 @@ def run_kakaotalk_windows_collect(
             "summary": analysis.get("summary", {}),
             "xlsx_requested": not no_xlsx,
         }
+        payload["functional_priority_profile"] = kakaotalk_windows_split_functional_profile(
+            command="kakaotalk-collect-windows",
+            summary=payload["summary"],
+            analysis_summary=analysis.get("summary", {}) if isinstance(analysis.get("summary"), Mapping) else {},
+        )
         payload["summary"]["status"] = "collected-and-analyzed"
         payload["summary"]["report_dir"] = str(report_dir)
     return payload
@@ -774,6 +1016,10 @@ def run_kakaotalk_decrypt(
         payload["summary"]["postpatch_memory_message_content_reportable"] = payload["postpatch_memory_carve"]["summary"][
             "message_content_reportable"
         ]
+    payload["functional_priority_profile"] = kakaotalk_windows_split_functional_profile(
+        command="kakaotalk-decrypt",
+        summary=payload["summary"],
+    )
     write_result(payload, output)
     return payload
 
@@ -983,6 +1229,10 @@ def run_kakaotalk_sqlcipher_probe(
         "openable_edbs": [],
         "errors": [],
     }
+    payload["functional_priority_profile"] = kakaotalk_windows_split_functional_profile(
+        command="kakaotalk-sqlcipher-probe",
+        summary=payload["summary"],
+    )
     if sqlcipher_path is None:
         payload["errors"] = [f"SQLCipher binary was not found: {sqlcipher_bin}"]
         write_result(payload, output)
@@ -1179,6 +1429,10 @@ def run_kakaotalk_sqlcipher_probe(
     payload["postpatch_media_inventory"] = media_inventory
     payload["summary"]["status"] = "matched" if matches else "no-chatlog-match"
     payload["matches"] = matches
+    payload["functional_priority_profile"] = kakaotalk_windows_split_functional_profile(
+        command="kakaotalk-sqlcipher-probe",
+        summary=payload["summary"],
+    )
     write_result(payload, output)
     return payload
 
@@ -1314,6 +1568,10 @@ def run_kakaotalk_key_store_inspect(
             ],
         },
     }
+    payload["functional_priority_profile"] = kakaotalk_windows_split_functional_profile(
+        command="kakaotalk-key-store-inspect",
+        summary=payload["summary"],
+    )
     write_result(payload, output)
     return payload
 

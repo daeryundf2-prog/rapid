@@ -34,6 +34,6 @@
 - Localhost/default binding:
 - Remote binding/auth:
 
-## Upgrade Notes
+## Migration / Upgrade Notes
 
 - 

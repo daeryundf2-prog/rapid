@@ -1,25 +1,31 @@
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
+from .audit import compute_sha256
 from .archive_image import ARCHIVE_IMAGE_SUFFIXES, ARCHIVE_IMAGE_TOOLS, missing_archive_image_tools
-from .disk_image import RAW_IMAGE_REQUIRED_TOOLS, RAW_IMAGE_SUFFIXES, discover_split_image_parts, missing_raw_image_tools
+from .disk_image import RAW_IMAGE_REQUIRED_TOOLS, RAW_IMAGE_SUFFIXES, build_split_set_profile, discover_split_image_parts, missing_raw_image_tools
 from .e01 import (
     E01_REPORT_GRADE_BLOCKERS,
     E01_SUFFIXES,
     E01_REQUIRED_TOOLS,
     collect_tool_preflight,
+    build_e01_segment_set_profile,
+    build_e01_ingest_workflow_profile,
     describe_source_integrity,
+    e01_failure_guidance,
+    e01_preflight_summary,
     image_core_accuracy_gates,
     image_commercial_uplift_evidence,
     image_report_grade_assessment,
     missing_e01_tools,
 )
-from .virtual_disk import VIRTUAL_DISK_REQUIRED_TOOLS, VIRTUAL_DISK_SUFFIXES, missing_virtual_disk_tools
+from .virtual_disk import VIRTUAL_DISK_REQUIRED_TOOLS, VIRTUAL_DISK_SUFFIXES, build_virtual_disk_chain_profile, missing_virtual_disk_tools
 
 
 class EvidenceAdapter(Protocol):
@@ -48,6 +54,7 @@ class EvidenceAdapterResult:
     external_validation_required: bool = True
     source_integrity: dict[str, object] | None = None
     tool_preflight: list[dict[str, object]] | None = None
+    preflight_summary: dict[str, object] | None = None
     commercial_grade_ready: bool = False
     commercial_gap_ids: list[str] | None = None
     report_grade_assessment: dict[str, object] | None = None
@@ -58,6 +65,13 @@ class EvidenceAdapterResult:
     safety_notes: list[str] | None = None
     core_accuracy_gates: list[dict[str, object]] | None = None
     commercial_uplift_evidence: dict[str, object] | None = None
+    failure_guidance: dict[str, object] | None = None
+    segment_set_profile: dict[str, object] | None = None
+    split_set_profile: dict[str, object] | None = None
+    virtual_disk_chain_profile: dict[str, object] | None = None
+    container_export_profile: dict[str, object] | None = None
+    verified_export_manifest_profile: dict[str, object] | None = None
+    ingest_workflow: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -125,7 +139,27 @@ class EwfAdapter:
         ready = supported and not missing
         report_grade = image_report_grade_assessment("#22", E01_REPORT_GRADE_BLOCKERS)
         source_integrity = describe_source_integrity(source) if source.is_file() else None
+        segment_set_profile = build_e01_segment_set_profile(source) if source.is_file() and supported else None
         tool_preflight = collect_tool_preflight(E01_REQUIRED_TOOLS) if supported else None
+        preflight_summary = e01_preflight_summary(tool_preflight or [], missing_tools=missing) if supported else None
+        failure_guidance = (
+            None
+            if ready
+            else e01_failure_guidance(
+                "E01 direct input requires external tools: " + ", ".join(missing)
+                if missing
+                else f"unsupported E01 image extension or unreadable path: {source}"
+                )
+        )
+        ingest_workflow = build_e01_ingest_workflow_profile(
+            source,
+            supported=supported and source.is_file(),
+            ready=ready,
+            preflight_summary=preflight_summary,
+            segment_set_profile=segment_set_profile,
+            source_integrity=source_integrity,
+            failure_guidance=failure_guidance,
+        )
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -154,6 +188,7 @@ class EwfAdapter:
             external_validation_required=True,
             source_integrity=source_integrity,
             tool_preflight=tool_preflight,
+            preflight_summary=preflight_summary,
             commercial_grade_ready=False,
             commercial_gap_ids=["#22"],
             report_grade_assessment=report_grade,
@@ -164,6 +199,7 @@ class EwfAdapter:
                     f"detected_format={'e01' if source.suffix.lower() == '.e01' else 'ex01'}",
                     f"ready={ready}",
                     f"missing_tools={','.join(missing)}",
+                    f"preflight_status={(preflight_summary or {}).get('status', 'not-run')}",
                 ],
                 report_grade_assessment=report_grade,
                 caveats=[
@@ -184,6 +220,7 @@ class EwfAdapter:
             fallback_guidance=[
                 "Use a write-blocked/read-only forensic mount or vendor export if direct tools are unavailable or fail.",
                 "Preserve libewf/Sleuth Kit or vendor export logs with the RapidTriage run outputs.",
+                *list((preflight_summary or {}).get("remediation_steps") or []),
             ],
             safety_notes=["RapidTriage never writes to the source image; extraction writes only under the selected output directory."],
             core_accuracy_gates=image_core_accuracy_gates(
@@ -196,6 +233,7 @@ class EwfAdapter:
                     "partition_start_sector": None,
                     "command_history": [],
                     "warnings": [] if ready else ["Direct E01/Ex01 extraction is disabled until required tools are present."],
+                    "segment_set_profile": segment_set_profile or {},
                     "limitations": E01_REPORT_GRADE_BLOCKERS,
                 },
             ),
@@ -208,11 +246,15 @@ class EwfAdapter:
                     "partition_table": [],
                     "command_history": [],
                     "warnings": [] if ready else ["Direct E01/Ex01 extraction is disabled until required tools are present."],
+                    "segment_set_profile": segment_set_profile or {},
                     "limitations": E01_REPORT_GRADE_BLOCKERS,
                     "image_report_grade_assessment": report_grade,
                     "detected_format": "e01" if source.suffix.lower() == ".e01" else "ex01",
                 },
             ),
+            failure_guidance=failure_guidance,
+            segment_set_profile=segment_set_profile,
+            ingest_workflow=ingest_workflow,
         )
 
 
@@ -225,6 +267,7 @@ class RawImageAdapter:
         missing = missing_raw_image_tools()
         ready = supported and not missing
         split_parts = discover_raw_parts_for_guidance(source) if supported and source.is_file() else []
+        split_set_profile = build_split_set_profile(split_parts, selected_path=source) if split_parts else None
         report_grade = image_report_grade_assessment(
             "#23",
             [
@@ -305,7 +348,8 @@ class RawImageAdapter:
                     "source_integrity": (source_integrity or {}).get("parts", []) if isinstance(source_integrity, dict) and "parts" in source_integrity else source_integrity,
                     "tool_preflight": tool_preflight or [],
                     "partition_table": [],
-                    "split_part_warnings": [],
+                    "split_part_warnings": list((split_set_profile or {}).get("warnings") or []),
+                    "split_set_profile": split_set_profile or {},
                     "command_history": [],
                     "warnings": [] if ready else ["Direct raw/split extraction is disabled until Sleuth Kit tools are present."],
                     "native_capabilities": {"encrypted_volume_unlock_workflow": False},
@@ -326,6 +370,7 @@ class RawImageAdapter:
                     "partition_table": [],
                     "command_history": [],
                     "split_part_count": len(split_parts) if split_parts else 0,
+                    "split_set_profile": split_set_profile or {},
                     "warnings": [] if ready else ["Direct raw/split extraction is disabled until Sleuth Kit tools are present."],
                     "limitations": [
                         "native-partition-filesystem-parser-not-implemented",
@@ -336,6 +381,7 @@ class RawImageAdapter:
                     "detected_format": "raw",
                 },
             ),
+            split_set_profile=split_set_profile,
         )
 
 
@@ -390,6 +436,7 @@ class VirtualDiskAdapter:
     def identify(self, source: Path) -> EvidenceAdapterResult:
         supported = source.suffix.lower() in self.supported_suffixes
         if source.suffix.lower() == ".xva":
+            chain_profile = build_virtual_disk_chain_profile(source) if source.is_file() else None
             report_grade = image_report_grade_assessment(
                 "#24",
                 [
@@ -453,6 +500,7 @@ class VirtualDiskAdapter:
                         "source_integrity": describe_source_integrity(source) if source.is_file() else None,
                         "detected_format": "xva",
                         "warnings": ["Direct XVA extraction is not implemented; preserve the export/conversion log for reporting."],
+                        "virtual_disk_chain_profile": chain_profile or {},
                         "native_capabilities": {
                             "snapshot_chain_validation": False,
                             "differencing_disk_resolution": False,
@@ -472,6 +520,7 @@ class VirtualDiskAdapter:
                         "warnings": [
                             "Direct XVA extraction is not implemented; preserve the export/conversion log for reporting."
                         ],
+                        "virtual_disk_chain_profile": chain_profile or {},
                         "limitations": [
                             "xva-direct-extraction-not-implemented",
                             "hypervisor-metadata-decoding-not-implemented",
@@ -481,6 +530,7 @@ class VirtualDiskAdapter:
                         "detected_format": "xva",
                     },
                 ),
+                virtual_disk_chain_profile=chain_profile,
             )
         missing = missing_virtual_disk_tools(source.suffix.lower())
         ready = supported and not missing
@@ -494,6 +544,7 @@ class VirtualDiskAdapter:
             ],
         )
         source_integrity = describe_source_integrity(source) if source.is_file() else None
+        chain_profile = build_virtual_disk_chain_profile(source) if source.is_file() and supported else None
         tool_preflight = collect_tool_preflight(VIRTUAL_DISK_REQUIRED_TOOLS) if supported else None
         return EvidenceAdapterResult(
             adapter=self.name,
@@ -558,6 +609,7 @@ class VirtualDiskAdapter:
                     "tool_preflight": tool_preflight or [],
                     "command_history": [],
                     "warnings": [] if ready else ["Direct virtual disk extraction is disabled until required tooling is present."],
+                    "virtual_disk_chain_profile": chain_profile or {},
                     "native_capabilities": {
                         "snapshot_chain_validation": False,
                         "differencing_disk_resolution": False,
@@ -578,6 +630,7 @@ class VirtualDiskAdapter:
                     "partition_table": [],
                     "command_history": [],
                     "warnings": [] if ready else ["Direct virtual disk extraction is disabled until required tooling is present."],
+                    "virtual_disk_chain_profile": chain_profile or {},
                     "limitations": [
                         "snapshot-chain-validation-not-implemented",
                         "differencing-disk-resolution-not-implemented",
@@ -588,7 +641,124 @@ class VirtualDiskAdapter:
                     "detected_format": source.suffix.lower().lstrip(".") or "virtual-disk",
                 },
             ),
+            virtual_disk_chain_profile=chain_profile,
         )
+
+
+def build_forensic_container_export_profile(source: Path) -> dict[str, object]:
+    suffix = source.suffix.lower().lstrip(".") or "forensic-container"
+    required_export_artifacts = [
+        "original container hash",
+        "vendor tool name and version",
+        "export settings/log",
+        "derived export root hash or manifest hash",
+        "deleted/compressed/encrypted item limitation statement",
+    ]
+    return {
+        "profile_version": "forensic-container-export-first-v1",
+        "container_type": suffix,
+        "source_path": str(source.resolve()),
+        "direct_parser_available": False,
+        "workflow": "vendor-export-first",
+        "supported_internal_action": "detect-hash-guide",
+        "required_export_artifacts": required_export_artifacts,
+        "derived_evidence_policy": "Treat mounted/exported files as derived evidence and preserve original container plus vendor logs.",
+        "native_parser_blockers": [
+            "proprietary-container-direct-parser-not-implemented",
+            "embedded-metadata-compression-deleted-entry-validation-required",
+            "vendor-export-log-required",
+        ],
+        "review_status": "external-export-required",
+    }
+
+
+def discover_forensic_container_export_manifest(source: Path) -> Path | None:
+    candidates = [
+        source.with_suffix(source.suffix + ".export-manifest.json"),
+        source.with_suffix(source.suffix + ".manifest.json"),
+        source.with_name(source.name + ".export-manifest.json"),
+        source.with_name(source.stem + "-export-manifest.json"),
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def build_verified_export_manifest_profile(
+    source: Path,
+    manifest_path: Path | None,
+    *,
+    source_integrity: dict[str, object] | None = None,
+) -> dict[str, object]:
+    if manifest_path is None:
+        return {
+            "profile_version": "forensic-container-verified-export-manifest-v1",
+            "manifest_present": False,
+            "validation_status": "missing",
+            "required_sidecar_names": [
+                source.with_suffix(source.suffix + ".export-manifest.json").name,
+                source.with_suffix(source.suffix + ".manifest.json").name,
+            ],
+            "warnings": ["No vendor export manifest sidecar was found next to the proprietary container."],
+        }
+    profile: dict[str, object] = {
+        "profile_version": "forensic-container-verified-export-manifest-v1",
+        "manifest_present": True,
+        "manifest_path": str(manifest_path.resolve()),
+        "manifest_sha256": compute_sha256(manifest_path),
+        "validation_status": "review-required",
+        "warnings": [],
+    }
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        profile.update(
+            {
+                "parse_status": "failed",
+                "error": str(exc),
+                "warnings": ["Vendor export manifest exists but could not be parsed as JSON."],
+            }
+        )
+        return profile
+    if not isinstance(payload, dict):
+        profile.update({"parse_status": "failed", "warnings": ["Vendor export manifest root must be a JSON object."]})
+        return profile
+    files = payload.get("files") if isinstance(payload.get("files"), list) else []
+    source_sha256 = str((source_integrity or {}).get("sha256") or "")
+    manifest_source_sha256 = str(payload.get("source_sha256") or payload.get("original_container_sha256") or "")
+    required_fields = ["vendor_tool", "vendor_tool_version", "export_root_sha256", "files"]
+    missing_required = [field for field in required_fields if not payload.get(field)]
+    source_hash_matches = bool(source_sha256 and manifest_source_sha256 and source_sha256.lower() == manifest_source_sha256.lower())
+    profile.update(
+        {
+            "parse_status": "json-parsed",
+            "vendor_tool": str(payload.get("vendor_tool") or ""),
+            "vendor_tool_version": str(payload.get("vendor_tool_version") or ""),
+            "export_root": str(payload.get("export_root") or ""),
+            "export_root_sha256": str(payload.get("export_root_sha256") or ""),
+            "source_sha256": manifest_source_sha256,
+            "source_hash_matches_manifest": source_hash_matches,
+            "file_count": len(files),
+            "hashed_file_count": sum(1 for item in files if isinstance(item, dict) and item.get("sha256")),
+            "missing_required_fields": missing_required,
+            "validation_status": "manifest-linked" if not missing_required and source_hash_matches else "review-required",
+            "sample_files": [
+                {
+                    "path": str(item.get("path") or item.get("relative_path") or ""),
+                    "sha256": str(item.get("sha256") or ""),
+                    "size": item.get("size"),
+                }
+                for item in files[:25]
+                if isinstance(item, dict)
+            ],
+        }
+    )
+    if missing_required:
+        profile["warnings"].append(f"Vendor export manifest is missing required fields: {', '.join(missing_required)}")
+    if manifest_source_sha256 and not source_hash_matches:
+        profile["warnings"].append("Vendor export manifest source hash does not match the detected container hash.")
+    return profile
 
 
 class ForensicContainerAdapter:
@@ -607,6 +777,16 @@ class ForensicContainerAdapter:
             ],
         )
         source_integrity = describe_source_integrity(source) if source.is_file() else None
+        container_export_profile = build_forensic_container_export_profile(source) if source.is_file() and supported else None
+        verified_export_manifest_profile = (
+            build_verified_export_manifest_profile(
+                source,
+                discover_forensic_container_export_manifest(source),
+                source_integrity=source_integrity,
+            )
+            if source.is_file() and supported
+            else None
+        )
         return EvidenceAdapterResult(
             adapter=self.name,
             source_path=str(source),
@@ -666,6 +846,8 @@ class ForensicContainerAdapter:
                     "source_integrity": source_integrity,
                     "detected_format": suffix or "forensic-container",
                     "scan_strategy": "vendor-export-first",
+                    "native_vs_export_workflow": container_export_profile or {},
+                    "verified_export_manifest_profile": verified_export_manifest_profile or {},
                     "fallback_guidance": [
                         f"Export or mount the {suffix.upper()} with the acquisition/vendor tool in a read-only workflow.",
                         "Hash the original container and exported payload, preserve vendor logs, then scan the exported folder.",
@@ -696,8 +878,13 @@ class ForensicContainerAdapter:
                     ],
                     "image_report_grade_assessment": report_grade,
                     "detected_format": suffix or "forensic-container",
+                    "export_manifest_sha256": (verified_export_manifest_profile or {}).get("manifest_sha256", ""),
+                    "native_vs_export_workflow": container_export_profile or {},
+                    "verified_export_manifest_profile": verified_export_manifest_profile or {},
                 },
             ),
+            container_export_profile=container_export_profile,
+            verified_export_manifest_profile=verified_export_manifest_profile,
         )
 
 

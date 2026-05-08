@@ -19,9 +19,11 @@ from .registry import (
     iter_registry_cell_candidates,
     parse_registry_hive_header,
     registry_value_data_preview,
+    registry_transaction_log_evidence,
+    registry_transaction_replay_profile,
 )
 
-PARSER_VERSION = "windows-shellbags-native-v2"
+PARSER_VERSION = "windows-shellbags-native-v3"
 SHELLBAG_USER_HIVES = {"NTUSER.DAT", "USRCLASS.DAT"}
 SHELLBAG_BLOCKERS = [
     "binary shell item payload decoding is not report-grade yet",
@@ -93,6 +95,7 @@ def collect_native_shellbag_hive(path: Path) -> Iterable[ArtifactRecord]:
         return
 
     metadata = parse_registry_hive_header(header)
+    transaction_log_evidence = registry_transaction_log_evidence(path)
     source_hashes = file_hashes(path)
     cell_candidates = iter_registry_cell_candidates(blob)
     value_by_offset = {
@@ -127,6 +130,7 @@ def collect_native_shellbag_hive(path: Path) -> Iterable[ArtifactRecord]:
             value_names=[str(value) for value in key_details.get("value_names", [])],
             value_previews=value_previews,
             key_last_written_at=str(key_details.get("last_written_at") or ""),
+            transaction_log_evidence=transaction_log_evidence,
             key_path_confidence=str(key_details.get("key_path_confidence") or ""),
             cell_offset=int(key_details.get("cell_offset") or 0),
             hbin_offset=int(key_details.get("hbin_offset") or 0),
@@ -147,6 +151,7 @@ def collect_native_shellbag_hive(path: Path) -> Iterable[ArtifactRecord]:
             value_names=[],
             value_previews={},
             key_last_written_at="",
+            transaction_log_evidence=transaction_log_evidence,
             key_path_confidence="string-pivot",
             cell_offset=0,
             hbin_offset=0,
@@ -165,6 +170,7 @@ def build_native_shellbag_record(
     value_names: Sequence[str],
     value_previews: Mapping[str, str],
     key_last_written_at: str,
+    transaction_log_evidence: Mapping[str, object],
     key_path_confidence: str,
     cell_offset: int,
     hbin_offset: int,
@@ -183,6 +189,7 @@ def build_native_shellbag_record(
         key_last_written_at=key_last_written_at,
         bag_ids=bag_ids,
         node_ids=node_ids,
+        transaction_log_evidence=transaction_log_evidence,
     )
     confidence = shellbag_candidate_confidence(checks, key_path_confidence, candidate_source)
     report_grade = shellbag_report_grade_assessment(
@@ -212,6 +219,11 @@ def build_native_shellbag_record(
         "value_names": sorted(value_names),
         "value_previews": dict(sorted(value_previews.items())),
         "timestamp_candidates": timestamp_candidates,
+        "registry_transaction_log_evidence": dict(transaction_log_evidence),
+        "registry_transaction_replay_profile": registry_transaction_replay_profile(
+            transaction_log_evidence,
+            dirty=bool(metadata.get("dirty")),
+        ),
         "shellbag_evidence": shellbag_evidence(
             source_key_path=source_key_path,
             section=section,
@@ -222,6 +234,7 @@ def build_native_shellbag_record(
             value_names=value_names,
             candidate_source=candidate_source,
             allocation_status=allocation_status,
+            transaction_log_evidence=transaction_log_evidence,
             cell_offset=cell_offset,
             hbin_offset=hbin_offset,
         ),
@@ -322,6 +335,7 @@ def shellbag_evidence(
     value_names: Sequence[str],
     candidate_source: str,
     allocation_status: str,
+    transaction_log_evidence: Mapping[str, object],
     cell_offset: int,
     hbin_offset: int,
 ) -> dict[str, object]:
@@ -333,6 +347,8 @@ def shellbag_evidence(
             "allocation_status": allocation_status,
             "cell_offset": cell_offset,
             "hbin_offset": hbin_offset,
+            "transaction_log_status": str(transaction_log_evidence.get("status") or ""),
+            "transaction_log_replay_applied": bool(transaction_log_evidence.get("transaction_log_replay_applied")),
         },
         "relationship_evidence": {
             "bag_id_candidates": list(bag_ids),
@@ -441,6 +457,7 @@ def shellbag_validation_checks(
     key_last_written_at: str,
     bag_ids: Sequence[str],
     node_ids: Sequence[str],
+    transaction_log_evidence: Mapping[str, object],
 ) -> dict[str, object]:
     return {
         "regf_header_valid": bool(metadata.get("regf_valid")),
@@ -450,6 +467,8 @@ def shellbag_validation_checks(
         "has_key_last_write_timestamp": bool(key_last_written_at),
         "has_bag_id_candidate": bool(bag_ids),
         "has_node_id_candidate": bool(node_ids),
+        "transaction_log_context_recorded": bool(transaction_log_evidence.get("status")),
+        "transaction_log_input_present": int(transaction_log_evidence.get("present_count") or 0) > 0,
         "binary_shell_item_decoding_available": False,
         "transaction_log_replay_available": False,
         "deleted_shellbag_validation_available": False,
@@ -466,6 +485,8 @@ def shellbag_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, o
         "has_key_last_write_timestamp": ("Key last-write timestamp", "medium"),
         "has_bag_id_candidate": ("Bag ID candidate", "medium"),
         "has_node_id_candidate": ("Node ID candidate", "medium"),
+        "transaction_log_context_recorded": ("Transaction-log context recorded", "medium"),
+        "transaction_log_input_present": ("Transaction-log input present", "medium"),
         "binary_shell_item_decoding_available": ("Binary shell item decode", "critical"),
         "transaction_log_replay_available": ("Transaction log replay", "critical"),
         "deleted_shellbag_validation_available": ("Deleted ShellBag validation", "critical"),
@@ -473,6 +494,8 @@ def shellbag_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, o
     }
     matrix: list[dict[str, object]] = []
     for key, value in checks.items():
+        if key == "transaction_log_input_present":
+            continue
         label, severity = labels.get(key, (key.replace("_", " "), "medium"))
         negative_requirement = key.startswith("requires_")
         passed = bool(value)
@@ -507,6 +530,8 @@ def shellbag_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str
         satisfied.append("timestamp source labeling")
     if details.get("user_hive_scope") in {"ntuser", "usrclass"} or str(details.get("hive_name") or "").upper() in {"NTUSER.DAT", "USRCLASS.DAT"}:
         satisfied.append("UsrClass/NTUSER correlation")
+    if checks.get("transaction_log_context_recorded") or details.get("registry_transaction_log_evidence"):
+        satisfied.append("transaction log context recorded")
     if not SHELLBAG_CAPABILITIES["deleted_slack_shellbag_validation"]:
         satisfied.append("deleted/slack validation warning")
     if trusted_diff.get("status") == "pass":
@@ -623,10 +648,36 @@ def build_shellbag_trusted_diff(
 def index_shellbag_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
     indexed: dict[str, dict[str, str]] = {}
     for row in rows:
-        source_key_path = normalized_diff_value(first_alias(row, "source_key_path", "key_path", "registry_path"))
-        folder_path = normalized_diff_value(first_alias(row, "folder_path", "shellbag_path", "path", "target_path"))
-        bag_id = normalized_diff_value(first_alias(row, "bag_id", "bag", "bag_id_candidates"))
-        node_id = normalized_diff_value(first_alias(row, "node_id", "node", "node_id_candidates"))
+        payload = shellbag_diff_row_payload(row)
+        evidence = payload.get("shellbag_evidence") if isinstance(payload.get("shellbag_evidence"), Mapping) else {}
+        key_evidence = evidence.get("key_evidence") if isinstance(evidence.get("key_evidence"), Mapping) else {}
+        relationship = evidence.get("relationship_evidence") if isinstance(evidence.get("relationship_evidence"), Mapping) else {}
+        activity = evidence.get("activity_evidence") if isinstance(evidence.get("activity_evidence"), Mapping) else {}
+
+        source_key_path = normalized_diff_value(
+            first_present(
+                first_alias(payload, "source_key_path", "key_path", "registry_path", "keypath"),
+                first_alias(key_evidence, "source_key_path", "key_path", "registry_path", "keypath"),
+            )
+        )
+        folder_path = normalized_diff_list(
+            first_present(
+                first_alias(payload, "folder_path", "shellbag_path", "path", "target_path", "shellbag_path_candidates", "path_candidates"),
+                first_alias(activity, "folder_path", "shellbag_path", "path", "target_path", "path_candidates"),
+            )
+        )
+        bag_id = normalized_diff_list(
+            first_present(
+                first_alias(payload, "bag_id", "bag", "bag_id_candidates", "bagid"),
+                first_alias(relationship, "bag_id", "bag", "bag_id_candidates", "bagid"),
+            )
+        )
+        node_id = normalized_diff_list(
+            first_present(
+                first_alias(payload, "node_id", "node", "node_id_candidates", "nodeid"),
+                first_alias(relationship, "node_id", "node", "node_id_candidates", "nodeid"),
+            )
+        )
         key = source_key_path or "|".join(item for item in (folder_path, bag_id, node_id) if item)
         if not key:
             continue
@@ -635,10 +686,57 @@ def index_shellbag_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[
             "folder_path": folder_path,
             "bag_id": bag_id,
             "node_id": node_id,
-            "timestamp": normalized_diff_value(first_alias(row, "timestamp", "key_last_written_at", "last_write_time")),
-            "hive": normalized_diff_value(first_alias(row, "hive_name", "hive", "source_hive")),
+            "timestamp": normalized_diff_value(
+                first_present(
+                    first_alias(payload, "timestamp", "key_last_written_at", "last_write_time", "lastwritetime"),
+                    first_alias(activity, "primary_timestamp", "timestamp", "key_last_written_at", "last_write_time"),
+                )
+            ),
+            "hive": normalized_diff_value(first_alias(payload, "hive_name", "hive", "source_hive")),
+            "section": normalized_diff_value(
+                first_present(
+                    first_alias(payload, "shellbag_section", "section"),
+                    first_alias(key_evidence, "shellbag_section", "section"),
+                )
+            ),
+            "cell_offset": normalized_int_text(
+                first_present(
+                    first_alias(payload, "cell_offset", "key_cell_offset", "source_offset"),
+                    first_alias(key_evidence, "cell_offset", "key_cell_offset", "source_offset"),
+                )
+            ),
+            "hbin_offset": normalized_int_text(
+                first_present(
+                    first_alias(payload, "hbin_offset", "hbin"),
+                    first_alias(key_evidence, "hbin_offset", "hbin"),
+                )
+            ),
+            "allocation_status": normalized_diff_value(
+                first_present(
+                    first_alias(payload, "allocation_status", "allocated", "cell_state"),
+                    first_alias(key_evidence, "allocation_status", "allocated", "cell_state"),
+                )
+            ),
+            "transaction_status": normalized_diff_value(
+                first_present(
+                    first_alias(payload, "transaction_log_status", "transaction_status"),
+                    first_alias(key_evidence, "transaction_log_status", "transaction_status"),
+                )
+            ),
         }
     return indexed
+
+
+def shellbag_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
+    details = row.get("details")
+    if not isinstance(details, Mapping):
+        return row
+    payload = dict(details)
+    for key, value in row.items():
+        if key == "details":
+            continue
+        payload.setdefault(key, value)
+    return payload
 
 
 def build_shellbag_diff_payload(
@@ -705,6 +803,43 @@ def normalize_key(value: object) -> str:
 
 def normalized_diff_value(value: object) -> str:
     return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
+
+
+def first_present(*values: object) -> object:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalized_diff_list(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        parts = [part.strip() for part in re.split(r"[,;|]", value) if part.strip()]
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        parts = [normalize_shellbag_list_item(item) for item in value]
+    else:
+        parts = [str(value).strip()]
+    return "|".join(sorted({normalized_diff_value(part) for part in parts if part}))
+
+
+def normalize_shellbag_list_item(value: object) -> str:
+    if isinstance(value, Mapping):
+        return str(first_alias(value, "path", "folder_path", "timestamp", "value", "id", "name") or "").strip()
+    return str(value).strip()
+
+
+def normalized_int_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        return normalized_diff_value(text)
 
 
 def shellbag_candidate_confidence(

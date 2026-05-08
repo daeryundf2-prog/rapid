@@ -1289,7 +1289,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Source preview preserves bounded hex rows, byte offsets, preview hash, byte-search citation support, source validation warning, and #53 core_accuracy_gates."
+          "Source preview preserves bounded hex rows, byte offsets, preview hash, byte-search citation support, source validation warning, bounded range citation package metadata, and #53 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; full range export and source-byte citation package remain validation-gated.",
@@ -1310,7 +1310,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "SQLite preview preserves read-only open, table/schema inventory, column/index metadata, bounded row preview, deleted/WAL warning, and #54 core_accuracy_gates."
+          "SQLite preview preserves read-only open, table/schema inventory, column/index metadata, bounded row preview, API-backed table pagination, restricted contains filters, deleted/WAL warning, and #54 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; deleted-row/WAL and large database corpus validation remain blockers.",
@@ -1331,7 +1331,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Email preview preserves thread grouping, message order, participant/header fields, attachment inventory, mailbox limitations, and #55 core_accuracy_gates."
+          "Email preview preserves thread grouping, message order, participant/header fields, attachment hash inventory, bounded attachment citation packages, mailbox limitations, and #55 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; native PST/OST/MSG conversation validation remains required.",
@@ -1353,7 +1353,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Image rows/previews preserve metadata, hashes, thumbnail metadata, perceptual similarity bucket, tag/report hints, classifier limitation, and #56 core_accuracy_gates."
+          "Image rows/previews preserve metadata, hashes, thumbnail metadata, perceptual similarity bucket, bounded folder gallery pages, bucket filters, tag/report hints, classifier limitation, and #56 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; dedicated gallery UI and ML similarity validation remain blockers.",
@@ -1374,7 +1374,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Media preview preserves media metadata, source hashes, transcript sidecars, cue timestamps, verification warning, and #57 core_accuracy_gates."
+          "Media preview preserves media metadata, source hashes, transcript sidecars, cue timestamps, bounded cue citation packages, verification warning, and #57 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; playback sandbox and ASR/transcript validation remain future work.",
@@ -1383,7 +1383,7 @@
     {
       "id": "core-forensics-058-ocr-queue-fixture",
       "name": "#58 OCR queue fixture assertions",
-      "source": "tests.test_rapidtriage_ocr_queue.RapidTriageOcrQueueTests",
+      "source": "tests.test_rapidtriage_ocr_queue.RapidTriageOcrQueueTests; tests.test_rapidtriage_api.RapidTriageApiTests",
       "corpus_family": "core-forensics",
       "status": "pass",
       "backlog_items": [
@@ -1392,7 +1392,8 @@
       "evidence_paths": [
         "docs/validation/core-forensics-051-060-fixture-evidence.json",
         "tests/test_rapidtriage_ocr_queue.py",
-        "tests/test_rapidtriage_media_image.py"
+        "tests/test_rapidtriage_media_image.py",
+        "tests/test_rapidtriage_api.py"
       ],
       "expected": {
         "required_assertions": [
@@ -1405,7 +1406,7 @@
     {
       "id": "core-forensics-059-korean-ocr-fixture",
       "name": "#59 Korean OCR/translation fixture assertions",
-      "source": "tests.test_rapidtriage_ocr_queue.RapidTriageOcrQueueTests",
+      "source": "tests.test_rapidtriage_ocr_queue.RapidTriageOcrQueueTests; tests.test_rapidtriage_api.RapidTriageApiTests",
       "corpus_family": "core-forensics",
       "status": "pass",
       "backlog_items": [
@@ -1414,11 +1415,12 @@
       "evidence_paths": [
         "docs/validation/core-forensics-051-060-fixture-evidence.json",
         "tests/test_rapidtriage_ocr_queue.py",
-        "tests/test_rapidtriage_media_image.py"
+        "tests/test_rapidtriage_media_image.py",
+        "tests/test_rapidtriage_api.py"
       ],
       "expected": {
         "required_assertions": [
-          "OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, human-review warning, and #59 core_accuracy_gates."
+          "OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, source-viewer side-by-side OCR/translation review packages, human-review warning, and #59 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; human-certified translation and OCR calibration remain blockers.",
@@ -1439,10 +1441,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search analysis preserves duplicate fingerprints, group counts, representative hit links, source/path references, near-duplicate warning, and #60 core_accuracy_gates."
+          "Search analysis preserves duplicate fingerprints, group counts, representative hit links, hidden duplicate counts, source/path references, collapse review profiles, web dedupe cards, near-duplicate warning, and #60 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; UI collapse/suppression and fuzzy/media duplicate validation remain blockers.",
+      "notes": "Internal fixture pass; persistent Case DB suppression and fuzzy/media duplicate validation remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-051-060-known-answer.json"
     },
     {
@@ -1460,10 +1462,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Search output preserves query mode/options, fuzzy/stem/regex support, proximity metadata, hit pointers, verification warnings, and #61 core_accuracy_gates."
+          "Search output preserves query mode/options, fuzzy/stem/regex support, proximity metadata, hit pointers, advanced_search_profile query validation, regex validity warnings, web mode/fuzzy/proximity controls, verification warnings, and #61 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; broad relevance/false-positive corpus remains commercial blocker.",
+      "notes": "Internal fixture pass; broad relevance/false-positive corpus, full browser query-builder validation, and external trusted query-hit manifest remain commercial blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-061-070-known-answer.json"
     },
     {
@@ -1482,10 +1484,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Keyword-pack outputs preserve built-in inventory, custom JSON support, deduplicated expansion, pack provenance, case-specific warnings, and #62 core_accuracy_gates."
+          "Keyword-pack outputs preserve built-in inventory, custom JSON support, deduplicated expansion, pack provenance, API search keyword_pack_selection_profile, web built-in pack selection controls, case-specific warnings, and #62 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; signed pack library and per-case editing UI remain blockers.",
+      "notes": "Internal fixture pass; signed pack library, trusted pack manifest diff, per-case editing UI, and language/domain corpus validation remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-061-070-known-answer.json"
     },
     {
@@ -1499,11 +1501,12 @@
       ],
       "evidence_paths": [
         "docs/validation/core-forensics-061-070-fixture-evidence.json",
-        "tests/test_rapidtriage_indicators.py"
+        "tests/test_rapidtriage_indicators.py",
+        "tests/test_rapidtriage_api.py"
       ],
       "expected": {
         "required_assertions": [
-          "Indicator output preserves source links, local rule matches, offline feed provenance, match mode, local-only warning, and #63 core_accuracy_gates."
+          "Indicator output preserves source links, local rule matches, offline feed provenance with feed hash/size, API/web local enrichment review package fields, match mode, local-only warning, and #63 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; signed/STIX/TAXII feed validation remains blocker.",
@@ -1524,7 +1527,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Case DB report export preserves review/source citation IDs, source references, citation counts, report-use warnings, and #64 core_accuracy_gates."
+          "Case DB report export preserves review/source citation IDs, copy-safe citation strings, source references, source-hash/parser-version coverage profile, citation counts, report-use warnings, and #64 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; exhibit numbering and jurisdiction-specific packaging remain blockers.",
@@ -1545,7 +1548,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Review history preserves version rows, changed fields, previous/current state, report inclusion changes, multi-user warning, and #65 core_accuracy_gates."
+          "Review history preserves version rows, changed fields, previous/current state, report inclusion changes, per-row hashes, export-time history hash chain/head hash, multi-user warning, and #65 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; signed multi-user append-only enforcement remains blocker.",
@@ -1554,7 +1557,7 @@
     {
       "id": "core-forensics-066-benchmark-fixture",
       "name": "#66 benchmark fixture assertions",
-      "source": "tests.test_rapidtriage_ops.RapidTriageOpsTests",
+      "source": "tests.test_rapidtriage_ops.RapidTriageOpsTests + tests.test_rapidtriage_api.RapidTriageApiTests",
       "corpus_family": "core-forensics",
       "status": "pass",
       "backlog_items": [
@@ -1566,7 +1569,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Benchmark output preserves scale matrix, ingest/search metrics, memory/output size, run-summary link, hardware-scale warning, #66 core_accuracy_gates, and #66 commercial_uplift_evidence."
+          "Benchmark output preserves scale matrix, ingest/search metrics, raw latency samples, environment profile, release-threshold guardrail profile, memory/output size, run-summary link, hardware-scale warning, #66 core_accuracy_gates, and #66 commercial_uplift_evidence."
         ]
       },
       "notes": "Internal fixture pass; published hardware matrix remains required.",
@@ -1587,7 +1590,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, real-hardware warning, #67 core_accuracy_gates, and #67 commercial_uplift_evidence."
+          "Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, per-scenario run-log templates, telemetry/evidence capture profile, real-hardware warning, #67 core_accuracy_gates, and #67 commercial_uplift_evidence."
         ]
       },
       "notes": "Internal fixture pass; actual 1TB-10TB hardware runs remain required.",
@@ -1608,10 +1611,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Run fingerprint output preserves fingerprint, path/size/mtime metadata, changed-source reuse behavior, truncation disclosure, limitation warning, #68 core_accuracy_gates, and #68 commercial_uplift_evidence."
+          "Run fingerprint output preserves fingerprint, path/size/mtime metadata, bounded per-file SHA-256 hashes, incremental reuse plan counts, changed-source reuse behavior, truncation disclosure, limitation warning, #68 core_accuracy_gates, and #68 commercial_uplift_evidence."
         ]
       },
-      "notes": "Internal fixture pass; content-hash incremental reindexing remains blocker.",
+      "notes": "Internal fixture pass; full large-file content-hash delta reindexing remains blocker.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-061-070-known-answer.json"
     },
     {
@@ -1629,7 +1632,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Job payloads preserve status, step progress, state persistence, cancel/retry state, local-threadpool limitation, #69 core_accuracy_gates, and #69 commercial_uplift_evidence."
+          "Job payloads preserve status, step progress, state persistence, append-intent transition logs, transition head hashes, cancel/retry state, local-threadpool limitation, #69 core_accuracy_gates, and #69 commercial_uplift_evidence."
         ]
       },
       "notes": "Internal fixture pass; distributed workers and parser-level progress telemetry remain blockers.",
@@ -1650,7 +1653,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Run checkpoint output preserves stage checkpoints, output path/size, reused flags, resume summary, partial-stage warning, #70 core_accuracy_gates, and #70 commercial_uplift_evidence."
+          "Run checkpoint output preserves stage checkpoints, output path/size, reused flags, row hashes, checkpoint integrity head hash, resume summary, partial-stage warning, #70 core_accuracy_gates, and #70 commercial_uplift_evidence."
         ]
       },
       "notes": "Internal fixture pass; mid-parser checkpointing and failed-stage resume remain blockers.",
@@ -1671,7 +1674,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Parser failures preserve isolated parser_errors, failed parser JSON output, run continuation warnings, summary counts, and #71 core_accuracy_gates."
+          "Parser failures preserve isolated parser_errors, error hashes, crash context, parser-error inventory head hash, failed parser JSON output, run continuation warnings, summary counts, and #71 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; native process sandboxing and corrupt-input fuzz corpus remain blockers.",
@@ -1692,7 +1695,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Run summaries preserve memory cap configuration, RSS readings, stage-boundary enforcement, fail-fast warnings, hard-limit caveats, and #72 core_accuracy_gates."
+          "Run summaries preserve memory cap configuration, RSS readings, utilization/over-cap policy profiles, stage-boundary enforcement, fail-fast warnings, hard-limit caveats, and #72 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; hard OS memory controls and platform RSS validation remain blockers.",
@@ -1713,7 +1716,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Source previews preserve read-only bounded preview metadata, active-content blocking, no network execution, cap metadata, OS sandbox warning, and #73 core_accuracy_gates."
+          "Source previews preserve read-only bounded preview metadata, active-content blocking, no network execution, cap metadata, preview-sandbox policy profiles, escaped bounded renderer strategy, OS sandbox warning, and #73 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; renderer/codecs/macros still require external sandbox validation.",
@@ -1735,7 +1738,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "SQLite outputs preserve performance pragmas, table profiles, searchable text column counts, bounded row previews, large-corpus warnings, and #74 core_accuracy_gates."
+          "SQLite outputs preserve performance pragmas, table profiles, searchable text column counts, bounded row previews, source preview query-plan profiles, Case DB query-plan head hashes, large-corpus warnings, and #74 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; 10M-row query-plan and WAL/deleted-row validation remain blockers.",
@@ -1756,10 +1759,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Run summaries preserve bounded worker count, deterministic outputs, per-parser capture, resume-aware scheduling, local-threadpool warning, and #75 core_accuracy_gates."
+          "Run summaries preserve bounded worker count, deterministic outputs, per-parser capture, resume-aware scheduling, scheduler run manifest hash, per-parser duration telemetry, local-threadpool warning, trusted scheduler diff status, and #75 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; distributed scheduling and TB-scale backpressure validation remain blockers.",
+      "notes": "Internal fixture pass; trusted scheduler manifests, distributed scheduling, live telemetry UI/stream, and TB-scale backpressure validation remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-071-080-known-answer.json"
     },
     {
@@ -1778,7 +1781,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Hash outputs preserve MD5/SHA1/SHA256, path-size-mtime cache metadata, hit/miss counters, hash-cache assessment, persistent-cache warning, and #76 core_accuracy_gates."
+          "Hash outputs preserve MD5/SHA1/SHA256, path-size-mtime-inode cache metadata, hit/miss/invalidation counters, hash-cache-manifest-v1 path-hash entries, manifest hash, hash-cache assessment, persistent-cache warning, trusted hash-cache manifest diff helpers/gates, and #76 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; persistent content-addressed cache and large-case hit-ratio validation remain blockers.",
@@ -1799,10 +1802,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "File scans preserve same-size bucketing, bounded SHA256 confirmation, duplicate group counts, representative paths, suppression warnings, and #77 core_accuracy_gates."
+          "File scans preserve same-size bucketing, bounded SHA256 confirmation, duplicate group counts, stable group IDs/fingerprints, representative paths, not-suppressed analyst-review policy, duplicate-content-manifest-v1 manifest hashes, and #77 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; fuzzy/media duplicate validation and analyst suppression UX remain blockers.",
+      "notes": "Internal fixture pass; fuzzy/media duplicate validation, trusted external duplicate group manifests, and analyst suppression UX remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-071-080-known-answer.json"
     },
     {
@@ -1820,10 +1823,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "API pages preserve cursor tokens, offset/limit/total metadata, next/previous cursors, bounded rows, snapshot warning, and #78 core_accuracy_gates."
+          "API pages preserve cursor tokens, offset/limit/total metadata, next/previous cursors, bounded rows, corrected last-page has_more semantics, pagination-cursor-manifest-v1 page-window IDs/manifest hashes, snapshot warning, and #78 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; snapshot-isolated cursors and endpoint-wide pagination compatibility remain blockers.",
+      "notes": "Internal fixture pass; snapshot-isolated cursors, trusted external pagination manifests, and endpoint-wide pagination compatibility remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-071-080-known-answer.json"
     },
     {
@@ -1842,10 +1845,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "API pagination and web UI preserve bounded DOM row windows, visible-row disclosure, keyboard/filter flow, API pagination links, virtual-scroller warning, and #79 core_accuracy_gates."
+          "API pagination and web UI preserve bounded DOM row windows, ui-virtualization-manifest-v1 row-window IDs/manifest hashes, visible-row disclosure, previous/next 300-row windows, keyboard/filter flow, API pagination links, virtual-scroller warning, and #79 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; true virtual scroller, viewport persistence, and browser e2e performance evidence remain blockers.",
+      "notes": "Internal fixture pass; true virtual scroller, trusted browser row-window manifests, persisted viewport restoration across reloads, and browser e2e performance evidence remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-071-080-known-answer.json"
     },
     {
@@ -1863,10 +1866,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Job payloads preserve queued cancellation, running cancel request records, failed/canceled retry support, persisted cancel flags, partial-output warnings, and #80 core_accuracy_gates."
+          "Job payloads preserve queued cancellation, running cancel request records, failed/canceled retry support, persisted cancel flags, retry_lineage_profile, job-partial-output-policy-v1, cancellation-retry-manifest-v1 hashes, and #80 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; parser-level cancellation under load and partial-output cleanup/resume validation remain blockers.",
+      "notes": "Internal fixture pass; parser-level cancellation under load, trusted cancellation/retry transition manifests, and partial-output cleanup/resume validation remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-071-080-known-answer.json"
     },
     {
@@ -1885,7 +1888,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Validation output preserves manifest ingestion, dataset counts, evidence-path checks, public corpus guidance, release gate, and #81 core_accuracy_gates."
+          "Validation output preserves manifest ingestion, dataset counts, expected assertions, evidence-path checks, evidence file SHA256 values, dataset hashes, manifest digest, public corpus guidance, release gate, and #81 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; public CFReDS/CFTT corpus execution remains blocker.",
@@ -1906,10 +1909,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Parser fixture corpus output preserves parser areas, fixture/test counts, expected edge cases, coverage status, release gate, and #82 core_accuracy_gates."
+          "Parser fixture corpus output preserves parser areas, fixture/test counts, fixture/test file SHA256 values, area manifest hashes, fixture_corpus_digest, expected edge cases, coverage status, release gate, and #82 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; broader malformed/deleted/versioned corpus remains blocker.",
+      "notes": "Internal fixture pass; broader malformed/deleted/versioned corpus and trusted fixture corpus manifests remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-081-090-known-answer.json"
     },
     {
@@ -1927,10 +1930,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Parser FP/FN notes preserve false-positive risks, false-negative risks, validation-required guidance, parser scope, quantification warning, and #83 core_accuracy_gates."
+          "Parser FP/FN notes preserve false-positive risks, false-negative risks, validation-required guidance, parser scope, quantification warning, risk_note_hash values, minimum quantification fields, reportability boundaries, parser-fp-fn-risk-register-v1 digest, and #83 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; quantified FP/FN rates remain blocker.",
+      "notes": "Internal fixture pass; quantified FP/FN rates and reviewed risk register remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-081-090-known-answer.json"
     },
     {
@@ -1949,7 +1952,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Independent validation report output preserves status, required signoffs, minimum sections, optional report hash/size, not-attached blocker, and #84 core_accuracy_gates."
+          "Independent validation report output preserves status, required signoffs, signoff slots, minimum sections, minimum-section presence checks, optional report hash/size, independent-validation-report-manifest-v1 report manifest hash, not-attached blocker, and #84 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; actual third-party signed validation remains operator-owned.",
@@ -1970,7 +1973,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Validation package outputs preserve JSON, Markdown, artifact hash manifest, known-answer/fixture sections, package limitation warning, and #85 core_accuracy_gates."
+          "Validation package outputs preserve JSON, Markdown, artifact hash manifest, validation-package-manifest-v1, artifact hash rows, package_manifest_hash, reproduction commands, known-answer/fixture sections, package limitation warning, and #85 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; attached release test logs and independent review remain blockers.",
@@ -1991,7 +1994,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Case DB report export preserves evidence-source inventory, custody events, citation IDs, source status/hash fields, acquisition metadata warning, and #86 core_accuracy_gates."
+          "Case DB report export preserves evidence-source inventory, custody events, citation IDs, source status/hash fields, custody row hashes, custody-event-manifest-v1, custody manifest hash, acquisition metadata warning, and #86 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; signed handoff/acquisition metadata remains blocker.",
@@ -2012,7 +2015,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Case DB report export preserves evidence-source hashes, hash records, algorithms, calculation timestamps, missing-hash warning, and #87 core_accuracy_gates."
+          "Case DB report export preserves evidence-source hashes, hash records, algorithms, calculation timestamps, per-row acquisition hash digests, acquisition-hash-manifest-v1 manifest hash, algorithm coverage, missing-hash warning, and #87 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; whole-device acquisition hash metadata remains blocker.",
@@ -2033,7 +2036,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Case DB report export preserves audit events, previous/event hash chain, actor/action/target/time fields, head hash, notarization warning, and #88 core_accuracy_gates."
+          "Case DB report export preserves audit events, previous/event hash chain, actor/action/target/time fields, head hash, audit-hash-chain-manifest-v1 manifest hash, notarization warning, and #88 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; DB-level append-only enforcement and external notarization remain blockers.",
@@ -2055,7 +2058,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Report export preserves stable payload hash, deterministic sorting, item/citation counts, volatile-field disclosure, replay warning, and #89 core_accuracy_gates."
+          "Report export preserves stable payload hash, deterministic sorting, item/citation counts, item/citation row digests, report-replay-manifest-v1 manifest hash, volatile-field disclosure, replay warning, and #89 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; cross-platform same-input replay validation remains blocker.",
@@ -2076,7 +2079,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Report items preserve source paths, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, and #90 core_accuracy_gates."
+          "Report items preserve source paths, source/record hashes, parser/version/confidence, offset/source-index fields when available, review/reportability fields, provenance row hashes, report-provenance-row-manifest-v1 manifest hashes, and #90 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; completeness validation across every parser remains blocker.",
@@ -2098,7 +2101,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Case DB report items preserve parser confidence, reportability, coverage status, warning derivation, evidence strength, and #91 core_accuracy_gates."
+          "Case DB report items preserve parser confidence, confidence band, reportability score, reportability, coverage status, warning derivation, evidence strength, parser-confidence-calibration-manifest-v1 manifest hash, and #91 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; parser-specific confidence calibration remains blocker.",
@@ -2119,7 +2122,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Report exports preserve warning reasons, summary warning counts, report guidance, validation-required state, warning UX limitation, and #92 core_accuracy_gates."
+          "Report exports preserve warning reasons, summary warning counts, warning detail metadata, severity/category counts, UX badges, validation-warning-checklist-manifest-v1 manifest hash, report guidance, validation-required state, warning UX limitation, and #92 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; full web badge coverage remains blocker.",
@@ -2140,7 +2143,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Report items preserve artifact limitation text, parser-provided limitations, jurisdiction caveat, analyst-review blockers, limitation counts, and #93 core_accuracy_gates."
+          "Report items preserve artifact limitation text, parser-provided limitations, limitation detail metadata, category/scope counts, legal-limitation-wording-manifest-v1 manifest hash, jurisdiction caveat, analyst-review blockers, limitation counts, and #93 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; jurisdiction-approved legal wording remains blocker.",
@@ -2161,7 +2164,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Reviewer bundles preserve exhibit IDs, selected evidence hashes, generated output hashes, source references, verification steps, and #94 core_accuracy_gates."
+          "Reviewer bundles preserve exhibit IDs, exhibit row hashes, selected evidence hashes, selected-evidence manifest hashes, generated output hashes, source references, signing slots, court-exhibit-package-manifest-v1 manifest hashes, verification steps, trusted court exhibit manifest diff helpers/gates, and #94 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; signed/notarized exhibit manifests remain blocker.",
@@ -2182,7 +2185,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Validation packages preserve tool inventory, availability/path/command/version/capture errors, limitation warnings, and #95 core_accuracy_gates."
+          "Validation packages preserve tool inventory, availability/path/command/version/capture errors, version-output hashes, per-tool row hashes, external-tool-version-manifest-v1 manifest hashes, limitation warnings, trusted external tool transcript diff helpers/gates, and #95 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; per-run tool transcripts remain blocker.",
@@ -2203,7 +2206,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Case DB report exports preserve operator/source metadata, write-blocker field, whole-source hash field, missing required fields, readiness flag, and #96 core_accuracy_gates."
+          "Case DB report exports preserve operator/source metadata, write-blocker field, whole-source hash field, acquisition metadata row hashes, evidence-source row hashes, acquisition-metadata-handoff-manifest-v1 manifest hashes, missing required fields, readiness flag, trusted acquisition-handoff diff helpers/gates, and #96 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; write-blocker device integration and signed handoff forms remain blockers.",
@@ -2224,7 +2227,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Report exports preserve timezone inventory, missing timezone counts, timestamp samples, UTC assumption, review-required flag, and #97 core_accuracy_gates."
+          "Report exports preserve timezone inventory, missing timezone counts, timestamp samples, timezone sample row hashes, timezone-normalization-manifest-v1 manifest hashes, UTC assumption, review-required flag, trusted timezone-matrix diff helpers/gates, and #97 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; parser-specific timezone matrix remains blocker.",
@@ -2245,7 +2248,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Report exports preserve parsed timestamp range, skew warning records, warning count, baseline requirement, heuristic limitation, and #98 core_accuracy_gates."
+          "Report exports preserve parsed timestamp range, skew warning records, clock-skew warning row hashes, warning count, baseline requirement, clock-skew-baseline-manifest-v1 manifest hashes, heuristic limitation, trusted clock-skew baseline diff helpers/gates, and #98 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; host/device baseline comparison remains blocker.",
@@ -2266,7 +2269,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Report exports preserve contamination warnings, warning count, output-under-evidence checks, write-blocker limitation, review-required flag, and #99 core_accuracy_gates."
+          "Report exports preserve contamination warnings, contamination warning row hashes, warning count, output-under-evidence checks, contamination-checklist-manifest-v1 manifest hashes, write-blocker limitation, review-required flag, trusted contamination-checklist diff helpers/gates, and #99 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; acquisition-time mtime and write-blocker integration remain blockers.",
@@ -2287,7 +2290,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, external signing limitation, and #100 core_accuracy_gates."
+          "Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, tamper-evident-audit-manifest-v1 manifest hashes, external signing slots, external signing limitation, trusted signature-attestation diff helpers/gates, and #100 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; external signing/notarization remains blocker.",
@@ -2309,7 +2312,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Release manifest and packaging plan preserve Windows installer targets, Authenticode/timestamp requirements, Windows smoke requirements, external signing blocker, and #101 core_accuracy_gates."
+          "Release manifest and packaging plan preserve Windows installer targets, Authenticode/timestamp requirements, Windows smoke requirements, release artifact hashes, windows-signing-evidence-manifest-v1 manifest hash/signing slots, external signing blocker, trusted Windows signing diff helpers/gates, and #101 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; actual Authenticode signing remains external.",
@@ -2331,10 +2334,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Release manifest and packaging plan preserve macOS package targets, codesign/notarization/Gatekeeper requirements, external notarization blocker, and #102 core_accuracy_gates."
+          "Release manifest and packaging plan preserve macOS package targets, codesign/notarization/Gatekeeper requirements, release artifact hashes, macos-notarization-evidence-manifest-v1 manifest hash/notarization slots, external notarization blocker, trusted macOS notarization diff helpers/gates, and #102 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; actual Apple signing/notarization remains external.",
+      "notes": "Internal fixture pass; actual Apple signing/notarization and trusted notarization manifests remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {
@@ -2353,10 +2356,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Release artifacts preserve portable ZIP, dependency inventory, Linux packaging targets, Linux smoke requirements, package wrapper blocker, and #103 core_accuracy_gates."
+          "Release artifacts preserve portable ZIP, dependency inventory, Linux packaging targets, Linux smoke requirements, linux-package-evidence-manifest-v1 manifest hash/package evidence slots, package wrapper blocker, trusted Linux package smoke diff helpers/gates, and #103 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; actual deb/rpm/AppImage artifacts remain external.",
+      "notes": "Internal fixture pass; actual deb/rpm/AppImage artifacts and trusted package smoke logs remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {
@@ -2375,10 +2378,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Update manifest preserves artifact hashes, enterprise disable flag, rollback guidance, hosting/signing blocker, and #104 core_accuracy_gates."
+          "Update manifest preserves artifact hashes, enterprise disable flag, rollback guidance, auto-update-channel-evidence-manifest-v1 manifest hash/update evidence slots, hosting/signing blocker, trusted signed-update-channel diff helpers/gates, and #104 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; hosted signed update channel remains external.",
+      "notes": "Internal fixture pass; hosted signed update channel and trusted update-channel manifests remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {
@@ -2393,15 +2396,20 @@
       "evidence_paths": [
         "docs/validation/core-forensics-101-120-fixture-evidence.json",
         "tests/test_rapidtriage_ops.py",
+        "tests/test_rapidtriage_api.py",
         "rapidtriage/core/crash.py",
+        "rapidtriage/api/app.py",
+        "rapidtriage/web/static/app.js",
+        "scripts/crash-export-smoke.py",
+        "scripts/crash-redaction-review.py",
         "rapidtriage/core/enterprise.py"
       ],
       "expected": {
         "required_assertions": [
-          "Crash reports and enterprise policy preserve local-only report generation, sensitive context redaction, runtime metadata, no-upload policy, operator export limitation, and #105 core_accuracy_gates."
+          "Crash reports and enterprise policy preserve local-only report generation, sensitive context redaction, runtime metadata, no-upload policy, crash-export-evidence-manifest-v1 manifest hash/redacted-key inventory/export evidence slots, operator export limitation, local dashboard/list/detail/export API, release crash-export smoke script, release redaction review script, trusted crash redaction/export diff helpers/gates, and #105 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; crash trend dashboard remains external.",
+      "notes": "Internal fixture pass; actual signed/release-build host smoke/review JSON and independent reviewer/lab signoff remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {
@@ -2420,10 +2428,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Enterprise policy preserves telemetry-disabled state, evidence/crash upload denial, localhost default, auth-token requirement, local-only caveat, and #106 core_accuracy_gates."
+          "Enterprise policy preserves telemetry-disabled state, evidence/crash upload denial, localhost default, auth-token requirement, local-only-enterprise-evidence-manifest-v1 manifest hash/evidence slots, local-only caveat, trusted local-only deployment diff helpers/gates, and #106 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; enterprise deployment proof remains external.",
+      "notes": "Internal fixture pass; enterprise deployment proof and trusted deployment policy manifests remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {
@@ -2442,10 +2450,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Enterprise policy preserves license requirement state, offline license hash when present, no network activation, no evidence touch, paid activation blocker, and #107 core_accuracy_gates."
+          "Enterprise policy preserves license requirement state, offline license hash when present, no network activation, no evidence touch, license-activation-evidence-manifest-v1 manifest hash/evidence slots, paid activation blocker, trusted license authority diff helpers/gates, and #107 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; paid activation remains optional external work.",
+      "notes": "Internal fixture pass; paid activation and trusted license authority review remain optional external work.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {
@@ -2464,10 +2472,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Enterprise policy preserves role matrix, active role, active permissions, export controls, per-action enforcement blocker, and #108 core_accuracy_gates."
+          "Enterprise policy preserves role matrix, active role, active permissions, export controls, rbac-enforcement-evidence-manifest-v1 manifest hash/evidence slots, per-action enforcement blocker, trusted RBAC enforcement diff helpers/gates, and #108 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; per-action server RBAC remains external work.",
+      "notes": "Internal fixture pass; per-action server RBAC and trusted enforcement logs remain external work.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {
@@ -2486,10 +2494,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Enterprise policy preserves disabled server state, network guardrails, identity provider requirement, locking/conflict requirement, security review blocker, and #109 core_accuracy_gates."
+          "Enterprise policy preserves disabled server state, network guardrails, identity provider requirement, locking/conflict requirement, multi-user-server-evidence-manifest-v1 manifest hash/evidence slots, security review blocker, trusted multi-user server review diff helpers/gates, and #109 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; actual multi-user server remains unimplemented.",
+      "notes": "Internal fixture pass; actual multi-user server and trusted architecture/security review remain unimplemented.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {
@@ -2508,10 +2516,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Enterprise policy preserves audit scope, recorded fields, tamper-evidence linkage, identity caveat, multi-user conflict blocker, and #110 core_accuracy_gates."
+          "Enterprise policy preserves audit scope, recorded fields, tamper-evidence linkage, identity caveat, collaboration-audit-evidence-manifest-v1 manifest hash/evidence slots, multi-user conflict blocker, trusted collaboration audit diff helpers/gates, and #110 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; multi-user identity/conflict handling remains external.",
+      "notes": "Internal fixture pass; multi-user identity/conflict handling and trusted collaboration audit review remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {
@@ -2704,14 +2712,15 @@
         "docs/validation/core-forensics-101-120-fixture-evidence.json",
         "tests/test_rapidtriage_ops.py",
         "rapidtriage/core/enterprise.py",
+        "scripts/parser-sandbox-smoke.py",
         "docs/rapidtriage-admin-deployment-guide.md"
       ],
       "expected": {
         "required_assertions": [
-          "Enterprise policy preserves preview sandboxing, active-content blocking, parser crash isolation, hostile evidence guidance, OS sandbox blocker, and #119 core_accuracy_gates."
+          "Enterprise policy preserves preview sandboxing, active-content blocking, parser crash isolation, hostile evidence guidance, parser subprocess isolation smoke, malicious-evidence-sandbox-evidence-manifest-v1 manifest hash/evidence slots, OS sandbox blocker, trusted malicious-corpus diff helpers/gates, and #119 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; OS-level parser sandbox remains external.",
+      "notes": "Internal fixture pass; OS-level parser sandbox and trusted malicious corpus/fuzz validation remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     },
     {
@@ -2726,14 +2735,15 @@
       "evidence_paths": [
         "docs/validation/core-forensics-101-120-fixture-evidence.json",
         "tests/test_rapidtriage_ops.py",
-        "scripts/check-dependencies.py"
+        "scripts/check-dependencies.py",
+        ".github/workflows/dependency-monitoring.yml"
       ],
       "expected": {
         "required_assertions": [
-          "Dependency monitoring script preserves dependency inventory, pip-audit attempt, release-blocking policy, packaged script evidence, CI scheduled scan blocker, and #120 core_accuracy_gates."
+          "Dependency monitoring script preserves dependency inventory, pip-audit attempt, release-blocking policy, packaged script evidence, dependency-monitoring-evidence-manifest-v1 manifest hash/evidence slots, dependency-ci-workflow-evidence-v1 hash, scheduled workflow contract, trusted advisory/SBOM diff helpers/gates, and #120 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; scheduled CI advisory monitoring remains external.",
+      "notes": "Internal fixture pass; actual CI advisory run log/artifact URL, SBOM publication, and trusted exception review remain external.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-101-120-known-answer.json"
     }
   ]

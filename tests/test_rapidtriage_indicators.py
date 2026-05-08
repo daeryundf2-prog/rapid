@@ -7,7 +7,11 @@ from pathlib import Path
 
 from rapidtriage.cli import build_parser, main
 from rapidtriage.core.case_db import open_case_database
-from rapidtriage.core.indicators import build_ioc_ti_trusted_diff, ioc_ti_core_accuracy_gates
+from rapidtriage.core.indicators import (
+    build_indicator_ti_enrichment_package,
+    build_ioc_ti_trusted_diff,
+    ioc_ti_core_accuracy_gates,
+)
 from tests.test_rapidtriage_rule_engine import sha256_hex
 from tests.test_rapidtriage_run import build_run_fixture
 
@@ -93,9 +97,32 @@ class RapidTriageIndicatorsTests(unittest.TestCase):
             self.assertFalse(manual_payload["indicator_native_capabilities"]["external_ti_api_calls"])
             self.assertEqual(manual_payload["ti_feed_sources"][0]["name"], "unit-ti-plugin")
             self.assertEqual(manual_payload["ti_feed_sources"][0]["version"], "2026.04")
+            self.assertEqual(manual_payload["ti_feed_sources"][0]["size_bytes"], ti_feed.stat().st_size)
+            self.assertEqual(len(manual_payload["ti_feed_sources"][0]["sha256"]), 64)
             self.assertIn("#63", manual_payload["ti_feed_sources"][0]["commercial_gap_ids"])
             self.assertGreaterEqual(manual_payload["summary"]["indicator_count"], 3)
             self.assertGreaterEqual(manual_payload["summary"]["enriched_indicator_count"], 1)
+            enrichment_package = build_indicator_ti_enrichment_package(
+                manual_payload,
+                ti_feeds=[ti_feed],
+                include_unmatched=False,
+                limit=10,
+            )
+            self.assertEqual(enrichment_package["command"], "indicator-ti-enrichment")
+            self.assertEqual(enrichment_package["profile_version"], "ioc-ti-enrichment-review-package-v1")
+            self.assertTrue(enrichment_package["local_only"])
+            self.assertTrue(enrichment_package["no_external_calls"])
+            self.assertEqual(enrichment_package["summary"]["ti_feed_count"], 1)
+            self.assertGreaterEqual(enrichment_package["summary"]["matched_indicator_count"], 1)
+            self.assertEqual(enrichment_package["core_accuracy_gates"][0]["gap_id"], "#63")
+            self.assertIn("offline feed provenance", enrichment_package["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(
+                enrichment_package["reportability_decision"]["allowed_use"],
+                "offline-ioc-ti-triage-pivot",
+            )
+            self.assertTrue(
+                any(item.get("ti_review_status") == "feed-match-review-required" for item in enrichment_package["indicators"])
+            )
             trusted_diff = build_ioc_ti_trusted_diff(manual_payload["indicators"], manual_payload["indicators"])
             trusted_gates = ioc_ti_core_accuracy_gates(
                 indicators=manual_payload["indicators"],

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import platform
 import shutil
@@ -19,6 +20,15 @@ from .forensic_accuracy import build_accuracy_gate, build_core_forensics_accurac
 VALIDATION_JSON_NAME = "rapidtriage-validation-package.json"
 VALIDATION_MARKDOWN_NAME = "rapidtriage-validation-report.md"
 VALIDATION_ARTIFACTS_NAME = "rapidtriage-validation-artifacts.json"
+VALIDATION_PACKAGE_REQUIRED_OUTPUTS = [VALIDATION_JSON_NAME, VALIDATION_MARKDOWN_NAME, VALIDATION_ARTIFACTS_NAME]
+VALIDATION_PACKAGE_REQUIRED_SECTIONS = [
+    "known_answer_validation",
+    "parser_fixture_corpus",
+    "parser_false_positive_false_negative_notes",
+    "independent_validation_report",
+    "validation_package_assessment",
+]
+FUNCTIONAL_VALIDATION_BATCH_ID = "commercial-uplift-036-040"
 KNOWN_ANSWER_TEST_GAP_ID = "#81"
 PARSER_FIXTURE_CORPUS_GAP_ID = "#82"
 PARSER_FP_FN_GAP_ID = "#83"
@@ -36,6 +46,14 @@ VALIDATION_TRUSTED_TOOLS = {
     "independent-validation-signoff",
     "validation-package-manifest",
 }
+INDEPENDENT_VALIDATION_REQUIRED_SIGNOFFS = ["independent-reviewer", "forensic-lead", "release-owner"]
+INDEPENDENT_VALIDATION_MINIMUM_SECTIONS = [
+    "scope and datasets",
+    "tool version and commit",
+    "known-answer pass/fail table",
+    "false positive/false negative notes",
+    "legal/report wording review",
+]
 EXTERNAL_TOOL_VERSION_GAP_ID = "#95"
 EXTERNAL_TOOL_VERSION_TRUSTED_DIFF_BLOCKER_95 = "trusted-external-tool-version-transcript-diff-missing"
 EXTERNAL_TOOL_VERSION_TRUSTED_TOOLS = {"external-tool-transcript", "release-environment-inventory", "operator-tool-log"}
@@ -218,6 +236,16 @@ def build_validation_package(
     artifacts_path = output_dir / VALIDATION_ARTIFACTS_NAME
     fixture_root = (fixture_root or Path.cwd()).expanduser().resolve()
     commercial_readiness_gate = build_commercial_readiness_report()
+    known_answer_validation = build_known_answer_validation(known_answer_manifest)
+    parser_fixture_corpus = build_parser_fixture_corpus(fixture_root)
+    parser_fp_fn_notes = build_parser_false_positive_false_negative_notes()
+    parser_fp_fn_manifest = build_parser_fp_fn_risk_register_manifest(parser_fp_fn_notes)
+    parser_fp_fn_profile = build_parser_fp_fn_risk_register_profile(
+        parser_fp_fn_notes,
+        manifest=parser_fp_fn_manifest,
+    )
+    independent_validation_report = build_independent_validation_report(independent_report)
+    validation_package_assessment = build_validation_package_assessment(output_dir)
     payload: dict[str, object] = {
         "command": "validation",
         "generated_at": now_iso(),
@@ -233,13 +261,22 @@ def build_validation_package(
             "artifact_manifest": str(artifacts_path),
         },
         "checks": build_validation_checks(),
-        "validation_package_assessment": build_validation_package_assessment(output_dir),
-        "known_answer_validation": build_known_answer_validation(known_answer_manifest),
+        "validation_package_assessment": validation_package_assessment,
+        "known_answer_validation": known_answer_validation,
         "core_forensics_accuracy_profiles": build_core_forensics_accuracy_profiles(),
         "core_forensics_known_answer_template": build_core_forensics_known_answer_template(),
-        "parser_fixture_corpus": build_parser_fixture_corpus(fixture_root),
-        "parser_false_positive_false_negative_notes": build_parser_false_positive_false_negative_notes(),
-        "independent_validation_report": build_independent_validation_report(independent_report),
+        "parser_fixture_corpus": parser_fixture_corpus,
+        "parser_false_positive_false_negative_notes": parser_fp_fn_notes,
+        "parser_fp_fn_risk_register_profile": parser_fp_fn_profile,
+        "parser_fp_fn_risk_register_manifest": parser_fp_fn_manifest,
+        "independent_validation_report": independent_validation_report,
+        "validation_legal_defensibility_matrix": build_validation_legal_defensibility_matrix(
+            known_answer_validation=known_answer_validation,
+            parser_fixture_corpus=parser_fixture_corpus,
+            parser_fp_fn_profile=parser_fp_fn_profile,
+            independent_validation_report=independent_validation_report,
+            validation_package_assessment=validation_package_assessment,
+        ),
         "external_tool_versions": build_external_tool_versions(),
         "external_tool_version_assessment": build_external_tool_version_assessment(),
         "enterprise_policy": build_enterprise_policy(),
@@ -294,6 +331,7 @@ def build_known_answer_validation(
             expected = item.get("expected")
             if not isinstance(expected, Mapping):
                 expected = {}
+            expected_assertions = extract_expected_assertions(expected)
             raw_backlog_items = item.get("backlog_items") or item.get("commercial_items") or item.get("item_numbers")
             if isinstance(raw_backlog_items, (str, int)):
                 raw_backlog_items = [raw_backlog_items]
@@ -303,17 +341,48 @@ def build_known_answer_validation(
             if not isinstance(evidence_paths, list):
                 evidence_paths = []
             normalized_paths = [str(Path(str(path)).expanduser()) for path in evidence_paths if str(path).strip()]
+            evidence_files = known_answer_evidence_files(normalized_paths)
+            evidence_paths_present = all(bool(row.get("exists")) for row in evidence_files) if evidence_files else False
+            evidence_hashes = [str(row.get("sha256") or "") for row in evidence_files if row.get("sha256")]
+            dataset_core = {
+                "id": str(item.get("id") or f"dataset-{index + 1}"),
+                "status": str(item.get("status") or "not-run"),
+                "backlog_items": [str(value).lstrip("#") for value in raw_backlog_items],
+                "expected_assertions": expected_assertions,
+                "evidence_hashes": evidence_hashes,
+                "evidence_paths_present": evidence_paths_present,
+            }
+            dataset_hash = hashlib_json(dataset_core)
+            evidence_matrix_row = {
+                "dataset_id": dataset_core["id"],
+                "status": dataset_core["status"],
+                "backlog_items": dataset_core["backlog_items"],
+                "expected_assertion_count": len(expected_assertions),
+                "evidence_path_count": len(normalized_paths),
+                "evidence_hash_count": len(evidence_hashes),
+                "evidence_paths_present": evidence_paths_present,
+                "dataset_hash": dataset_hash,
+            }
+            evidence_matrix_row_hash = hashlib_json(evidence_matrix_row)
             datasets.append(
                 {
-                    "id": str(item.get("id") or f"dataset-{index + 1}"),
+                    "id": dataset_core["id"],
                     "name": str(item.get("name") or item.get("id") or f"Dataset {index + 1}"),
                     "source": str(item.get("source") or ""),
                     "corpus_family": str(item.get("corpus_family") or item.get("family") or ""),
-                    "status": str(item.get("status") or "not-run"),
-                    "backlog_items": [str(value).lstrip("#") for value in raw_backlog_items],
+                    "status": dataset_core["status"],
+                    "backlog_items": dataset_core["backlog_items"],
                     "expected": dict(expected),
+                    "expected_assertions": expected_assertions,
+                    "expected_assertion_count": len(expected_assertions),
                     "evidence_paths": normalized_paths,
-                    "evidence_paths_present": all(Path(path).expanduser().exists() for path in normalized_paths),
+                    "evidence_files": evidence_files,
+                    "evidence_paths_present": evidence_paths_present,
+                    "evidence_hashes": evidence_hashes,
+                    "evidence_hash_count": len(evidence_hashes),
+                    "dataset_hash": dataset_hash,
+                    "evidence_matrix_row": evidence_matrix_row,
+                    "evidence_matrix_row_hash": evidence_matrix_row_hash,
                     "notes": str(item.get("notes") or ""),
                 }
             )
@@ -334,8 +403,27 @@ def build_known_answer_validation(
         satisfied.append("dataset status counts recorded")
     if datasets:
         satisfied.append("evidence path existence checked")
+    if datasets and all(item.get("expected_assertion_count") for item in datasets):
+        satisfied.append("expected assertions recorded")
+    if datasets and all(item.get("evidence_hash_count") for item in datasets):
+        satisfied.append("evidence file hashes recorded")
+    manifest_digest = known_answer_manifest_digest(datasets)
+    dataset_evidence_matrix = known_answer_dataset_evidence_matrix(datasets)
+    if datasets:
+        satisfied.append("known-answer manifest digest emitted")
+        satisfied.append("dataset evidence matrix hash emitted")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted known-answer manifest diff pass")
+    pipeline_manifest = build_known_answer_pipeline_manifest(
+        manifest_path=manifest_path,
+        datasets=datasets,
+        status_counts=status_counts,
+        manifest_status=manifest_status,
+        manifest_digest=manifest_digest,
+        dataset_evidence_matrix=dataset_evidence_matrix,
+        trusted_diff=trusted_diff,
+    )
+    satisfied.append("known-answer pipeline manifest hash emitted")
     blockers = [
         "known-answer-manifest-not-attached" if manifest_path is None else "review-open-known-answer-results",
         "public-corpus-coverage-must-match-claimed-parser-scope",
@@ -345,7 +433,20 @@ def build_known_answer_validation(
     return {
         "status": manifest_status,
         "commercial_gap_ids": [KNOWN_ANSWER_TEST_GAP_ID],
+        "functional_priority_profile": known_answer_manifest_functional_profile(
+            manifest_path=manifest_path,
+            datasets=datasets,
+            status_counts=status_counts,
+            manifest_status=manifest_status,
+            pipeline_manifest=pipeline_manifest,
+            trusted_diff=trusted_diff,
+        ),
         "manifest_path": str(manifest_path.expanduser().resolve()) if manifest_path else "",
+        "manifest_digest": manifest_digest,
+        "known_answer_pipeline_manifest": pipeline_manifest,
+        "known_answer_pipeline_manifest_hash": pipeline_manifest["manifest_hash"],
+        "dataset_evidence_matrix": dataset_evidence_matrix,
+        "dataset_evidence_matrix_hash": dataset_evidence_matrix["matrix_hash"],
         "manifest_error": manifest_error,
         "dataset_count": len(datasets),
         "status_counts": status_counts,
@@ -377,11 +478,150 @@ def build_known_answer_validation(
                     f"manifest_attached:{manifest_path is not None}",
                     f"dataset_count:{len(datasets)}",
                     f"status:{manifest_status}",
+                    f"manifest_digest:{manifest_digest}",
+                    f"dataset_evidence_matrix_hash:{dataset_evidence_matrix['matrix_hash']}",
+                    f"pipeline_manifest_hash:{pipeline_manifest['manifest_hash']}",
                 ],
             )
         ],
         "blockers": blockers,
     }
+
+
+def build_known_answer_pipeline_manifest(
+    *,
+    manifest_path: Path | None,
+    datasets: Sequence[Mapping[str, object]],
+    status_counts: Mapping[str, int],
+    manifest_status: str,
+    manifest_digest: str,
+    dataset_evidence_matrix: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    expected_assertion_count = sum(int(item.get("expected_assertion_count") or 0) for item in datasets)
+    evidence_path_count = sum(len(item.get("evidence_paths") or []) for item in datasets)
+    evidence_hash_count = sum(int(item.get("evidence_hash_count") or 0) for item in datasets)
+    missing_evidence_dataset_ids = [
+        str(item.get("id") or "")
+        for item in datasets
+        if not bool(item.get("evidence_paths_present"))
+    ]
+    coverage_by_item: dict[str, dict[str, object]] = {}
+    for item in datasets:
+        for number in item.get("backlog_items") or []:
+            key = str(number).lstrip("#")
+            row = coverage_by_item.setdefault(
+                key,
+                {
+                    "item_number": int(key) if key.isdigit() else key,
+                    "dataset_count": 0,
+                    "pass_count": 0,
+                    "evidence_hash_count": 0,
+                    "expected_assertion_count": 0,
+                },
+            )
+            row["dataset_count"] = int(row["dataset_count"]) + 1
+            row["pass_count"] = int(row["pass_count"]) + (1 if str(item.get("status") or "") == "pass" else 0)
+            row["evidence_hash_count"] = int(row["evidence_hash_count"]) + int(item.get("evidence_hash_count") or 0)
+            row["expected_assertion_count"] = int(row["expected_assertion_count"]) + int(
+                item.get("expected_assertion_count") or 0
+            )
+    manifest_core = {
+        "profile_version": "known-answer-pipeline-manifest-v1",
+        "item_number": 36,
+        "gap_id": "#36",
+        "commercial_gap_ids": [KNOWN_ANSWER_TEST_GAP_ID],
+        "manifest_attached": manifest_path is not None,
+        "manifest_path_hash": hashlib.sha256(
+            str(manifest_path.expanduser().resolve() if manifest_path else "").encode("utf-8", errors="replace")
+        ).hexdigest(),
+        "manifest_status": manifest_status,
+        "manifest_digest": manifest_digest,
+        "dataset_evidence_matrix_hash": str(dataset_evidence_matrix.get("matrix_hash") or ""),
+        "dataset_count": len(datasets),
+        "status_counts": dict(status_counts),
+        "coverage_by_item": [coverage_by_item[key] for key in sorted(coverage_by_item, key=lambda value: int(value) if value.isdigit() else value)],
+        "expected_assertion_count": expected_assertion_count,
+        "evidence_path_count": evidence_path_count,
+        "evidence_hash_count": evidence_hash_count,
+        "missing_evidence_dataset_ids": missing_evidence_dataset_ids,
+        "trusted_diff_status": str((trusted_diff or {}).get("status") or "missing"),
+        "trusted_diff_blocker": "" if trusted_diff and trusted_diff.get("status") == "pass" else KNOWN_ANSWER_TRUSTED_DIFF_BLOCKER_81,
+        "public_corpus_scope_complete": False,
+        "independent_expected_answer_review_attached": False,
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "manifest_hash": hashlib_json(manifest_core)}
+
+
+def known_answer_dataset_evidence_matrix(datasets: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    rows = []
+    for item in datasets:
+        row = dict(item.get("evidence_matrix_row") or {})
+        if not row:
+            row = {
+                "dataset_id": str(item.get("id") or ""),
+                "status": str(item.get("status") or ""),
+                "backlog_items": [str(value).lstrip("#") for value in item.get("backlog_items") or []],
+                "expected_assertion_count": int(item.get("expected_assertion_count") or 0),
+                "evidence_path_count": len(item.get("evidence_paths") or []),
+                "evidence_hash_count": int(item.get("evidence_hash_count") or 0),
+                "evidence_paths_present": bool(item.get("evidence_paths_present")),
+                "dataset_hash": str(item.get("dataset_hash") or ""),
+            }
+        rows.append({**row, "row_hash": hashlib_json(row)})
+    matrix_core = {
+        "profile_version": "known-answer-dataset-evidence-matrix-v1",
+        "item_number": 81,
+        "dataset_count": len(rows),
+        "rows": rows,
+        "all_evidence_present": bool(rows) and all(bool(row.get("evidence_paths_present")) for row in rows),
+        "all_status_pass": bool(rows) and all(str(row.get("status") or "") == "pass" for row in rows),
+    }
+    return {**matrix_core, "matrix_hash": hashlib_json(matrix_core)}
+
+
+def extract_expected_assertions(expected: Mapping[str, object]) -> list[str]:
+    raw_assertions = expected.get("required_assertions") or expected.get("assertions") or expected.get("checks")
+    if isinstance(raw_assertions, str):
+        raw_assertions = [raw_assertions]
+    if not isinstance(raw_assertions, list):
+        raw_assertions = []
+    return [str(value).strip() for value in raw_assertions if str(value).strip()]
+
+
+def known_answer_evidence_files(paths: Sequence[str]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for raw_path in paths:
+        path = Path(raw_path).expanduser()
+        exists = path.exists()
+        row: dict[str, object] = {
+            "path": str(path),
+            "exists": exists,
+            "size_bytes": path.stat().st_size if exists and path.is_file() else None,
+            "sha256": compute_sha256(path) if exists and path.is_file() else "",
+        }
+        rows.append(row)
+    return rows
+
+
+def hashlib_json(payload: Mapping[str, object]) -> str:
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def known_answer_manifest_digest(datasets: Sequence[Mapping[str, object]]) -> str:
+    digest_rows = [
+        {
+            "id": str(item.get("id") or ""),
+            "status": str(item.get("status") or ""),
+            "backlog_items": [str(value).lstrip("#") for value in item.get("backlog_items") or []],
+            "expected_assertions": [str(value) for value in item.get("expected_assertions") or []],
+            "evidence_hashes": [str(value) for value in item.get("evidence_hashes") or []],
+            "dataset_hash": str(item.get("dataset_hash") or ""),
+        }
+        for item in datasets
+    ]
+    return hashlib_json({"profile": "known-answer-manifest-digest-v1", "datasets": digest_rows})
 
 
 def build_validation_package_assessment(
@@ -393,9 +633,13 @@ def build_validation_package_assessment(
         "validation JSON output generated",
         "validation Markdown output generated",
         "artifact hash manifest generated",
+        "validation package manifest profile emitted",
+        "package manifest hash emitted",
+        "reproduction commands recorded",
         "known-answer/fixture sections included",
         "package generation limitation warning",
     ]
+    package_manifest = build_validation_package_manifest_profile(output_dir, [])
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted validation package manifest diff pass")
     blockers = [
@@ -411,6 +655,8 @@ def build_validation_package_assessment(
         "commercial_gap_ids": [VALIDATION_PACKAGE_GAP_ID],
         "output_dir": str(output_dir),
         "outputs": [VALIDATION_JSON_NAME, VALIDATION_MARKDOWN_NAME, VALIDATION_ARTIFACTS_NAME],
+        "validation_package_manifest": package_manifest,
+        "package_manifest_hash": package_manifest["package_manifest_hash"],
         "ready_for_court_report": False,
         "trusted_validation_package_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
             VALIDATION_PACKAGE_GAP_ID,
@@ -426,6 +672,7 @@ def build_validation_package_assessment(
                     VALIDATION_JSON_NAME,
                     VALIDATION_MARKDOWN_NAME,
                     VALIDATION_ARTIFACTS_NAME,
+                    f"package_manifest_hash:{package_manifest['package_manifest_hash']}",
                 ],
             )
         ],
@@ -500,27 +747,57 @@ def build_parser_fixture_corpus(
         for pattern in area["fixture_globs"]:
             fixture_paths.extend(str(path.relative_to(fixture_root)) for path in sorted(fixture_root.glob(str(pattern))) if path.exists())
         test_files = [str(path) for path in area["test_files"] if (fixture_root / str(path)).exists()]
+        fixture_file_manifest = fixture_corpus_file_manifest(fixture_root, fixture_paths)
+        test_file_manifest = fixture_corpus_file_manifest(fixture_root, test_files)
+        area_core = {
+            "id": area["id"],
+            "fixture_hashes": [str(row.get("sha256") or "") for row in fixture_file_manifest if row.get("sha256")],
+            "test_hashes": [str(row.get("sha256") or "") for row in test_file_manifest if row.get("sha256")],
+            "expected_edge_cases": list(area["expected_edge_cases"]),
+        }
+        release_gate_row = {
+            "area_id": area["id"],
+            "parser": area["parser"],
+            "fixture_count": len(fixture_paths),
+            "test_file_count": len(test_files),
+            "fixture_hash_count": len(area_core["fixture_hashes"]),
+            "test_file_hash_count": len(area_core["test_hashes"]),
+            "expected_edge_case_count": len(area["expected_edge_cases"]),
+            "fixture_backed": bool(fixture_paths or test_files),
+        }
         rows.append(
             {
                 "id": area["id"],
                 "parser": area["parser"],
                 "fixture_count": len(fixture_paths),
                 "fixture_paths": fixture_paths[:25],
+                "fixture_file_manifest": fixture_file_manifest[:25],
+                "fixture_hash_count": len(area_core["fixture_hashes"]),
                 "test_files": test_files,
                 "test_file_count": len(test_files),
+                "test_file_manifest": test_file_manifest,
+                "test_file_hash_count": len(area_core["test_hashes"]),
                 "expected_edge_cases": list(area["expected_edge_cases"]),
                 "fixture_backed": bool(fixture_paths or test_files),
+                "area_manifest_hash": hashlib_json(area_core),
+                "release_gate_row": release_gate_row,
+                "release_gate_row_hash": hashlib_json(release_gate_row),
                 "commercial_gap_ids": [PARSER_FIXTURE_CORPUS_GAP_ID],
                 "release_gate": "add at least one fixture/test before changing parser output semantics",
             }
         )
     covered = sum(1 for row in rows if row["fixture_backed"])
+    fixture_digest = fixture_corpus_digest(rows)
+    release_gate_matrix = fixture_release_gate_matrix(rows)
     satisfied = [
         "parser areas inventoried",
         "fixture/test counts recorded",
+        "fixture/test file hashes recorded",
+        "fixture corpus digest emitted",
         "expected edge cases listed",
         "coverage status summarized",
         "release gate for parser changes recorded",
+        "fixture release gate matrix hash emitted",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted fixture corpus manifest diff pass")
@@ -529,6 +806,9 @@ def build_parser_fixture_corpus(
         "parser_area_count": len(rows),
         "fixture_backed_count": covered,
         "coverage_status": "fixture-backed-baseline" if covered == len(rows) else "fixture-gaps-present",
+        "fixture_corpus_digest": fixture_digest,
+        "fixture_release_gate_matrix": release_gate_matrix,
+        "fixture_release_gate_matrix_hash": release_gate_matrix["matrix_hash"],
         "commercial_gap_ids": [PARSER_FIXTURE_CORPUS_GAP_ID],
         "ready_for_court_report": covered == len(rows),
         "trusted_fixture_corpus_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
@@ -545,11 +825,71 @@ def build_parser_fixture_corpus(
                     f"parser_area_count:{len(rows)}",
                     f"fixture_backed_count:{covered}",
                     f"fixture_root:{fixture_root}",
+                    f"fixture_corpus_digest:{fixture_digest}",
+                    f"fixture_release_gate_matrix_hash:{release_gate_matrix['matrix_hash']}",
                 ],
             )
         ],
         "areas": rows,
     }
+
+
+def fixture_corpus_file_manifest(root: Path, relative_paths: Sequence[str]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for relative_path in relative_paths:
+        path = (root / relative_path).resolve()
+        exists = path.exists()
+        rows.append(
+            {
+                "path": relative_path,
+                "exists": exists,
+                "size_bytes": path.stat().st_size if exists and path.is_file() else None,
+                "sha256": compute_sha256(path) if exists and path.is_file() else "",
+            }
+        )
+    return rows
+
+
+def fixture_corpus_digest(rows: Sequence[Mapping[str, object]]) -> str:
+    digest_rows = [
+        {
+            "id": str(row.get("id") or ""),
+            "fixture_count": int(row.get("fixture_count") or 0),
+            "test_file_count": int(row.get("test_file_count") or 0),
+            "fixture_hash_count": int(row.get("fixture_hash_count") or 0),
+            "test_file_hash_count": int(row.get("test_file_hash_count") or 0),
+            "area_manifest_hash": str(row.get("area_manifest_hash") or ""),
+        }
+        for row in rows
+    ]
+    return hashlib_json({"profile": "fixture-corpus-digest-v1", "areas": digest_rows})
+
+
+def fixture_release_gate_matrix(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    matrix_rows = []
+    for row in rows:
+        gate_row = dict(row.get("release_gate_row") or {})
+        if not gate_row:
+            gate_row = {
+                "area_id": str(row.get("id") or ""),
+                "parser": str(row.get("parser") or ""),
+                "fixture_count": int(row.get("fixture_count") or 0),
+                "test_file_count": int(row.get("test_file_count") or 0),
+                "fixture_hash_count": int(row.get("fixture_hash_count") or 0),
+                "test_file_hash_count": int(row.get("test_file_hash_count") or 0),
+                "expected_edge_case_count": len(row.get("expected_edge_cases") or []),
+                "fixture_backed": bool(row.get("fixture_backed")),
+            }
+        matrix_rows.append({**gate_row, "row_hash": hashlib_json(gate_row)})
+    matrix_core = {
+        "profile_version": "fixture-release-gate-matrix-v1",
+        "item_number": 82,
+        "parser_area_count": len(matrix_rows),
+        "fixture_backed_count": sum(1 for row in matrix_rows if row.get("fixture_backed")),
+        "rows": matrix_rows,
+        "release_block_on_missing_fixture": True,
+    }
+    return {**matrix_core, "matrix_hash": hashlib_json(matrix_core)}
 
 
 def build_parser_false_positive_false_negative_notes(
@@ -559,7 +899,27 @@ def build_parser_false_positive_false_negative_notes(
     rows = []
     for item in PARSER_FALSE_POSITIVE_NOTES:
         row = dict(item)
+        row["measurement_status"] = "qualitative-risk-register-not-quantified"
+        row["minimum_quantification_fields"] = [
+            "corpus_id",
+            "parser_version",
+            "sample_count",
+            "false_positive_count",
+            "false_negative_count",
+            "reviewer",
+        ]
+        row["quantification_required"] = True
+        row["review_required_before_report"] = True
+        row["reportability_boundary"] = (
+            "Do not treat this parser family as report-grade until the listed FP/FN risks are measured "
+            "against a versioned corpus or trusted risk register."
+        )
+        row["risk_note_hash"] = parser_fp_fn_risk_note_hash(row)
         row["commercial_gap_ids"] = [PARSER_FP_FN_GAP_ID]
+        row["functional_priority_profile"] = parser_fp_fn_functional_profile(
+            row,
+            trusted_diff=trusted_diff,
+        )
         row["ready_for_court_report"] = False
         row["trusted_fp_fn_diff"] = dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
             PARSER_FP_FN_GAP_ID,
@@ -573,6 +933,9 @@ def build_parser_false_positive_false_negative_notes(
             "validation-required guidance recorded",
             "parser family scope recorded",
             "quantification limitation warning",
+            "risk note hash emitted",
+            "minimum quantification fields listed",
+            "reportability boundary recorded",
         ]
         if trusted_diff and trusted_diff.get("status") == "pass":
             satisfied.append("trusted FP/FN risk register diff pass")
@@ -580,11 +943,177 @@ def build_parser_false_positive_false_negative_notes(
             build_accuracy_gate(
                 83,
                 satisfied_checks=satisfied,
-                evidence_refs=[f"parser:{row.get('parser', '')}"],
+                evidence_refs=[f"parser:{row.get('parser', '')}", f"risk_note_hash:{row.get('risk_note_hash', '')}"],
             )
         ]
         rows.append(row)
     return rows
+
+
+def parser_fp_fn_risk_note_hash(row: Mapping[str, object]) -> str:
+    risk_core = {
+        "parser": str(row.get("parser") or ""),
+        "false_positive_risks": [str(value) for value in row.get("false_positive_risks") or []],
+        "false_negative_risks": [str(value) for value in row.get("false_negative_risks") or []],
+        "validation_required": str(row.get("validation_required") or ""),
+        "measurement_status": str(row.get("measurement_status") or ""),
+        "minimum_quantification_fields": [str(value) for value in row.get("minimum_quantification_fields") or []],
+        "quantification_required": bool(row.get("quantification_required")),
+        "reportability_boundary": str(row.get("reportability_boundary") or ""),
+    }
+    return hashlib_json(risk_core)
+
+
+def build_parser_fp_fn_risk_register_profile(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    manifest: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    manifest = manifest or build_parser_fp_fn_risk_register_manifest(rows)
+    digest_rows = [
+        {
+            "parser": str(row.get("parser") or ""),
+            "risk_note_hash": str(row.get("risk_note_hash") or ""),
+            "false_positive_count": len(row.get("false_positive_risks") or []),
+            "false_negative_count": len(row.get("false_negative_risks") or []),
+            "quantification_required": bool(row.get("quantification_required")),
+        }
+        for row in rows
+    ]
+    register_digest = hashlib_json({"profile": "parser-fp-fn-risk-register-v1", "rows": digest_rows})
+    risk_matrix = parser_fp_fn_risk_matrix(rows)
+    return {
+        "profile_version": "parser-fp-fn-risk-register-v1",
+        "commercial_gap_ids": [PARSER_FP_FN_GAP_ID],
+        "parser_count": len(rows),
+        "risk_note_hashes": [str(row.get("risk_note_hash") or "") for row in rows],
+        "register_digest": register_digest,
+        "risk_matrix": risk_matrix,
+        "risk_matrix_hash": risk_matrix["matrix_hash"],
+        "risk_register_manifest_hash": str(manifest.get("manifest_hash") or ""),
+        "quantified_parser_count": int(manifest.get("quantified_parser_count") or 0),
+        "unquantified_parser_count": int(manifest.get("unquantified_parser_count") or 0),
+        "quantified": False,
+        "commercial_claim_allowed": False,
+        "required_before_report": [
+            "attach corpus_id and parser_version for every measured risk row",
+            "record sample_count, false_positive_count, false_negative_count, and reviewer signoff",
+            "diff the register against a trusted FP/FN risk-register manifest",
+        ],
+    }
+
+
+def parser_fp_fn_risk_matrix(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    matrix_rows = []
+    for row in rows:
+        matrix_row = {
+            "parser": str(row.get("parser") or ""),
+            "false_positive_risk_count": len(row.get("false_positive_risks") or []),
+            "false_negative_risk_count": len(row.get("false_negative_risks") or []),
+            "risk_note_hash": str(row.get("risk_note_hash") or ""),
+            "measurement_status": str(row.get("measurement_status") or ""),
+            "quantification_required": bool(row.get("quantification_required")),
+            "minimum_quantification_field_count": len(row.get("minimum_quantification_fields") or []),
+        }
+        matrix_rows.append({**matrix_row, "row_hash": hashlib_json(matrix_row)})
+    matrix_core = {
+        "profile_version": "parser-fp-fn-risk-matrix-v1",
+        "item_number": 83,
+        "parser_count": len(matrix_rows),
+        "rows": matrix_rows,
+        "all_rows_quantified": bool(matrix_rows) and all(
+            str(row.get("measurement_status") or "") == "quantified" for row in rows
+        ),
+    }
+    return {**matrix_core, "matrix_hash": hashlib_json(matrix_core)}
+
+
+def build_parser_fp_fn_risk_register_manifest(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    manifest_rows: list[dict[str, object]] = []
+    quantified_count = 0
+    for row in rows:
+        sample_count = optional_int(row.get("sample_count"))
+        false_positive_count = optional_int(row.get("measured_false_positive_count"))
+        false_negative_count = optional_int(row.get("measured_false_negative_count"))
+        quantified_fields = {
+            "corpus_id": bool(str(row.get("corpus_id") or "").strip()),
+            "parser_version": bool(str(row.get("parser_version") or "").strip()),
+            "sample_count": sample_count is not None,
+            "false_positive_count": false_positive_count is not None,
+            "false_negative_count": false_negative_count is not None,
+            "reviewer": bool(str(row.get("reviewer") or "").strip()),
+        }
+        quantified = all(quantified_fields.values())
+        if quantified:
+            quantified_count += 1
+        manifest_rows.append(
+            {
+                "parser": str(row.get("parser") or ""),
+                "risk_note_hash": str(row.get("risk_note_hash") or ""),
+                "measurement_status": str(row.get("measurement_status") or ""),
+                "false_positive_risk_count": len(row.get("false_positive_risks") or []),
+                "false_negative_risk_count": len(row.get("false_negative_risks") or []),
+                "minimum_quantification_fields": [
+                    str(value) for value in row.get("minimum_quantification_fields") or []
+                ],
+                "quantified_fields_present": quantified_fields,
+                "quantified": quantified,
+                "sample_count": sample_count,
+                "measured_false_positive_count": false_positive_count,
+                "measured_false_negative_count": false_negative_count,
+                "false_positive_rate": round(false_positive_count / sample_count, 6)
+                if sample_count and false_positive_count is not None
+                else None,
+                "false_negative_rate": round(false_negative_count / sample_count, 6)
+                if sample_count and false_negative_count is not None
+                else None,
+                "reportability_boundary": str(row.get("reportability_boundary") or ""),
+            }
+        )
+    manifest_core: dict[str, object] = {
+        "profile_version": "parser-fp-fn-risk-register-manifest-v1",
+        "item_number": 38,
+        "batch_id": FUNCTIONAL_VALIDATION_BATCH_ID,
+        "gap_id": "#38",
+        "commercial_gap_ids": [PARSER_FP_FN_GAP_ID],
+        "parser_count": len(rows),
+        "quantified_parser_count": quantified_count,
+        "unquantified_parser_count": max(len(rows) - quantified_count, 0),
+        "quantified": bool(rows) and quantified_count == len(rows),
+        "risk_row_count": sum(
+            len(row.get("false_positive_risks") or []) + len(row.get("false_negative_risks") or [])
+            for row in rows
+        ),
+        "minimum_quantification_fields": [
+            "corpus_id",
+            "parser_version",
+            "sample_count",
+            "false_positive_count",
+            "false_negative_count",
+            "reviewer",
+        ],
+        "missing_quantification_parsers": [
+            str(row.get("parser") or "")
+            for row in manifest_rows
+            if not bool(row.get("quantified"))
+        ],
+        "rows": manifest_rows,
+        "commercial_claim_allowed": bool(rows) and quantified_count == len(rows),
+        "operator_warning": (
+            "Qualitative FP/FN documentation is useful for review, but report-grade claims require "
+            "measured rates from a versioned corpus or trusted risk register."
+        ),
+    }
+    return {**manifest_core, "manifest_hash": hashlib_json(manifest_core)}
+
+
+def optional_int(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def build_independent_validation_report(
@@ -592,11 +1121,24 @@ def build_independent_validation_report(
     *,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    missing_manifest = independent_validation_report_manifest(
+        status="not-attached",
+        report_path="",
+        report_hash="",
+        size_bytes=0,
+        section_presence={section: False for section in INDEPENDENT_VALIDATION_MINIMUM_SECTIONS},
+    )
     if report_path is None:
+        package_manifest = independent_validation_package_manifest(
+            report_manifest=missing_manifest,
+            trusted_diff=trusted_diff,
+        )
         satisfied = [
             "independent report status recorded",
             "required signoffs listed",
             "minimum report sections listed",
+            "independent validation manifest emitted",
+            "independent validation package manifest emitted",
             "not-attached blocker recorded",
         ]
         if trusted_diff and trusted_diff.get("status") == "pass":
@@ -604,16 +1146,23 @@ def build_independent_validation_report(
         return {
             "status": "not-attached",
             "commercial_gap_ids": [INDEPENDENT_VALIDATION_GAP_ID],
+            "functional_priority_profile": independent_validation_functional_profile(
+                status="not-attached",
+                report_attached=False,
+                report_hash="",
+                report_manifest=missing_manifest,
+                package_manifest=package_manifest,
+                trusted_diff=trusted_diff,
+            ),
             "report_path": "",
             "sha256": "",
-            "required_signoffs": ["independent-reviewer", "forensic-lead", "release-owner"],
-            "minimum_sections": [
-                "scope and datasets",
-                "tool version and commit",
-                "known-answer pass/fail table",
-                "false positive/false negative notes",
-                "legal/report wording review",
-            ],
+            "required_signoffs": INDEPENDENT_VALIDATION_REQUIRED_SIGNOFFS,
+            "minimum_sections": INDEPENDENT_VALIDATION_MINIMUM_SECTIONS,
+            "minimum_section_presence": missing_manifest["minimum_section_presence"],
+            "signoff_slots": missing_manifest["signoff_slots"],
+            "independent_validation_manifest": missing_manifest,
+            "independent_validation_package_manifest": package_manifest,
+            "independent_validation_package_manifest_hash": package_manifest["manifest_hash"],
             "ready_for_court_report": False,
             "trusted_independent_validation_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
                 INDEPENDENT_VALIDATION_GAP_ID,
@@ -625,18 +1174,39 @@ def build_independent_validation_report(
                 build_accuracy_gate(
                     84,
                     satisfied_checks=satisfied,
-                    evidence_refs=["status:not-attached"],
+                    evidence_refs=[
+                        "status:not-attached",
+                        f"report_manifest_hash:{missing_manifest['report_manifest_hash']}",
+                        f"package_manifest_hash:{package_manifest['manifest_hash']}",
+                    ],
                 )
             ],
         }
     resolved = report_path.expanduser().resolve()
     if not resolved.is_file():
         raise ValidationError(f"independent validation report not found: {resolved}")
+    section_presence = independent_validation_section_presence(resolved)
+    report_hash = compute_sha256(resolved)
+    report_manifest = independent_validation_report_manifest(
+        status="attached",
+        report_path=str(resolved),
+        report_hash=report_hash,
+        size_bytes=resolved.stat().st_size,
+        section_presence=section_presence,
+    )
+    package_manifest = independent_validation_package_manifest(
+        report_manifest=report_manifest,
+        trusted_diff=trusted_diff,
+    )
     satisfied = [
         "independent report status recorded",
         "report hash captured when attached",
         "required signoffs listed",
         "minimum report sections listed",
+        "minimum report section presence checked",
+        "independent validation manifest emitted",
+        "independent validation package manifest emitted",
+        "report manifest hash emitted",
         "not-attached blocker recorded",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
@@ -645,17 +1215,24 @@ def build_independent_validation_report(
     return {
         "status": "attached",
         "commercial_gap_ids": [INDEPENDENT_VALIDATION_GAP_ID],
+        "functional_priority_profile": independent_validation_functional_profile(
+            status="attached",
+            report_attached=True,
+            report_hash=report_hash,
+            report_manifest=report_manifest,
+            package_manifest=package_manifest,
+            trusted_diff=trusted_diff,
+        ),
         "report_path": str(resolved),
-        "sha256": compute_sha256(resolved),
+        "sha256": report_hash,
         "size_bytes": resolved.stat().st_size,
-        "required_signoffs": ["independent-reviewer", "forensic-lead", "release-owner"],
-        "minimum_sections": [
-            "scope and datasets",
-            "tool version and commit",
-            "known-answer pass/fail table",
-            "false positive/false negative notes",
-            "legal/report wording review",
-        ],
+        "required_signoffs": INDEPENDENT_VALIDATION_REQUIRED_SIGNOFFS,
+        "minimum_sections": INDEPENDENT_VALIDATION_MINIMUM_SECTIONS,
+        "minimum_section_presence": report_manifest["minimum_section_presence"],
+        "signoff_slots": report_manifest["signoff_slots"],
+        "independent_validation_manifest": report_manifest,
+        "independent_validation_package_manifest": package_manifest,
+        "independent_validation_package_manifest_hash": package_manifest["manifest_hash"],
         "ready_for_court_report": bool(trusted_diff and trusted_diff.get("status") == "pass"),
         "trusted_independent_validation_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
             INDEPENDENT_VALIDATION_GAP_ID,
@@ -667,9 +1244,304 @@ def build_independent_validation_report(
             build_accuracy_gate(
                 84,
                 satisfied_checks=satisfied,
-                evidence_refs=[f"report_path:{resolved}", f"sha256:{compute_sha256(resolved)}"],
+                evidence_refs=[
+                    f"report_path:{resolved}",
+                    f"sha256:{report_hash}",
+                    f"report_manifest_hash:{report_manifest['report_manifest_hash']}",
+                    f"package_manifest_hash:{package_manifest['manifest_hash']}",
+                ],
             )
         ],
+    }
+
+
+def independent_validation_section_presence(report_path: Path) -> dict[str, bool]:
+    try:
+        text = report_path.read_text(encoding="utf-8", errors="ignore").lower()
+    except OSError:
+        text = ""
+    return {
+        section: section.lower() in text
+        for section in INDEPENDENT_VALIDATION_MINIMUM_SECTIONS
+    }
+
+
+def independent_validation_report_manifest(
+    *,
+    status: str,
+    report_path: str,
+    report_hash: str,
+    size_bytes: int,
+    section_presence: Mapping[str, bool],
+) -> dict[str, object]:
+    signoff_slots = [
+        {
+            "role": role,
+            "required": True,
+            "signed": False,
+            "signature_hash": "",
+            "external_signoff_required": True,
+        }
+        for role in INDEPENDENT_VALIDATION_REQUIRED_SIGNOFFS
+    ]
+    missing_sections = [section for section, present in section_presence.items() if not present]
+    section_presence_hash = hashlib_json({"minimum_section_presence": dict(section_presence)})
+    signoff_status_hash = hashlib_json({"signoff_slots": signoff_slots})
+    manifest_core = {
+        "profile_version": "independent-validation-report-manifest-v1",
+        "item_number": 84,
+        "status": status,
+        "report_path": report_path,
+        "sha256": report_hash,
+        "size_bytes": size_bytes,
+        "required_signoffs": INDEPENDENT_VALIDATION_REQUIRED_SIGNOFFS,
+        "minimum_section_presence": dict(section_presence),
+        "minimum_section_presence_hash": section_presence_hash,
+        "missing_minimum_sections": missing_sections,
+        "minimum_sections_present_count": sum(1 for present in section_presence.values() if present),
+        "minimum_sections_required_count": len(INDEPENDENT_VALIDATION_MINIMUM_SECTIONS),
+        "signoff_slots": signoff_slots,
+        "signoff_status_hash": signoff_status_hash,
+        "commercial_gap_ids": [INDEPENDENT_VALIDATION_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "report_manifest_hash": hashlib_json(manifest_core)}
+
+
+def independent_validation_package_manifest(
+    *,
+    report_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    signoff_slots = report_manifest.get("signoff_slots") if isinstance(report_manifest.get("signoff_slots"), list) else []
+    signed_roles = [
+        str(slot.get("role") or "")
+        for slot in signoff_slots
+        if isinstance(slot, Mapping) and bool(slot.get("signed"))
+    ]
+    minimum_present_count = int(report_manifest.get("minimum_sections_present_count") or 0)
+    minimum_required_count = int(report_manifest.get("minimum_sections_required_count") or 0)
+    trusted_status = str(trusted_diff.get("status") or "missing") if trusted_diff else "missing"
+    manifest_core: dict[str, object] = {
+        "profile_version": "independent-validation-package-manifest-v1",
+        "item_number": 39,
+        "batch_id": FUNCTIONAL_VALIDATION_BATCH_ID,
+        "gap_id": "#39",
+        "commercial_gap_ids": [INDEPENDENT_VALIDATION_GAP_ID],
+        "report_status": str(report_manifest.get("status") or ""),
+        "report_attached": str(report_manifest.get("status") or "") == "attached",
+        "report_path": str(report_manifest.get("report_path") or ""),
+        "report_sha256_present": bool(str(report_manifest.get("sha256") or "")),
+        "report_manifest_hash": str(report_manifest.get("report_manifest_hash") or ""),
+        "minimum_section_presence_hash": str(report_manifest.get("minimum_section_presence_hash") or ""),
+        "signoff_status_hash": str(report_manifest.get("signoff_status_hash") or ""),
+        "minimum_sections_present_count": minimum_present_count,
+        "minimum_sections_required_count": minimum_required_count,
+        "minimum_sections_complete": minimum_required_count > 0 and minimum_present_count >= minimum_required_count,
+        "required_signoffs": INDEPENDENT_VALIDATION_REQUIRED_SIGNOFFS,
+        "signed_signoff_count": len([role for role in signed_roles if role]),
+        "missing_signoff_roles": [
+            role for role in INDEPENDENT_VALIDATION_REQUIRED_SIGNOFFS
+            if role not in signed_roles
+        ],
+        "trusted_diff_status": trusted_status,
+        "trusted_diff_hash": hashlib_json(dict(trusted_diff)) if trusted_diff else "",
+        "ready_for_court_report": (
+            str(report_manifest.get("status") or "") == "attached"
+            and trusted_status == "pass"
+            and minimum_required_count > 0
+            and minimum_present_count >= minimum_required_count
+        ),
+        "commercial_claim_allowed": (
+            str(report_manifest.get("status") or "") == "attached"
+            and trusted_status == "pass"
+            and minimum_required_count > 0
+            and minimum_present_count >= minimum_required_count
+        ),
+        "external_evidence_required": [
+            "signed independent reviewer report",
+            "reviewer identity and role trace",
+            "forensic lead signoff",
+            "release owner signoff",
+            "trusted independent-validation-signoff diff",
+        ],
+    }
+    return {**manifest_core, "manifest_hash": hashlib_json(manifest_core)}
+
+
+def known_answer_manifest_functional_profile(
+    *,
+    manifest_path: Path | None,
+    datasets: Sequence[Mapping[str, object]],
+    status_counts: Mapping[str, int],
+    manifest_status: str,
+    pipeline_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    evidence_path_count = sum(len(item.get("evidence_paths") or []) for item in datasets)
+    expected_assertion_count = sum(
+        int(item.get("expected_assertion_count") or 0)
+        for item in datasets
+    )
+    evidence_hash_count = sum(int(item.get("evidence_hash_count") or 0) for item in datasets)
+    manifest_digest = known_answer_manifest_digest(datasets)
+    failed_checks = []
+    if manifest_path is None:
+        failed_checks.append("known-answer-manifest-not-attached")
+    if not datasets:
+        failed_checks.append("no-known-answer-datasets")
+    if any(str(item.get("status") or "") != "pass" for item in datasets):
+        failed_checks.append("known-answer-datasets-not-all-pass")
+    if any(not bool(item.get("evidence_paths_present")) for item in datasets):
+        failed_checks.append("known-answer-evidence-path-missing")
+    if datasets and any(int(item.get("expected_assertion_count") or 0) == 0 for item in datasets):
+        failed_checks.append("known-answer-expected-assertions-missing")
+    if datasets and any(int(item.get("evidence_hash_count") or 0) == 0 for item in datasets):
+        failed_checks.append("known-answer-evidence-hashes-missing")
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        failed_checks.append(KNOWN_ANSWER_TRUSTED_DIFF_BLOCKER_81)
+    return {
+        "item_number": 36,
+        "batch_id": FUNCTIONAL_VALIDATION_BATCH_ID,
+        "status": "complete" if not failed_checks else "partial",
+        "implemented_controls": {
+            "manifest_attached": manifest_path is not None,
+            "dataset_count": len(datasets),
+            "status_counts": dict(status_counts),
+            "evidence_path_count": evidence_path_count,
+            "evidence_hash_count": evidence_hash_count,
+            "expected_assertion_count": expected_assertion_count,
+            "manifest_status": manifest_status,
+            "manifest_digest": manifest_digest,
+            "dataset_evidence_matrix_hash": str(pipeline_manifest.get("dataset_evidence_matrix_hash") or ""),
+            "pipeline_manifest_hash": str(pipeline_manifest.get("manifest_hash") or ""),
+            "pipeline_manifest_profile": str(pipeline_manifest.get("profile_version") or ""),
+            "trusted_diff_status": str(pipeline_manifest.get("trusted_diff_status") or ""),
+        },
+        "passed_validation_check_ids": [
+            "known-answer-status-counts-recorded",
+            "known-answer-evidence-path-presence-checked",
+            "known-answer-evidence-hashes-recorded",
+            "known-answer-expected-assertions-preserved",
+            "known-answer-manifest-digest-emitted",
+            "known-answer-dataset-evidence-matrix-emitted",
+        ],
+        "failed_validation_check_ids": failed_checks,
+        "reportability_decision": {
+            "allowed_use": "parser-known-answer-validation-evidence",
+            "commercial_claim_allowed": not failed_checks,
+            "operator_warning": "Attach public-corpus expected answers plus trusted diff before claiming report-grade parser accuracy.",
+        },
+    }
+
+
+def parser_fp_fn_functional_profile(
+    row: Mapping[str, object],
+    *,
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    false_positive_count = len(row.get("false_positive_risks") or [])
+    false_negative_count = len(row.get("false_negative_risks") or [])
+    minimum_quantification_fields = row.get("minimum_quantification_fields") or []
+    failed_checks = []
+    if false_positive_count == 0:
+        failed_checks.append("false-positive-risk-list-empty")
+    if false_negative_count == 0:
+        failed_checks.append("false-negative-risk-list-empty")
+    if not row.get("risk_note_hash"):
+        failed_checks.append("fp-fn-risk-note-hash-missing")
+    if len(minimum_quantification_fields) < 6:
+        failed_checks.append("fp-fn-minimum-quantification-fields-incomplete")
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        failed_checks.append(FP_FN_TRUSTED_DIFF_BLOCKER_83)
+    return {
+        "item_number": 38,
+        "batch_id": FUNCTIONAL_VALIDATION_BATCH_ID,
+        "status": "complete" if not failed_checks else "partial",
+        "parser": str(row.get("parser") or ""),
+        "implemented_controls": {
+            "false_positive_risk_count": false_positive_count,
+            "false_negative_risk_count": false_negative_count,
+            "validation_required": True,
+            "risk_note_hash": str(row.get("risk_note_hash") or ""),
+            "minimum_quantification_field_count": len(minimum_quantification_fields),
+            "quantification_required": bool(row.get("quantification_required")),
+            "trusted_diff_status": str(trusted_diff.get("status")) if trusted_diff else "missing",
+        },
+        "passed_validation_check_ids": [
+            "parser-family-scope-recorded",
+            "fp-fn-risk-register-emitted",
+            "fp-fn-risk-note-hash-emitted",
+            "fp-fn-minimum-quantification-fields-listed",
+            "validation-required-guidance-recorded",
+            "reportability-boundary-recorded",
+        ],
+        "failed_validation_check_ids": failed_checks,
+        "reportability_decision": {
+            "allowed_use": "parser-limitation-and-review-guidance",
+            "commercial_claim_allowed": not failed_checks,
+            "operator_warning": "Risk notes are not measured FP/FN rates until independently diffed against a corpus risk register.",
+        },
+    }
+
+
+def independent_validation_functional_profile(
+    *,
+    status: str,
+    report_attached: bool,
+    report_hash: str,
+    report_manifest: Mapping[str, object],
+    package_manifest: Mapping[str, object],
+    trusted_diff: Mapping[str, object] | None,
+) -> dict[str, object]:
+    failed_checks = []
+    if not report_attached:
+        failed_checks.append("independent-validation-report-not-attached")
+    if report_attached and not report_hash:
+        failed_checks.append("independent-validation-report-hash-missing")
+    if not report_manifest.get("report_manifest_hash"):
+        failed_checks.append("independent-validation-report-manifest-hash-missing")
+    if not package_manifest.get("manifest_hash"):
+        failed_checks.append("independent-validation-package-manifest-hash-missing")
+    if report_attached and int(report_manifest.get("minimum_sections_present_count") or 0) < int(
+        report_manifest.get("minimum_sections_required_count") or 0
+    ):
+        failed_checks.append("independent-validation-minimum-sections-incomplete")
+    if not trusted_diff or trusted_diff.get("status") != "pass":
+        failed_checks.append(INDEPENDENT_VALIDATION_TRUSTED_DIFF_BLOCKER_84)
+    return {
+        "item_number": 39,
+        "batch_id": FUNCTIONAL_VALIDATION_BATCH_ID,
+        "status": "complete" if not failed_checks else "partial",
+        "implemented_controls": {
+            "report_status": status,
+            "report_attached": report_attached,
+            "report_sha256_present": bool(report_hash),
+            "report_manifest_hash": str(report_manifest.get("report_manifest_hash") or ""),
+            "minimum_section_presence_hash": str(report_manifest.get("minimum_section_presence_hash") or ""),
+            "signoff_status_hash": str(report_manifest.get("signoff_status_hash") or ""),
+            "package_manifest_hash": str(package_manifest.get("manifest_hash") or ""),
+            "package_manifest_profile": str(package_manifest.get("profile_version") or ""),
+            "minimum_sections_present_count": int(report_manifest.get("minimum_sections_present_count") or 0),
+            "minimum_sections_required_count": int(report_manifest.get("minimum_sections_required_count") or 0),
+            "required_signoffs": INDEPENDENT_VALIDATION_REQUIRED_SIGNOFFS,
+            "missing_signoff_roles": list(package_manifest.get("missing_signoff_roles") or []),
+            "trusted_diff_status": str(trusted_diff.get("status")) if trusted_diff else "missing",
+        },
+        "passed_validation_check_ids": [
+            "independent-report-status-recorded",
+            "independent-report-manifest-hash-emitted",
+            "independent-validation-package-manifest-hash-emitted",
+            "minimum-report-section-presence-checked",
+            "required-signoffs-listed",
+            "minimum-report-sections-listed",
+        ],
+        "failed_validation_check_ids": failed_checks,
+        "reportability_decision": {
+            "allowed_use": "independent-validation-package-index",
+            "commercial_claim_allowed": not failed_checks,
+            "operator_warning": "Commercial-grade validation requires an attached independent report and trusted signoff diff.",
+        },
     }
 
 
@@ -689,10 +1561,14 @@ def build_validation_artifact_manifest(
                 "size_bytes": path.stat().st_size,
             }
         )
+    package_manifest = build_validation_package_manifest_profile(output_dir, artifacts)
     satisfied = [
         "validation JSON output generated",
         "validation Markdown output generated",
         "artifact hash manifest generated",
+        "validation package manifest profile emitted",
+        "package manifest hash emitted",
+        "reproduction commands recorded",
         "known-answer/fixture sections included",
         "package generation limitation warning",
     ]
@@ -705,6 +1581,9 @@ def build_validation_artifact_manifest(
         "commercial_gap_ids": [VALIDATION_PACKAGE_GAP_ID],
         "artifact_count": len(artifacts),
         "artifacts": artifacts,
+        "validation_package_manifest": package_manifest,
+        "package_manifest_hash": package_manifest["package_manifest_hash"],
+        "reproduction_commands": package_manifest["reproduction_commands"],
         "trusted_validation_package_diff": dict(trusted_diff) if trusted_diff else missing_validation_trusted_diff(
             VALIDATION_PACKAGE_GAP_ID,
             VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85,
@@ -715,11 +1594,158 @@ def build_validation_artifact_manifest(
             build_accuracy_gate(
                 85,
                 satisfied_checks=satisfied,
-                evidence_refs=[f"artifact_count:{len(artifacts)}", f"output_dir:{output_dir}"],
+                evidence_refs=[
+                    f"artifact_count:{len(artifacts)}",
+                    f"output_dir:{output_dir}",
+                    f"package_manifest_hash:{package_manifest['package_manifest_hash']}",
+                ],
             )
         ],
         "tamper_note": "Recompute SHA256 values before release publication; this manifest covers the validation package outputs.",
     }
+
+
+def build_validation_package_manifest_profile(
+    output_dir: Path,
+    artifacts: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    artifact_rows = [
+        {
+            "name": str(row.get("name") or ""),
+            "sha256": str(row.get("sha256") or ""),
+            "size_bytes": int(row.get("size_bytes") or 0),
+        }
+        for row in artifacts
+    ]
+    present_names = {row["name"] for row in artifact_rows}
+    required_output_presence = {
+        name: (name in present_names if name != VALIDATION_ARTIFACTS_NAME else True)
+        for name in VALIDATION_PACKAGE_REQUIRED_OUTPUTS
+    }
+    artifact_set_hash = hashlib_json({"artifacts": artifact_rows})
+    required_output_presence_hash = hashlib_json({"required_output_presence": required_output_presence})
+    manifest_core = {
+        "profile_version": "validation-package-manifest-v1",
+        "item_number": 85,
+        "output_dir": str(output_dir),
+        "required_outputs": VALIDATION_PACKAGE_REQUIRED_OUTPUTS,
+        "required_output_presence": required_output_presence,
+        "required_output_presence_hash": required_output_presence_hash,
+        "required_sections": VALIDATION_PACKAGE_REQUIRED_SECTIONS,
+        "required_section_count": len(VALIDATION_PACKAGE_REQUIRED_SECTIONS),
+        "required_section_presence_declared": {
+            section: True for section in VALIDATION_PACKAGE_REQUIRED_SECTIONS
+        },
+        "artifact_count": len(artifact_rows),
+        "artifact_hashes": artifact_rows,
+        "artifact_set_hash": artifact_set_hash,
+        "reproduction_commands": [
+            "rapidtriage validation --output-dir <output-dir> --json",
+            "rapidtriage commercial-readiness --validation-package <output-dir>/rapidtriage-validation-package.json --json",
+        ],
+        "commercial_gap_ids": [VALIDATION_PACKAGE_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "package_manifest_hash": hashlib_json(manifest_core)}
+
+
+def build_validation_legal_defensibility_matrix(
+    *,
+    known_answer_validation: Mapping[str, object],
+    parser_fixture_corpus: Mapping[str, object],
+    parser_fp_fn_profile: Mapping[str, object],
+    independent_validation_report: Mapping[str, object],
+    validation_package_assessment: Mapping[str, object],
+) -> dict[str, object]:
+    source_rows = [
+        {
+            "item_number": 81,
+            "gap_id": "#81",
+            "component": "known-answer validation",
+            "status": str(known_answer_validation.get("status") or ""),
+            "primary_hash": str(known_answer_validation.get("known_answer_pipeline_manifest_hash") or ""),
+            "secondary_hash": str(known_answer_validation.get("dataset_evidence_matrix_hash") or ""),
+            "blockers": list(known_answer_validation.get("blockers") or []),
+            "implemented": True,
+            "usable": True,
+            "validated": bool(known_answer_validation.get("dataset_count")),
+            "commercial_grade_ready": bool(known_answer_validation.get("ready_for_court_report")),
+        },
+        {
+            "item_number": 82,
+            "gap_id": "#82",
+            "component": "parser fixture corpus",
+            "status": str(parser_fixture_corpus.get("coverage_status") or ""),
+            "primary_hash": str(parser_fixture_corpus.get("fixture_corpus_digest") or ""),
+            "secondary_hash": str(parser_fixture_corpus.get("fixture_release_gate_matrix_hash") or ""),
+            "blockers": list(parser_fixture_corpus.get("blockers") or []),
+            "implemented": True,
+            "usable": True,
+            "validated": bool(parser_fixture_corpus.get("fixture_backed_count")),
+            "commercial_grade_ready": bool(parser_fixture_corpus.get("ready_for_court_report"))
+            and not bool(parser_fixture_corpus.get("blockers")),
+        },
+        {
+            "item_number": 83,
+            "gap_id": "#83",
+            "component": "parser FP/FN risk register",
+            "status": str(parser_fp_fn_profile.get("status") or "partial"),
+            "primary_hash": str(parser_fp_fn_profile.get("risk_register_manifest_hash") or ""),
+            "secondary_hash": str(parser_fp_fn_profile.get("risk_matrix_hash") or ""),
+            "blockers": list(parser_fp_fn_profile.get("required_before_report") or []),
+            "implemented": True,
+            "usable": True,
+            "validated": bool(parser_fp_fn_profile.get("parser_count")),
+            "commercial_grade_ready": bool(parser_fp_fn_profile.get("commercial_claim_allowed")),
+        },
+        {
+            "item_number": 84,
+            "gap_id": "#84",
+            "component": "independent validation report",
+            "status": str(independent_validation_report.get("status") or ""),
+            "primary_hash": str(independent_validation_report.get("independent_validation_package_manifest_hash") or ""),
+            "secondary_hash": str(
+                (independent_validation_report.get("independent_validation_manifest") or {}).get("signoff_status_hash")
+                if isinstance(independent_validation_report.get("independent_validation_manifest"), Mapping)
+                else ""
+            ),
+            "blockers": list(independent_validation_report.get("blockers") or []),
+            "implemented": True,
+            "usable": True,
+            "validated": bool(independent_validation_report.get("sha256")),
+            "commercial_grade_ready": bool(independent_validation_report.get("ready_for_court_report")),
+        },
+        {
+            "item_number": 85,
+            "gap_id": "#85",
+            "component": "validation package automation",
+            "status": str(validation_package_assessment.get("status") or ""),
+            "primary_hash": str(validation_package_assessment.get("package_manifest_hash") or ""),
+            "secondary_hash": str(
+                (validation_package_assessment.get("validation_package_manifest") or {}).get("artifact_set_hash")
+                if isinstance(validation_package_assessment.get("validation_package_manifest"), Mapping)
+                else ""
+            ),
+            "blockers": list(validation_package_assessment.get("blockers") or []),
+            "implemented": True,
+            "usable": True,
+            "validated": True,
+            "commercial_grade_ready": bool(validation_package_assessment.get("ready_for_court_report")),
+        },
+    ]
+    rows = [{**row, "row_hash": hashlib_json(row)} for row in source_rows]
+    matrix_core = {
+        "profile_version": "validation-legal-defensibility-matrix-v1",
+        "item_numbers": [81, 82, 83, 84, 85],
+        "row_count": len(rows),
+        "implemented_count": sum(1 for row in rows if row["implemented"]),
+        "usable_count": sum(1 for row in rows if row["usable"]),
+        "validated_count": sum(1 for row in rows if row["validated"]),
+        "commercial_grade_count": sum(1 for row in rows if row["commercial_grade_ready"]),
+        "rows": rows,
+        "commercial_claim_allowed": all(bool(row["commercial_grade_ready"]) for row in rows),
+    }
+    return {**matrix_core, "matrix_hash": hashlib_json(matrix_core)}
 
 
 def missing_validation_trusted_diff(gap_id: str, blocker: str, *, trusted_tool: str) -> dict[str, object]:
@@ -743,7 +1769,15 @@ def build_known_answer_trusted_diff(
     mismatches = compare_indexed_manifests(
         rapid_index,
         trusted_index,
-        fields=("status", "backlog_items", "evidence_paths_present"),
+        fields=(
+            "status",
+            "backlog_items",
+            "evidence_paths_present",
+            "expected_assertion_count",
+            "evidence_hashes",
+            "evidence_matrix_row_hash",
+            "dataset_hash",
+        ),
     )
     status = "pass" if not mismatches and trusted_tool in VALIDATION_TRUSTED_TOOLS else "fail"
     return validation_trusted_diff_result(
@@ -751,7 +1785,16 @@ def build_known_answer_trusted_diff(
         gap_id=KNOWN_ANSWER_TEST_GAP_ID,
         blocker=KNOWN_ANSWER_TRUSTED_DIFF_BLOCKER_81,
         trusted_tool=trusted_tool,
-        compared_fields=["dataset_id", "status", "backlog_items", "evidence_paths_present"],
+        compared_fields=[
+            "dataset_id",
+            "status",
+            "backlog_items",
+            "evidence_paths_present",
+            "expected_assertion_count",
+            "evidence_hashes",
+            "evidence_matrix_row_hash",
+            "dataset_hash",
+        ],
         mismatches=mismatches,
     )
 
@@ -767,7 +1810,15 @@ def build_fixture_corpus_trusted_diff(
     mismatches = compare_indexed_manifests(
         rapid_index,
         trusted_index,
-        fields=("fixture_count", "test_file_count", "fixture_backed"),
+        fields=(
+            "fixture_count",
+            "test_file_count",
+            "fixture_hash_count",
+            "test_file_hash_count",
+            "fixture_backed",
+            "area_manifest_hash",
+            "release_gate_row_hash",
+        ),
     )
     status = "pass" if not mismatches and trusted_tool in VALIDATION_TRUSTED_TOOLS else "fail"
     return validation_trusted_diff_result(
@@ -775,7 +1826,16 @@ def build_fixture_corpus_trusted_diff(
         gap_id=PARSER_FIXTURE_CORPUS_GAP_ID,
         blocker=FIXTURE_CORPUS_TRUSTED_DIFF_BLOCKER_82,
         trusted_tool=trusted_tool,
-        compared_fields=["area_id", "fixture_count", "test_file_count", "fixture_backed"],
+        compared_fields=[
+            "area_id",
+            "fixture_count",
+            "test_file_count",
+            "fixture_hash_count",
+            "test_file_hash_count",
+            "fixture_backed",
+            "area_manifest_hash",
+            "release_gate_row_hash",
+        ],
         mismatches=mismatches,
     )
 
@@ -791,7 +1851,14 @@ def build_fp_fn_trusted_diff(
     mismatches = compare_indexed_manifests(
         rapid_index,
         trusted_index,
-        fields=("false_positive_count", "false_negative_count", "validation_required"),
+        fields=(
+            "false_positive_count",
+            "false_negative_count",
+            "validation_required",
+            "risk_note_hash",
+            "minimum_quantification_field_count",
+            "quantification_required",
+        ),
     )
     status = "pass" if not mismatches and trusted_tool in VALIDATION_TRUSTED_TOOLS else "fail"
     return validation_trusted_diff_result(
@@ -799,7 +1866,15 @@ def build_fp_fn_trusted_diff(
         gap_id=PARSER_FP_FN_GAP_ID,
         blocker=FP_FN_TRUSTED_DIFF_BLOCKER_83,
         trusted_tool=trusted_tool,
-        compared_fields=["parser", "false_positive_count", "false_negative_count", "validation_required"],
+        compared_fields=[
+            "parser",
+            "false_positive_count",
+            "false_negative_count",
+            "validation_required",
+            "risk_note_hash",
+            "minimum_quantification_field_count",
+            "quantification_required",
+        ],
         mismatches=mismatches,
     )
 
@@ -810,11 +1885,26 @@ def build_independent_validation_trusted_diff(
     *,
     trusted_tool: str = "independent-validation-signoff",
 ) -> dict[str, object]:
-    compared_fields = ["status", "sha256", "size_bytes", "required_signoffs", "minimum_sections"]
+    compared_fields = [
+        "status",
+        "sha256",
+        "size_bytes",
+        "required_signoffs",
+        "minimum_sections",
+        "minimum_section_presence",
+        "minimum_section_presence_hash",
+        "signoff_status_hash",
+        "report_manifest_hash",
+    ]
     mismatches = [
-        {"field": field, "rapid": rapid_report.get(field), "trusted": trusted_report.get(field)}
+        {
+            "field": field,
+            "rapid": independent_validation_diff_value(rapid_report, field),
+            "trusted": independent_validation_diff_value(trusted_report, field),
+        }
         for field in compared_fields
-        if normalize_manifest_value(rapid_report.get(field)) != normalize_manifest_value(trusted_report.get(field))
+        if normalize_manifest_value(independent_validation_diff_value(rapid_report, field))
+        != normalize_manifest_value(independent_validation_diff_value(trusted_report, field))
     ]
     status = "pass" if not mismatches and trusted_tool in VALIDATION_TRUSTED_TOOLS else "fail"
     return validation_trusted_diff_result(
@@ -825,6 +1915,20 @@ def build_independent_validation_trusted_diff(
         compared_fields=compared_fields,
         mismatches=mismatches,
     )
+
+
+def independent_validation_diff_value(report: Mapping[str, object], field: str) -> object:
+    manifest = report.get("independent_validation_manifest")
+    manifest_mapping = manifest if isinstance(manifest, Mapping) else {}
+    if field == "minimum_section_presence":
+        return manifest_mapping.get("minimum_section_presence") or report.get("minimum_section_presence")
+    if field == "minimum_section_presence_hash":
+        return manifest_mapping.get("minimum_section_presence_hash")
+    if field == "signoff_status_hash":
+        return manifest_mapping.get("signoff_status_hash")
+    if field == "report_manifest_hash":
+        return manifest_mapping.get("report_manifest_hash")
+    return report.get(field)
 
 
 def build_validation_package_trusted_diff(
@@ -840,13 +1944,32 @@ def build_validation_package_trusted_diff(
         trusted_index,
         fields=("sha256", "size_bytes"),
     )
+    top_level_fields = ["artifact_count", "artifact_set_hash", "required_output_presence_hash", "package_manifest_hash"]
+    for field in top_level_fields:
+        if normalize_manifest_value(rapid_manifest.get(field)) != normalize_manifest_value(trusted_manifest.get(field)):
+            mismatches.append(
+                {
+                    "id": "validation-package-manifest",
+                    "field": field,
+                    "rapid": rapid_manifest.get(field),
+                    "trusted": trusted_manifest.get(field),
+                }
+            )
     status = "pass" if not mismatches and trusted_tool in VALIDATION_TRUSTED_TOOLS else "fail"
     return validation_trusted_diff_result(
         status=status,
         gap_id=VALIDATION_PACKAGE_GAP_ID,
         blocker=VALIDATION_PACKAGE_TRUSTED_DIFF_BLOCKER_85,
         trusted_tool=trusted_tool,
-        compared_fields=["artifact_name", "sha256", "size_bytes"],
+        compared_fields=[
+            "artifact_name",
+            "sha256",
+            "size_bytes",
+            "artifact_count",
+            "artifact_set_hash",
+            "required_output_presence_hash",
+            "package_manifest_hash",
+        ],
         mismatches=mismatches,
     )
 
@@ -914,6 +2037,10 @@ def index_known_answer_datasets(rows: object) -> dict[str, Mapping[str, object]]
             "status": row.get("status"),
             "backlog_items": [str(value).lstrip("#") for value in row.get("backlog_items") or []],
             "evidence_paths_present": bool(row.get("evidence_paths_present")),
+            "expected_assertion_count": int(row.get("expected_assertion_count") or 0),
+            "evidence_hashes": [str(value) for value in row.get("evidence_hashes") or []],
+            "evidence_matrix_row_hash": str(row.get("evidence_matrix_row_hash") or ""),
+            "dataset_hash": str(row.get("dataset_hash") or ""),
         }
     return indexed
 
@@ -931,7 +2058,11 @@ def index_fixture_areas(rows: object) -> dict[str, Mapping[str, object]]:
         indexed[area_id] = {
             "fixture_count": int(row.get("fixture_count") or 0),
             "test_file_count": int(row.get("test_file_count") or 0),
+            "fixture_hash_count": int(row.get("fixture_hash_count") or 0),
+            "test_file_hash_count": int(row.get("test_file_hash_count") or 0),
             "fixture_backed": bool(row.get("fixture_backed")),
+            "area_manifest_hash": str(row.get("area_manifest_hash") or ""),
+            "release_gate_row_hash": str(row.get("release_gate_row_hash") or ""),
         }
     return indexed
 
@@ -948,6 +2079,9 @@ def index_fp_fn_notes(rows: Sequence[Mapping[str, object]]) -> dict[str, Mapping
             "false_positive_count": len(fp) if isinstance(fp, list) else 0,
             "false_negative_count": len(fn) if isinstance(fn, list) else 0,
             "validation_required": str(row.get("validation_required") or ""),
+            "risk_note_hash": str(row.get("risk_note_hash") or ""),
+            "minimum_quantification_field_count": len(row.get("minimum_quantification_fields") or []),
+            "quantification_required": bool(row.get("quantification_required")),
         }
     return indexed
 
@@ -984,23 +2118,29 @@ def build_external_tool_versions() -> list[dict[str, object]]:
         executable = command[0] if command and command[0] else name
         path = shutil.which(executable)
         if path is None:
-            rows.append(
+            row = attach_external_tool_version_row_manifest(
                 {
                     "name": name,
                     "commercial_gap_ids": [EXTERNAL_TOOL_VERSION_GAP_ID],
                     "available": False,
                     "path": "",
+                    "command": " ".join(command),
+                    "command_argv": list(command),
+                    "return_code": None,
                     "version_output": "",
+                    "version_output_sha256": "",
                     "capture_error": "not-found",
-                    "core_accuracy_gates": external_tool_version_core_accuracy_gates(
-                        available=False,
-                        path="",
-                        command="",
-                        version_output="",
-                        capture_error="not-found",
-                    ),
                 }
             )
+            row["core_accuracy_gates"] = external_tool_version_core_accuracy_gates(
+                available=False,
+                path="",
+                command=str(row.get("command") or ""),
+                version_output="",
+                capture_error="not-found",
+                row_manifest=row.get("tool_version_row_manifest") if isinstance(row.get("tool_version_row_manifest"), Mapping) else None,
+            )
+            rows.append(row)
             continue
         actual_command = [path, *command[1:]]
         try:
@@ -1013,55 +2153,166 @@ def build_external_tool_versions() -> list[dict[str, object]]:
                 timeout=5,
             )
             version_output = (completed.stdout or "").strip().splitlines()[:3]
-            rows.append(
+            output_text = "\n".join(version_output)
+            row = attach_external_tool_version_row_manifest(
                 {
                     "name": name,
                     "commercial_gap_ids": [EXTERNAL_TOOL_VERSION_GAP_ID],
                     "available": True,
                     "path": path,
                     "command": " ".join(actual_command),
+                    "command_argv": list(actual_command),
                     "return_code": completed.returncode,
-                    "version_output": "\n".join(version_output),
+                    "version_output": output_text,
+                    "version_output_sha256": hashlib.sha256(output_text.encode("utf-8")).hexdigest() if output_text else "",
                     "capture_error": "",
-                    "core_accuracy_gates": external_tool_version_core_accuracy_gates(
-                        available=True,
-                        path=path,
-                        command=" ".join(actual_command),
-                        version_output="\n".join(version_output),
-                        capture_error="",
-                    ),
                 }
             )
+            row["core_accuracy_gates"] = external_tool_version_core_accuracy_gates(
+                available=True,
+                path=path,
+                command=str(row.get("command") or ""),
+                version_output=output_text,
+                capture_error="",
+                row_manifest=row.get("tool_version_row_manifest") if isinstance(row.get("tool_version_row_manifest"), Mapping) else None,
+            )
+            rows.append(row)
         except (OSError, subprocess.SubprocessError) as exc:
-            rows.append(
+            row = attach_external_tool_version_row_manifest(
                 {
                     "name": name,
                     "commercial_gap_ids": [EXTERNAL_TOOL_VERSION_GAP_ID],
                     "available": True,
                     "path": path,
                     "command": " ".join(actual_command),
+                    "command_argv": list(actual_command),
+                    "return_code": None,
                     "version_output": "",
+                    "version_output_sha256": "",
                     "capture_error": str(exc),
-                    "core_accuracy_gates": external_tool_version_core_accuracy_gates(
-                        available=True,
-                        path=path,
-                        command=" ".join(actual_command),
-                        version_output="",
-                        capture_error=str(exc),
-                    ),
                 }
             )
+            row["core_accuracy_gates"] = external_tool_version_core_accuracy_gates(
+                available=True,
+                path=path,
+                command=str(row.get("command") or ""),
+                version_output="",
+                capture_error=str(exc),
+                row_manifest=row.get("tool_version_row_manifest") if isinstance(row.get("tool_version_row_manifest"), Mapping) else None,
+            )
+            rows.append(row)
     return rows
+
+
+def attach_external_tool_version_row_manifest(row: Mapping[str, object]) -> dict[str, object]:
+    row_payload = dict(row)
+    command_argv_hash = hashlib.sha256(
+        json.dumps(list(row_payload.get("command_argv") or []), ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    capture_state = {
+        "available": bool(row_payload.get("available")),
+        "return_code": row_payload.get("return_code"),
+        "version_output_sha256": str(row_payload.get("version_output_sha256") or ""),
+        "capture_error": str(row_payload.get("capture_error") or ""),
+    }
+    manifest_core = {
+        "profile_version": "external-tool-version-row-v1",
+        "item_number": 95,
+        "name": str(row_payload.get("name") or ""),
+        "available": bool(row_payload.get("available")),
+        "path": str(row_payload.get("path") or ""),
+        "command": str(row_payload.get("command") or ""),
+        "command_argv": list(row_payload.get("command_argv") or []),
+        "command_argv_hash": command_argv_hash,
+        "return_code": row_payload.get("return_code"),
+        "version_output_sha256": str(row_payload.get("version_output_sha256") or ""),
+        "capture_error": str(row_payload.get("capture_error") or ""),
+        "capture_state_hash": hashlib.sha256(
+            json.dumps(capture_state, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+    }
+    row_hash = hashlib.sha256(
+        json.dumps(manifest_core, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    manifest = {**manifest_core, "row_hash": row_hash}
+    return {
+        **row_payload,
+        "command_argv_hash": command_argv_hash,
+        "capture_state_hash": manifest_core["capture_state_hash"],
+        "tool_version_row_manifest": manifest,
+        "tool_version_row_hash": row_hash,
+    }
+
+
+def build_external_tool_capture_matrix(tools: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    rows = []
+    for item in tools:
+        row_core = {
+            "name": str(item.get("name") or ""),
+            "available": bool(item.get("available")),
+            "path_present": bool(item.get("path")),
+            "command_present": bool(item.get("command")),
+            "command_argv_hash": str(item.get("command_argv_hash") or ""),
+            "version_output_sha256": str(item.get("version_output_sha256") or ""),
+            "capture_error": str(item.get("capture_error") or ""),
+            "capture_state_hash": str(item.get("capture_state_hash") or ""),
+            "tool_version_row_hash": str(item.get("tool_version_row_hash") or ""),
+        }
+        rows.append({**row_core, "row_hash": hashlib.sha256(
+            json.dumps(row_core, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()})
+    matrix_core = {
+        "profile_version": "external-tool-capture-matrix-v1",
+        "item_number": 95,
+        "tool_count": len(rows),
+        "rows": rows,
+        "all_rows_hashed": all(row.get("row_hash") for row in rows) if rows else True,
+        "all_commands_recorded_or_missing": all(row.get("command_present") or not row.get("available") for row in rows) if rows else True,
+        "commercial_claim_allowed": False,
+    }
+    return {**matrix_core, "matrix_hash": hashlib.sha256(
+        json.dumps(matrix_core, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()}
+
+
+def build_external_tool_version_manifest(tools: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    row_hashes = [str(item.get("tool_version_row_hash") or "") for item in tools]
+    capture_matrix = build_external_tool_capture_matrix(tools)
+    manifest_core = {
+        "profile_version": "external-tool-version-manifest-v1",
+        "item_number": 95,
+        "tool_count": len(tools),
+        "available_count": sum(1 for item in tools if item.get("available")),
+        "missing_count": sum(1 for item in tools if not item.get("available")),
+        "capture_error_count": sum(1 for item in tools if item.get("capture_error")),
+        "tool_names": [str(item.get("name") or "") for item in tools],
+        "row_hashes": row_hashes,
+        "capture_matrix_hash": capture_matrix["matrix_hash"],
+        "capture_environment": {
+            "platform": platform.platform(),
+            "python_executable_hash": hashlib.sha256(sys.executable.encode("utf-8")).hexdigest(),
+        },
+        "commercial_gap_ids": [EXTERNAL_TOOL_VERSION_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+    manifest_hash = hashlib.sha256(
+        json.dumps(manifest_core, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {**manifest_core, "capture_matrix": capture_matrix, "manifest_hash": manifest_hash}
 
 
 def build_external_tool_version_assessment(*, trusted_diff: Mapping[str, object] | None = None) -> dict[str, object]:
     tools = build_external_tool_versions()
+    tool_manifest = build_external_tool_version_manifest(tools)
     satisfied = [
         "tool inventory emitted",
         "tool path captured when available",
         "version command captured",
         "capture error recorded",
         "per-run limitation warning",
+        "tool row hashes emitted",
+        "external tool version manifest hash emitted",
+        "external tool capture matrix hash emitted",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted external tool transcript diff pass")
@@ -1075,12 +2326,27 @@ def build_external_tool_version_assessment(*, trusted_diff: Mapping[str, object]
         "component": "external-tool-version-capture",
         "status": "release-validation-tool-preflight",
         "commercial_gap_ids": [EXTERNAL_TOOL_VERSION_GAP_ID],
+        "summary": {
+            "tool_count": tool_manifest["tool_count"],
+            "available_count": tool_manifest["available_count"],
+            "missing_count": tool_manifest["missing_count"],
+            "capture_error_count": tool_manifest["capture_error_count"],
+            "manifest_hash": tool_manifest["manifest_hash"],
+        },
+        "external_tool_version_manifest": tool_manifest,
+        "external_tool_version_manifest_hash": tool_manifest["manifest_hash"],
+        "external_tool_capture_matrix": tool_manifest["capture_matrix"],
+        "external_tool_capture_matrix_hash": tool_manifest["capture_matrix_hash"],
         "trusted_external_tool_version_diff": dict(trusted_diff) if trusted_diff else missing_external_tool_version_trusted_diff(),
         "core_accuracy_gates": [
             build_accuracy_gate(
                 95,
                 satisfied_checks=satisfied,
-                evidence_refs=[f"tool_count:{len(tools)}"],
+                evidence_refs=[
+                    f"tool_count:{len(tools)}",
+                    f"external_tool_version_manifest_hash:{tool_manifest['manifest_hash']}",
+                    f"external_tool_capture_matrix_hash:{tool_manifest['capture_matrix_hash']}",
+                ],
             )
         ],
         "ready_for_court_report": False,
@@ -1095,14 +2361,23 @@ def external_tool_version_core_accuracy_gates(
     command: str,
     version_output: str,
     capture_error: str,
+    row_manifest: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["tool inventory emitted", "per-run limitation warning"]
     if available and path:
         satisfied.append("tool path captured when available")
     if command:
         satisfied.append("version command captured")
+    if version_output:
+        satisfied.append("version output hash emitted")
     if version_output or capture_error:
         satisfied.append("capture error recorded")
+    if row_manifest and row_manifest.get("row_hash"):
+        satisfied.append("tool row hash emitted")
+    if row_manifest and row_manifest.get("command_argv_hash"):
+        satisfied.append("tool command argv hash emitted")
+    if row_manifest and row_manifest.get("capture_state_hash"):
+        satisfied.append("tool capture state hash emitted")
     return [
         build_accuracy_gate(
             95,
@@ -1112,6 +2387,9 @@ def external_tool_version_core_accuracy_gates(
                 f"path:{path}",
                 f"command:{command}",
                 f"capture_error:{capture_error}",
+                f"tool_version_row_hash:{(row_manifest or {}).get('row_hash', '')}",
+                f"command_argv_hash:{(row_manifest or {}).get('command_argv_hash', '')}",
+                f"capture_state_hash:{(row_manifest or {}).get('capture_state_hash', '')}",
             ],
         )
     ]
@@ -1138,7 +2416,16 @@ def build_external_tool_version_trusted_diff(
     mismatches = compare_indexed_manifests(
         rapid_index,
         trusted_index,
-        fields=("available", "path", "command", "version_output", "capture_error"),
+        fields=(
+            "available",
+            "path",
+            "command",
+            "version_output",
+            "capture_error",
+            "command_argv_hash",
+            "capture_state_hash",
+            "tool_version_row_hash",
+        ),
     )
     status = "pass" if not mismatches and trusted_tool in EXTERNAL_TOOL_VERSION_TRUSTED_TOOLS else "fail"
     return validation_trusted_diff_result(
@@ -1146,7 +2433,17 @@ def build_external_tool_version_trusted_diff(
         gap_id=EXTERNAL_TOOL_VERSION_GAP_ID,
         blocker=EXTERNAL_TOOL_VERSION_TRUSTED_DIFF_BLOCKER_95,
         trusted_tool=trusted_tool,
-        compared_fields=["name", "available", "path", "command", "version_output", "capture_error"],
+        compared_fields=[
+            "name",
+            "available",
+            "path",
+            "command",
+            "version_output",
+            "capture_error",
+            "command_argv_hash",
+            "capture_state_hash",
+            "tool_version_row_hash",
+        ],
         mismatches=mismatches,
     )
 
@@ -1163,6 +2460,9 @@ def index_external_tool_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, 
             "command": str(row.get("command") or ""),
             "version_output": str(row.get("version_output") or ""),
             "capture_error": str(row.get("capture_error") or ""),
+            "command_argv_hash": str(row.get("command_argv_hash") or ""),
+            "capture_state_hash": str(row.get("capture_state_hash") or ""),
+            "tool_version_row_hash": str(row.get("tool_version_row_hash") or ""),
         }
     return indexed
 

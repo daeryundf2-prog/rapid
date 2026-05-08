@@ -9,7 +9,7 @@
       "title": "Parser crash isolation",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Synthetic parser failures are isolated into parser_errors, failed parser JSON output remains machine-readable, summaries preserve parser error counts, trusted crash-corpus diff helpers/gates, and #71 core_accuracy_gates are attached."
+        "Synthetic parser failures are isolated into parser_errors with error hashes, crash context, parser-error inventory head hash, failed parser JSON output remains machine-readable, summaries preserve parser error counts, trusted crash-corpus diff helpers/gates, and #71 core_accuracy_gates are attached."
       ],
       "remaining_external_validation": ["Native process sandboxing for all parsers, trusted crash-corpus manifests, and corrupt-input fuzz/crash corpus validation."]
     },
@@ -18,7 +18,7 @@
       "title": "Memory cap enforcement",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Run processing metadata records configured memory caps, RSS readings, stage-boundary checks, fail-fast warnings, trusted RSS diff helpers/gates, and #72 core_accuracy_gates."
+        "Run processing metadata records configured memory caps, RSS readings, utilization/over-cap policy profiles, stage-boundary checks, fail-fast warnings, trusted RSS diff helpers/gates, and #72 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Hard OS resource limits, trusted RSS manifests, and platform-specific RSS validation on Windows, macOS, and Linux."]
     },
@@ -27,7 +27,7 @@
       "title": "Preview sandboxing",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Source preview metadata records read-only bounded rendering, active-content blocking, no network execution, preview caps, trusted no-exec diff helpers/gates, and #73 core_accuracy_gates."
+        "Source preview metadata records read-only bounded rendering, active-content blocking, no network execution, preview caps, preview-sandbox policy profiles, escaped bounded renderer strategy, trusted no-exec diff helpers/gates, and #73 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Separate OS sandbox for risky renderers/codecs, trusted no-exec manifests, and malicious active-content corpus validation."]
     },
@@ -36,7 +36,7 @@
       "title": "Large SQLite/FTS optimization",
       "test_files": ["tests/test_rapidtriage_api.py", "tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB and source-viewer SQLite outputs preserve WAL/cache pragmas, table profiles, searchable text column counts, bounded row previews, trusted query-plan diff helpers/gates, and #74 core_accuracy_gates."
+        "Case DB and source-viewer SQLite outputs preserve WAL/cache pragmas, table profiles, searchable text column counts, bounded row previews, source preview query-plan profiles, Case DB query-plan head hashes, trusted query-plan diff helpers/gates, and #74 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Trusted query-plan manifests, 10M-row benchmark, deleted-row/WAL replay validation, and query-plan regression gates."]
     },
@@ -45,16 +45,16 @@
       "title": "Parallel parser scheduler",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Run summaries preserve bounded worker count, deterministic output paths, per-parser capture, resume-aware scheduling, trusted scheduler diff helpers/gates, and #75 core_accuracy_gates."
+        "Run summaries preserve bounded worker count, deterministic output paths, per-parser capture, resume-aware scheduling, scheduler run manifest hash, per-parser duration telemetry, trusted scheduler diff helpers/gates, and #75 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Trusted scheduler manifests, distributed priority queue, live per-worker telemetry, and TB-scale fairness/backpressure validation."]
+      "remaining_external_validation": ["Trusted scheduler manifests, distributed priority queue, live per-worker telemetry UI/stream, and TB-scale fairness/backpressure validation."]
     },
     {
       "item": 76,
       "title": "File hash cache",
       "test_files": ["tests/test_rapidtriage_files.py", "tests/test_rapidtriage_api.py"],
       "assertions": [
-        "File scan and source metadata outputs preserve MD5/SHA1/SHA256 support, path-size-mtime cache metadata, hit/miss counters, trusted hash-cache manifest diff helpers/gates, and #76 core_accuracy_gates."
+        "File scan and source metadata outputs preserve MD5/SHA1/SHA256 support, path-size-mtime-inode cache metadata, hit/miss/invalidation counters, hash-cache-manifest-v1 path-hash entries, manifest hash, trusted hash-cache manifest diff helpers/gates, and #76 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Persistent content-addressed cache, trusted hash-cache manifests, and large-case hit-ratio validation."]
     },
@@ -63,34 +63,34 @@
       "title": "Duplicate file/content detection",
       "test_files": ["tests/test_rapidtriage_files.py"],
       "assertions": [
-        "File scans preserve same-size candidate bucketing, bounded SHA256 confirmation, duplicate group counts, representative paths, trusted duplicate file manifest diff helpers/gates, and #77 core_accuracy_gates."
+        "File scans preserve same-size candidate bucketing, bounded SHA256 confirmation, duplicate group counts, stable group IDs/fingerprints, representative paths, not-suppressed analyst-review policy, duplicate-content-manifest-v1 manifest hashes, trusted duplicate file manifest diff helpers/gates, and #77 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Fuzzy text/media duplicate grouping, trusted duplicate group manifests, and analyst suppression workflow validation."]
+      "remaining_external_validation": ["Fuzzy text/media duplicate grouping, trusted external duplicate group manifests, and analyst suppression workflow validation."]
     },
     {
       "item": 78,
       "title": "Artifact pagination/cursor API",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "API output preserves cursor tokens, offset/limit/total metadata, next/previous cursors, bounded rows, trusted pagination cursor manifest diff helpers/gates, and #78 core_accuracy_gates."
+        "API output preserves cursor tokens, offset/limit/total metadata, next/previous cursors, bounded rows, corrected last-page has_more semantics, pagination-cursor-manifest-v1 page-window IDs/manifest hashes, trusted pagination cursor manifest diff helpers/gates, and #78 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Snapshot-isolated database cursors, trusted pagination manifests, and endpoint-wide compatibility validation."]
+      "remaining_external_validation": ["Snapshot-isolated database cursors, trusted external pagination manifests, and endpoint-wide compatibility validation."]
     },
     {
       "item": 79,
       "title": "UI virtualization for massive result tables",
       "test_files": ["tests/test_rapidtriage_api.py", "rapidtriage/web/static/app.js"],
       "assertions": [
-        "API pagination and web UI metadata preserve bounded visible row windows, visible-row disclosure, keyboard/filter workflow, API pagination links, trusted UI virtualization manifest diff helpers/gates, and #79 core_accuracy_gates."
+        "API pagination and web UI metadata preserve bounded visible row windows, ui-virtualization-manifest-v1 row-window IDs/manifest hashes, visible-row disclosure, previous/next 300-row windows, keyboard/filter workflow, API pagination links, trusted UI virtualization manifest diff helpers/gates, and #79 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Full recycling virtual scroller, trusted browser row-window manifests, persisted viewport restoration, and browser e2e performance evidence."]
+      "remaining_external_validation": ["Full recycling virtual scroller, trusted browser row-window manifests, persisted viewport restoration across reloads, and browser e2e performance evidence."]
     },
     {
       "item": 80,
       "title": "Long-running job cancellation/retry",
       "test_files": ["tests/test_rapidtriage_ops.py"],
       "assertions": [
-        "Job payloads preserve queued/running cancellation, failed/canceled retry support, persisted cancel flags, partial-output warnings, trusted cancellation/retry transition diff helpers/gates, and #80 core_accuracy_gates."
+        "Job payloads preserve queued/running cancellation, failed/canceled retry support, persisted cancel flags, retry_lineage_profile, job-partial-output-policy-v1, cancellation-retry-manifest-v1 hashes, trusted cancellation/retry transition diff helpers/gates, and #80 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Parser-level cancellation under load, trusted cancellation/retry transition manifests, and partial-output cleanup/resume validation."]
     }

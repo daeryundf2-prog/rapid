@@ -46,6 +46,94 @@
       "#77"
     ]
   },
+  "hash_cache_manifest": {
+    "profile": "hash-cache-manifest-v1",
+    "item_number": 76,
+    "entry_count": 2,
+    "event_count": 2,
+    "entries_truncated": false,
+    "events_truncated": false,
+    "stats": {
+      "hits": "<HASH_CACHE_HITS>",
+      "misses": "<HASH_CACHE_MISSES>",
+      "invalidations": "<HASH_CACHE_INVALIDATIONS>"
+    },
+    "cache_key_fields": [
+      "path",
+      "size",
+      "mtime_ns",
+      "inode",
+      "device"
+    ],
+    "algorithms": [
+      "md5",
+      "sha1",
+      "sha256"
+    ],
+    "policy": {
+      "scope": "process-local",
+      "persistent_across_restarts": false,
+      "stale_entry_invalidation": "same-path size/mtime/inode/device mismatch invalidates previous entries",
+      "path_disclosure": "full paths are hashed in manifest entries; basename is retained for analyst orientation"
+    },
+    "entries": [
+      {
+        "path_hash": "<PATH_HASH>",
+        "name": "bundle.zip",
+        "size": 4,
+        "mtime_ns": "<MTIME_NS>",
+        "inode": "<INODE>",
+        "device": "<DEVICE>",
+        "algorithms": [
+          "md5",
+          "sha1",
+          "sha256"
+        ],
+        "sha256": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2"
+      },
+      {
+        "path_hash": "<PATH_HASH>",
+        "name": "tool.exe",
+        "size": 4,
+        "mtime_ns": "<MTIME_NS>",
+        "inode": "<INODE>",
+        "device": "<DEVICE>",
+        "algorithms": [
+          "md5",
+          "sha1",
+          "sha256"
+        ],
+        "sha256": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31"
+      }
+    ],
+    "recent_events": [
+      {
+        "action": "miss",
+        "path_hash": "<PATH_HASH>",
+        "name": "tool.exe",
+        "size": 4,
+        "mtime_ns": "<MTIME_NS>",
+        "inode": "<INODE>",
+        "device": "<DEVICE>",
+        "cache_hit": false
+      },
+      {
+        "action": "miss",
+        "path_hash": "<PATH_HASH>",
+        "name": "bundle.zip",
+        "size": 4,
+        "mtime_ns": "<MTIME_NS>",
+        "inode": "<INODE>",
+        "device": "<DEVICE>",
+        "cache_hit": false
+      }
+    ],
+    "commercial_gap_ids": [
+      "#76"
+    ],
+    "commercial_claim_allowed": false,
+    "manifest_hash": "<HASH_CACHE_MANIFEST_HASH>"
+  },
   "hash_cache_assessment": {
     "component": "file-hash-cache",
     "status": "in-process-path-size-mtime-cache",
@@ -61,7 +149,109 @@
     "entry_count": "<HASH_CACHE_ENTRY_COUNT>",
     "hit_count": "<HASH_CACHE_HIT_COUNT>",
     "miss_count": "<HASH_CACHE_MISS_COUNT>",
+    "invalidation_count": "<HASH_CACHE_INVALIDATION_COUNT>",
+    "hash_cache_manifest": {
+      "profile": "hash-cache-manifest-v1",
+      "item_number": 76,
+      "entry_count": 2,
+      "event_count": 2,
+      "entries_truncated": false,
+      "events_truncated": false,
+      "stats": {
+        "hits": "<HASH_CACHE_HITS>",
+        "misses": "<HASH_CACHE_MISSES>",
+        "invalidations": "<HASH_CACHE_INVALIDATIONS>"
+      },
+      "cache_key_fields": [
+        "path",
+        "size",
+        "mtime_ns",
+        "inode",
+        "device"
+      ],
+      "algorithms": [
+        "md5",
+        "sha1",
+        "sha256"
+      ],
+      "policy": {
+        "scope": "process-local",
+        "persistent_across_restarts": false,
+        "stale_entry_invalidation": "same-path size/mtime/inode/device mismatch invalidates previous entries",
+        "path_disclosure": "full paths are hashed in manifest entries; basename is retained for analyst orientation"
+      },
+      "entries": [
+        {
+          "path_hash": "<PATH_HASH>",
+          "name": "bundle.zip",
+          "size": 4,
+          "mtime_ns": "<MTIME_NS>",
+          "inode": "<INODE>",
+          "device": "<DEVICE>",
+          "algorithms": [
+            "md5",
+            "sha1",
+            "sha256"
+          ],
+          "sha256": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2"
+        },
+        {
+          "path_hash": "<PATH_HASH>",
+          "name": "tool.exe",
+          "size": 4,
+          "mtime_ns": "<MTIME_NS>",
+          "inode": "<INODE>",
+          "device": "<DEVICE>",
+          "algorithms": [
+            "md5",
+            "sha1",
+            "sha256"
+          ],
+          "sha256": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31"
+        }
+      ],
+      "recent_events": [
+        {
+          "action": "miss",
+          "path_hash": "<PATH_HASH>",
+          "name": "tool.exe",
+          "size": 4,
+          "mtime_ns": "<MTIME_NS>",
+          "inode": "<INODE>",
+          "device": "<DEVICE>",
+          "cache_hit": false
+        },
+        {
+          "action": "miss",
+          "path_hash": "<PATH_HASH>",
+          "name": "bundle.zip",
+          "size": 4,
+          "mtime_ns": "<MTIME_NS>",
+          "inode": "<INODE>",
+          "device": "<DEVICE>",
+          "cache_hit": false
+        }
+      ],
+      "commercial_gap_ids": [
+        "#76"
+      ],
+      "commercial_claim_allowed": false,
+      "manifest_hash": "<HASH_CACHE_MANIFEST_HASH>"
+    },
     "ready_for_court_report": false,
+    "trusted_hash_cache_diff": {
+      "status": "missing",
+      "trusted_tool": null,
+      "commercial_gap_ids": [
+        "#76"
+      ],
+      "blocker": "trusted-hash-cache-manifest-diff-missing",
+      "required_trusted_tools": [
+        "content-addressed-cache-oracle",
+        "hash-cache-manifest",
+        "known-answer-hash-cache-export"
+      ]
+    },
     "core_accuracy_gates": [
       {
         "gap_id": "#76"
@@ -70,8 +260,30 @@
     "blockers": [
       "cache-is-process-local-not-persistent-across-restarts",
       "cache-key-uses-path-size-mtime-not-verified-content-addressed-store",
-      "large-scale-hash-cache-hit-ratio-validation-remains-required"
+      "large-scale-hash-cache-hit-ratio-validation-remains-required",
+      "trusted-hash-cache-manifest-diff-missing"
     ]
+  },
+  "duplicate_content_manifest": {
+    "profile": "duplicate-content-manifest-v1",
+    "item_number": 77,
+    "method": "same-size-bucket-sha256-confirmation",
+    "group_count": 0,
+    "duplicate_file_count": 0,
+    "exact_hash_grouping": true,
+    "fuzzy_text_grouping": false,
+    "perceptual_media_grouping": false,
+    "suppression_policy": {
+      "auto_suppression_enabled": false,
+      "analyst_override_required": true,
+      "report_suppression_default": "not-suppressed"
+    },
+    "groups": [],
+    "commercial_gap_ids": [
+      "#77"
+    ],
+    "commercial_claim_allowed": false,
+    "manifest_hash": "<DUPLICATE_CONTENT_MANIFEST_HASH>"
   },
   "duplicate_detection_assessment": {
     "component": "duplicate-file-content-detection",
@@ -79,9 +291,73 @@
     "commercial_gap_ids": [
       "#77"
     ],
+    "functional_priority_profile": {
+      "batch_id": "commercial-uplift-031-035",
+      "item_number": 33,
+      "gap_id": "#33",
+      "component": "duplicate-suppression",
+      "status": "implemented-hash-identical-grouping-validation-required",
+      "implemented": true,
+      "usable": true,
+      "validated": true,
+      "ready_for_commercial_claim": false,
+      "controls": {
+        "duplicate_group_count": 0,
+        "duplicate_file_count": 0,
+        "same_size_candidate_bucketing": true,
+        "bounded_sha256_confirmation": true,
+        "representative_paths_listed": true,
+        "collapse_by_default_in_ui": false,
+        "auto_suppression_enabled": false,
+        "analyst_override_required_before_report_suppression": true
+      },
+      "blockers": [
+        "trusted-duplicate-file-manifest-diff-missing",
+        "ui-collapse-and-suppression-state-not-yet-persisted",
+        "near-duplicate-text-and-perceptual-media-similarity-not-complete"
+      ],
+      "validation_evidence": [
+        "files-output-emits-functional-duplicate-suppression-profile",
+        "unit-test-asserts-duplicate-profile-contract"
+      ]
+    },
+    "duplicate_content_manifest": {
+      "profile": "duplicate-content-manifest-v1",
+      "item_number": 77,
+      "method": "same-size-bucket-sha256-confirmation",
+      "group_count": 0,
+      "duplicate_file_count": 0,
+      "exact_hash_grouping": true,
+      "fuzzy_text_grouping": false,
+      "perceptual_media_grouping": false,
+      "suppression_policy": {
+        "auto_suppression_enabled": false,
+        "analyst_override_required": true,
+        "report_suppression_default": "not-suppressed"
+      },
+      "groups": [],
+      "commercial_gap_ids": [
+        "#77"
+      ],
+      "commercial_claim_allowed": false,
+      "manifest_hash": "<DUPLICATE_CONTENT_MANIFEST_HASH>"
+    },
     "duplicate_group_count": 0,
     "duplicate_file_count": 0,
     "ready_for_court_report": false,
+    "trusted_duplicate_content_diff": {
+      "status": "missing",
+      "trusted_tool": null,
+      "commercial_gap_ids": [
+        "#77"
+      ],
+      "blocker": "trusted-duplicate-file-manifest-diff-missing",
+      "required_trusted_tools": [
+        "content-hash-oracle",
+        "duplicate-file-manifest",
+        "known-answer-duplicate-group-export"
+      ]
+    },
     "core_accuracy_gates": [
       {
         "gap_id": "#77"
@@ -90,12 +366,15 @@
     "supports": [
       "same-size-candidate-bucketing",
       "bounded-content-sha256-confirmation",
-      "representative-path-lists"
+      "representative-path-lists",
+      "duplicate-content-manifest",
+      "not-suppressed-until-analyst-review"
     ],
     "blockers": [
       "near-duplicate-text-and-media-similarity-are-not-full-file-deduplication",
       "hashing-is-bounded-to-protect-large-case-responsiveness",
-      "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports"
+      "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports",
+      "trusted-duplicate-file-manifest-diff-missing"
     ]
   },
   "core_accuracy_gates": [

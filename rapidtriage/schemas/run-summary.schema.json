@@ -228,6 +228,10 @@
                 "type": "string"
               }
             },
+            "manifest": {
+              "type": "object",
+              "additionalProperties": true
+            },
             "assessment": {
               "type": "object",
               "additionalProperties": true
@@ -285,6 +289,8 @@
         "parser_crash_isolation",
         "memory_cap_enforcement",
         "parallel_parser_scheduler",
+        "functional_large_data_profiles",
+        "runtime_defensibility_profiles",
         "caps",
         "step_count",
         "warning_count",
@@ -333,6 +339,14 @@
           "additionalProperties": true
         },
         "parallel_parser_scheduler": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "functional_large_data_profiles": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "runtime_defensibility_profiles": {
           "type": "object",
           "additionalProperties": true
         },

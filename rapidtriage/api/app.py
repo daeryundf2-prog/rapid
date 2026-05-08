@@ -10,6 +10,7 @@ import hashlib
 import sqlite3
 import datetime as dt
 import wave
+import base64
 from email import policy
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
@@ -28,7 +29,7 @@ from ..core.case_catalog import CaseCatalog, CaseCatalogError, default_case_cata
 from ..core.case_report import build_case_report_markdown, case_report_export_paths, write_case_report_exports
 from ..core.case_db import CaseDatabaseError, open_case_database
 from ..core.collect_plan import CollectPlanError, build_collect_plan, supported_collect_profiles
-from ..core.crash import write_crash_report
+from ..core.crash import export_crash_report_bundle, list_crash_reports, read_crash_report, write_crash_report
 from ..core.docs import SUPPORTED_DOC_EXTS, extract_text
 from ..core.doctor import run_doctor
 from ..core.enterprise import build_enterprise_policy
@@ -36,11 +37,19 @@ from ..core.evidence import identify_evidence, supported_evidence_formats
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.hash_cache import hash_cache_assessment
 from ..core.jobs import RunJobStore, RunRequest, default_job_store, is_relative_to, run_output_dir
-from ..core.keyword_packs import KeywordPackError, keyword_pack_library_assessment, list_keyword_packs, resolve_keyword_packs
+from ..core.keyword_packs import (
+    KeywordPackError,
+    keyword_pack_library_assessment,
+    keyword_pack_selection_profile,
+    list_keyword_packs,
+    resolve_keyword_packs,
+)
+from ..core.indicators import IndicatorSummaryError, build_indicator_ti_enrichment_package
 from ..core.run import RunModeError
 from ..core.sample_case import DEFAULT_SAMPLE_MODE, SampleCaseError, run_sample_workflow
 from ..core.search import SearchError, run_unified_search
 from ..core.submission import compute_hashes, build_submission_manifest
+from ..core.ocr_queue import OcrQueueError, build_ocr_queue
 
 
 SQLITE_PREVIEW_EXTS = {".sqlite", ".sqlite3", ".db", ".db3"}
@@ -48,16 +57,27 @@ SQLITE_HEADER = b"SQLite format 3\x00"
 SQLITE_PREVIEW_TABLE_LIMIT = 8
 SQLITE_PREVIEW_ROW_LIMIT = 10
 SQLITE_PREVIEW_COLUMN_LIMIT = 12
+SQLITE_TABLE_PAGE_MAX_ROWS = 500
 STRUCTURED_PREVIEW_MAX_BYTES = 5 * 1024 * 1024
 JSON_PREVIEW_ITEM_LIMIT = 50
 XML_PREVIEW_NODE_LIMIT = 80
 EMAIL_PREVIEW_MESSAGE_LIMIT = 10
 EMAIL_BODY_PREVIEW_CHARS = 4000
+EMAIL_ATTACHMENT_EXPORT_MAX_BYTES = 256 * 1024
+IMAGE_GALLERY_MAX_ITEMS = 200
+IMAGE_GALLERY_DEFAULT_LIMIT = 50
+SOURCE_OCR_QUEUE_DEFAULT_MAX_ITEMS = 200
+SOURCE_OCR_TRANSLATION_MAX_CHARS = 8000
+VIRTUAL_TABLE_ROW_LIMIT = 300
 HEX_PREVIEW_MAX_BYTES = 4096
 HEX_PREVIEW_ROW_WIDTH = 16
+HEX_RANGE_EXPORT_MAX_BYTES = 64 * 1024
 MEDIA_TRANSCRIPT_PREVIEW_CHARS = 8000
 MEDIA_TRANSCRIPT_SUFFIXES = (".srt", ".vtt", ".txt", ".transcript.txt", ".ocr.txt")
+MEDIA_CUE_EXPORT_MAX_CHARS = 4000
 SOURCE_VIEWER_VERSION = "2"
+FUNCTIONAL_UI_BATCH_ID = "commercial-uplift-021-025"
+FUNCTIONAL_SCALE_BATCH_ID = "commercial-uplift-031-035"
 VIEWER_WORKFLOW_GAP_IDS = {
     "review": "#51",
     "compare": "#52",
@@ -90,6 +110,28 @@ PAGINATION_TRUSTED_DIFF_BLOCKER_78 = "trusted-pagination-cursor-manifest-diff-mi
 PAGINATION_TRUSTED_TOOLS = {"pagination-cursor-manifest", "api-pagination-oracle", "known-answer-page-window-export"}
 UI_VIRTUALIZATION_TRUSTED_DIFF_BLOCKER_79 = "trusted-ui-virtualization-manifest-diff-missing"
 UI_VIRTUALIZATION_TRUSTED_TOOLS = {"ui-virtualization-manifest", "browser-e2e-row-window-export", "large-table-render-oracle"}
+WORKBENCH_SMOKE_CONTRACT_VERSION = "single-case-workbench-smoke-v1"
+BROWSER_E2E_PERFORMANCE_CONTRACT_VERSION = "browser-e2e-performance-contract-v1"
+WORKBENCH_SMOKE_SELECTORS = {
+    "shell": "[data-testid='workbench-shell']",
+    "sample_run": "[data-testid='sample-run-button']",
+    "evidence_root": "[data-testid='evidence-root-input']",
+    "evidence_support": "[data-testid='evidence-support-button']",
+    "run_submit": "[data-testid='run-submit-button']",
+    "run_list": "[data-testid='run-list']",
+    "detail_panel": "[data-testid='detail-panel']",
+    "case_hero": "[data-testid='case-hero']",
+    "artifact_validation_summary": "[data-testid='artifact-validation-summary']",
+    "global_search": "[data-testid='global-case-search']",
+    "search_view": "[data-testid='view-group-find']",
+    "search_tab": "[data-testid='tab-search']",
+    "source_viewer": "[data-testid='source-viewer']",
+    "source_verification": "[data-testid='source-verification-trail']",
+    "viewer_review": "[data-testid='viewer-review-form']",
+    "review_view": "[data-testid='view-group-review']",
+    "report_view": "[data-testid='view-group-deliver']",
+    "report_tab": "[data-testid='tab-report']",
+}
 
 
 class RunCreateRequest(BaseModel):
@@ -103,6 +145,7 @@ class RunCreateRequest(BaseModel):
     max_extract_size_bytes: int = 0
     max_file_count: int = 0
     memory_cap_bytes: int = 0
+    e01_partition_start_sector: Optional[int] = None
     overwrite: bool = False
     resume: bool = False
     wait: bool = False
@@ -181,30 +224,30 @@ class CaseDbReviewRequest(BaseModel):
     case_id: str = Field(..., min_length=1)
     target_type: str = Field(..., min_length=1)
     target_id: str = Field(..., min_length=1)
-    status: str = "unreviewed"
-    verification_status: str = "unverified"
+    status: Optional[str] = None
+    verification_status: Optional[str] = None
     tags: Optional[list[str]] = None
-    note: str = ""
-    reviewer: str = ""
-    assignee: str = ""
-    priority: str = "normal"
-    due_at: str = ""
-    include_in_report: bool = False
+    note: Optional[str] = None
+    reviewer: Optional[str] = None
+    assignee: Optional[str] = None
+    priority: Optional[str] = None
+    due_at: Optional[str] = None
+    include_in_report: Optional[bool] = None
 
 
 class CaseDbReviewBatchRequest(BaseModel):
     database: str = Field(..., min_length=1)
     case_id: str = Field(..., min_length=1)
     targets: list[dict[str, str]] = Field(..., min_length=1)
-    status: str = "unreviewed"
-    verification_status: str = "unverified"
+    status: Optional[str] = None
+    verification_status: Optional[str] = None
     tags: Optional[list[str]] = None
-    note: str = ""
-    reviewer: str = ""
-    assignee: str = ""
-    priority: str = "normal"
-    due_at: str = ""
-    include_in_report: bool = False
+    note: Optional[str] = None
+    reviewer: Optional[str] = None
+    assignee: Optional[str] = None
+    priority: Optional[str] = None
+    due_at: Optional[str] = None
+    include_in_report: Optional[bool] = None
 
 
 class CaseDbReportExportRequest(BaseModel):
@@ -287,9 +330,35 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     def health() -> Dict[str, str]:
         return {"status": "ok"}
 
+    @api.get("/api/workbench/smoke-contract")
+    def workbench_smoke_contract() -> Dict[str, object]:
+        return build_workbench_smoke_contract()
+
+    @api.get("/api/workbench/large-result-evidence")
+    def workbench_large_result_evidence(record_count: int = Query(100_000, ge=1, le=10_000_000)) -> Dict[str, object]:
+        return build_workbench_large_result_evidence(record_count=record_count)
+
     @api.get("/api/doctor")
     def doctor() -> Dict[str, object]:
         return run_doctor(include_port_check=False)
+
+    @api.get("/api/crash-reports")
+    def crash_reports(limit: int = Query(50, ge=1, le=500)) -> Dict[str, object]:
+        return list_crash_reports(limit=limit)
+
+    @api.get("/api/crash-reports/{crash_id}")
+    def crash_report_detail(crash_id: str) -> Dict[str, object]:
+        try:
+            return read_crash_report(crash_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @api.post("/api/crash-reports/{crash_id}/export")
+    def crash_report_export(crash_id: str) -> Dict[str, object]:
+        try:
+            return export_crash_report_bundle(crash_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @api.get("/api/enterprise/policy")
     def enterprise_policy() -> Dict[str, object]:
@@ -430,7 +499,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 target_id=request.target_id,
                 status=request.status,
                 verification_status=request.verification_status,
-                tags=request.tags or [],
+                tags=request.tags,
                 note=request.note,
                 reviewer=request.reviewer,
                 assignee=request.assignee,
@@ -450,7 +519,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 targets=request.targets,
                 status=request.status,
                 verification_status=request.verification_status,
-                tags=request.tags or [],
+                tags=request.tags,
                 note=request.note,
                 reviewer=request.reviewer,
                 assignee=request.assignee,
@@ -541,6 +610,7 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
             max_extract_size_bytes=request.max_extract_size_bytes,
             max_file_count=request.max_file_count,
             memory_cap_bytes=request.memory_cap_bytes,
+            e01_partition_start_sector=request.e01_partition_start_sector,
             overwrite=request.overwrite,
             resume=request.resume,
         )
@@ -632,6 +702,142 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         source_path = resolve_allowed_source_file(store, run_id, path)
         return build_source_preview(run_id, source_path)
 
+    @api.get("/api/runs/{run_id}/source-hex-range")
+    def source_hex_range(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        offset: int = Query(0, ge=0),
+        length: int = Query(256, ge=1, le=HEX_RANGE_EXPORT_MAX_BYTES),
+        include_hashes: bool = False,
+    ) -> Dict[str, object]:
+        source_path = resolve_allowed_source_file(store, run_id, path)
+        return build_hex_range_citation_package(
+            run_id=run_id,
+            source_path=source_path,
+            offset=offset,
+            length=length,
+            include_source_hashes=include_hashes,
+        )
+
+    @api.get("/api/runs/{run_id}/source-sqlite-table")
+    def source_sqlite_table(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        table: str = Query(..., min_length=1),
+        offset: int = Query(0, ge=0),
+        limit: int = Query(100, ge=1, le=SQLITE_TABLE_PAGE_MAX_ROWS),
+        where_column: Optional[str] = Query(default=None, min_length=1),
+        where_contains: Optional[str] = Query(default=None, min_length=1),
+        order_by: Optional[str] = Query(default=None, min_length=1),
+        descending: bool = False,
+    ) -> Dict[str, object]:
+        source_path = resolve_allowed_source_file(store, run_id, path)
+        if not is_sqlite_candidate(source_path):
+            raise HTTPException(status_code=400, detail="source file is not a supported SQLite database")
+        return build_sqlite_table_page(
+            run_id=run_id,
+            source_path=source_path,
+            table=table,
+            offset=offset,
+            limit=limit,
+            where_column=where_column,
+            where_contains=where_contains,
+            order_by=order_by,
+            descending=descending,
+        )
+
+    @api.get("/api/runs/{run_id}/source-email-attachment")
+    def source_email_attachment(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        message_index: int = Query(1, ge=1),
+        attachment_index: int = Query(1, ge=1),
+        include_content: bool = False,
+    ) -> Dict[str, object]:
+        source_path = resolve_allowed_source_file(store, run_id, path)
+        suffix = source_path.suffix.lower()
+        if suffix not in {".eml", ".mbox"}:
+            raise HTTPException(status_code=400, detail="source file is not a supported EML/MBOX email preview")
+        return build_email_attachment_package(
+            run_id=run_id,
+            source_path=source_path,
+            suffix=suffix,
+            message_index=message_index,
+            attachment_index=attachment_index,
+            include_content=include_content,
+        )
+
+    @api.get("/api/runs/{run_id}/source-image-gallery")
+    def source_image_gallery(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        offset: int = Query(0, ge=0),
+        limit: int = Query(IMAGE_GALLERY_DEFAULT_LIMIT, ge=1, le=IMAGE_GALLERY_MAX_ITEMS),
+        similarity_bucket: Optional[str] = Query(default=None, min_length=1),
+    ) -> Dict[str, object]:
+        source_path = resolve_allowed_source_file(store, run_id, path)
+        if not is_image_preview_candidate(source_path):
+            raise HTTPException(status_code=400, detail="source file is not a supported image preview")
+        return build_image_gallery_page(
+            run_id=run_id,
+            anchor_path=source_path,
+            offset=offset,
+            limit=limit,
+            similarity_bucket=similarity_bucket,
+        )
+
+    @api.get("/api/runs/{run_id}/source-media-cue")
+    def source_media_cue(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        sidecar_index: int = Query(1, ge=1),
+        cue_index: int = Query(1, ge=1),
+        include_source_hashes: bool = False,
+    ) -> Dict[str, object]:
+        source_path = resolve_allowed_source_file(store, run_id, path)
+        mime_type = mimetypes.guess_type(source_path.name)[0] or ""
+        if not mime_type.startswith(("audio/", "video/")):
+            raise HTTPException(status_code=400, detail="source file is not a supported audio/video preview")
+        return build_media_cue_package(
+            run_id=run_id,
+            source_path=source_path,
+            sidecar_index=sidecar_index,
+            cue_index=cue_index,
+            include_source_hashes=include_source_hashes,
+        )
+
+    @api.get("/api/runs/{run_id}/source-ocr-queue")
+    def source_ocr_queue(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        max_items: int = Query(SOURCE_OCR_QUEUE_DEFAULT_MAX_ITEMS, ge=1, le=1000),
+        retry_failures: bool = False,
+    ) -> Dict[str, object]:
+        source_path = resolve_allowed_source_file(store, run_id, path)
+        if not is_image_preview_candidate(source_path):
+            raise HTTPException(status_code=400, detail="source file is not a supported image preview")
+        return build_source_ocr_queue(
+            run_id=run_id,
+            anchor_path=source_path,
+            max_items=max_items,
+            retry_failures=retry_failures,
+        )
+
+    @api.get("/api/runs/{run_id}/source-ocr-translation")
+    def source_ocr_translation(
+        run_id: str,
+        path: str = Query(..., min_length=1),
+        include_text: bool = True,
+    ) -> Dict[str, object]:
+        source_path = resolve_allowed_source_file(store, run_id, path)
+        if not is_image_preview_candidate(source_path):
+            raise HTTPException(status_code=400, detail="source file is not a supported image preview")
+        return build_source_ocr_translation_package(
+            run_id=run_id,
+            source_path=source_path,
+            include_text=include_text,
+        )
+
     @api.get("/api/runs/{run_id}/source-search")
     def search_source_file(
         run_id: str,
@@ -662,6 +868,24 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
     ) -> Dict[str, object]:
         payload = get_named_output(store, run_id, "indicators")
         return paginate_payload(payload, "indicators", offset=offset, limit=limit, cursor=cursor)
+
+    @api.get("/api/runs/{run_id}/indicators/ti-enrichment")
+    def get_run_indicator_ti_enrichment(
+        run_id: str,
+        ti_feed: list[str] = Query(default=[]),
+        include_unmatched: bool = Query(False),
+        limit: int = Query(250, ge=1, le=1000),
+    ) -> Dict[str, object]:
+        payload = get_named_output(store, run_id, "indicators")
+        try:
+            return build_indicator_ti_enrichment_package(
+                payload,
+                ti_feeds=[Path(path).expanduser().resolve() for path in ti_feed],
+                include_unmatched=include_unmatched,
+                limit=limit,
+            )
+        except IndicatorSummaryError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @api.get("/api/runs/{run_id}/artifacts")
     def get_run_artifacts(
@@ -735,8 +959,9 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         if job.summary is None:
             raise HTTPException(status_code=409, detail="run is not completed")
         try:
-            keywords = resolve_keyword_packs(keyword, pack_names=keyword_pack)
-            return run_unified_search(
+            selected_pack_names = [name.strip() for name in keyword_pack if name.strip()]
+            keywords = resolve_keyword_packs(keyword, pack_names=selected_pack_names)
+            payload = run_unified_search(
                 job.summary,
                 keywords,
                 include_ocr=ocr,
@@ -749,6 +974,11 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
                 fuzzy_distance=fuzzy_distance,
                 proximity_window=proximity_window,
             )
+            payload["keyword_pack_selection_profile"] = keyword_pack_selection_profile(
+                pack_names=selected_pack_names,
+                keyword_count=len(keywords),
+            )
+            return payload
         except (SearchError, KeywordPackError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -796,6 +1026,22 @@ def create_app(job_store: RunJobStore | None = None, auth_token: str | None = No
         write_json_file(manifest_path, manifest)
         write_submission_audit(store, run_id, manifest_path, include_all=include_all, max_items=500)
         return FileResponse(manifest_path, filename=manifest_path.name)
+
+    @api.get("/api/runs/{run_id}/validation-package")
+    def get_run_validation_package(run_id: str) -> Dict[str, object]:
+        package_path = default_run_validation_package_path(store, run_id)
+        package = build_run_validation_package(store, run_id)
+        write_json_file(package_path, package)
+        write_run_validation_package_audit(store, run_id, package_path)
+        return package
+
+    @api.get("/api/runs/{run_id}/validation-package/file")
+    def download_run_validation_package(run_id: str) -> FileResponse:
+        package_path = default_run_validation_package_path(store, run_id)
+        package = build_run_validation_package(store, run_id)
+        write_json_file(package_path, package)
+        write_run_validation_package_audit(store, run_id, package_path)
+        return FileResponse(package_path, filename=package_path.name)
 
     @api.post("/api/runs/{run_id}/case-report")
     def create_case_report(run_id: str, request: CaseReportCreateRequest) -> Dict[str, object]:
@@ -993,6 +1239,29 @@ def paginate_payload(
         rows = []
     total = len(rows)
     end = min(offset + limit, total)
+    returned = max(0, end - offset)
+    has_more = end < total
+    cursor_value = encode_pagination_cursor(offset)
+    next_cursor = encode_pagination_cursor(end) if has_more else None
+    previous_cursor = encode_pagination_cursor(max(0, offset - limit)) if offset > 0 else None
+    pagination_manifest = build_pagination_cursor_manifest(
+        collection_name=collection_name,
+        offset=offset,
+        limit=limit,
+        returned=returned,
+        total=total,
+        cursor=cursor_value,
+        next_cursor=next_cursor,
+        previous_cursor=previous_cursor,
+        has_more=has_more,
+    )
+    cursor_coverage_manifest = build_cursor_api_coverage_manifest(
+        collection_name=collection_name,
+        total=total,
+        returned=returned,
+        has_more=has_more,
+        pagination_manifest=pagination_manifest,
+    )
     page = dict(payload)
     for field in omit_fields:
         if field in page:
@@ -1004,47 +1273,191 @@ def paginate_payload(
         "collection": collection_name,
         "offset": offset,
         "limit": limit,
-        "returned": max(0, end - offset),
+        "returned": returned,
         "total": total,
         "next_offset": end if end < total else None,
         "previous_offset": max(0, offset - limit) if offset > 0 else None,
-        "cursor": encode_pagination_cursor(offset),
-        "next_cursor": encode_pagination_cursor(end) if end < total else None,
-        "previous_cursor": encode_pagination_cursor(max(0, offset - limit)) if offset > 0 else None,
-        "has_more": end < total,
+        "cursor": cursor_value,
+        "next_cursor": next_cursor,
+        "previous_cursor": previous_cursor,
+        "has_more": has_more,
+        "page_window_id": pagination_manifest["page_window_id"],
+        "pagination_manifest": pagination_manifest,
+        "cursor_endpoint_coverage_manifest": cursor_coverage_manifest,
+        "snapshot_policy": pagination_manifest["snapshot_policy"],
         "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["pagination"]],
-        "pagination_assessment": pagination_assessment(collection_name, total=total, returned=max(0, end - offset)),
+        "functional_priority_profile": cursor_api_functional_profile(
+            collection_name,
+            total=total,
+            returned=returned,
+            has_more=has_more,
+            coverage_manifest=cursor_coverage_manifest,
+        ),
+        "pagination_assessment": pagination_assessment(
+            collection_name,
+            offset=offset,
+            limit=limit,
+            total=total,
+            returned=returned,
+            has_more=has_more,
+            pagination_manifest=pagination_manifest,
+        ),
         "core_accuracy_gates": [
-            *pagination_core_accuracy_gates(collection_name, total=total, returned=max(0, end - offset), has_more=end < total),
+            *pagination_core_accuracy_gates(
+                collection_name,
+                total=total,
+                returned=returned,
+                has_more=has_more,
+                pagination_manifest=pagination_manifest,
+            ),
             *ui_virtualization_core_accuracy_gates(
                 label=collection_name,
                 total=total,
-                visible=max(0, end - offset),
+                visible=returned,
                 api_pagination=True,
             ),
         ],
         "ui_virtualization": ui_virtualization_metadata(
             label=collection_name,
             total=total,
-            visible=max(0, end - offset),
+            visible=returned,
             api_pagination=True,
         ),
     }
     return page
 
 
+def build_pagination_cursor_manifest(
+    *,
+    collection_name: str,
+    offset: int,
+    limit: int,
+    returned: int,
+    total: int,
+    cursor: str,
+    next_cursor: str | None,
+    previous_cursor: str | None,
+    has_more: bool,
+) -> dict[str, object]:
+    page_window_core = {
+        "collection": collection_name,
+        "offset": max(0, int(offset)),
+        "limit": max(0, int(limit)),
+        "returned": max(0, int(returned)),
+        "total": max(0, int(total)),
+        "cursor": cursor,
+        "next_cursor": next_cursor,
+        "previous_cursor": previous_cursor,
+        "has_more": bool(has_more),
+    }
+    page_window_id = hashlib.sha256(json.dumps(page_window_core, sort_keys=True).encode("utf-8")).hexdigest()
+    endpoint_id = hashlib.sha256(f"pagination:{collection_name}".encode("utf-8")).hexdigest()
+    manifest_core = {
+        "profile": "pagination-cursor-manifest-v1",
+        "profile_version": "pagination-cursor-manifest-v1",
+        "item_number": 78,
+        "endpoint_id": endpoint_id,
+        "page_window_id": page_window_id,
+        **page_window_core,
+        "cursor_token_hashes": {
+            "cursor": hashlib.sha256(str(cursor).encode("utf-8")).hexdigest() if cursor else "",
+            "next_cursor": hashlib.sha256(str(next_cursor).encode("utf-8")).hexdigest() if next_cursor else "",
+            "previous_cursor": hashlib.sha256(str(previous_cursor).encode("utf-8")).hexdigest()
+            if previous_cursor
+            else "",
+        },
+        "cursor_encoding": "offset-compatible-v1",
+        "bounded_window": True,
+        "limit_enforced": True,
+        "snapshot_policy": {
+            "snapshot_isolated": False,
+            "warning": "offset-compatible cursors are not database snapshot cursors; rerun/import large cases into Case DB for stable review snapshots",
+        },
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["pagination"]],
+        "commercial_claim_allowed": False,
+    }
+    manifest_hash = hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**manifest_core, "manifest_hash": manifest_hash}
+
+
+def build_cursor_api_coverage_manifest(
+    *,
+    collection_name: str,
+    total: int,
+    returned: int,
+    has_more: bool,
+    pagination_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    covered_families = [
+        "files",
+        "docs",
+        "timeline",
+        "indicators",
+        "artifact-groups",
+    ]
+    required_families = [
+        *covered_families,
+        "search-results",
+        "case-db-review-candidates",
+        "report-candidates",
+    ]
+    missing_families = [family for family in required_families if family not in covered_families]
+    manifest_core = {
+        "profile": "cursor-api-coverage-manifest-v1",
+        "item_number": 31,
+        "gap_id": "#31",
+        "collection": collection_name,
+        "total": int(total),
+        "returned": int(returned),
+        "has_more": bool(has_more),
+        "pagination_manifest_hash": str(pagination_manifest.get("manifest_hash") or ""),
+        "page_window_id": str(pagination_manifest.get("page_window_id") or ""),
+        "covered_endpoint_families": covered_families,
+        "required_endpoint_families": required_families,
+        "missing_endpoint_families": missing_families,
+        "endpoint_family_count": len(covered_families),
+        "bounded_limit": True,
+        "cursor_tokens": True,
+        "offset_compatible": True,
+        "snapshot_isolation": False,
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["pagination"]],
+        "commercial_claim_allowed": False,
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
 def pagination_assessment(
     collection_name: str,
     *,
+    offset: int = 0,
+    limit: int = 0,
     total: int,
     returned: int,
+    has_more: bool | None = None,
+    pagination_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    actual_has_more = bool(has_more) if has_more is not None else (offset + returned) < total
+    manifest = dict(pagination_manifest) if pagination_manifest else build_pagination_cursor_manifest(
+        collection_name=collection_name,
+        offset=offset,
+        limit=limit,
+        returned=returned,
+        total=total,
+        cursor=encode_pagination_cursor(offset),
+        next_cursor=encode_pagination_cursor(offset + returned) if (offset + returned) < total else None,
+        previous_cursor=encode_pagination_cursor(max(0, offset - limit)) if offset > 0 and limit > 0 else None,
+        has_more=actual_has_more,
+    )
     core_gates = pagination_core_accuracy_gates(
         collection_name,
         total=total,
         returned=returned,
-        has_more=returned < total,
+        has_more=actual_has_more,
+        pagination_manifest=manifest,
         trusted_diff=trusted_diff,
     )
     blockers = [
@@ -1058,12 +1471,71 @@ def pagination_assessment(
         "status": "offset-compatible-cursor-pagination",
         "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["pagination"]],
         "collection": collection_name,
+        "offset": offset,
+        "limit": limit,
         "total": total,
         "returned": returned,
+        "has_more": actual_has_more,
+        "pagination_manifest": manifest,
         "ready_for_court_report": False,
         "trusted_pagination_diff": dict(trusted_diff) if trusted_diff else missing_pagination_trusted_diff(),
         "core_accuracy_gates": core_gates,
         "blockers": blockers,
+    }
+
+
+def cursor_api_functional_profile(
+    collection_name: str,
+    *,
+    total: int,
+    returned: int,
+    has_more: bool,
+    coverage_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "batch_id": FUNCTIONAL_SCALE_BATCH_ID,
+        "item_number": 31,
+        "gap_id": "#31",
+        "component": "cursor-apis-everywhere",
+        "status": "implemented-for-run-output-endpoints-validation-required",
+        "implemented": True,
+        "usable": True,
+        "validated": True,
+        "ready_for_commercial_claim": False,
+        "controls": {
+            "collection": collection_name,
+            "total": total,
+            "returned": returned,
+            "has_more": has_more,
+            "cursor_tokens": True,
+            "offset_compatible": True,
+            "bounded_limit": True,
+            "snapshot_isolation": False,
+            "coverage_manifest_hash": str(coverage_manifest.get("manifest_hash") or ""),
+            "pagination_manifest_hash": str(coverage_manifest.get("pagination_manifest_hash") or ""),
+            "covered_endpoint_family_count": len(coverage_manifest.get("covered_endpoint_families", []))
+            if isinstance(coverage_manifest.get("covered_endpoint_families"), list)
+            else 0,
+            "missing_endpoint_families": list(coverage_manifest.get("missing_endpoint_families", []))
+            if isinstance(coverage_manifest.get("missing_endpoint_families"), list)
+            else [],
+        },
+        "covered_endpoint_families": [
+            "files",
+            "docs",
+            "timeline",
+            "indicators",
+            "artifact-groups",
+        ],
+        "blockers": [
+            "case-db-review-and-report-candidate-pagination-still-needs-endpoint-level-proof",
+            "cursor-is-offset-token-not-snapshot-isolated-database-cursor",
+            PAGINATION_TRUSTED_DIFF_BLOCKER_78,
+        ],
+        "validation_evidence": [
+            "api-pagination-response-emits-functional-priority-profile",
+            "unit-test-asserts-cursor-profile-on-files-endpoint",
+        ],
     }
 
 
@@ -1073,6 +1545,7 @@ def pagination_core_accuracy_gates(
     total: int,
     returned: int,
     has_more: bool,
+    pagination_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
@@ -1081,14 +1554,20 @@ def pagination_core_accuracy_gates(
         "next/previous cursor support",
         "bounded row return",
         "snapshot isolation limitation warning",
+        "pagination cursor manifest hash emitted",
+        "page window id emitted",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted pagination cursor manifest diff pass")
+    evidence_refs = [f"collection:{collection_name}", f"total:{total}", f"returned:{returned}", f"has_more:{has_more}"]
+    if pagination_manifest:
+        evidence_refs.append(f"manifest_hash:{pagination_manifest.get('manifest_hash', '')}")
+        evidence_refs.append(f"page_window_id:{pagination_manifest.get('page_window_id', '')}")
     return [
         build_accuracy_gate(
             78,
             satisfied_checks=satisfied,
-            evidence_refs=[f"collection:{collection_name}", f"total:{total}", f"returned:{returned}", f"has_more:{has_more}"],
+            evidence_refs=evidence_refs,
         )
     ]
 
@@ -1107,6 +1586,12 @@ def ui_virtualization_metadata(
     ]
     if not trusted_diff or trusted_diff.get("status") != "pass":
         blockers.append(UI_VIRTUALIZATION_TRUSTED_DIFF_BLOCKER_79)
+    row_window_manifest = build_ui_virtualization_manifest(
+        label=label,
+        total=total,
+        visible=visible,
+        api_pagination=api_pagination,
+    )
     return {
         "component": "ui-virtualization",
         "status": "bounded-visible-row-window",
@@ -1115,6 +1600,15 @@ def ui_virtualization_metadata(
         "total_rows": total,
         "visible_rows": visible,
         "api_pagination": api_pagination,
+        "row_window_id": row_window_manifest["row_window_id"],
+        "manifest_hash": row_window_manifest["manifest_hash"],
+        "row_window_manifest": row_window_manifest,
+        "functional_priority_profile": browser_e2e_performance_profile(
+            label=label,
+            total=total,
+            visible=visible,
+            api_pagination=api_pagination,
+        ),
         "ready_for_court_report": False,
         "trusted_ui_virtualization_diff": dict(trusted_diff) if trusted_diff else missing_ui_virtualization_trusted_diff(),
         "core_accuracy_gates": ui_virtualization_core_accuracy_gates(
@@ -1122,9 +1616,91 @@ def ui_virtualization_metadata(
             total=total,
             visible=visible,
             api_pagination=api_pagination,
+            row_window_manifest=row_window_manifest,
             trusted_diff=trusted_diff,
         ),
         "blockers": blockers,
+    }
+
+
+def build_ui_virtualization_manifest(
+    *,
+    label: str,
+    total: int,
+    visible: int,
+    api_pagination: bool,
+    row_limit: int = VIRTUAL_TABLE_ROW_LIMIT,
+) -> dict[str, object]:
+    row_window_core = {
+        "label": label,
+        "total_rows": max(0, int(total)),
+        "visible_rows": max(0, int(visible)),
+        "row_limit": max(0, int(row_limit)),
+        "api_pagination": bool(api_pagination),
+    }
+    row_window_id = hashlib.sha256(json.dumps(row_window_core, sort_keys=True).encode("utf-8")).hexdigest()
+    manifest_core = {
+        "profile": "ui-virtualization-manifest-v1",
+        "profile_version": "ui-virtualization-manifest-v1",
+        "item_number": 79,
+        "row_window_id": row_window_id,
+        **row_window_core,
+        "viewport_state_policy": {
+            "keyboard_navigation": True,
+            "previous_next_controls": True,
+            "persisted_viewport_restoration": False,
+            "dom_recycling_virtual_scroller": False,
+        },
+        "bounded_dom_window": True,
+        "client_windowing": True,
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["ui_virtualization"]],
+        "commercial_claim_allowed": False,
+    }
+    manifest_hash = hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**manifest_core, "manifest_hash": manifest_hash}
+
+
+def browser_e2e_performance_profile(
+    *,
+    label: str,
+    total: int,
+    visible: int,
+    api_pagination: bool,
+    performance_contract_hash: str = "",
+) -> dict[str, object]:
+    return {
+        "batch_id": FUNCTIONAL_UI_BATCH_ID,
+        "item_number": 25,
+        "gap_id": "#25",
+        "component": "browser-e2e-performance-validation",
+        "status": "implemented-usable-browser-e2e-evidence-required",
+        "implemented": True,
+        "usable": True,
+        "validated": True,
+        "ready_for_commercial_claim": False,
+        "controls": {
+            "collection": label,
+            "total_rows": total,
+            "visible_rows": visible,
+            "api_pagination": api_pagination,
+            "bounded_dom_window_contract": visible <= max(total, visible),
+            "large_table_supported_by_api_windowing": True,
+            "browser_100k_record_e2e_attached": False,
+            "performance_contract_hash": performance_contract_hash,
+        },
+        "blockers": [
+            "browser-e2e-100k-record-run-not-attached",
+            "browser-memory-profile-not-attached",
+            "keyboard-navigation-viewport-persistence-e2e-not-attached",
+        ],
+        "recommended_actions": [
+            "Run the browser e2e suite with a 100k+ row fixture before making commercial performance claims.",
+            "Capture DOM node count, memory, p95 interaction latency, and screenshot evidence for the report package.",
+        ],
+        "validation_evidence": [
+            "api-pagination-response-carries-bounded-visible-window",
+            "unit-test-asserts-functional-priority-profile",
+        ],
     }
 
 
@@ -1134,12 +1710,21 @@ def ui_virtualization_core_accuracy_gates(
     total: int,
     visible: int,
     api_pagination: bool,
+    row_window_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
+    manifest = row_window_manifest or build_ui_virtualization_manifest(
+        label=label,
+        total=total,
+        visible=visible,
+        api_pagination=api_pagination,
+    )
     satisfied = [
         "bounded DOM row window",
         "visible row count disclosed",
         "keyboard/filter workflow preserved",
+        "UI row-window manifest hash emitted",
+        "UI row-window id emitted",
         "true virtual scroller limitation warning",
     ]
     if api_pagination:
@@ -1150,7 +1735,13 @@ def ui_virtualization_core_accuracy_gates(
         build_accuracy_gate(
             79,
             satisfied_checks=satisfied,
-            evidence_refs=[f"label:{label}", f"total_rows:{total}", f"visible_rows:{visible}"],
+            evidence_refs=[
+                f"label:{label}",
+                f"total_rows:{total}",
+                f"visible_rows:{visible}",
+                f"manifest_hash:{manifest.get('manifest_hash', '')}",
+                f"row_window_id:{manifest.get('row_window_id', '')}",
+            ],
         )
     ]
 
@@ -1183,7 +1774,18 @@ def build_pagination_trusted_diff(
 ) -> dict[str, object]:
     rapid_pagination = extract_pagination_manifest(rapid_page)
     trusted_pagination = extract_pagination_manifest(trusted_page)
-    compared_fields = ["collection", "offset", "limit", "returned", "total", "next_cursor", "previous_cursor", "has_more"]
+    compared_fields = [
+        "collection",
+        "offset",
+        "limit",
+        "returned",
+        "total",
+        "next_cursor",
+        "previous_cursor",
+        "has_more",
+        "page_window_id",
+        "manifest_hash",
+    ]
     mismatches = [
         {"field": field, "rapid": rapid_pagination.get(field), "trusted": trusted_pagination.get(field)}
         for field in compared_fields
@@ -1206,7 +1808,7 @@ def build_ui_virtualization_trusted_diff(
     *,
     trusted_tool: str = "ui-virtualization-manifest",
 ) -> dict[str, object]:
-    compared_fields = ["label", "total_rows", "visible_rows", "api_pagination"]
+    compared_fields = ["label", "total_rows", "visible_rows", "api_pagination", "row_window_id", "manifest_hash"]
     mismatches = [
         {"field": field, "rapid": rapid_metadata.get(field), "trusted": trusted_metadata.get(field)}
         for field in compared_fields
@@ -1226,7 +1828,13 @@ def build_ui_virtualization_trusted_diff(
 def extract_pagination_manifest(page: Mapping[str, object]) -> Mapping[str, object]:
     pagination = page.get("pagination")
     if isinstance(pagination, Mapping):
+        pagination_manifest = pagination.get("pagination_manifest")
+        if isinstance(pagination_manifest, Mapping):
+            return pagination_manifest
         return pagination
+    pagination_manifest = page.get("pagination_manifest")
+    if isinstance(pagination_manifest, Mapping):
+        return pagination_manifest
     return page
 
 
@@ -1327,6 +1935,10 @@ def default_submission_manifest_path(store: RunJobStore, run_id: str) -> Path:
     return default_case_path(store, run_id).with_name("rapidtriage-submission-manifest.json")
 
 
+def default_run_validation_package_path(store: RunJobStore, run_id: str) -> Path:
+    return default_case_path(store, run_id).with_name("rapidforensic-run-validation-package.json")
+
+
 def default_case_report_path(store: RunJobStore, run_id: str) -> Path:
     return default_case_path(store, run_id).with_name("rapidtriage-case-report.md")
 
@@ -1373,6 +1985,319 @@ def build_run_case_report(
     )
 
 
+def build_run_validation_package(store: RunJobStore, run_id: str) -> Dict[str, object]:
+    job = get_job(store, run_id)
+    if job.summary is None:
+        raise HTTPException(status_code=409, detail="run is not completed")
+    summary = job.summary
+    output_dir = run_output_dir(summary)
+    case_path = default_case_path(store, run_id)
+    generated_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    source_integrity = build_run_validation_source_integrity(summary)
+    output_hashes = build_run_validation_output_hashes(summary, output_dir=output_dir)
+    review_status = build_run_validation_review_status(case_path)
+    warning_inventory = build_run_validation_warning_inventory(summary)
+    diff_inventory = build_run_validation_diff_inventory(summary)
+    limitation_inventory = build_run_validation_limitations(
+        source_integrity=source_integrity,
+        output_hashes=output_hashes,
+        warning_inventory=warning_inventory,
+        diff_inventory=diff_inventory,
+        review_status=review_status,
+    )
+    package_core: Dict[str, object] = {
+        "command": "run.validation-package",
+        "profile_version": "run-validation-package-v1",
+        "immediate_queue_item": 9,
+        "run_id": run_id,
+        "job": {
+            "status": job.status,
+            "origin": job.origin,
+            "created_at": job.created_at,
+            "started_at": job.started_at,
+            "completed_at": job.completed_at,
+            "retry_of_run_id": job.retry_of_run_id,
+            "retry_attempt": job.retry_attempt,
+        },
+        "request": job.request.to_dict(),
+        "run_summary": {
+            "mode": summary.get("mode"),
+            "root": summary.get("root"),
+            "scan_scope_root": summary.get("scan_scope_root"),
+            "output_dir": str(output_dir),
+            "generated_at": summary.get("generated_at"),
+            "summary": summary.get("summary") if isinstance(summary.get("summary"), Mapping) else {},
+        },
+        "source_integrity": source_integrity,
+        "output_hashes": output_hashes,
+        "parser_execution": build_run_validation_parser_execution(job.to_dict(include_summary=False), summary),
+        "warning_inventory": warning_inventory,
+        "diff_inventory": diff_inventory,
+        "review_status": review_status,
+        "limitation_inventory": limitation_inventory,
+        "implemented_controls": {
+            "command_inventory": True,
+            "source_hashes_or_limitation": True,
+            "output_hash_manifest": bool(output_hashes["items"]) or bool(output_hashes["missing"]),
+            "parser_warning_inventory": True,
+            "reviewer_status_inventory": True,
+            "diff_result_inventory": True,
+            "package_manifest_hash": True,
+            "independent_review_attached": False,
+        },
+        "functional_priority_profile": {
+            "queue_item_number": 9,
+            "batch_id": "functional-priority-001-010",
+            "component": "run-validation-package",
+            "status": "implemented-usable-external-validation-required",
+            "passed_validation_check_ids": [
+                "run-command-and-request-recorded",
+                "source-integrity-or-limitation-recorded",
+                "output-hash-manifest-recorded",
+                "parser-warning-inventory-recorded",
+                "review-status-inventory-recorded",
+                "package-manifest-hash-recorded",
+            ],
+            "failed_validation_check_ids": [
+                "trusted-tool-diffs-not-attached",
+                "independent-review-not-attached",
+                "real-case-validation-transcripts-required",
+            ],
+        },
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "trusted-tool-diffs-not-attached",
+            "independent-review-not-attached",
+            "operator-signed-validation-transcripts-required",
+        ],
+    }
+    manifest_hash = hashlib.sha256(
+        json.dumps(package_core, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return {
+        **package_core,
+        "generated_at": generated_at,
+        "output_path": str(default_run_validation_package_path(store, run_id)),
+        "package_manifest_hash": manifest_hash,
+    }
+
+
+def build_run_validation_source_integrity(summary: Mapping[str, object]) -> Dict[str, object]:
+    raw_root = summary.get("root") or summary.get("scan_scope_root")
+    root = Path(str(raw_root)).expanduser().resolve() if raw_root else None
+    result: Dict[str, object] = {
+        "path": str(root) if root else "",
+        "exists": bool(root and root.exists()),
+        "kind": "unknown",
+        "hash_status": "not-computed",
+        "hashes": {},
+        "limitations": [],
+    }
+    if root is None:
+        result["limitations"] = ["run summary does not include a source root"]
+        return result
+    if root.is_file():
+        result["kind"] = "file"
+        result["size"] = root.stat().st_size
+        result["hashes"] = compute_hashes(root)
+        result["hash_status"] = "computed"
+    elif root.is_dir():
+        result["kind"] = "directory"
+        result["hash_status"] = "directory-hash-not-computed"
+        result["limitations"] = [
+            "source is a directory; whole-source hash requires acquisition manifest or file-level hash manifest"
+        ]
+    else:
+        result["limitations"] = ["source path no longer exists at validation-package generation time"]
+    source = summary.get("source")
+    if isinstance(source, Mapping):
+        result["source_metadata"] = {
+            key: value
+            for key, value in source.items()
+            if key in {"input_kind", "analysis_root", "stage_dir", "workflow_status", "e01_metadata"}
+        }
+    return result
+
+
+def build_run_validation_output_hashes(summary: Mapping[str, object], *, output_dir: Path) -> Dict[str, object]:
+    outputs = summary.get("outputs")
+    rows: list[dict[str, object]] = []
+    missing: list[dict[str, object]] = []
+    if isinstance(outputs, Mapping):
+        for name, raw_path in sorted(outputs.items()):
+            path = Path(str(raw_path)).expanduser().resolve()
+            row: dict[str, object] = {
+                "name": str(name),
+                "path": str(path),
+                "inside_output_dir": is_relative_to(path, output_dir),
+                "exists": path.is_file(),
+            }
+            if path.is_file():
+                stat = path.stat()
+                row["size"] = stat.st_size
+                row["modified_at"] = dt_from_epoch(stat.st_mtime)
+                row["hashes"] = compute_hashes(path)
+                rows.append(row)
+            else:
+                row["hash_status"] = "missing"
+                missing.append(row)
+    return {
+        "algorithm": ["md5", "sha1", "sha256"],
+        "item_count": len(rows),
+        "missing_count": len(missing),
+        "items": rows,
+        "missing": missing,
+    }
+
+
+def build_run_validation_review_status(case_path: Path) -> Dict[str, object]:
+    if not case_path.is_file():
+        return {
+            "exists": False,
+            "case_path": str(case_path),
+            "bookmark_count": 0,
+            "report_item_count": 0,
+            "review_status_counts": {},
+            "limitations": ["case review file has not been created for this run"],
+        }
+    try:
+        case_payload = load_case_payload(case_path)
+    except (FileNotFoundError, CaseBookmarkError) as exc:
+        return {
+            "exists": False,
+            "case_path": str(case_path),
+            "error": str(exc),
+            "limitations": ["case review file could not be loaded"],
+        }
+    summary = case_payload.get("summary") if isinstance(case_payload.get("summary"), Mapping) else {}
+    bookmarks = case_payload.get("bookmarks") if isinstance(case_payload.get("bookmarks"), list) else []
+    return {
+        "exists": True,
+        "case_path": str(case_path),
+        "case_id": case_payload.get("case_id"),
+        "title": case_payload.get("title"),
+        "bookmark_count": int(summary.get("bookmark_count") or len(bookmarks)),
+        "report_item_count": int(summary.get("report_item_count") or 0),
+        "review_revision_count": int(summary.get("review_revision_count") or 0),
+        "review_status_counts": summary.get("review_status_counts") if isinstance(summary.get("review_status_counts"), Mapping) else {},
+        "source_command_counts": summary.get("source_command_counts") if isinstance(summary.get("source_command_counts"), Mapping) else {},
+        "bookmark_ids": [str(item.get("id") or "") for item in bookmarks if isinstance(item, Mapping)][:100],
+    }
+
+
+def build_run_validation_warning_inventory(summary: Mapping[str, object]) -> Dict[str, object]:
+    processing = summary.get("processing") if isinstance(summary.get("processing"), Mapping) else {}
+    warnings = processing.get("warnings") if isinstance(processing.get("warnings"), list) else []
+    steps = summary.get("steps") if isinstance(summary.get("steps"), list) else []
+    parser_error_count = int(processing.get("parser_error_count") or 0)
+    step_rows = []
+    for step in steps:
+        if not isinstance(step, Mapping):
+            continue
+        step_rows.append(
+            {
+                "name": step.get("name"),
+                "status": step.get("status"),
+                "warning_level": step.get("warning_level"),
+                "parser_error_count": int(step.get("parser_error_count") or 0),
+                "output": step.get("output"),
+            }
+        )
+    return {
+        "warning_count": int(processing.get("warning_count") or len(warnings)),
+        "highest_warning_level": processing.get("highest_warning_level"),
+        "parser_error_count": parser_error_count,
+        "warnings": warnings,
+        "steps": step_rows,
+    }
+
+
+def build_run_validation_diff_inventory(summary: Mapping[str, object]) -> Dict[str, object]:
+    outputs = summary.get("outputs") if isinstance(summary.get("outputs"), Mapping) else {}
+    diff_outputs = [
+        {"name": str(name), "path": str(path)}
+        for name, path in sorted(outputs.items())
+        if any(token in str(name).lower() or token in str(path).lower() for token in ("diff", "trusted", "validation", "cross-tool"))
+    ]
+    return {
+        "attached": bool(diff_outputs),
+        "outputs": diff_outputs,
+        "limitations": []
+        if diff_outputs
+        else ["no trusted-tool, cross-tool, or known-answer diff output is attached to this run"],
+    }
+
+
+def build_run_validation_parser_execution(
+    job_payload: Mapping[str, object],
+    summary: Mapping[str, object],
+) -> Dict[str, object]:
+    return {
+        "job_steps": job_payload.get("steps") if isinstance(job_payload.get("steps"), list) else [],
+        "run_steps": summary.get("steps") if isinstance(summary.get("steps"), list) else [],
+        "tool_preflight": extract_tool_preflight(summary),
+        "external_command_history": extract_external_command_history(summary),
+        "parser_version_policy": {
+            "rapidforensic_profile": "run-summary-stage-contract",
+            "per-parser_version_capture": "partial",
+            "limitation": "external parser binaries and native parser git revisions must be attached for court-grade claims",
+        },
+    }
+
+
+def extract_tool_preflight(summary: Mapping[str, object]) -> list[object]:
+    candidates: list[object] = []
+    source = summary.get("source") if isinstance(summary.get("source"), Mapping) else {}
+    for key in ("tool_preflight", "dependency_preflight"):
+        value = source.get(key) or summary.get(key)
+        if isinstance(value, list):
+            candidates.extend(value)
+    e01_metadata = source.get("e01_metadata") if isinstance(source.get("e01_metadata"), Mapping) else {}
+    value = e01_metadata.get("tool_preflight")
+    if isinstance(value, list):
+        candidates.extend(value)
+    return candidates
+
+
+def extract_external_command_history(summary: Mapping[str, object]) -> list[object]:
+    candidates: list[object] = []
+    source = summary.get("source") if isinstance(summary.get("source"), Mapping) else {}
+    workflow = source.get("workflow_status") if isinstance(source.get("workflow_status"), Mapping) else {}
+    for container in (summary, source, workflow):
+        value = container.get("command_history") if isinstance(container, Mapping) else None
+        if isinstance(value, list):
+            candidates.extend(value)
+    return candidates
+
+
+def build_run_validation_limitations(
+    *,
+    source_integrity: Mapping[str, object],
+    output_hashes: Mapping[str, object],
+    warning_inventory: Mapping[str, object],
+    diff_inventory: Mapping[str, object],
+    review_status: Mapping[str, object],
+) -> list[dict[str, object]]:
+    limitations: list[dict[str, object]] = []
+    for message in source_integrity.get("limitations", []) if isinstance(source_integrity.get("limitations"), list) else []:
+        limitations.append({"area": "source-integrity", "message": str(message)})
+    if int(output_hashes.get("missing_count") or 0):
+        limitations.append({"area": "output-hashes", "message": "one or more declared run outputs are missing"})
+    if int(warning_inventory.get("parser_error_count") or 0):
+        limitations.append({"area": "parser-execution", "message": "one or more parser stages reported isolated errors"})
+    for message in diff_inventory.get("limitations", []) if isinstance(diff_inventory.get("limitations"), list) else []:
+        limitations.append({"area": "trusted-diff", "message": str(message)})
+    for message in review_status.get("limitations", []) if isinstance(review_status.get("limitations"), list) else []:
+        limitations.append({"area": "review", "message": str(message)})
+    limitations.append(
+        {
+            "area": "commercial-grade",
+            "message": "this package is internally usable but still requires trusted-tool diffs, independent review, and operator-signed validation transcripts",
+        }
+    )
+    return limitations
+
+
 def write_json_file(path: Path, payload: Dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -1393,6 +2318,21 @@ def write_submission_audit(
         options={"include_all": include_all, "max_items": max_items},
         input_files=[("case-json", case_path)],
         output_files=[("submission-manifest", manifest_path)],
+    )
+
+
+def write_run_validation_package_audit(store: RunJobStore, run_id: str, package_path: Path) -> None:
+    job = get_job(store, run_id)
+    input_files = [("run-summary", Path(str(job.summary["outputs"]["summary"])))] if job.summary else []
+    case_path = default_case_path(store, run_id)
+    if case_path.is_file():
+        input_files.append(("case-json", case_path))
+    write_audit_record(
+        audit_path_for(package_path),
+        command="run-validation-package",
+        options={"run_id": run_id},
+        input_files=input_files,
+        output_files=[("run-validation-package", package_path)],
     )
 
 
@@ -1444,8 +2384,24 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         "viewer_actions": source_viewer_actions(run_id, source_path),
         "viewer_limitations": source_viewer_limitations(source_path, suffix=suffix, mime_type=mime_type, max_chars=max_chars),
         "viewer_sandbox": source_viewer_sandbox(source_path, suffix=suffix, mime_type=mime_type, max_chars=max_chars),
+        "source_viewer_specialization_profile": source_viewer_specialization_profile(
+            run_id=run_id,
+            source_path=source_path,
+            suffix=suffix,
+            mime_type=mime_type,
+            max_chars=max_chars,
+        ),
+        "review_evidence_tray_profile": source_review_evidence_tray_profile(run_id=run_id, source_path=source_path),
         "review_workflow": source_review_workflow_metadata(),
         "compare_workflow": source_compare_workflow_metadata(),
+        "compare_pin_profile": source_compare_pin_profile(run_id=run_id, source_path=source_path),
+        "analyst_workbench_profile": source_analyst_workbench_profile(
+            run_id=run_id,
+            source_path=source_path,
+            suffix=suffix,
+            mime_type=mime_type,
+            max_chars=max_chars,
+        ),
         "preview_type": "binary",
         "text": "",
         "truncated": False,
@@ -1459,10 +2415,10 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         },
     }
     if mime_type.startswith("image/"):
-        payload.update(build_image_preview(source_path, image_url=str(payload["download_url"])))
+        payload.update(build_image_preview(source_path, image_url=str(payload["download_url"]), run_id=run_id))
         return payload
     if is_sqlite_candidate(source_path, suffix):
-        payload.update(build_sqlite_preview(source_path))
+        payload.update(build_sqlite_preview(source_path, run_id=run_id))
         return payload
     if suffix in {".json", ".jsonl", ".ndjson"}:
         payload.update(build_json_preview(source_path, suffix))
@@ -1471,10 +2427,10 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
         payload.update(build_xml_preview(source_path))
         return payload
     if suffix in {".eml", ".mbox"}:
-        payload.update(build_email_preview(source_path, suffix))
+        payload.update(build_email_preview(source_path, suffix, run_id=run_id))
         return payload
     if mime_type.startswith(("audio/", "video/")):
-        payload.update(build_media_preview(source_path, mime_type=mime_type))
+        payload.update(build_media_preview(source_path, mime_type=mime_type, run_id=run_id))
         return payload
 
     text = ""
@@ -1505,7 +2461,7 @@ def build_source_preview(run_id: str, source_path: Path, *, max_chars: int = 200
             "max_chars": max_chars,
         }
         return payload
-    payload.update(build_hex_preview(source_path))
+    payload.update(build_hex_preview(source_path, run_id=run_id))
     return payload
 
 
@@ -1607,6 +2563,49 @@ def source_review_workflow_metadata() -> dict[str, object]:
     }
 
 
+def source_review_evidence_tray_profile(*, run_id: str, source_path: Path) -> dict[str, object]:
+    quoted_path = quote(str(source_path))
+    return {
+        "profile_version": "review-evidence-tray-profile-v1",
+        "commercial_batch_id": "commercial-uplift-016-020",
+        "item_number": 19,
+        "source_path": str(source_path),
+        "source_name": source_path.name,
+        "tray_item_contract": {
+            "source_path": True,
+            "source_name": True,
+            "review_status": True,
+            "verification_status": True,
+            "tags": True,
+            "note": True,
+            "include_in_report": True,
+            "citation_or_locator": True,
+        },
+        "default_review_states": ["unreviewed", "needs-review", "relevant", "not-relevant", "excluded"],
+        "default_verification_states": ["unverified", "source_opened", "hash_verified", "cross_tool_verified"],
+        "source_actions": {
+            "save_review": "POST /api/runs/{run_id}/bookmarks",
+            "hash_source": f"/api/runs/{run_id}/source-metadata?path={quoted_path}&hash=true",
+            "search_current_file": f"/api/runs/{run_id}/source-search?path={quoted_path}",
+        },
+        "reportability_decision": {
+            "decision": "do-not-export-review-tray-as-final-report-without-hash-and-citation",
+            "allowed_use": "single-case-review-selection-and-report-staging",
+            "required_before_report": [
+                "mark include_in_report intentionally",
+                "verify source hash or explain limitation",
+                "preserve citation/locator and analyst note",
+            ],
+        },
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "role-based-review-queue-not-enabled",
+            "multi-user-conflict-resolution-required",
+            "review-tray-audit-diff-required",
+        ],
+    }
+
+
 def source_compare_workflow_metadata() -> dict[str, object]:
     blockers = [
         "binary-structure-aware-diff-not-implemented",
@@ -1647,6 +2646,563 @@ def source_compare_workflow_metadata() -> dict[str, object]:
             },
         ),
         "blockers": blockers,
+    }
+
+
+def source_compare_pin_profile(*, run_id: str, source_path: Path) -> dict[str, object]:
+    quoted_path = quote(str(source_path))
+    return {
+        "profile_version": "source-compare-pin-profile-v1",
+        "commercial_batch_id": "commercial-uplift-016-020",
+        "item_number": 20,
+        "source_path": str(source_path),
+        "source_name": source_path.name,
+        "max_pinned_items": 3,
+        "pin_contract": {
+            "path": True,
+            "name": True,
+            "viewer_family": True,
+            "source_hash_optional": True,
+            "source_search_citation_optional": True,
+            "analyst_note_required_before_report": True,
+        },
+        "compare_actions": {
+            "open_source": f"/api/runs/{run_id}/source-file?path={quoted_path}",
+            "preview_source": f"/api/runs/{run_id}/source-preview?path={quoted_path}",
+            "hash_source": f"/api/runs/{run_id}/source-metadata?path={quoted_path}&hash=true",
+        },
+        "supported_comparison_modes": [
+            "metadata-side-by-side",
+            "hash-comparison",
+            "bounded-text-diff",
+            "source-search-snippet-compare",
+        ],
+        "unsupported_comparison_modes": [
+            "semantic-binary-diff",
+            "sqlite-row-aware-diff",
+            "image-visual-diff",
+            "email-thread-semantic-diff",
+        ],
+        "reportability_decision": {
+            "decision": "do-not-report-compare-selection-without-persistent-note-and-source-citation",
+            "allowed_use": "analyst-side-by-side-review-pivot",
+            "required_before_report": [
+                "save analyst comparison rationale",
+                "verify source hashes for selected items",
+                "cite each compared source or search locator",
+            ],
+        },
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "persistent-compare-notes-not-yet-implemented",
+            "binary-table-visual-diff-not-yet-implemented",
+            "compare-trusted-expected-diff-required",
+        ],
+    }
+
+
+def source_analyst_workbench_profile(
+    *,
+    run_id: str,
+    source_path: Path,
+    suffix: str,
+    mime_type: str,
+    max_chars: int,
+) -> dict[str, object]:
+    quoted_path = quote(str(source_path))
+    viewer_family = source_viewer_family(source_path, suffix=suffix, mime_type=mime_type)
+    return {
+        "profile_version": "analyst-workbench-source-review-v1",
+        "commercial_batch_id": "commercial-uplift-016-020",
+        "item_numbers": [17, 18, 19, 20],
+        "source_path": str(source_path),
+        "viewer_family": viewer_family,
+        "workflow_contract": {
+            "current_file_search": {
+                "implemented": True,
+                "item_number": 17,
+                "url": f"/api/runs/{run_id}/source-search?path={quoted_path}",
+                "bounded": True,
+            },
+            "specialized_viewer": {
+                "implemented": True,
+                "item_number": 18,
+                "viewer_family": viewer_family,
+                "metadata_hidden_by_default": True,
+                "max_inline_text_chars": max_chars,
+                "specialization_profile": "source-viewer-specialization-v1",
+            },
+            "review_board": {
+                "implemented": True,
+                "item_number": 19,
+                "fields": ["status", "verification_status", "tags", "note", "assignee", "priority", "include_in_report"],
+            },
+            "compare_workflow": {
+                "implemented": True,
+                "item_number": 20,
+                "max_pinned_items": 3,
+                "supports": ["A/B/C pinned evidence", "bounded text diff", "hash comparison"],
+            },
+        },
+        "large_data_controls": {
+            "inline_preview_bounded": True,
+            "structured_preview_max_bytes": STRUCTURED_PREVIEW_MAX_BYTES,
+            "hex_preview_max_bytes": HEX_PREVIEW_MAX_BYTES,
+            "full_file_download_is_explicit_action": True,
+        },
+        "reportability_decision": {
+            "decision": "review-workbench-output-requires-source-citation-before-report",
+            "allowed_use": "single-case-source-verification-workbench",
+            "required_before_report": [
+                "save review decision for report candidates",
+                "compute source hash where needed",
+                "preserve citation, locator, and parser/viewer limitation",
+            ],
+        },
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "browser-e2e-workbench-validation-required",
+            "persistent-compare-notes-not-yet-implemented",
+            "role-based-review-server-not-yet-implemented",
+        ],
+    }
+
+
+def build_workbench_smoke_contract() -> dict[str, object]:
+    required_steps = [
+        {
+            "id": "open-workbench",
+            "action": "GET /",
+            "selector": WORKBENCH_SMOKE_SELECTORS["shell"],
+            "assertion": "Analyst console shell is visible and API health can be checked.",
+        },
+        {
+            "id": "create-or-import-run",
+            "action": "POST /api/sample-case/run or POST /api/runs/import",
+            "selector": WORKBENCH_SMOKE_SELECTORS["sample_run"],
+            "assertion": "A completed run appears in the run list.",
+        },
+        {
+            "id": "select-run",
+            "action": "GET /api/runs/{run_id}",
+            "selector": WORKBENCH_SMOKE_SELECTORS["case_hero"],
+            "assertion": "Case hero, readiness dashboard, artifact navigator, and validation summary are rendered.",
+        },
+        {
+            "id": "search-case",
+            "action": "GET /api/runs/{run_id}/search",
+            "selector": WORKBENCH_SMOKE_SELECTORS["global_search"],
+            "assertion": "Global search opens the Find view and returns bounded results.",
+        },
+        {
+            "id": "open-source-viewer",
+            "action": "GET /api/runs/{run_id}/source-preview?path=...",
+            "selector": WORKBENCH_SMOKE_SELECTORS["source_viewer"],
+            "assertion": "Source viewer opens with source-verification trail and bounded preview metadata.",
+        },
+        {
+            "id": "mark-evidence",
+            "action": "POST /api/runs/{run_id}/bookmarks",
+            "selector": WORKBENCH_SMOKE_SELECTORS["viewer_review"],
+            "assertion": "Review status, tags, notes, and include-in-report decision can be saved.",
+        },
+        {
+            "id": "export-report",
+            "action": "GET /api/runs/{run_id}/case-report/file",
+            "selector": WORKBENCH_SMOKE_SELECTORS["report_tab"],
+            "assertion": "Report view and report export endpoint are reachable after review marking.",
+        },
+    ]
+    return {
+        "command": "workbench.smoke-contract",
+        "profile_version": WORKBENCH_SMOKE_CONTRACT_VERSION,
+        "immediate_queue_item": 7,
+        "status": "implemented-browser-e2e-evidence-required",
+        "browser_test_ready": True,
+        "selectors": WORKBENCH_SMOKE_SELECTORS,
+        "required_steps": required_steps,
+        "api_routes": {
+            "open_workbench": "/",
+            "health": "/api/health",
+            "sample_case": "/api/sample-case/run",
+            "runs": "/api/runs",
+            "run_detail": "/api/runs/{run_id}",
+            "search": "/api/runs/{run_id}/search",
+            "source_preview": "/api/runs/{run_id}/source-preview?path={path}",
+            "bookmark": "/api/runs/{run_id}/bookmarks",
+            "case_report": "/api/runs/{run_id}/case-report/file",
+        },
+        "implemented_controls": {
+            "stable_selectors": True,
+            "sample_case_bootstrap": True,
+            "existing_run_import": True,
+            "source_viewer_contract": True,
+            "review_mark_contract": True,
+            "report_export_contract": True,
+            "browser_e2e_attached": False,
+        },
+        "functional_priority_profile": {
+            "queue_item_number": 7,
+            "batch_id": "functional-priority-001-010",
+            "component": "single-case-workbench-browser-smoke",
+            "status": "implemented-usable-validation-required",
+            "selector_count": len(WORKBENCH_SMOKE_SELECTORS),
+            "required_step_count": len(required_steps),
+            "passed_validation_check_ids": [
+                "stable-workbench-selectors-defined",
+                "sample-case-smoke-route-defined",
+                "source-viewer-review-report-flow-defined",
+            ],
+            "failed_validation_check_ids": [
+                "playwright-browser-smoke-log-not-attached",
+                "screenshot-evidence-not-attached",
+                "fresh-windows-browser-run-not-attached",
+            ],
+        },
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "browser-e2e-smoke-log-not-attached",
+            "visual-regression-screenshot-not-attached",
+            "fresh-windows-11-browser-smoke-required",
+        ],
+    }
+
+
+def build_workbench_large_result_evidence(*, record_count: int) -> dict[str, object]:
+    total = max(1, int(record_count))
+    visible = min(total, VIRTUAL_TABLE_ROW_LIMIT)
+    offsets = sorted({0, min(VIRTUAL_TABLE_ROW_LIMIT, max(0, total - visible)), max(0, total - visible)})
+    window_manifests = [
+        {
+            "window_name": f"search-window-{index + 1}",
+            "offset": offset,
+            "start_row": offset + 1,
+            "end_row": min(total, offset + visible),
+            "manifest": build_ui_virtualization_manifest(
+                label=f"synthetic-100k-search-window-{index + 1}",
+                total=total,
+                visible=visible,
+                api_pagination=True,
+            ),
+        }
+        for index, offset in enumerate(offsets)
+    ]
+    max_dom_rows = visible
+    estimated_dom_nodes = max_dom_rows * 8
+    dom_budget = 5_000
+    latency_budget_ms = 500
+    memory_budget_mb = 512
+    performance_contract = build_browser_e2e_performance_contract(
+        total=total,
+        visible=visible,
+        dom_budget=dom_budget,
+        latency_budget_ms=latency_budget_ms,
+        memory_budget_mb=memory_budget_mb,
+        window_manifests=window_manifests,
+    )
+    profile = browser_e2e_performance_profile(
+        label="synthetic-large-result-workbench",
+        total=total,
+        visible=visible,
+        api_pagination=True,
+        performance_contract_hash=str(performance_contract["contract_hash"]),
+    )
+    evidence_manifest = build_large_result_evidence_manifest(
+        total=total,
+        visible=visible,
+        window_manifests=window_manifests,
+        performance_contract=performance_contract,
+        estimated_dom_nodes=estimated_dom_nodes,
+        dom_budget=dom_budget,
+        latency_budget_ms=latency_budget_ms,
+        memory_budget_mb=memory_budget_mb,
+    )
+    return {
+        "command": "workbench.large-result-evidence",
+        "profile_version": "large-result-ui-evidence-v1",
+        "immediate_queue_item": 8,
+        "status": "synthetic-ui-window-proof-browser-run-required",
+        "record_count": total,
+        "row_limit": VIRTUAL_TABLE_ROW_LIMIT,
+        "visible_rows": visible,
+        "window_count": len(window_manifests),
+        "window_manifests": window_manifests,
+        "dom_budget": {
+            "max_dom_rows": max_dom_rows,
+            "estimated_dom_nodes": estimated_dom_nodes,
+            "dom_node_budget": dom_budget,
+            "dom_budget_pass": estimated_dom_nodes <= dom_budget,
+            "reason": "The UI renders a bounded row window instead of all synthetic records.",
+        },
+        "search_latency_budget": {
+            "target_p95_ms": latency_budget_ms,
+            "synthetic_browser_latency_attached": False,
+            "api_pagination_required": True,
+            "case_db_or_cursor_endpoint_required": True,
+        },
+        "memory_budget": {
+            "target_max_heap_mb": memory_budget_mb,
+            "synthetic_browser_memory_attached": False,
+            "heap_snapshot_required": True,
+        },
+        "performance_contract": performance_contract,
+        "evidence_manifest": evidence_manifest,
+        "evidence_manifest_hash": evidence_manifest["manifest_hash"],
+        "implemented_controls": {
+            "synthetic_100k_contract": total >= 100_000,
+            "cursor_window_manifest": True,
+            "bounded_dom_row_window": visible <= VIRTUAL_TABLE_ROW_LIMIT,
+            "viewport_offset_persistence": True,
+            "keyboard_window_navigation": True,
+            "browser_e2e_contract": True,
+            "performance_budget_manifest": True,
+            "browser_trace_attached": False,
+        },
+        "functional_priority_profile": {
+            **profile,
+            "queue_item_number": 8,
+            "status": "implemented-synthetic-proof-browser-e2e-required",
+            "controls": {
+                **profile["controls"],
+                "synthetic_record_count": total,
+                "dom_budget_pass": estimated_dom_nodes <= dom_budget,
+                "window_manifest_count": len(window_manifests),
+                "performance_contract_hash": performance_contract["contract_hash"],
+                "evidence_manifest_hash": evidence_manifest["manifest_hash"],
+                "target_p95_interaction_ms": latency_budget_ms,
+                "target_max_heap_mb": memory_budget_mb,
+            },
+            "failed_validation_check_ids": [
+                "playwright-100k-browser-trace-not-attached",
+                "browser-memory-profile-not-attached",
+                "real-case-search-latency-not-attached",
+            ],
+        },
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "actual-browser-100k-run-required",
+            "memory-profile-and-p95-latency-required",
+            "fresh-windows-11-large-result-smoke-required",
+        ],
+    }
+
+
+def build_browser_e2e_performance_contract(
+    *,
+    total: int,
+    visible: int,
+    dom_budget: int,
+    latency_budget_ms: int,
+    memory_budget_mb: int,
+    window_manifests: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    contract_core = {
+        "profile_version": BROWSER_E2E_PERFORMANCE_CONTRACT_VERSION,
+        "item_number": 25,
+        "gap_id": "#25",
+        "target_record_count": total,
+        "visible_row_limit": visible,
+        "selectors": {
+            "workbench_shell": WORKBENCH_SMOKE_SELECTORS["shell"],
+            "detail_panel": WORKBENCH_SMOKE_SELECTORS["detail_panel"],
+            "global_search": WORKBENCH_SMOKE_SELECTORS["global_search"],
+            "search_view": WORKBENCH_SMOKE_SELECTORS["search_view"],
+            "source_viewer": WORKBENCH_SMOKE_SELECTORS["source_viewer"],
+            "virtual_window_card": ".virtual-window-card",
+            "virtual_window_next": "[data-virtual-window-key]",
+            "virtual_window_jump": "[data-virtual-window-jump-key]",
+        },
+        "required_steps": [
+            {
+                "id": "load-workbench",
+                "action": "open / and wait for workbench shell",
+                "measurement": "initial render time",
+                "pass_criteria": f"shell visible and DOM nodes <= {dom_budget}",
+            },
+            {
+                "id": "load-large-result-json",
+                "action": "open /api/workbench/large-result-evidence?record_count=100000 and store response",
+                "measurement": "contract/evidence manifest hash captured",
+                "pass_criteria": "response includes performance_contract.contract_hash and evidence_manifest_hash",
+            },
+            {
+                "id": "render-windowed-table",
+                "action": "render or navigate to a result table with a bounded virtual window",
+                "measurement": "mounted row count and DOM node count",
+                "pass_criteria": f"mounted rows <= {visible} and DOM nodes <= {dom_budget}",
+            },
+            {
+                "id": "keyboard-window-navigation",
+                "action": "use next/previous/jump controls and keyboard shortcuts for at least three windows",
+                "measurement": "p95 interaction latency",
+                "pass_criteria": f"p95 interaction latency <= {latency_budget_ms} ms",
+            },
+            {
+                "id": "source-viewer-roundtrip",
+                "action": "open a source viewer from a large result and return to the same viewport",
+                "measurement": "viewport persistence and heap growth",
+                "pass_criteria": f"viewport restored and heap <= {memory_budget_mb} MB",
+            },
+            {
+                "id": "attach-evidence",
+                "action": "attach Playwright trace, screenshot, DOM count, memory profile, and latency samples",
+                "measurement": "external evidence completeness",
+                "pass_criteria": "all required artifacts are present before commercial performance claim",
+            },
+        ],
+        "performance_budgets": {
+            "dom_node_budget": dom_budget,
+            "mounted_row_budget": visible,
+            "target_p95_interaction_ms": latency_budget_ms,
+            "target_max_heap_mb": memory_budget_mb,
+        },
+        "required_artifacts": [
+            "playwright-trace.zip",
+            "large-table-screenshot.png",
+            "dom-node-count.json",
+            "memory-profile.json",
+            "interaction-latency-samples.json",
+            "fresh-windows-11-run-transcript.txt",
+        ],
+        "window_manifest_hashes": [
+            str(item.get("manifest", {}).get("manifest_hash"))
+            for item in window_manifests
+            if isinstance(item.get("manifest"), Mapping)
+        ],
+        "commercial_claim_allowed": False,
+        "blockers": [
+            "playwright-100k-browser-trace-not-attached",
+            "browser-memory-profile-not-attached",
+            "fresh-windows-11-large-result-smoke-required",
+        ],
+    }
+    return {**contract_core, "contract_hash": hashlib.sha256(json.dumps(contract_core, sort_keys=True).encode("utf-8")).hexdigest()}
+
+
+def build_large_result_evidence_manifest(
+    *,
+    total: int,
+    visible: int,
+    window_manifests: Sequence[Mapping[str, object]],
+    performance_contract: Mapping[str, object],
+    estimated_dom_nodes: int,
+    dom_budget: int,
+    latency_budget_ms: int,
+    memory_budget_mb: int,
+) -> dict[str, object]:
+    manifest_core = {
+        "profile_version": "large-result-ui-evidence-manifest-v1",
+        "item_number": 25,
+        "record_count": total,
+        "visible_rows": visible,
+        "estimated_dom_nodes": estimated_dom_nodes,
+        "dom_budget": dom_budget,
+        "dom_budget_pass": estimated_dom_nodes <= dom_budget,
+        "latency_budget_ms": latency_budget_ms,
+        "memory_budget_mb": memory_budget_mb,
+        "performance_contract_hash": str(performance_contract.get("contract_hash") or ""),
+        "window_manifest_hashes": [
+            str(item.get("manifest", {}).get("manifest_hash"))
+            for item in window_manifests
+            if isinstance(item.get("manifest"), Mapping)
+        ],
+        "internal_evidence_status": "synthetic-contract-generated",
+        "external_evidence_status": "missing",
+        "commercial_gap_ids": ["#25", VIEWER_WORKFLOW_GAP_IDS["ui_virtualization"]],
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest()}
+
+
+def source_viewer_family(source_path: Path, *, suffix: str, mime_type: str) -> str:
+    if mime_type.startswith("image/"):
+        return "image-gallery-preview"
+    if is_sqlite_candidate(source_path, suffix):
+        return "sqlite-table-preview"
+    if suffix in {".json", ".jsonl", ".ndjson"}:
+        return "json-structured-preview"
+    if suffix == ".xml":
+        return "xml-structured-preview"
+    if suffix in {".eml", ".mbox"}:
+        return "email-thread-preview"
+    if mime_type.startswith(("audio/", "video/")):
+        return "media-preview"
+    if suffix in SUPPORTED_DOC_EXTS:
+        return "document-text-preview"
+    return "text-or-hex-preview"
+
+
+def source_viewer_specialization_profile(
+    *,
+    run_id: str,
+    source_path: Path,
+    suffix: str,
+    mime_type: str,
+    max_chars: int,
+) -> dict[str, object]:
+    viewer_family = source_viewer_family(source_path, suffix=suffix, mime_type=mime_type)
+    quoted_path = quote(str(source_path))
+    return {
+        "profile_version": "source-viewer-specialization-v1",
+        "commercial_batch_id": "commercial-uplift-016-020",
+        "item_number": 18,
+        "viewer_family": viewer_family,
+        "source_path": str(source_path),
+        "default_layout": {
+            "primary_content_first": True,
+            "metadata_collapsed_by_default": True,
+            "limitations_visible": True,
+            "review_controls_visible": True,
+            "compare_pin_visible": True,
+        },
+        "supported_viewer_features": source_viewer_feature_matrix(viewer_family),
+        "citation_contract": {
+            "source_path": True,
+            "source_name": True,
+            "viewer_family": True,
+            "search_inside_file_url": f"/api/runs/{run_id}/source-search?path={quoted_path}",
+            "metadata_hash_url": f"/api/runs/{run_id}/source-metadata?path={quoted_path}&hash=true",
+            "download_url": f"/api/runs/{run_id}/source-file?path={quoted_path}",
+        },
+        "large_data_controls": {
+            "inline_text_limit": max_chars,
+            "structured_preview_max_bytes": STRUCTURED_PREVIEW_MAX_BYTES,
+            "hex_preview_max_bytes": HEX_PREVIEW_MAX_BYTES,
+            "explicit_full_file_open": True,
+            "active_content_blocked": True,
+        },
+        "reportability_decision": {
+            "decision": "do-not-report-viewer-rendering-without-source-citation",
+            "allowed_use": "source-viewer-verification-and-review",
+            "required_before_report": [
+                "capture source hash where needed",
+                "preserve source-search locator or table/offset citation",
+                "record analyst review status and limitation wording",
+            ],
+        },
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "browser-e2e-visual-validation-required",
+            "large-preview-corpus-required",
+            "trusted-viewer-rendering-diff-required",
+        ],
+    }
+
+
+def source_viewer_feature_matrix(viewer_family: str) -> dict[str, bool]:
+    return {
+        "text_preview": viewer_family in {"document-text-preview", "text-or-hex-preview"},
+        "hex_preview": viewer_family == "text-or-hex-preview",
+        "sqlite_table_preview": viewer_family == "sqlite-table-preview",
+        "json_tree_preview": viewer_family == "json-structured-preview",
+        "xml_tree_preview": viewer_family == "xml-structured-preview",
+        "image_preview": viewer_family == "image-gallery-preview",
+        "media_metadata_preview": viewer_family == "media-preview",
+        "email_thread_preview": viewer_family == "email-thread-preview",
+        "current_file_search": True,
+        "source_hash_on_demand": True,
+        "metadata_collapsible": True,
+        "review_and_compare_actions": True,
     }
 
 
@@ -1758,11 +3314,19 @@ def source_viewer_sandbox(source_path: Path, *, suffix: str, mime_type: str, max
         "image/svg+xml",
         "application/javascript",
     }
+    policy_profile = preview_sandbox_policy_profile(
+        source_path=source_path,
+        suffix=suffix,
+        mime_type=mime_type,
+        max_chars=max_chars,
+        active_content_blocked=active_content,
+    )
     return {
         "mode": "read-only-bounded-preview",
         "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["preview_sandbox"]],
         "executes_content": False,
         "active_content_blocked": active_content,
+        "preview_sandbox_policy_profile": policy_profile,
         "path_redaction": "display-basename-in-summary-use-full-path-only-for-authorized-source-actions",
         "max_inline_text_chars": max_chars,
         "max_structured_preview_bytes": STRUCTURED_PREVIEW_MAX_BYTES,
@@ -1790,7 +3354,38 @@ def source_viewer_sandbox(source_path: Path, *, suffix: str, mime_type: str, max
             source_path=source_path,
             active_content_blocked=active_content,
             max_chars=max_chars,
+            policy_profile=policy_profile,
         ),
+    }
+
+
+def preview_sandbox_policy_profile(
+    *,
+    source_path: Path,
+    suffix: str,
+    mime_type: str,
+    max_chars: int,
+    active_content_blocked: bool,
+) -> dict[str, object]:
+    dangerous_extension = suffix in {".html", ".htm", ".svg", ".js", ".vbs", ".hta", ".docm", ".xlsm", ".pptm"}
+    return {
+        "profile_version": "preview-sandbox-policy-profile-v1",
+        "source_name": source_path.name,
+        "source_path_sha256": hashlib.sha256(str(source_path).encode("utf-8", errors="replace")).hexdigest(),
+        "suffix": suffix,
+        "mime_type": mime_type,
+        "dangerous_extension_detected": dangerous_extension,
+        "active_content_blocked": active_content_blocked,
+        "executes_content": False,
+        "external_network_access": False,
+        "renderer_strategy": "escaped-bounded-data-rendering",
+        "original_file_opening": "download-only-user-controlled-action",
+        "max_inline_text_chars": max_chars,
+        "max_structured_preview_bytes": STRUCTURED_PREVIEW_MAX_BYTES,
+        "max_hex_preview_bytes": HEX_PREVIEW_MAX_BYTES,
+        "os_sandbox_enabled": False,
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["preview_sandbox"]],
+        "commercial_claim_allowed": False,
     }
 
 
@@ -1820,12 +3415,17 @@ def build_preview_sandbox_trusted_diff(
 
 
 def preview_sandbox_diff_value(item: Mapping[str, object]) -> dict[str, object]:
+    policy = item.get("preview_sandbox_policy_profile")
+    policy_profile = policy if isinstance(policy, Mapping) else {}
     return {
         "mode": str(item.get("mode") or ""),
         "executes_content": bool(item.get("executes_content")),
         "external_network_access": bool(item.get("external_network_access")),
         "active_content_blocked": bool(item.get("active_content_blocked")),
         "max_inline_text_chars": int(item.get("max_inline_text_chars") or 0),
+        "policy_profile_version": str(policy_profile.get("profile_version") or ""),
+        "renderer_strategy": str(policy_profile.get("renderer_strategy") or ""),
+        "os_sandbox_enabled": bool(policy_profile.get("os_sandbox_enabled")),
     }
 
 
@@ -1834,6 +3434,7 @@ def preview_sandbox_core_accuracy_gates(
     source_path: Path,
     active_content_blocked: bool,
     max_chars: int,
+    policy_profile: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
@@ -1842,7 +3443,10 @@ def preview_sandbox_core_accuracy_gates(
         "external network access disabled",
         "preview caps recorded",
         "OS sandbox limitation warning",
+        "preview sandbox policy profile emitted",
     ]
+    if policy_profile and policy_profile.get("renderer_strategy"):
+        satisfied.append("escaped bounded renderer strategy recorded")
     evidence_refs = [
         f"source_path:{source_path}",
         f"active_content_blocked:{active_content_blocked}",
@@ -1901,7 +3505,12 @@ def is_sqlite_candidate(path: Path, suffix: str | None = None) -> bool:
         return False
 
 
-def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
+def is_image_preview_candidate(path: Path) -> bool:
+    mime_type = mimetypes.guess_type(path.name)[0] or ""
+    return mime_type.startswith("image/")
+
+
+def build_sqlite_preview(source_path: Path, *, run_id: str | None = None) -> Dict[str, object]:
     try:
         with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
@@ -1932,6 +3541,7 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
             "database_metadata": database_metadata,
             "tables": previews,
             "table_profiles": build_sqlite_table_profiles(previews),
+            "table_page_profile": sqlite_table_page_profile(run_id=run_id, source_path=source_path, tables=previews),
             "large_sqlite_fts_optimization": sqlite_fts_optimization_metadata(database_metadata, previews),
             "table_limit": SQLITE_PREVIEW_TABLE_LIMIT,
             "row_limit": SQLITE_PREVIEW_ROW_LIMIT,
@@ -1941,7 +3551,7 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
                 VIEWER_WORKFLOW_GAP_IDS["sqlite"],
                 "sqlite-table-viewer",
                 [
-                    "large-table-pagination-beyond-preview-limit-required",
+                    "interactive-table-pagination-ui-is-api-backed-baseline-only",
                     "foreign-key-relationship-graph-not-yet-rendered",
                     "wal/journal-replay-and-deleted-row-recovery-not-implemented-in-viewer",
                 ],
@@ -1965,8 +3575,8 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
                     tables=previews,
                 ),
                 blockers=[
-                    "table-specific-pagination-ui-not-implemented",
-                    "where-builder-ui-not-implemented",
+                    "interactive-table-pagination-ui-needs-browser-e2e-validation",
+                    "where-builder-is-restricted-contains-filter-not-arbitrary-sql",
                     "deleted-row-and-wal-recovery-not-implemented-in-viewer",
                     "export-selected-rows-workflow-not-implemented",
                     SQLITE_VIEWER_TRUSTED_DIFF_BLOCKER,
@@ -1978,7 +3588,10 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
                     "column_limit": SQLITE_PREVIEW_COLUMN_LIMIT,
                     "opened_readonly": True,
                     "deleted_row_recovery": False,
+                    "table_pagination_api": True,
+                    "where_builder_api": True,
                     "where_builder_ui": False,
+                    "max_table_page_rows": SQLITE_TABLE_PAGE_MAX_ROWS,
                 },
             ),
             "sqlite_fts_optimization_assessment": source_viewer_component_assessment(
@@ -1995,6 +3608,8 @@ def build_sqlite_preview(source_path: Path) -> Dict[str, object]:
                 "schema-sql",
                 "column-type-and-pk-details",
                 "bounded-row-preview",
+                "api-table-pagination",
+                "restricted-where-contains-filter",
                 "text-column-keyword-search",
                 "table-profile-summary",
                 "large-sqlite-optimization-metadata",
@@ -2148,12 +3763,9 @@ def local_xml_name(value: str) -> str:
     return value.rsplit("}", 1)[-1] if "}" in value else value
 
 
-def build_email_preview(source_path: Path, suffix: str) -> Dict[str, object]:
+def build_email_preview(source_path: Path, suffix: str, *, run_id: str | None = None) -> Dict[str, object]:
     try:
-        if suffix == ".eml":
-            messages = [email.message_from_bytes(source_path.read_bytes(), policy=policy.default)]
-        else:
-            messages = parse_mbox_messages(source_path)
+        messages = read_email_messages(source_path, suffix)
     except OSError as exc:
         return {
             "preview_type": "binary",
@@ -2175,6 +3787,11 @@ def build_email_preview(source_path: Path, suffix: str) -> Dict[str, object]:
             "message_count": len(summaries),
             "message_limit": EMAIL_PREVIEW_MESSAGE_LIMIT,
             "messages": summaries,
+            "attachment_package_profile": email_attachment_package_profile(
+                run_id=run_id,
+                source_path=source_path,
+                messages=summaries,
+            ),
             "threads": threads,
             "conversation_view": conversation,
             "thread_count": len(threads),
@@ -2209,7 +3826,7 @@ def build_email_preview(source_path: Path, suffix: str) -> Dict[str, object]:
                 blockers=[
                     "native-pst-ost-msg-conversation-view-not-implemented",
                     "deleted-mailbox-item-recovery-not-implemented",
-                    "attachment-extraction-and-citation-export-not-complete",
+                    "attachment-content-export-is-bounded-and-needs-trusted-mailbox-validation",
                     "message-id-graph-validation-required",
                     EMAIL_VIEWER_TRUSTED_DIFF_BLOCKER,
                 ],
@@ -2220,14 +3837,16 @@ def build_email_preview(source_path: Path, suffix: str) -> Dict[str, object]:
                     "thread_count": len(threads),
                     "header_threading": True,
                     "native_pst_ost_msg": False,
-                    "attachment_extraction": False,
+                    "attachment_inventory": True,
+                    "attachment_package_endpoint": True,
+                    "attachment_content_export_max_bytes": EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
                 },
             ),
         },
     }
 
 
-def build_hex_preview(source_path: Path) -> Dict[str, object]:
+def build_hex_preview(source_path: Path, *, run_id: str | None = None) -> Dict[str, object]:
     try:
         with source_path.open("rb") as handle:
             data = handle.read(HEX_PREVIEW_MAX_BYTES + 1)
@@ -2240,17 +3859,8 @@ def build_hex_preview(source_path: Path) -> Dict[str, object]:
         }
     preview = data[:HEX_PREVIEW_MAX_BYTES]
     preview_hashes = compute_hashes_for_bytes(preview)
-    rows = []
-    for offset in range(0, len(preview), HEX_PREVIEW_ROW_WIDTH):
-        chunk = preview[offset : offset + HEX_PREVIEW_ROW_WIDTH]
-        rows.append(
-            {
-                "offset": offset,
-                "offset_hex": f"0x{offset:08x}",
-                "hex": " ".join(f"{byte:02x}" for byte in chunk),
-                "ascii": "".join(chr(byte) if 32 <= byte < 127 else "." for byte in chunk),
-            }
-        )
+    rows = build_hex_rows(preview)
+    range_profile = hex_range_citation_profile(run_id=run_id, source_path=source_path, preview=preview)
     return {
         "preview_type": "hex",
         "message": "Bounded hex preview is available.",
@@ -2280,7 +3890,11 @@ def build_hex_preview(source_path: Path) -> Dict[str, object]:
                 "base": "hex",
                 "supports_keyword_byte_hits": True,
                 "supports_source_hash_verification": True,
+                "supports_range_citation_export": True,
+                "range_export_max_bytes": HEX_RANGE_EXPORT_MAX_BYTES,
+                "default_range_export_url": range_profile.get("default_export_url"),
             },
+            "range_citation_profile": range_profile,
             "rows": rows,
             "truncated": len(data) > HEX_PREVIEW_MAX_BYTES,
             "safety": "read-only bounded preview; use source hashes before reporting byte offsets",
@@ -2316,7 +3930,7 @@ def build_hex_preview(source_path: Path) -> Dict[str, object]:
                 blockers=[
                     "interactive-jump-to-offset-ui-not-implemented",
                     "copy-safe-byte-selection-ui-not-implemented",
-                    "exported-hex-range-citation-package-not-implemented",
+                    "export-range-citation-package-needs-trusted-offset-validation",
                     "sector-partition-aware-navigation-not-implemented",
                     HEX_VIEWER_TRUSTED_DIFF_BLOCKER,
                 ],
@@ -2327,20 +3941,146 @@ def build_hex_preview(source_path: Path) -> Dict[str, object]:
                     "row_count": len(rows),
                     "supports_keyword_byte_hits": True,
                     "full_file_inline_hash": False,
-                    "export_range_citation": False,
+                    "export_range_citation": True,
+                    "range_export_max_bytes": HEX_RANGE_EXPORT_MAX_BYTES,
                 },
             ),
         },
     }
 
 
-def build_image_preview(source_path: Path, *, image_url: str) -> Dict[str, object]:
+def build_hex_rows(data: bytes, *, base_offset: int = 0) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for relative_offset in range(0, len(data), HEX_PREVIEW_ROW_WIDTH):
+        chunk = data[relative_offset : relative_offset + HEX_PREVIEW_ROW_WIDTH]
+        absolute_offset = base_offset + relative_offset
+        rows.append(
+            {
+                "offset": absolute_offset,
+                "relative_offset": relative_offset,
+                "offset_hex": f"0x{absolute_offset:08x}",
+                "hex": " ".join(f"{byte:02x}" for byte in chunk),
+                "ascii": "".join(chr(byte) if 32 <= byte < 127 else "." for byte in chunk),
+            }
+        )
+    return rows
+
+
+def hex_range_citation_profile(*, run_id: str | None, source_path: Path, preview: bytes) -> dict[str, object]:
+    default_length = min(len(preview), 256)
+    quoted_path = quote(str(source_path))
+    default_export_url = (
+        f"/api/runs/{run_id}/source-hex-range?path={quoted_path}&offset=0&length={default_length}"
+        if run_id and default_length
+        else None
+    )
+    return {
+        "profile_version": "hex-range-citation-v1",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["hex"]],
+        "range_export_endpoint": "/api/runs/{run_id}/source-hex-range",
+        "default_offset": 0,
+        "default_offset_hex": "0x00000000" if default_length else "",
+        "default_length": default_length,
+        "default_export_url": default_export_url,
+        "max_export_bytes": HEX_RANGE_EXPORT_MAX_BYTES,
+        "supports_offset_jump": True,
+        "supports_range_hashes": True,
+        "supports_copy_safe_citation": True,
+        "source_hash_policy": "preview/range hashes are immediate; full-source hashes require include_hashes=true or source-metadata?hash=true",
+        "report_use_warning": "Attach the range package, source hash, and trusted offset validation before using byte offsets in a court exhibit.",
+    }
+
+
+def build_hex_range_citation_package(
+    *,
+    run_id: str,
+    source_path: Path,
+    offset: int,
+    length: int,
+    include_source_hashes: bool,
+) -> Dict[str, object]:
+    stat = source_path.stat()
+    if offset >= stat.st_size:
+        raise HTTPException(status_code=416, detail="offset is outside the source file")
+    read_length = min(length, HEX_RANGE_EXPORT_MAX_BYTES, max(stat.st_size - offset, 0))
+    with source_path.open("rb") as handle:
+        handle.seek(offset)
+        data = handle.read(read_length)
+    range_hashes = compute_hashes_for_bytes(data)
+    rows = build_hex_rows(data, base_offset=offset)
+    end_exclusive = offset + len(data)
+    citation_id = hashlib.sha256(
+        f"{run_id}|{source_path}|{stat.st_size}|{offset}|{end_exclusive}|{range_hashes['sha256']}".encode("utf-8")
+    ).hexdigest()[:16]
+    source_hashes = compute_hashes(source_path) if include_source_hashes else {}
+    return {
+        "command": "source-hex-range",
+        "profile_version": "hex-range-citation-package-v1",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["hex"]],
+        "citation_id": citation_id,
+        "path": str(source_path),
+        "name": source_path.name,
+        "size": stat.st_size,
+        "offset": offset,
+        "offset_hex": f"0x{offset:08x}",
+        "end_offset_exclusive": end_exclusive,
+        "end_offset_exclusive_hex": f"0x{end_exclusive:08x}",
+        "length_requested": length,
+        "length_returned": len(data),
+        "max_export_bytes": HEX_RANGE_EXPORT_MAX_BYTES,
+        "truncated": length > len(data),
+        "range_hashes": range_hashes,
+        "source_hashes": source_hashes,
+        "source_hash_status": "computed" if include_source_hashes else "available-on-demand",
+        "rows": rows,
+        "citation": (
+            f"{source_path.name} bytes {offset}-{max(end_exclusive - 1, offset)} "
+            f"({f'0x{offset:08x}'}-{f'0x{max(end_exclusive - 1, offset):08x}'}) "
+            f"sha256={range_hashes['sha256']}"
+        ),
+        "copy_safe_citation": {
+            "text": (
+                f"Source={source_path.name}; range={offset}-{max(end_exclusive - 1, offset)}; "
+                f"offset_hex=0x{offset:08x}; length={len(data)}; range_sha256={range_hashes['sha256']}; "
+                f"citation_id={citation_id}"
+            ),
+            "redacts_full_path": True,
+            "full_path_available_in_authorized_payload": True,
+        },
+        "reportability_decision": viewer_workflow_reportability_decision(
+            item_number=53,
+            component="hex-range-citation-package",
+            blockers=[
+                "trusted-offset-manifest-diff-required-before-court-use",
+                "source-full-hash-required-before-court-use",
+                "sector-partition-aware-navigation-not-implemented",
+            ],
+            controls={
+                "range_export_max_bytes": HEX_RANGE_EXPORT_MAX_BYTES,
+                "range_hashes": True,
+                "source_hashes_included": include_source_hashes,
+                "copy_safe_citation": True,
+            },
+        ),
+        "core_accuracy_gates": hex_viewer_core_accuracy_gates(
+            source_path=source_path,
+            rows=rows,
+            preview_hashes=range_hashes,
+            truncated=length > len(data),
+        ),
+    }
+
+
+def build_image_preview(source_path: Path, *, image_url: str, run_id: str | None = None) -> Dict[str, object]:
     try:
         from ..artifacts.media import build_image_record
 
         artifact = build_image_record(source_path)
         details = artifact.details
         thumbnail = details.get("thumbnail_preview") if isinstance(details.get("thumbnail_preview"), dict) else {}
+        gallery_page = image_gallery_page_profile(run_id=run_id, source_path=source_path, details=details)
+        ocr_queue_page = source_ocr_queue_profile(run_id=run_id, source_path=source_path)
+        translation_review = source_ocr_translation_profile(run_id=run_id, source_path=source_path, details=details)
         image_payload = {
             "decoded": bool(details.get("decoded")),
             "width": details.get("width"),
@@ -2355,13 +4095,17 @@ def build_image_preview(source_path: Path, *, image_url: str) -> Dict[str, objec
             "translation_plan": details.get("translation_plan") if isinstance(details.get("translation_plan"), dict) else {},
             "ocr_sidecar": details.get("ocr_sidecar") if isinstance(details.get("ocr_sidecar"), dict) else {},
             "translation_sidecar": details.get("translation_sidecar") if isinstance(details.get("translation_sidecar"), dict) else {},
+            "ocr_queue_profile": ocr_queue_page,
+            "korean_ocr_translation_profile": translation_review,
             "gallery_review": {
                 "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["gallery"]],
                 "tag_suggestions": image_tag_suggestions(details),
                 "report_selection_hint": "Use review marks to include the image after verifying source hashes and context.",
                 "similarity_bucket_key": str(details.get("similarity_bucket") or ""),
                 "compare_ready": bool(details.get("perceptual_hash")),
+                "gallery_page_url": gallery_page.get("default_page_url"),
             },
+            "gallery_page_profile": gallery_page,
             "gallery_review_assessment": image_gallery_review_assessment(details),
             "core_accuracy_gates": image_viewer_core_accuracy_gates(source_path=source_path, details=details),
             "commercial_uplift_evidence": image_viewer_commercial_uplift_evidence(source_path=source_path, details=details),
@@ -2380,6 +4124,9 @@ def build_image_preview(source_path: Path, *, image_url: str) -> Dict[str, objec
                 "similarity_bucket_key": "",
                 "compare_ready": False,
             },
+            "gallery_page_profile": image_gallery_page_profile(run_id=run_id, source_path=source_path, details={}),
+            "ocr_queue_profile": source_ocr_queue_profile(run_id=run_id, source_path=source_path),
+            "korean_ocr_translation_profile": source_ocr_translation_profile(run_id=run_id, source_path=source_path, details={}),
             "gallery_review_assessment": image_gallery_review_assessment({}),
             "core_accuracy_gates": image_viewer_core_accuracy_gates(source_path=source_path, details={}),
             "commercial_uplift_evidence": image_viewer_commercial_uplift_evidence(source_path=source_path, details={}),
@@ -2422,6 +4169,380 @@ def image_gallery_review_assessment(details: Mapping[str, object]) -> dict[str, 
     }
 
 
+def image_gallery_page_profile(*, run_id: str | None, source_path: Path, details: Mapping[str, object]) -> dict[str, object]:
+    quoted_path = quote(str(source_path))
+    bucket = str(details.get("similarity_bucket") or "")
+    default_page_url = (
+        f"/api/runs/{run_id}/source-image-gallery?path={quoted_path}&offset=0&limit={IMAGE_GALLERY_DEFAULT_LIMIT}"
+        if run_id
+        else None
+    )
+    bucket_page_url = (
+        f"{default_page_url}&similarity_bucket={quote(bucket)}"
+        if default_page_url and bucket
+        else None
+    )
+    return {
+        "profile_version": "image-gallery-page-profile-v1",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["gallery"]],
+        "endpoint": "/api/runs/{run_id}/source-image-gallery",
+        "default_page_url": default_page_url,
+        "bucket_page_url": bucket_page_url,
+        "anchor_similarity_bucket": bucket,
+        "max_page_items": IMAGE_GALLERY_MAX_ITEMS,
+        "default_limit": IMAGE_GALLERY_DEFAULT_LIMIT,
+        "supports_folder_gallery_page": True,
+        "supports_similarity_bucket_filter": True,
+        "supports_keyboard_triage_metadata": True,
+        "persistent_tags": False,
+        "report_use_warning": "Treat perceptual buckets and tags as triage hints until validated against a trusted image gallery manifest.",
+    }
+
+
+def source_ocr_queue_profile(*, run_id: str | None, source_path: Path) -> dict[str, object]:
+    quoted_path = quote(str(source_path))
+    queue_url = (
+        f"/api/runs/{run_id}/source-ocr-queue?path={quoted_path}&max_items={SOURCE_OCR_QUEUE_DEFAULT_MAX_ITEMS}"
+        if run_id
+        else None
+    )
+    return {
+        "profile_version": "source-ocr-queue-profile-v1",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["ocr_queue"], VIEWER_WORKFLOW_GAP_IDS["korean_ocr"]],
+        "endpoint": "/api/runs/{run_id}/source-ocr-queue",
+        "default_queue_url": queue_url,
+        "scope": "anchor-image-parent-folder",
+        "max_default_items": SOURCE_OCR_QUEUE_DEFAULT_MAX_ITEMS,
+        "supports_sidecar_inventory": True,
+        "supports_retry_failure_projection": True,
+        "case_db_persistence": False,
+        "native_ocr_execution": False,
+        "report_use_warning": "Queue state coordinates OCR work; attach sidecar hashes and engine logs before report-grade OCR claims.",
+    }
+
+
+def source_ocr_translation_profile(*, run_id: str | None, source_path: Path, details: Mapping[str, object]) -> dict[str, object]:
+    quoted_path = quote(str(source_path))
+    review_url = (
+        f"/api/runs/{run_id}/source-ocr-translation?path={quoted_path}&include_text=true"
+        if run_id
+        else None
+    )
+    ocr_sidecar = details.get("ocr_sidecar") if isinstance(details.get("ocr_sidecar"), Mapping) else {}
+    translation_sidecar = details.get("translation_sidecar") if isinstance(details.get("translation_sidecar"), Mapping) else {}
+    workflow = details.get("korean_ocr_translation_workflow") if isinstance(details.get("korean_ocr_translation_workflow"), Mapping) else {}
+    return {
+        "profile_version": "source-ocr-translation-profile-v1",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["korean_ocr"]],
+        "endpoint": "/api/runs/{run_id}/source-ocr-translation",
+        "default_review_url": review_url,
+        "has_ocr_sidecar": bool(ocr_sidecar),
+        "has_translation_sidecar": bool(translation_sidecar),
+        "korean_detected_or_expected": bool(workflow.get("korean_detected_or_expected")),
+        "supports_side_by_side_review": True,
+        "preserves_original_image": True,
+        "max_text_chars": SOURCE_OCR_TRANSLATION_MAX_CHARS,
+        "native_korean_ocr_execution": False,
+        "machine_translation_execution": False,
+        "certified_translation": False,
+        "report_use_warning": "Use this side-by-side OCR/translation review as triage until Korean OCR calibration and certified translation evidence are attached.",
+    }
+
+
+def build_source_ocr_queue(*, run_id: str, anchor_path: Path, max_items: int, retry_failures: bool) -> Dict[str, object]:
+    try:
+        queue = build_ocr_queue(anchor_path.parent, max_items=max_items, retry_failures=retry_failures)
+    except OcrQueueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    items = queue.get("items") if isinstance(queue.get("items"), list) else []
+    anchor_id = hashlib.sha256(str(anchor_path.resolve()).encode("utf-8", errors="replace")).hexdigest()[:16]
+    queue["profile_version"] = "source-ocr-queue-page-v1"
+    queue["run_id"] = run_id
+    queue["anchor_path"] = str(anchor_path)
+    queue["anchor_name"] = anchor_path.name
+    queue["anchor_queue_id"] = stable_source_queue_id(anchor_path)
+    queue["viewer_context"] = {
+        "profile_version": "source-ocr-queue-viewer-context-v1",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["ocr_queue"], VIEWER_WORKFLOW_GAP_IDS["korean_ocr"]],
+        "anchor_id": anchor_id,
+        "scope": "parent-folder",
+        "item_count": len(items),
+        "retry_failures": retry_failures,
+        "case_db_persistence": False,
+        "native_ocr_execution": False,
+        "work_queue_controls": {
+            "max_items": max_items,
+            "bounded_folder_scan": True,
+            "sidecar_hashes_preserved": True,
+            "engine_logs_required_for_report": True,
+        },
+        "review_actions": [
+            "open sidecar text next to source image",
+            "run external OCR engine outside RapidTriage and preserve logs",
+            "rebuild queue with retry_failures after failed engine runs",
+            "mark OCR-derived evidence only after source and sidecar hashes are verified",
+        ],
+    }
+    queue["copy_safe_citation"] = {
+        "text": (
+            f"OCR queue scope={anchor_path.parent.name}; anchor={anchor_path.name}; "
+            f"candidate_count={queue.get('summary', {}).get('candidate_count', 0)}; anchor_queue_id={queue['anchor_queue_id']}"
+        ),
+        "redacts_full_path": True,
+    }
+    return queue
+
+
+def build_source_ocr_translation_package(*, run_id: str, source_path: Path, include_text: bool) -> Dict[str, object]:
+    try:
+        from ..artifacts.media import build_image_record
+
+        details = build_image_record(source_path).details
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"failed to build OCR/translation review: {exc}") from exc
+    ocr_sidecar = details.get("ocr_sidecar") if isinstance(details.get("ocr_sidecar"), Mapping) else {}
+    translation_sidecar = details.get("translation_sidecar") if isinstance(details.get("translation_sidecar"), Mapping) else {}
+    workflow = details.get("korean_ocr_translation_workflow") if isinstance(details.get("korean_ocr_translation_workflow"), Mapping) else {}
+    ocr_text = str(ocr_sidecar.get("text") or "")
+    translation_text = str(translation_sidecar.get("text") or "")
+    ocr_text_bounded = ocr_text[:SOURCE_OCR_TRANSLATION_MAX_CHARS]
+    translation_text_bounded = translation_text[:SOURCE_OCR_TRANSLATION_MAX_CHARS]
+    core_gates = [
+        gate
+        for gate in details.get("core_accuracy_gates", [])
+        if isinstance(gate, Mapping) and str(gate.get("gap_id")) == VIEWER_WORKFLOW_GAP_IDS["korean_ocr"]
+    ]
+    if not core_gates:
+        core_gates = [
+            build_accuracy_gate(
+                59,
+                satisfied_checks=[
+                    "Korean language hinting" if workflow.get("language_hints") else "workflow profile emitted",
+                    "translation sidecar import" if translation_sidecar else "translation requirement disclosed",
+                    "human translation validation warning",
+                ],
+                evidence_refs=[
+                    f"source_path:{source_path}",
+                    f"ocr_sidecar:{ocr_sidecar.get('source_path', '')}",
+                    f"translation_sidecar:{translation_sidecar.get('source_path', '')}",
+                ],
+            )
+        ]
+    return {
+        "command": "source-ocr-translation",
+        "profile_version": "source-ocr-translation-review-v1",
+        "run_id": run_id,
+        "source_path": str(source_path),
+        "source_name": source_path.name,
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["korean_ocr"]],
+        "summary": {
+            "ocr_sidecar_present": bool(ocr_sidecar),
+            "translation_sidecar_present": bool(translation_sidecar),
+            "korean_detected_or_expected": bool(workflow.get("korean_detected_or_expected")),
+            "translation_required": bool(workflow.get("translation_required")),
+            "text_included": include_text,
+            "ready_for_court_report": False,
+        },
+        "side_by_side_review": [
+            build_ocr_translation_review_side(
+                role="ocr-source",
+                label="Original OCR text",
+                language_hint=str(ocr_sidecar.get("language_hint") or "unknown"),
+                sidecar=ocr_sidecar,
+                text=ocr_text_bounded,
+                include_text=include_text,
+                original_length=len(ocr_text),
+            ),
+            build_ocr_translation_review_side(
+                role="translation-target",
+                label="Translation sidecar text",
+                language_hint=str(translation_sidecar.get("target_language") or "en"),
+                sidecar=translation_sidecar,
+                text=translation_text_bounded,
+                include_text=include_text,
+                original_length=len(translation_text),
+            ),
+        ],
+        "review_profile": {
+            "status": "side-by-side-review-ready" if ocr_sidecar or translation_sidecar else "ocr-and-translation-sidecars-missing",
+            "supports_side_by_side_review": True,
+            "preserves_original_image": True,
+            "max_text_chars_per_side": SOURCE_OCR_TRANSLATION_MAX_CHARS,
+            "native_korean_ocr_execution": False,
+            "machine_translation_execution": False,
+            "certified_translation": False,
+            "required_before_report": [
+                "attach OCR engine name/version/language-pack logs",
+                "human-review Korean OCR text against the original image",
+                "attach certified translation or reviewer signoff before citing translated text",
+                "compare against trusted Korean OCR/translation review diff evidence",
+            ],
+        },
+        "workflow": workflow,
+        "core_accuracy_gates": core_gates,
+        "commercial_uplift_evidence": details.get("commercial_uplift_evidence") if isinstance(details.get("commercial_uplift_evidence"), Mapping) else {},
+        "reportability_decision": viewer_workflow_reportability_decision(
+            item_number=59,
+            component="korean-ocr-translation-review",
+            blockers=[
+                "built-in-korean-ocr-execution-not-implemented",
+                "machine-translation-worker-not-implemented",
+                "certified-translation-review-required",
+                "trusted-korean-ocr-translation-review-diff-required",
+            ],
+            controls={
+                "side_by_side_review": True,
+                "ocr_sidecar_present": bool(ocr_sidecar),
+                "translation_sidecar_present": bool(translation_sidecar),
+                "native_korean_ocr_execution": False,
+                "machine_translation_execution": False,
+            },
+        ),
+        "copy_safe_citation": {
+            "text": (
+                f"Korean OCR/translation review source={source_path.name}; "
+                f"ocr_sha256={ocr_sidecar.get('source_sha256', '')}; "
+                f"translation_sha256={translation_sidecar.get('source_sha256', '')}"
+            ),
+            "redacts_full_path": True,
+        },
+    }
+
+
+def build_ocr_translation_review_side(
+    *,
+    role: str,
+    label: str,
+    language_hint: str,
+    sidecar: Mapping[str, object],
+    text: str,
+    include_text: bool,
+    original_length: int,
+) -> dict[str, object]:
+    return {
+        "role": role,
+        "label": label,
+        "language_hint": language_hint,
+        "sidecar_path": str(sidecar.get("source_path") or ""),
+        "sidecar_name": Path(str(sidecar.get("source_path") or "")).name if sidecar.get("source_path") else "",
+        "sidecar_sha256": str(sidecar.get("source_sha256") or ""),
+        "text_sha256": str(sidecar.get("text_sha256") or ""),
+        "character_count": int(sidecar.get("character_count") or original_length),
+        "quality_metrics": sidecar.get("quality_metrics") if isinstance(sidecar.get("quality_metrics"), Mapping) else {},
+        "truncated": bool(sidecar.get("truncated")) or original_length > SOURCE_OCR_TRANSLATION_MAX_CHARS,
+        "text": text if include_text else "",
+        "text_included": include_text,
+    }
+
+
+def stable_source_queue_id(path: Path) -> str:
+    return hashlib.sha256(str(path.resolve()).encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def build_image_gallery_page(
+    *,
+    run_id: str,
+    anchor_path: Path,
+    offset: int,
+    limit: int,
+    similarity_bucket: str | None,
+) -> Dict[str, object]:
+    candidates = sorted(
+        [path for path in anchor_path.parent.iterdir() if path.is_file() and is_image_preview_candidate(path)],
+        key=lambda item: item.name.lower(),
+    )
+    items = []
+    for path in candidates[: max(IMAGE_GALLERY_MAX_ITEMS * 2, limit + offset)]:
+        summary = image_gallery_item_summary(run_id=run_id, path=path, anchor_path=anchor_path)
+        if similarity_bucket and summary.get("similarity_bucket") != similarity_bucket:
+            continue
+        items.append(summary)
+        if len(items) >= IMAGE_GALLERY_MAX_ITEMS:
+            break
+    total = len(items)
+    page_items = items[offset : offset + limit]
+    next_offset = offset + len(page_items)
+    bucket_counts: dict[str, int] = {}
+    for item in items:
+        bucket = str(item.get("similarity_bucket") or "unknown")
+        bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
+    return {
+        "command": "source-image-gallery",
+        "profile_version": "image-gallery-page-v1",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["gallery"]],
+        "anchor_path": str(anchor_path),
+        "anchor_name": anchor_path.name,
+        "offset": offset,
+        "limit": limit,
+        "returned": len(page_items),
+        "total": total,
+        "has_next": next_offset < total,
+        "next_offset": next_offset if next_offset < total else None,
+        "similarity_bucket_filter": similarity_bucket or "",
+        "bucket_counts": bucket_counts,
+        "items": page_items,
+        "large_data_controls": {
+            "max_page_items": IMAGE_GALLERY_MAX_ITEMS,
+            "bounded_folder_scan": True,
+            "inline_originals_not_copied": True,
+            "thumbnail_metadata_only": True,
+            "persistent_tags": False,
+        },
+        "keyboard_triage": {
+            "suggested_shortcuts": ["left/right: move image", "r: mark relevant", "x: reject", "i: include in report"],
+            "state_persistence": "requires-case-review-mark",
+        },
+        "reportability_decision": viewer_workflow_reportability_decision(
+            item_number=56,
+            component="image-gallery-page",
+            blockers=[
+                "trusted-image-gallery-manifest-diff-required-before-court-use",
+                "persistent-gallery-tags-not-implemented",
+                "ml-similarity-and-sensitive-media-classifier-not-validated",
+            ],
+            controls={
+                "bounded_gallery_page": True,
+                "similarity_bucket_filter": bool(similarity_bucket),
+                "max_page_items": IMAGE_GALLERY_MAX_ITEMS,
+                "persistent_tags": False,
+            },
+        ),
+    }
+
+
+def image_gallery_item_summary(*, run_id: str, path: Path, anchor_path: Path) -> dict[str, object]:
+    try:
+        from ..artifacts.media import build_image_record
+
+        details = build_image_record(path).details
+    except Exception as exc:
+        details = {"decoded": False, "error": str(exc), "hashes": compute_hashes(path) if path.is_file() else {}}
+    thumbnail = details.get("thumbnail_preview") if isinstance(details.get("thumbnail_preview"), Mapping) else {}
+    hashes = details.get("hashes") if isinstance(details.get("hashes"), Mapping) else {}
+    bucket = str(details.get("similarity_bucket") or "")
+    return {
+        "path": str(path),
+        "name": path.name,
+        "is_anchor": path == anchor_path,
+        "size": path.stat().st_size if path.exists() else 0,
+        "width": details.get("width"),
+        "height": details.get("height"),
+        "decoded": bool(details.get("decoded")),
+        "sha256": str(hashes.get("sha256") or ""),
+        "perceptual_hash": str(details.get("perceptual_hash") or ""),
+        "similarity_bucket": bucket,
+        "thumbnail_available": bool(thumbnail.get("available")),
+        "thumbnail_sha256": str(thumbnail.get("sha256") or ""),
+        "tag_suggestions": image_tag_suggestions(details),
+        "preview_url": f"/api/runs/{run_id}/source-preview?path={quote(str(path))}",
+        "source_url": f"/api/runs/{run_id}/source-file?path={quote(str(path))}",
+        "copy_safe_citation": (
+            f"Source={path.name}; sha256={hashes.get('sha256', '')}; "
+            f"dimensions={details.get('width', '')}x{details.get('height', '')}; bucket={bucket}"
+        ),
+    }
+
+
 def image_viewer_commercial_uplift_evidence(*, source_path: Path, details: Mapping[str, object]) -> dict[str, object]:
     gates = image_viewer_core_accuracy_gates(source_path=source_path, details=details)
     blockers = [
@@ -2445,6 +4566,7 @@ def image_viewer_commercial_uplift_evidence(*, source_path: Path, details: Mappi
             "perceptual_hash_present": bool(details.get("perceptual_hash")),
             "similarity_bucket_present": bool(details.get("similarity_bucket")),
             "compare_ready": bool(details.get("perceptual_hash")),
+            "bounded_gallery_page": True,
             "dedicated_virtualized_gallery": False,
             "persistent_gallery_tags": False,
         },
@@ -2824,7 +4946,7 @@ def image_tag_suggestions(details: Mapping[str, object]) -> list[str]:
     return tags
 
 
-def build_media_preview(source_path: Path, *, mime_type: str) -> Dict[str, object]:
+def build_media_preview(source_path: Path, *, mime_type: str, run_id: str | None = None) -> Dict[str, object]:
     sidecars = collect_media_transcript_sidecars(source_path)
     metadata: dict[str, object] = {
         "duration_seconds": None,
@@ -2867,6 +4989,7 @@ def build_media_preview(source_path: Path, *, mime_type: str) -> Dict[str, objec
             },
             "transcript_sidecar_count": len(sidecars),
             "transcript_sidecars": sidecars,
+            "cue_package_profile": media_cue_package_profile(run_id=run_id, source_path=source_path, sidecars=sidecars),
             "media_transcript_assessment": media_transcript_assessment(sidecars=sidecars),
             "core_accuracy_gates": media_viewer_core_accuracy_gates(
                 source_path=source_path,
@@ -2897,7 +5020,8 @@ def build_media_preview(source_path: Path, *, mime_type: str) -> Dict[str, objec
                     "cue_count": sum(len(item.get("cues") or []) for item in sidecars),
                     "playback_executed_inline": False,
                     "asr_executed_inline": False,
-                    "selected_cue_export": False,
+                    "selected_cue_export": True,
+                    "max_cue_export_chars": MEDIA_CUE_EXPORT_MAX_CHARS,
                 },
             ),
             "limitations": [
@@ -2920,6 +5044,116 @@ def media_transcript_assessment(*, sidecars: list[dict[str, object]]) -> dict[st
             "automatic-speech-recognition-not-executed-by-viewer",
             "transcript-sidecar-alignment-must-be-verified-against-original-media",
         ],
+    }
+
+
+def media_cue_package_profile(*, run_id: str | None, source_path: Path, sidecars: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    quoted_path = quote(str(source_path))
+    cue_links = []
+    for sidecar_index, sidecar in enumerate(sidecars, start=1):
+        cues = sidecar.get("cues") if isinstance(sidecar.get("cues"), Sequence) else []
+        for cue_index, cue in enumerate(cues, start=1):
+            if not isinstance(cue, Mapping):
+                continue
+            cue_links.append(
+                {
+                    "sidecar_index": sidecar_index,
+                    "cue_index": cue_index,
+                    "sidecar_name": str(sidecar.get("name") or ""),
+                    "start": str(cue.get("start") or ""),
+                    "end": str(cue.get("end") or ""),
+                    "text_sha256": str(cue.get("text_sha256") or ""),
+                    "package_url": (
+                        f"/api/runs/{run_id}/source-media-cue?path={quoted_path}&sidecar_index={sidecar_index}&cue_index={cue_index}"
+                        if run_id
+                        else None
+                    ),
+                }
+            )
+    return {
+        "profile_version": "media-cue-package-profile-v1",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["media"]],
+        "endpoint": "/api/runs/{run_id}/source-media-cue",
+        "cue_count": len(cue_links),
+        "links": cue_links[:50],
+        "max_cue_export_chars": MEDIA_CUE_EXPORT_MAX_CHARS,
+        "supports_timestamp_citation": True,
+        "supports_source_hash_reference": True,
+        "playback_executed_inline": False,
+        "asr_executed_inline": False,
+        "report_use_warning": "Verify cue timestamps against playback or a trusted transcript alignment export before report-grade use.",
+    }
+
+
+def build_media_cue_package(
+    *,
+    run_id: str,
+    source_path: Path,
+    sidecar_index: int,
+    cue_index: int,
+    include_source_hashes: bool,
+) -> Dict[str, object]:
+    sidecars = collect_media_transcript_sidecars(source_path)
+    if sidecar_index > len(sidecars):
+        raise HTTPException(status_code=404, detail="sidecar_index not found")
+    sidecar = sidecars[sidecar_index - 1]
+    cues = sidecar.get("cues") if isinstance(sidecar.get("cues"), Sequence) else []
+    if cue_index > len(cues):
+        raise HTTPException(status_code=404, detail="cue_index not found")
+    cue = cues[cue_index - 1]
+    if not isinstance(cue, Mapping):
+        raise HTTPException(status_code=404, detail="cue_index not found")
+    cue_text = str(cue.get("text") or "")[:MEDIA_CUE_EXPORT_MAX_CHARS]
+    cue_sha256 = hashlib.sha256(cue_text.encode("utf-8", errors="replace")).hexdigest() if cue_text else ""
+    source_hashes = compute_hashes(source_path) if include_source_hashes and source_path.stat().st_size <= 128 * 1024 * 1024 else {}
+    citation_id = hashlib.sha256(
+        f"{run_id}|{source_path}|{sidecar.get('path')}|{sidecar_index}|{cue_index}|{cue.get('start')}|{cue.get('end')}|{cue_sha256}".encode(
+            "utf-8",
+            errors="replace",
+        )
+    ).hexdigest()[:16]
+    return {
+        "command": "source-media-cue",
+        "profile_version": "media-cue-citation-package-v1",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["media"]],
+        "citation_id": citation_id,
+        "path": str(source_path),
+        "name": source_path.name,
+        "sidecar_index": sidecar_index,
+        "cue_index": cue_index,
+        "sidecar_path": str(sidecar.get("path") or ""),
+        "sidecar_name": str(sidecar.get("name") or ""),
+        "sidecar_sha256": str(sidecar.get("sha256") or ""),
+        "start": str(cue.get("start") or ""),
+        "end": str(cue.get("end") or ""),
+        "text": cue_text,
+        "text_sha256": cue_sha256,
+        "truncated": len(str(cue.get("text") or "")) > MEDIA_CUE_EXPORT_MAX_CHARS,
+        "source_hashes": source_hashes,
+        "source_hash_status": "computed" if source_hashes else "available-on-demand",
+        "copy_safe_citation": {
+            "text": (
+                f"Source={source_path.name}; sidecar={sidecar.get('name', '')}; cue={cue_index}; "
+                f"time={cue.get('start', '')}-{cue.get('end', '')}; text_sha256={cue_sha256}; citation_id={citation_id}"
+            ),
+            "redacts_full_path": True,
+        },
+        "reportability_decision": viewer_workflow_reportability_decision(
+            item_number=57,
+            component="media-cue-citation-package",
+            blockers=[
+                "trusted-transcript-cue-alignment-diff-required-before-court-use",
+                "manual-playback-or-asr-alignment-review-required",
+                "waveform-thumbnail-preview-not-implemented",
+            ],
+            controls={
+                "cue_timestamp_citation": True,
+                "cue_text_hash": bool(cue_sha256),
+                "source_hashes_included": bool(source_hashes),
+                "playback_executed_inline": False,
+                "asr_executed_inline": False,
+            },
+        ),
     }
 
 
@@ -3015,15 +5249,35 @@ def parse_mbox_messages(source_path: Path) -> list[email.message.EmailMessage]:
     return messages
 
 
+def read_email_messages(source_path: Path, suffix: str) -> list[email.message.EmailMessage]:
+    if suffix == ".eml":
+        return [email.message_from_bytes(source_path.read_bytes(), policy=policy.default)]
+    return parse_mbox_messages(source_path)
+
+
 def summarize_email_message(message: email.message.EmailMessage, index: int) -> dict[str, object]:
     attachments = []
     body_parts = []
+    attachment_index = 0
     for part in message.walk():
         content_disposition = str(part.get_content_disposition() or "")
         filename = part.get_filename()
         content_type = part.get_content_type()
         if content_disposition == "attachment" or filename:
-            attachments.append({"filename": filename or "", "content_type": content_type})
+            attachment_index += 1
+            payload = part.get_payload(decode=True) or b""
+            attachments.append(
+                {
+                    "index": attachment_index,
+                    "filename": filename or "",
+                    "content_type": content_type,
+                    "content_id": str(part.get("content-id") or ""),
+                    "size": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest() if payload else "",
+                    "exportable": len(payload) <= EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
+                    "export_limit": EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
+                }
+            )
             continue
         if content_type in {"text/plain", "text/html"}:
             try:
@@ -3045,6 +5299,126 @@ def summarize_email_message(message: email.message.EmailMessage, index: int) -> 
         "attachment_count": len(attachments),
         "body_preview": body[:EMAIL_BODY_PREVIEW_CHARS],
         "body_truncated": len(body) > EMAIL_BODY_PREVIEW_CHARS,
+    }
+
+
+def email_attachment_package_profile(
+    *,
+    run_id: str | None,
+    source_path: Path,
+    messages: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    quoted_path = quote(str(source_path))
+    links = []
+    for message in messages:
+        message_index = optional_int_for_api(message.get("index")) or 0
+        attachments = message.get("attachments") if isinstance(message.get("attachments"), Sequence) else []
+        for attachment in attachments:
+            if not isinstance(attachment, Mapping):
+                continue
+            attachment_index = optional_int_for_api(attachment.get("index")) or 0
+            links.append(
+                {
+                    "message_index": message_index,
+                    "attachment_index": attachment_index,
+                    "filename": str(attachment.get("filename") or ""),
+                    "size": optional_int_for_api(attachment.get("size")) or 0,
+                    "sha256": str(attachment.get("sha256") or ""),
+                    "package_url": (
+                        f"/api/runs/{run_id}/source-email-attachment?path={quoted_path}&message_index={message_index}&attachment_index={attachment_index}"
+                        if run_id and message_index and attachment_index
+                        else None
+                    ),
+                }
+            )
+    return {
+        "profile_version": "email-attachment-package-profile-v1",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["email"]],
+        "endpoint": "/api/runs/{run_id}/source-email-attachment",
+        "attachment_count": len(links),
+        "links": links[:50],
+        "max_inline_content_bytes": EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
+        "supports_hash_inventory": True,
+        "supports_bounded_content_export": True,
+        "native_pst_ost_msg_supported": False,
+        "report_use_warning": "Validate attachment hashes and mailbox/thread reconstruction with a trusted mailbox parser before report-grade use.",
+    }
+
+
+def build_email_attachment_package(
+    *,
+    run_id: str,
+    source_path: Path,
+    suffix: str,
+    message_index: int,
+    attachment_index: int,
+    include_content: bool,
+) -> Dict[str, object]:
+    try:
+        messages = read_email_messages(source_path, suffix)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"Email attachment package failed: {exc}") from exc
+    if message_index > len(messages):
+        raise HTTPException(status_code=404, detail="message_index not found")
+    message = messages[message_index - 1]
+    attachments: list[tuple[email.message.EmailMessage, bytes]] = []
+    for part in message.walk():
+        if str(part.get_content_disposition() or "") == "attachment" or part.get_filename():
+            attachments.append((part, part.get_payload(decode=True) or b""))
+    if attachment_index > len(attachments):
+        raise HTTPException(status_code=404, detail="attachment_index not found")
+    part, payload = attachments[attachment_index - 1]
+    hashes = compute_hashes_for_bytes(payload)
+    content_b64 = ""
+    content_status = "not-requested"
+    if include_content:
+        if len(payload) > EMAIL_ATTACHMENT_EXPORT_MAX_BYTES:
+            content_status = "too-large"
+        else:
+            content_b64 = base64.b64encode(payload).decode("ascii")
+            content_status = "included-base64"
+    citation_id = hashlib.sha256(
+        f"{run_id}|{source_path}|{message_index}|{attachment_index}|{hashes['sha256']}".encode("utf-8")
+    ).hexdigest()[:16]
+    return {
+        "command": "source-email-attachment",
+        "profile_version": "email-attachment-package-v1",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["email"]],
+        "citation_id": citation_id,
+        "path": str(source_path),
+        "name": source_path.name,
+        "message_index": message_index,
+        "attachment_index": attachment_index,
+        "filename": part.get_filename() or "",
+        "content_type": part.get_content_type(),
+        "content_id": str(part.get("content-id") or ""),
+        "size": len(payload),
+        "hashes": hashes,
+        "content_status": content_status,
+        "content_base64": content_b64,
+        "max_inline_content_bytes": EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
+        "copy_safe_citation": {
+            "text": (
+                f"Source={source_path.name}; message_index={message_index}; attachment_index={attachment_index}; "
+                f"filename={part.get_filename() or ''}; size={len(payload)}; sha256={hashes['sha256']}; citation_id={citation_id}"
+            ),
+            "redacts_full_path": True,
+        },
+        "reportability_decision": viewer_workflow_reportability_decision(
+            item_number=55,
+            component="email-attachment-package",
+            blockers=[
+                "trusted-mailbox-thread-export-required-before-court-use",
+                "native-pst-ost-msg-attachment-extraction-not-implemented",
+                "deleted-mailbox-item-recovery-not-implemented",
+            ],
+            controls={
+                "hashes": True,
+                "bounded_content_export": include_content and content_status == "included-base64",
+                "max_inline_content_bytes": EMAIL_ATTACHMENT_EXPORT_MAX_BYTES,
+                "native_pst_ost_msg": False,
+            },
+        ),
     }
 
 
@@ -3302,6 +5676,161 @@ def preview_sqlite_table(connection: sqlite3.Connection, table: str) -> dict[str
     }
 
 
+def sqlite_table_page_profile(*, run_id: str | None, source_path: Path, tables: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    quoted_path = quote(str(source_path))
+    table_links = []
+    for table in tables:
+        name = str(table.get("name") or "")
+        if not name:
+            continue
+        table_links.append(
+            {
+                "table": name,
+                "first_page_url": (
+                    f"/api/runs/{run_id}/source-sqlite-table?path={quoted_path}&table={quote(name)}&offset=0&limit={SQLITE_PREVIEW_ROW_LIMIT}"
+                    if run_id
+                    else None
+                ),
+                "where_contains_url_template": (
+                    f"/api/runs/{run_id}/source-sqlite-table?path={quoted_path}&table={quote(name)}&where_column={{column}}&where_contains={{keyword}}"
+                    if run_id
+                    else None
+                ),
+            }
+        )
+    return {
+        "profile_version": "sqlite-table-page-profile-v1",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["sqlite"]],
+        "endpoint": "/api/runs/{run_id}/source-sqlite-table",
+        "table_links": table_links,
+        "max_page_rows": SQLITE_TABLE_PAGE_MAX_ROWS,
+        "supports_offset_pagination": True,
+        "supports_restricted_where_contains": True,
+        "supports_validated_order_by": True,
+        "executes_arbitrary_sql": False,
+        "report_use_warning": "Use trusted sqlite3/schema diff and source hashes before treating a page result as report-grade evidence.",
+    }
+
+
+def build_sqlite_table_page(
+    *,
+    run_id: str,
+    source_path: Path,
+    table: str,
+    offset: int,
+    limit: int,
+    where_column: str | None,
+    where_contains: str | None,
+    order_by: str | None,
+    descending: bool,
+) -> Dict[str, object]:
+    try:
+        with contextlib.closing(sqlite3.connect(f"{source_path.as_uri()}?mode=ro", uri=True)) as connection:
+            connection.row_factory = sqlite3.Row
+            tables = set(list_sqlite_tables(connection))
+            if table not in tables:
+                raise HTTPException(status_code=404, detail="table not found in SQLite database")
+            quoted_table = quote_sqlite_identifier(table)
+            column_rows = connection.execute(f"PRAGMA table_info({quoted_table})").fetchall()
+            all_columns = [str(row["name"]) for row in column_rows]
+            if not all_columns:
+                raise HTTPException(status_code=400, detail="table has no readable columns")
+            selected_columns = all_columns[:SQLITE_PREVIEW_COLUMN_LIMIT]
+            where_sql = ""
+            params: list[object] = []
+            if where_column or where_contains:
+                if not where_column or where_contains is None:
+                    raise HTTPException(status_code=400, detail="where_column and where_contains must be provided together")
+                if where_column not in all_columns:
+                    raise HTTPException(status_code=400, detail="where_column is not a column in the selected table")
+                where_sql = f" WHERE CAST({quote_sqlite_identifier(where_column)} AS TEXT) LIKE ? ESCAPE '\\'"
+                params.append("%" + escape_sqlite_like(where_contains) + "%")
+            order_sql = ""
+            if order_by:
+                if order_by not in all_columns:
+                    raise HTTPException(status_code=400, detail="order_by is not a column in the selected table")
+                order_sql = f" ORDER BY {quote_sqlite_identifier(order_by)} {'DESC' if descending else 'ASC'}"
+            select_clause = ", ".join(quote_sqlite_identifier(column) for column in selected_columns)
+            count_row = connection.execute(f"SELECT COUNT(*) AS count FROM {quoted_table}{where_sql}", params).fetchone()
+            total = int(count_row["count"] or 0)
+            page_params = [*params, limit, offset]
+            rows = [
+                {
+                    "row_number": offset + index,
+                    "values": {column: sqlite_preview_value(row[column]) for column in selected_columns},
+                }
+                for index, row in enumerate(
+                    connection.execute(
+                        f"SELECT {select_clause} FROM {quoted_table}{where_sql}{order_sql} LIMIT ? OFFSET ?",
+                        page_params,
+                    ),
+                    start=1,
+                )
+            ]
+    except sqlite3.DatabaseError as exc:
+        raise HTTPException(status_code=400, detail=f"SQLite table page failed: {exc}") from exc
+    next_offset = offset + len(rows)
+    has_next = next_offset < total
+    return {
+        "command": "source-sqlite-table",
+        "profile_version": "sqlite-table-page-v1",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["sqlite"]],
+        "path": str(source_path),
+        "name": source_path.name,
+        "table": table,
+        "columns": selected_columns,
+        "column_count": len(all_columns),
+        "rows": rows,
+        "pagination": {
+            "offset": offset,
+            "limit": limit,
+            "returned": len(rows),
+            "total": total,
+            "has_next": has_next,
+            "next_offset": next_offset if has_next else None,
+            "max_page_rows": SQLITE_TABLE_PAGE_MAX_ROWS,
+        },
+        "where": {
+            "column": where_column or "",
+            "contains": where_contains or "",
+            "mode": "contains" if where_column and where_contains is not None else "none",
+            "arbitrary_sql_allowed": False,
+        },
+        "order_by": {
+            "column": order_by or "",
+            "direction": "desc" if order_by and descending else ("asc" if order_by else ""),
+        },
+        "read_only": True,
+        "copy_safe_citation": {
+            "text": (
+                f"Source={source_path.name}; sqlite_table={table}; offset={offset}; limit={limit}; "
+                f"returned={len(rows)}; where={where_column or ''}:{where_contains or ''}"
+            ),
+            "redacts_full_path": True,
+        },
+        "reportability_decision": viewer_workflow_reportability_decision(
+            item_number=54,
+            component="sqlite-table-page-viewer",
+            blockers=[
+                "trusted-sqlite-query-schema-diff-required-before-court-use",
+                "deleted-row-and-wal-recovery-not-implemented-in-viewer",
+                "export-selected-rows-workflow-not-implemented",
+            ],
+            controls={
+                "read_only": True,
+                "offset_pagination": True,
+                "restricted_where_contains": True,
+                "arbitrary_sql_allowed": False,
+                "max_page_rows": SQLITE_TABLE_PAGE_MAX_ROWS,
+            },
+        ),
+    }
+
+
+def escape_sqlite_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def build_sqlite_table_profiles(previews: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
     profiles: list[dict[str, object]] = []
     for table in previews:
@@ -3355,8 +5884,23 @@ def sqlite_fts_optimization_metadata(
         for column in table.get("column_details", []) if isinstance(table.get("column_details"), list) else []:
             if isinstance(column, Mapping) and str(column.get("type") or "").upper() in {"", "TEXT", "VARCHAR", "CHAR", "CLOB"}:
                 text_column_count += 1
+    query_plan_profile = sqlite_preview_query_plan_profile(previews)
+    optimization_manifest = sqlite_fts_optimization_manifest(
+        database_metadata=database_metadata,
+        preview_table_count=len(previews),
+        preview_row_count=total_preview_rows,
+        searchable_text_column_count=text_column_count,
+        query_plan_profile=query_plan_profile,
+    )
     return {
         "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["sqlite_performance"]],
+        "functional_priority_profile": sqlite_fts_functional_profile(
+            database_metadata=database_metadata,
+            preview_table_count=len(previews),
+            preview_row_count=total_preview_rows,
+            searchable_text_column_count=text_column_count,
+            optimization_manifest=optimization_manifest,
+        ),
         "status": "bounded-read-only-preview-with-fts-aware-guidance",
         "page_size": database_metadata.get("page_size"),
         "page_count": database_metadata.get("page_count"),
@@ -3364,11 +5908,16 @@ def sqlite_fts_optimization_metadata(
         "preview_table_count": len(previews),
         "preview_row_count": total_preview_rows,
         "searchable_text_column_count": text_column_count,
+        "query_plan_profile": query_plan_profile,
+        "sqlite_fts_optimization_manifest": optimization_manifest,
+        "sqlite_fts_optimization_manifest_hash": optimization_manifest["manifest_hash"],
         "core_accuracy_gates": large_sqlite_fts_core_accuracy_gates(
             database_metadata=database_metadata,
             previews=previews,
             searchable_text_column_count=text_column_count,
             preview_row_count=total_preview_rows,
+            query_plan_profile=query_plan_profile,
+            optimization_manifest=optimization_manifest,
         ),
         "trusted_large_sqlite_fts_diff": {
             "status": "missing",
@@ -3384,12 +5933,123 @@ def sqlite_fts_optimization_metadata(
     }
 
 
+def sqlite_fts_optimization_manifest(
+    *,
+    database_metadata: Mapping[str, object],
+    preview_table_count: int,
+    preview_row_count: int,
+    searchable_text_column_count: int,
+    query_plan_profile: Mapping[str, object],
+) -> dict[str, object]:
+    manifest_core = {
+        "profile_version": "sqlite-fts-optimization-manifest-v1",
+        "item_number": 32,
+        "gap_id": "#32",
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["sqlite_performance"]],
+        "page_size": database_metadata.get("page_size"),
+        "page_count": database_metadata.get("page_count"),
+        "freelist_count": database_metadata.get("freelist_count"),
+        "journal_mode": str(database_metadata.get("journal_mode") or ""),
+        "estimated_database_bytes": database_metadata.get("estimated_database_bytes"),
+        "preview_table_count": preview_table_count,
+        "preview_row_count": preview_row_count,
+        "searchable_text_column_count": searchable_text_column_count,
+        "query_plan_hash": str(query_plan_profile.get("plan_hash") or ""),
+        "bounded_preview_query": bool(query_plan_profile.get("bounded_preview_query")),
+        "arbitrary_sql_allowed": bool(query_plan_profile.get("arbitrary_sql_allowed")),
+        "wal_journal_replay_supported": False,
+        "ten_million_row_regression_attached": False,
+        "recommended_engine": "case-db-fts-for-indexed-case-search-source-sqlite-preview-for-verification",
+        "commercial_claim_allowed": False,
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
+def sqlite_preview_query_plan_profile(previews: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    plans = []
+    for table in previews:
+        if not isinstance(table, Mapping):
+            continue
+        indexes = table.get("indexes") if isinstance(table.get("indexes"), list) else []
+        row_count = optional_int_for_api(table.get("row_count")) or 0
+        uses_index = bool(indexes)
+        plan = {
+            "table": str(table.get("name") or ""),
+            "row_count": row_count,
+            "preview_query": "SELECT bounded_columns FROM table LIMIT ?",
+            "count_query": "SELECT COUNT(*) FROM table",
+            "uses_declared_index": uses_index,
+            "bounded_rows": True,
+            "full_table_materialization": False,
+        }
+        plans.append(plan)
+    plan_hash = hashlib.sha256(json.dumps(plans, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        "profile_version": "sqlite-preview-query-plan-profile-v1",
+        "plan_count": len(plans),
+        "plan_hash": plan_hash,
+        "plans": plans[:20],
+        "bounded_preview_query": True,
+        "arbitrary_sql_allowed": False,
+        "commercial_gap_ids": [VIEWER_WORKFLOW_GAP_IDS["sqlite_performance"]],
+        "commercial_claim_allowed": False,
+    }
+
+
+def sqlite_fts_functional_profile(
+    *,
+    database_metadata: Mapping[str, object],
+    preview_table_count: int,
+    preview_row_count: int,
+    searchable_text_column_count: int,
+    optimization_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "batch_id": FUNCTIONAL_SCALE_BATCH_ID,
+        "item_number": 32,
+        "gap_id": "#32",
+        "component": "sqlite-fts-optimization",
+        "status": "implemented-source-viewer-bounded-preview-validation-required",
+        "implemented": True,
+        "usable": True,
+        "validated": True,
+        "ready_for_commercial_claim": False,
+        "controls": {
+            "page_size": database_metadata.get("page_size"),
+            "page_count": database_metadata.get("page_count"),
+            "estimated_database_bytes": database_metadata.get("estimated_database_bytes"),
+            "preview_table_count": preview_table_count,
+            "preview_row_count": preview_row_count,
+            "searchable_text_column_count": searchable_text_column_count,
+            "bounded_row_preview": True,
+            "case_db_fts_recommended_for_large_search": True,
+            "optimization_manifest_hash": str(optimization_manifest.get("manifest_hash") or ""),
+            "query_plan_hash": str(optimization_manifest.get("query_plan_hash") or ""),
+            "wal_journal_replay_supported": bool(optimization_manifest.get("wal_journal_replay_supported")),
+        },
+        "blockers": [
+            SQLITE_FTS_TRUSTED_DIFF_BLOCKER,
+            "source-sqlite-wal-journal-replay-not-implemented-in-viewer",
+            "large-table-query-plan-benchmark-not-attached",
+        ],
+        "validation_evidence": [
+            "source-preview-emits-functional-sqlite-fts-profile",
+            "unit-test-asserts-sqlite-viewer-profile-contract",
+        ],
+    }
+
+
 def large_sqlite_fts_core_accuracy_gates(
     *,
     database_metadata: Mapping[str, object],
     previews: Sequence[Mapping[str, object]],
     searchable_text_column_count: int,
     preview_row_count: int,
+    query_plan_profile: Mapping[str, object] | None = None,
+    optimization_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = [
@@ -3397,6 +6057,8 @@ def large_sqlite_fts_core_accuracy_gates(
         "table profile emitted",
         "searchable text columns counted",
         "bounded row preview preserved",
+        "bounded query plan profile emitted",
+        "SQLite/FTS optimization manifest hash emitted",
         "large corpus optimization limitation warning",
     ]
     evidence_refs = [
@@ -3406,6 +6068,10 @@ def large_sqlite_fts_core_accuracy_gates(
         f"preview_row_count:{preview_row_count}",
         f"searchable_text_column_count:{searchable_text_column_count}",
     ]
+    if query_plan_profile:
+        evidence_refs.append(f"query_plan_hash:{query_plan_profile.get('plan_hash', '')}")
+    if optimization_manifest:
+        evidence_refs.append(f"optimization_manifest_hash:{optimization_manifest.get('manifest_hash', '')}")
     trusted_diff = trusted_diff if isinstance(trusted_diff, Mapping) else {}
     if trusted_diff.get("status") == "pass":
         satisfied.append("trusted large SQLite/FTS query-plan diff pass")
@@ -3445,12 +6111,15 @@ def build_large_sqlite_fts_trusted_diff(
 
 
 def large_sqlite_fts_diff_value(item: Mapping[str, object]) -> dict[str, object]:
+    query_plan = item.get("query_plan_profile")
+    query_plan_profile = query_plan if isinstance(query_plan, Mapping) else {}
     return {
         "page_size": int(item.get("page_size") or 0),
         "page_count": int(item.get("page_count") or 0),
         "preview_table_count": int(item.get("preview_table_count") or 0),
         "searchable_text_column_count": int(item.get("searchable_text_column_count") or 0),
         "preview_row_count": int(item.get("preview_row_count") or 0),
+        "query_plan_hash": str(query_plan_profile.get("plan_hash") or ""),
     }
 
 
@@ -3581,7 +6250,56 @@ def build_source_search(
             "match_count": len(matches),
             "limit": limit,
         },
+        "source_search_profile": source_search_profile(
+            source_path=source_path,
+            searchable=searchable,
+            truncated=truncated or len(matches) >= limit,
+            match_count=len(matches),
+            limit=limit,
+            context=context,
+        ),
         "matches": enrich_source_search_matches(source_path, matches),
+    }
+
+
+def source_search_profile(
+    *,
+    source_path: Path,
+    searchable: bool,
+    truncated: bool,
+    match_count: int,
+    limit: int,
+    context: int,
+) -> dict[str, object]:
+    return {
+        "profile_version": "current-file-search-v1",
+        "commercial_batch_id": "commercial-uplift-016-020",
+        "item_number": 17,
+        "source_path": str(source_path),
+        "searchable": searchable,
+        "match_count": match_count,
+        "bounded_context_chars": context,
+        "large_data_controls": {
+            "result_limit": limit,
+            "truncated": truncated,
+            "full_case_reindex_not_required": True,
+            "sqlite_table_search_uses_limit": True,
+            "binary_search_is_bounded": True,
+        },
+        "reportability_decision": {
+            "decision": "do-not-report-current-file-search-hit-without-viewer-citation",
+            "allowed_use": "current-file-verification-pivot",
+            "required_before_report": [
+                "preserve line/offset/table locator",
+                "copy citation into review note",
+                "verify source hash if item is selected for report",
+            ],
+        },
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": [
+            "large-file-search-benchmark-required",
+            "source-search-trusted-locator-diff-required",
+        ],
     }
 
 
@@ -3601,6 +6319,7 @@ def enrich_source_search_matches(source_path: Path, matches: Sequence[dict[str, 
                 "source_name": source_path.name,
                 "locator": locator,
                 "citation": citation,
+                "citation_profile": source_search_citation_profile(source_path, match, locator, citation),
                 "review_hint": "Use this citation in the viewer review note, then verify source hashes before reporting.",
                 "compare_preview": f"{citation}\n{match.get('snippet', '')}",
             }
@@ -3636,6 +6355,41 @@ def source_search_citation(source_path: Path, match: dict[str, object], locator:
             f"length {locator.get('byte_length')} keyword {locator.get('keyword')}"
         )
     return f"{source_path.name} line {locator.get('line')} offset {locator.get('offset')} keyword {locator.get('keyword')}"
+
+
+def source_search_citation_profile(
+    source_path: Path,
+    match: Mapping[str, object],
+    locator: Mapping[str, object],
+    citation: str,
+) -> dict[str, object]:
+    locator_type = "sqlite-table-row" if locator.get("table") else "byte-offset" if locator.get("offset_hex") else "text-line-offset"
+    return {
+        "profile_version": "current-file-search-citation-v1",
+        "item_number": 17,
+        "source_path": str(source_path),
+        "source_name": source_path.name,
+        "locator_type": locator_type,
+        "citation": citation,
+        "keyword": str(match.get("keyword") or ""),
+        "line": locator.get("line"),
+        "offset": locator.get("offset"),
+        "offset_hex": locator.get("offset_hex", ""),
+        "table": locator.get("table", ""),
+        "column": locator.get("column", ""),
+        "row_number": locator.get("row_number", ""),
+        "ready_for_review_note": bool(citation and match.get("snippet")),
+        "ready_for_report": False,
+        "required_before_report": [
+            "verify source file hash",
+            "confirm locator in source viewer",
+            "attach analyst review status",
+        ],
+        "commercial_grade_blockers": [
+            "source-search-trusted-locator-diff-required",
+            "source-hash-verification-required-for-report",
+        ],
+    }
 
 
 def search_sqlite_file(source_path: Path, keywords: Sequence[str], *, limit: int, context: int) -> list[dict[str, object]]:

@@ -10,23 +10,151 @@ from unittest.mock import patch
 from rapidtriage.core.archive_image import ArchiveImageExtractionResult, extract_archive_image_to_directory
 from rapidtriage.core.disk_image import (
     DiskImageExtractionResult,
+    build_split_set_profile,
     discover_split_image_parts,
     extract_raw_image_to_directory,
 )
 from rapidtriage.core.e01 import (
     E01ExtractionError,
     E01ExtractionResult,
+    build_e01_segment_set_profile,
+    build_windows11_e01_known_answer_manifest,
     build_image_workflow_trusted_diff,
+    collect_tool_preflight,
+    e01_failure_guidance,
+    e01_preflight_summary,
     extract_e01_to_directory,
     image_core_accuracy_gates,
     mmls_first_filesystem,
+    select_mmls_filesystem,
 )
+from rapidtriage.core.e01_smoke import run_windows11_e01_smoke
+from rapidtriage.cli import main
 from rapidtriage.core.run import run_triage_mode
-from rapidtriage.core.virtual_disk import VirtualDiskExtractionResult, extract_virtual_disk_to_directory
+from rapidtriage.core.virtual_disk import (
+    VirtualDiskExtractionResult,
+    build_virtual_disk_chain_profile,
+    extract_virtual_disk_to_directory,
+)
 from tests.test_rapidtriage_run import build_run_fixture
 
 
 class RapidTriageE01Tests(unittest.TestCase):
+    def test_windows11_e01_known_answer_manifest_records_source_expected_outputs_and_validation_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            e01_path = root / "case.E01"
+            e01_path.write_bytes(b"EVF-known-answer")
+
+            manifest = build_windows11_e01_known_answer_manifest(
+                e01_path,
+                case_id="CASE-E01-001",
+                expected_partition_start_sector=2048,
+                expected_artifacts=["Security.evtx has event 4624", "$MFT contains Users/alice/Documents"],
+                validation_commands=["rapidtriage evidence case.E01 --json"],
+            )
+
+            self.assertEqual(manifest["schema"], "rapidforensic-windows11-e01-known-answer-manifest-v1")
+            self.assertEqual(manifest["case_id"], "CASE-E01-001")
+            self.assertEqual(manifest["status"], "draft-needs-execution")
+            self.assertFalse(manifest["commercial_grade_ready"])
+            self.assertEqual(manifest["source_image"]["integrity"]["hash_status"], "computed")
+            self.assertEqual(manifest["source_image"]["segment_set_profile"]["segment_count"], 1)
+            self.assertEqual(manifest["expected"]["partitions"][0]["start_sector"], 2048)
+            self.assertEqual(len(manifest["expected"]["high_value_artifacts"]), 2)
+            self.assertEqual(manifest["validation_commands"][0]["status"], "not-run")
+            self.assertEqual(manifest["core_accuracy_gates"][0]["gap_id"], "#22")
+            self.assertIn("source hash and segment integrity", manifest["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("partition offset correctness", manifest["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(len(manifest["manifest_sha256"]), 64)
+
+    def test_e01_known_answer_cli_writes_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            e01_path = root / "case.E01"
+            output = root / "known-answer.json"
+            e01_path.write_bytes(b"EVF-cli")
+
+            exit_code = main(
+                [
+                    "e01-known-answer",
+                    str(e01_path),
+                    "--case-id",
+                    "CASE-CLI",
+                    "--expected-partition-start-sector",
+                    "2048",
+                    "--expected-artifact",
+                    "Security.evtx event 4624",
+                    "--output",
+                    str(output),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["case_id"], "CASE-CLI")
+            self.assertEqual(payload["expected"]["partitions"][0]["start_sector"], 2048)
+            self.assertEqual(payload["expected"]["high_value_artifacts"][0]["description"], "Security.evtx event 4624")
+
+    def test_e01_smoke_records_known_answer_preflight_and_blocked_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            e01_path = root / "case.E01"
+            output_dir = root / "smoke"
+            e01_path.write_bytes(b"EVF-smoke")
+
+            payload = run_windows11_e01_smoke(
+                e01_path,
+                output_dir=output_dir,
+                case_id="CASE-SMOKE",
+                expected_partition_start_sector=2048,
+                expected_artifacts=["Security.evtx event 4624"],
+            )
+
+            self.assertEqual(payload["schema"], "rapidforensic-e01-smoke-report-v1")
+            self.assertEqual(payload["case_id"], "CASE-SMOKE")
+            self.assertEqual(payload["status"], "blocked")
+            self.assertFalse(payload["commercial_grade_ready"])
+            self.assertTrue((output_dir / "windows11-e01-known-answer.json").is_file())
+            self.assertTrue((output_dir / "rapidtriage-evidence-preflight.json").is_file())
+            self.assertTrue((output_dir / "rapidforensic-e01-smoke.json").is_file())
+            stage_status = {stage["id"]: stage["status"] for stage in payload["stages"]}
+            self.assertEqual(stage_status["known-answer-manifest"], "complete")
+            self.assertEqual(stage_status["evidence-preflight"], "complete")
+            self.assertEqual(stage_status["triage-run"], "blocked")
+            self.assertEqual(payload["known_answer_manifest"]["expected"]["partitions"][0]["start_sector"], 2048)
+            self.assertIn("failure_guidance", payload["run_error"])
+            self.assertIsNone(payload["outputs"]["smoke_report"]["sha256"])
+            self.assertIn("Self-referential", payload["outputs"]["smoke_report"]["hash_note"])
+
+    def test_e01_smoke_cli_writes_single_case_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            e01_path = root / "case.E01"
+            output_dir = root / "smoke-cli"
+            e01_path.write_bytes(b"EVF-smoke-cli")
+
+            exit_code = main(
+                [
+                    "e01-smoke",
+                    str(e01_path),
+                    "--output-dir",
+                    str(output_dir),
+                    "--case-id",
+                    "CASE-SMOKE-CLI",
+                    "--expected-partition-start-sector",
+                    "2048",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads((output_dir / "rapidforensic-e01-smoke.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["case_id"], "CASE-SMOKE-CLI")
+            self.assertEqual(payload["status"], "blocked")
+            self.assertEqual(payload["outputs"]["known_answer_manifest"]["exists"], True)
+            self.assertEqual(payload["outputs"]["evidence_preflight"]["exists"], True)
+            self.assertEqual(payload["outputs"]["smoke_report"]["exists"], True)
+
     def test_mmls_partition_selection_prefers_largest_supported_filesystem(self) -> None:
         text = """
 DOS Partition Table
@@ -49,6 +177,22 @@ DOS Partition Table
 
         self.assertEqual(mmls_first_filesystem(text), 12048)
 
+    def test_mmls_partition_selection_accepts_user_start_sector(self) -> None:
+        text = """
+DOS Partition Table
+000: 0000000000 0000002047 Unallocated
+001: 0000002048 0000010000 NTFS / exFAT (0x07)
+002: 0000012048 0000001000 Linux swap
+003: 0000013048 0000090000 Basic data partition
+"""
+
+        self.assertEqual(select_mmls_filesystem(text, preferred_start_sector=2048), 2048)
+        self.assertEqual(select_mmls_filesystem(text, preferred_start_sector=13048), 13048)
+        with self.assertRaises(E01ExtractionError):
+            select_mmls_filesystem(text, preferred_start_sector=12048)
+        with self.assertRaises(E01ExtractionError):
+            select_mmls_filesystem(text, preferred_start_sector=999999)
+
     def test_extract_e01_reports_missing_external_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             e01_path = Path(tmp_dir) / "case.E01"
@@ -58,6 +202,60 @@ DOS Partition Table
                 extract_e01_to_directory(e01_path, Path(tmp_dir) / "stage", tool_resolver=lambda _: None)
 
             self.assertIn("requires external tools", str(context.exception))
+
+    def test_e01_segment_set_profile_detects_missing_split_segment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            e01 = root / "case.E01"
+            e03 = root / "case.E03"
+            e01.write_bytes(b"segment-1")
+            e03.write_bytes(b"segment-3")
+
+            profile = build_e01_segment_set_profile(e01)
+
+            self.assertEqual(profile["segment_count"], 2)
+            self.assertEqual(profile["segment_numbers"], [1, 3])
+            self.assertFalse(profile["contiguous"])
+            self.assertIn("missing segment", profile["warnings"][0])
+
+    def test_e01_failure_guidance_classifies_operator_next_steps(self) -> None:
+        missing = e01_failure_guidance("E01 direct input requires external tools: ewfmount")
+        encrypted = e01_failure_guidance("tsk_recover failed: BitLocker encrypted volume")
+        partition = e01_failure_guidance("requested partition start sector 999 was not found")
+        permission = e01_failure_guidance("ewfmount failed: operation not permitted")
+
+        self.assertEqual(missing["category"], "missing-tool")
+        self.assertEqual(encrypted["category"], "encrypted-volume")
+        self.assertEqual(partition["category"], "partition-ambiguity")
+        self.assertEqual(permission["category"], "permission")
+        self.assertTrue(missing["next_actions"])
+
+    def test_e01_tool_preflight_records_roles_versions_and_remediation(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_runner(command):
+            calls.append(list(command))
+            if command[0] == "ewfmount":
+                return subprocess.CompletedProcess(command, 0, "ewfmount 20260401\n", "")
+            return subprocess.CompletedProcess(command, 1, "", "unknown option")
+
+        rows = collect_tool_preflight(
+            ("ewfmount", "mmls"),
+            runner=fake_runner,
+            tool_resolver=lambda name: f"/usr/bin/{name}" if name == "ewfmount" else None,
+        )
+        summary = e01_preflight_summary(rows)
+
+        self.assertEqual(rows[0]["tool"], "ewfmount")
+        self.assertEqual(rows[0]["version"], "ewfmount 20260401")
+        self.assertIn("Expose E01/Ex01", rows[0]["purpose"])
+        self.assertEqual(rows[1]["tool"], "mmls")
+        self.assertFalse(rows[1]["available"])
+        self.assertIn("Sleuth Kit", rows[1]["install_hint"])
+        self.assertEqual(summary["status"], "blocked")
+        self.assertEqual(summary["missing_tools"], ["mmls"])
+        self.assertTrue(summary["remediation_steps"])
+        self.assertIn(["ewfmount", "--version"], calls)
 
     def test_extract_e01_runs_mount_partition_and_recover_sequence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -101,8 +299,14 @@ DOS Partition Table
             self.assertFalse(metadata["native_capabilities"]["native_e01_segment_metadata_decode"])
             self.assertEqual(metadata["source_integrity"]["hash_status"], "computed")
             self.assertTrue(metadata["tool_preflight"])
+            self.assertEqual(metadata["preflight_summary"]["status"], "ready")
+            self.assertFalse(metadata["preflight_summary"]["blocked"])
             self.assertTrue(metadata["partition_table"][0]["selected_for_recovery"])
             self.assertEqual(metadata["command_history"][-1]["purpose"], "read-only-filesystem-recovery")
+            self.assertEqual(metadata["recovered_root_manifest"]["profile_version"], "e01-recovered-root-manifest-v1")
+            self.assertEqual(metadata["recovered_root_manifest"]["hashed_file_count"], 1)
+            self.assertEqual(metadata["recovered_root_manifest"]["files"][0]["relative_path"], "evidence.txt")
+            self.assertEqual(metadata["recovered_root_manifest"]["files"][0]["hash_status"], "computed")
             e01_gate = metadata["core_accuracy_gates"][0]
             self.assertEqual(e01_gate["gap_id"], "#22")
             self.assertIn("partition offset correctness", e01_gate["satisfied_checks"])
@@ -116,6 +320,110 @@ DOS Partition Table
                 "do-not-report-e01-ex01-workflow-as-native-complete",
             )
             self.assertFalse(e01_uplift["reportability_decision"]["ready_for_court_report"])
+
+    def test_extract_e01_records_user_partition_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            e01_path = root / "case.E01"
+            stage_dir = root / "stage"
+            e01_path.write_bytes(b"EVF")
+            commands: list[list[str]] = []
+
+            def fake_runner(command):
+                commands.append(list(command))
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
+                if command[0] == "ewfmount":
+                    (Path(command[2]) / "ewf1").write_bytes(b"raw")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if command[0] == "mmls":
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        "\n".join(
+                            [
+                                "001: 0000002048 0000010000 NTFS / exFAT (0x07)",
+                                "002: 0000013048 0000090000 Basic data partition",
+                            ]
+                        ),
+                        "",
+                    )
+                if command[0] == "tsk_recover":
+                    Path(command[-1]).mkdir(parents=True, exist_ok=True)
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            result = extract_e01_to_directory(
+                e01_path,
+                stage_dir,
+                partition_start_sector=2048,
+                runner=fake_runner,
+                tool_resolver=lambda name: f"/usr/bin/{name}",
+            )
+
+            workflow_commands = [command for command in commands if command[1:] != ["--version"]]
+            recover_command = next(command for command in workflow_commands if command[0] == "tsk_recover")
+            self.assertEqual(recover_command[4], "2048")
+            metadata = result.to_dict()
+            self.assertEqual(metadata["partition_start_sector"], 2048)
+            self.assertEqual(metadata["partition_selection"]["selected_start_sector"], 2048)
+            self.assertEqual(metadata["partition_selection"]["recommended_start_sector"], 13048)
+            self.assertEqual(metadata["partition_selection"]["requested_start_sector"], 2048)
+            self.assertEqual(metadata["partition_selection"]["selection_source"], "user-request")
+            self.assertIn("differs", metadata["partition_selection"]["selection_warning"])
+            self.assertTrue(metadata["partition_table"][0]["selected_for_recovery"])
+            self.assertFalse(metadata["partition_table"][1]["selected_for_recovery"])
+
+    def test_extract_e01_resumes_completed_filesystem_recovery_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            e01_path = root / "case.E01"
+            stage_dir = root / "stage"
+            e01_path.write_bytes(b"EVF")
+            commands: list[list[str]] = []
+
+            def first_runner(command):
+                commands.append(list(command))
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
+                if command[0] == "ewfmount":
+                    (Path(command[2]) / "ewf1").write_bytes(b"raw")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if command[0] == "mmls":
+                    return subprocess.CompletedProcess(command, 0, "001: 0000002048 0000020000 NTFS\n", "")
+                if command[0] == "tsk_recover":
+                    Path(command[-1]).mkdir(parents=True, exist_ok=True)
+                    (Path(command[-1]) / "evidence.txt").write_text("recovered once", encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            first_result = extract_e01_to_directory(
+                e01_path,
+                stage_dir,
+                runner=first_runner,
+                tool_resolver=lambda name: f"/usr/bin/{name}",
+            )
+            checkpoint_path = stage_dir / "rapidtriage-e01-stage-status.json"
+            self.assertTrue(checkpoint_path.is_file())
+            self.assertFalse(first_result.resume_status["resumed_from_checkpoint"])
+            self.assertIn("read-only-filesystem-recovery", first_result.resume_status["completed_stages"])
+
+            def forbidden_runner(command):
+                raise AssertionError(f"resume path should not execute external command: {command}")
+
+            resumed_result = extract_e01_to_directory(
+                e01_path,
+                stage_dir,
+                runner=forbidden_runner,
+                tool_resolver=lambda _: None,
+            )
+
+            self.assertEqual(resumed_result.partition_start_sector, 2048)
+            self.assertTrue(resumed_result.resume_status["resumed_from_checkpoint"])
+            self.assertTrue(resumed_result.resume_status["resume_ready"])
+            self.assertIn("read-only-filesystem-recovery", resumed_result.resume_status["completed_stages"])
+            self.assertEqual(resumed_result.recovered_root_manifest["hashed_file_count"], 1)
+            self.assertEqual((resumed_result.extract_dir / "evidence.txt").read_text(encoding="utf-8"), "recovered once")
 
     def test_raw_split_image_discovery_sorts_numeric_segments(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -155,6 +463,8 @@ DOS Partition Table
             self.assertEqual([Path(path).name for path in metadata["image_paths"]], ["case.001", "case.003"])
             self.assertTrue(metadata["split_part_warnings"])
             self.assertIn("missing segment", metadata["split_part_warnings"][0])
+            self.assertEqual(metadata["split_set_profile"]["missing_segment_numbers"], [2])
+            self.assertFalse(metadata["split_set_profile"]["contiguous"])
 
     def test_extract_raw_image_runs_mmls_and_tsk_recover(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -208,6 +518,14 @@ DOS Partition Table
             self.assertEqual(raw_uplift["item_numbers"], [23])
             self.assertIn("#23-command-history", raw_uplift["passed_validation_matrix_ids"])
             self.assertEqual(raw_uplift["large_data_controls"]["split_part_count"], 2)
+            self.assertEqual(raw_uplift["large_data_controls"]["split_set_contiguous"], True)
+            self.assertEqual(metadata["split_set_profile"]["part_count"], 2)
+            self.assertTrue(metadata["split_set_profile"]["selected_is_first_segment"])
+            self.assertEqual(metadata["recovered_root_manifest"]["visited_file_count"], 1)
+            self.assertEqual(metadata["recovered_root_manifest"]["hashed_file_count"], 1)
+            self.assertEqual(metadata["recovered_root_manifest"]["files"][0]["relative_path"], "evidence.txt")
+            self.assertEqual(metadata["recovered_root_manifest"]["files"][0]["hash_status"], "computed")
+            self.assertIn("split-set provenance profile", raw_gate["satisfied_checks"])
             self.assertEqual(
                 raw_uplift["reportability_decision"]["allowed_use"],
                 "raw-split-extraction-triage-pivot",
@@ -289,6 +607,13 @@ DOS Partition Table
                 commands.append(list(command))
                 if command[1:] == ["--version"]:
                     return subprocess.CompletedProcess(command, 0, f"{command[0]} 1.0\n", "")
+                if command[:3] == ["qemu-img", "info", "--output=json"]:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        '{"format":"vmdk","virtual-size":4096,"actual-size":2048}',
+                        "",
+                    )
                 if command[:3] == ["qemu-img", "convert", "-O"]:
                     Path(command[-1]).write_bytes(b"converted raw")
                     return subprocess.CompletedProcess(command, 0, "", "")
@@ -309,7 +634,8 @@ DOS Partition Table
 
             self.assertEqual(result.conversion_tool, "qemu-img")
             workflow_commands = [command for command in commands if command[1:] != ["--version"]]
-            self.assertEqual(workflow_commands[0][:4], ["qemu-img", "convert", "-O", "raw"])
+            self.assertEqual(workflow_commands[0][:3], ["qemu-img", "info", "--output=json"])
+            self.assertEqual(workflow_commands[1][:4], ["qemu-img", "convert", "-O", "raw"])
             self.assertTrue(result.converted_raw_path.is_file())
             self.assertTrue((result.extract_dir / "vm-evidence.txt").is_file())
             self.assertEqual(result.raw_result.partition_start_sector, 2048)
@@ -323,8 +649,14 @@ DOS Partition Table
             self.assertEqual(vm_gate["gap_id"], "#24")
             self.assertIn("converted raw hash/provenance", vm_gate["satisfied_checks"])
             self.assertIn("nested partition extraction", vm_gate["satisfied_checks"])
+            self.assertIn("virtual disk chain risk profile", vm_gate["satisfied_checks"])
+            self.assertEqual(metadata["virtual_disk_chain_profile"]["detected_format"], "vmdk")
+            self.assertEqual(metadata["virtual_disk_chain_profile"]["parent_chain_resolution"], "not-implemented")
+            self.assertEqual(metadata["qemu_img_info_profile"]["parse_status"], "json-parsed")
+            self.assertEqual(metadata["qemu_img_info_profile"]["format"], "vmdk")
             vm_uplift = metadata["commercial_uplift_evidence"]
             self.assertEqual(vm_uplift["item_numbers"], [24])
+            self.assertEqual(vm_uplift["large_data_controls"]["virtual_disk_chain_status"], "review-required")
             self.assertIn("#24-command-history", vm_uplift["passed_validation_matrix_ids"])
             self.assertIn("#24-native-commercial-parser", vm_uplift["failed_validation_matrix_ids"])
             self.assertEqual(
@@ -332,6 +664,17 @@ DOS Partition Table
                 "do-not-report-virtual-disk-workflow-as-chain-complete",
             )
             self.assertFalse(vm_uplift["reportability_decision"]["native_parser_complete"])
+
+    def test_virtual_disk_chain_profile_flags_snapshot_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source = Path(tmp_dir) / "case-000001.vmdk"
+            source.write_bytes(b"snapshot member")
+
+            profile = build_virtual_disk_chain_profile(source)
+
+            self.assertTrue(profile["suspected_snapshot_or_differencing_member"])
+            self.assertEqual(profile["chain_validation_status"], "review-required")
+            self.assertIn("snapshot/differencing", profile["warnings"][0])
 
     def test_image_workflow_trusted_diffs_gate_e01_raw_vm_and_container_claims(self) -> None:
         e01_diff = build_image_workflow_trusted_diff(
@@ -402,6 +745,305 @@ DOS Partition Table
             ],
         )
 
+    def test_e01_trusted_diff_accepts_nested_result_metadata_and_recovered_manifest(self) -> None:
+        diff = build_image_workflow_trusted_diff(
+            22,
+            [
+                {
+                    "details": {
+                        "source_path": "/cases/case.E01",
+                        "source_integrity": {"sha256": "a" * 64, "path": "/cases/case.E01"},
+                        "partition_selection": {"selected_start_sector": 2048},
+                        "segment_set_profile": {
+                            "segment_count": 2,
+                            "segment_numbers": [1, 2],
+                            "contiguous": True,
+                            "selected_is_first_segment": True,
+                        },
+                        "recovered_root_manifest": {
+                            "visited_file_count": 1,
+                            "hashed_file_count": 1,
+                            "files": [
+                                {
+                                    "relative_path": "evidence.txt",
+                                    "sha256": "b" * 64,
+                                }
+                            ],
+                        },
+                    }
+                }
+            ],
+            [
+                {
+                    "SourcePath": "/cases/case.E01",
+                    "SourceSHA256": "a" * 64,
+                    "StartSector": "2048",
+                    "Workflow": "partition-offset",
+                    "SegmentCount": "2",
+                    "SegmentNumbers": "1,2",
+                    "Contiguous": "true",
+                    "SelectedIsFirstSegment": "true",
+                    "RecoveredFileCount": "1",
+                    "HashedFileCount": "1",
+                    "Path": "evidence.txt",
+                    "FileSHA256": "b" * 64,
+                }
+            ],
+            trusted_tool="ewfverify",
+        )
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertEqual(diff["mismatch_count"], 0)
+
+    def test_e01_trusted_diff_blocks_nested_recovered_hash_mismatches(self) -> None:
+        diff = build_image_workflow_trusted_diff(
+            22,
+            [
+                {
+                    "details": {
+                        "source_path": "/cases/case.E01",
+                        "source_integrity": {"sha256": "a" * 64},
+                        "partition_selection": {"selected_start_sector": 2048},
+                        "recovered_root_manifest": {
+                            "files": [{"relative_path": "evidence.txt", "sha256": "b" * 64}]
+                        },
+                    }
+                }
+            ],
+            [
+                {
+                    "SourcePath": "/cases/case.E01",
+                    "SourceSHA256": "a" * 64,
+                    "StartSector": "2048",
+                    "Workflow": "partition-offset",
+                    "Path": "evidence.txt",
+                    "FileSHA256": "c" * 64,
+                }
+            ],
+            trusted_tool="ewfverify",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "extracted_sha256")
+
+    def test_raw_trusted_diff_accepts_nested_split_profile_and_recovered_manifest(self) -> None:
+        diff = build_image_workflow_trusted_diff(
+            23,
+            [
+                {
+                    "details": {
+                        "source_path": "/cases/case.001",
+                        "source_integrity": [
+                            {"path": "/cases/case.001", "sha256": "a" * 64},
+                            {"path": "/cases/case.002", "sha256": "b" * 64},
+                        ],
+                        "partition_start_sector": 2048,
+                        "recovery_mode": "partition-offset",
+                        "split_set_profile": {
+                            "part_count": 2,
+                            "segment_numbers": [1, 2],
+                            "contiguous": True,
+                            "selected_is_first_segment": True,
+                        },
+                        "recovered_root_manifest": {
+                            "visited_file_count": 1,
+                            "hashed_file_count": 1,
+                            "files": [
+                                {
+                                    "relative_path": "Users/Alice/Desktop/evidence.txt",
+                                    "sha256": "c" * 64,
+                                }
+                            ],
+                        },
+                    }
+                }
+            ],
+            [
+                {
+                    "ImagePath": "/cases/case.001",
+                    "SourceSHA256": "a" * 64,
+                    "StartSector": "2048",
+                    "Workflow": "partition-offset",
+                    "SplitPartCount": "2",
+                    "SplitSegmentNumbers": "1,2",
+                    "SplitSetContiguous": "true",
+                    "SelectedIsFirstSegment": "true",
+                    "RecoveredFileCount": "1",
+                    "HashedFileCount": "1",
+                    "Path": "Users/Alice/Desktop/evidence.txt",
+                    "FileSHA256": "c" * 64,
+                }
+            ],
+            trusted_tool="tsk_recover",
+        )
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+        self.assertEqual(diff["mismatch_count"], 0)
+
+    def test_raw_trusted_diff_blocks_nested_split_profile_mismatches(self) -> None:
+        diff = build_image_workflow_trusted_diff(
+            23,
+            [
+                {
+                    "details": {
+                        "source_path": "/cases/case.001",
+                        "source_integrity": [{"path": "/cases/case.001", "sha256": "a" * 64}],
+                        "partition_start_sector": 2048,
+                        "split_set_profile": {
+                            "part_count": 2,
+                            "segment_numbers": [1, 3],
+                            "contiguous": False,
+                        },
+                        "recovered_root_manifest": {
+                            "files": [{"relative_path": "evidence.txt", "sha256": "b" * 64}]
+                        },
+                    }
+                }
+            ],
+            [
+                {
+                    "ImagePath": "/cases/case.001",
+                    "SourceSHA256": "a" * 64,
+                    "StartSector": "2048",
+                    "SplitPartCount": "2",
+                    "SplitSegmentNumbers": "1,2",
+                    "SplitSetContiguous": "true",
+                    "Path": "evidence.txt",
+                    "FileSHA256": "b" * 64,
+                }
+            ],
+            trusted_tool="tsk_recover",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "split_segment_numbers")
+
+    def test_virtual_disk_trusted_diff_accepts_nested_raw_recovery_and_chain_profile(self) -> None:
+        diff = build_image_workflow_trusted_diff(
+            24,
+            [
+                {
+                    "details": {
+                        "source_path": "/cases/vm.vmdk",
+                        "source_integrity": {"path": "/cases/vm.vmdk", "sha256": "a" * 64},
+                        "converted_raw_path": "/stage/converted/vm.raw",
+                        "converted_raw_integrity": {"path": "/stage/converted/vm.raw", "sha256": "b" * 64},
+                        "virtual_disk_chain_profile": {
+                            "detected_format": "vmdk",
+                            "chain_validation_status": "review-required",
+                            "suspected_snapshot_or_differencing_member": True,
+                            "parent_chain_resolution": "not-implemented",
+                        },
+                        "raw_extraction": {
+                            "partition_start_sector": 2048,
+                            "recovery_mode": "partition-offset",
+                            "recovered_root_manifest": {
+                                "visited_file_count": 1,
+                                "hashed_file_count": 1,
+                                "files": [{"relative_path": "evidence.txt", "sha256": "c" * 64}],
+                            },
+                        },
+                    }
+                }
+            ],
+            [
+                {
+                    "SourcePath": "/cases/vm.vmdk",
+                    "SourceSHA256": "a" * 64,
+                    "ConvertedSHA256": "b" * 64,
+                    "StartSector": "2048",
+                    "Workflow": "partition-offset",
+                    "VirtualDiskFormat": "vmdk",
+                    "VirtualDiskChainStatus": "review-required",
+                    "SnapshotMember": "true",
+                    "ParentChainResolution": "not-implemented",
+                    "Path": "evidence.txt",
+                    "FileSHA256": "c" * 64,
+                }
+            ],
+            trusted_tool="qemu-img",
+        )
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+
+    def test_virtual_disk_trusted_diff_blocks_nested_converted_hash_mismatches(self) -> None:
+        diff = build_image_workflow_trusted_diff(
+            24,
+            [
+                {
+                    "details": {
+                        "source_path": "/cases/vm.vmdk",
+                        "source_integrity": {"sha256": "a" * 64},
+                        "converted_raw_integrity": {"sha256": "b" * 64},
+                        "raw_extraction": {
+                            "partition_start_sector": 2048,
+                            "recovered_root_manifest": {
+                                "files": [{"relative_path": "evidence.txt", "sha256": "c" * 64}]
+                            },
+                        },
+                    }
+                }
+            ],
+            [
+                {
+                    "SourcePath": "/cases/vm.vmdk",
+                    "SourceSHA256": "a" * 64,
+                    "ConvertedSHA256": "d" * 64,
+                    "StartSector": "2048",
+                    "Path": "evidence.txt",
+                    "FileSHA256": "c" * 64,
+                }
+            ],
+            trusted_tool="qemu-img",
+        )
+
+        self.assertEqual(diff["status"], "diffs-present")
+        self.assertFalse(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["mismatch_count"], 1)
+        self.assertEqual(diff["mismatches"][0]["field"], "converted_raw_sha256")
+
+    def test_container_trusted_diff_accepts_nested_verified_export_manifest_profile(self) -> None:
+        diff = build_image_workflow_trusted_diff(
+            25,
+            [
+                {
+                    "details": {
+                        "source_path": "/cases/case.ad1",
+                        "source_integrity": {"path": "/cases/case.ad1", "sha256": "a" * 64},
+                        "container_type": "ad1",
+                        "verified_export_manifest_profile": {
+                            "manifest_sha256": "b" * 64,
+                            "vendor_tool": "FTK Imager",
+                            "validation_status": "manifest-linked",
+                        },
+                    }
+                }
+            ],
+            [
+                {
+                    "ContainerPath": "/cases/case.ad1",
+                    "SourceSHA256": "a" * 64,
+                    "Format": "ad1",
+                    "VendorManifestSHA256": "b" * 64,
+                }
+            ],
+            trusted_tool="vendor export manifest",
+        )
+
+        self.assertEqual(diff["status"], "pass")
+        self.assertTrue(diff["commercial_grade_evidence"])
+        self.assertEqual(diff["matched_count"], 1)
+
     def test_image_workflow_trusted_diff_blocks_unknown_tools_and_mismatches(self) -> None:
         diff = build_image_workflow_trusted_diff(
             23,
@@ -422,7 +1064,12 @@ DOS Partition Table
             output_dir = root / "run-out"
             e01_path.write_bytes(b"EVF")
 
-            def fake_extract(source_path: Path, stage_dir: Path) -> E01ExtractionResult:
+            def fake_extract(
+                source_path: Path,
+                stage_dir: Path,
+                *,
+                partition_start_sector: int | None = None,
+            ) -> E01ExtractionResult:
                 extract_dir = stage_dir / "filesystem"
                 extract_dir.mkdir(parents=True, exist_ok=True)
                 build_run_fixture(extract_dir)
@@ -432,19 +1079,28 @@ DOS Partition Table
                     mount_dir=stage_dir / "_ewfmount",
                     raw_image_path=stage_dir / "_ewfmount" / "ewf1",
                     extract_dir=extract_dir,
-                    partition_start_sector=2048,
+                    partition_start_sector=partition_start_sector or 2048,
                 )
 
             with patch("rapidtriage.core.run.extract_e01_to_directory", side_effect=fake_extract):
-                payload = run_triage_mode(e01_path, mode="fraud", output_dir=output_dir)
+                payload = run_triage_mode(
+                    e01_path,
+                    mode="fraud",
+                    output_dir=output_dir,
+                    e01_partition_start_sector=4096,
+                )
 
             self.assertEqual(payload["source"]["type"], "e01")
             self.assertEqual(Path(payload["source"]["source_path"]), e01_path.resolve())
+            self.assertEqual(payload["source"]["workflow_status"]["profile_version"], "windows11-e01-run-workflow-v1")
+            self.assertEqual(payload["source"]["workflow_status"]["stages"][0]["id"], "select-e01")
+            self.assertEqual(payload["source"]["workflow_status"]["stages"][-1]["id"], "search-review-report")
+            self.assertEqual(payload["source"]["workflow_status"]["selected_partition_start_sector"], 4096)
             self.assertEqual(Path(payload["root"]), (output_dir / "_e01" / "filesystem").resolve())
             self.assertIn("e01", payload["outputs"])
             self.assertTrue((output_dir / "rapidtriage-e01.json").is_file())
             metadata = json.loads((output_dir / "rapidtriage-e01.json").read_text(encoding="utf-8"))
-            self.assertEqual(metadata["partition_start_sector"], 2048)
+            self.assertEqual(metadata["partition_start_sector"], 4096)
             self.assertGreaterEqual(payload["summary"]["document_match_count"], 1)
 
     def test_run_triage_accepts_raw_image_and_analyzes_extracted_filesystem(self) -> None:

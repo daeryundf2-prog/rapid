@@ -310,18 +310,20 @@ def build_court_exhibit_index(
             continue
         hashes = item.get("hashes") if isinstance(item.get("hashes"), Mapping) else {}
         reference = item.get("reference") if isinstance(item.get("reference"), Mapping) else {}
-        exhibit_items.append(
-            {
-                "exhibit_id": f"EXH-{index:04d}",
-                "bookmark_id": str(item.get("bookmark_id") or ""),
-                "summary": str(item.get("summary") or ""),
-                "path": str(item.get("path") or ""),
-                "sha256": str(hashes.get("sha256") or ""),
-                "review_status": str((item.get("review") or {}).get("status") if isinstance(item.get("review"), Mapping) else ""),
-                "source_reference": dict(reference),
-                "hash_status": str(item.get("hash_status") or ""),
-            }
-        )
+        exhibit_row = {
+            "exhibit_id": f"EXH-{index:04d}",
+            "bookmark_id": str(item.get("bookmark_id") or ""),
+            "summary": str(item.get("summary") or ""),
+            "path": str(item.get("path") or ""),
+            "sha256": str(hashes.get("sha256") or ""),
+            "review_status": str((item.get("review") or {}).get("status") if isinstance(item.get("review"), Mapping) else ""),
+            "source_reference": dict(reference),
+            "hash_status": str(item.get("hash_status") or ""),
+        }
+        exhibit_row["exhibit_row_hash"] = hashlib.sha256(
+            json.dumps(exhibit_row, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        exhibit_items.append(exhibit_row)
     output_hashes = []
     for label, path in output_paths:
         if not path.exists() or not path.is_file():
@@ -337,6 +339,13 @@ def build_court_exhibit_index(
     blockers = []
     if not trusted_diff or trusted_diff.get("status") != "pass":
         blockers.append(COURT_EXHIBIT_TRUSTED_DIFF_BLOCKER_94)
+    exhibit_manifest = build_court_exhibit_package_manifest(
+        case_id=str(manifest.get("case_id") or ""),
+        selected=selected,
+        exhibits=exhibit_items,
+        output_hashes=output_hashes,
+        blockers=blockers,
+    )
     return {
         "command": "court-exhibit-index",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -349,10 +358,14 @@ def build_court_exhibit_index(
         },
         "exhibits": exhibit_items,
         "output_hashes": output_hashes,
+        "court_exhibit_manifest": exhibit_manifest,
+        "court_exhibit_manifest_hash": exhibit_manifest["manifest_hash"],
+        "signing_slots": exhibit_manifest["signing_slots"],
         "trusted_court_exhibit_diff": dict(trusted_diff) if trusted_diff else missing_court_exhibit_trusted_diff(),
         "core_accuracy_gates": court_exhibit_core_accuracy_gates(
             exhibits=exhibit_items,
             output_hashes=output_hashes,
+            exhibit_manifest=exhibit_manifest,
             trusted_diff=trusted_diff,
         ),
         "blockers": blockers,
@@ -363,6 +376,53 @@ def build_court_exhibit_index(
             "Cross-check each exhibit path/hash against the authoritative source evidence.",
         ],
     }
+
+
+def build_court_exhibit_package_manifest(
+    *,
+    case_id: str,
+    selected: Mapping[str, object],
+    exhibits: Sequence[Mapping[str, object]],
+    output_hashes: Sequence[Mapping[str, object]],
+    blockers: Sequence[str],
+) -> dict[str, object]:
+    selected_manifest_hash = hashlib.sha256(
+        json.dumps(selected, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    output_hash_manifest = [
+        {
+            "label": str(item.get("label") or ""),
+            "sha256": str((item.get("hashes") or {}).get("sha256") if isinstance(item.get("hashes"), Mapping) else ""),
+            "size_bytes": item.get("size_bytes"),
+        }
+        for item in output_hashes
+    ]
+    manifest_core = {
+        "profile_version": "court-exhibit-package-manifest-v1",
+        "item_number": 94,
+        "case_id": case_id,
+        "selected_evidence_manifest_hash": selected_manifest_hash,
+        "exhibit_count": len(exhibits),
+        "exhibit_row_hashes": [str(item.get("exhibit_row_hash") or "") for item in exhibits],
+        "output_hash_manifest": output_hash_manifest,
+        "signing_slots": {
+            "external_signature": {
+                "status": "not-attached",
+                "expected_material": "detached signature or notarization receipt for the final bundle archive",
+            },
+            "court_form": {
+                "status": "operator-owned",
+                "expected_material": "jurisdiction-specific exhibit cover sheet or filing form",
+            },
+        },
+        "blockers": list(blockers),
+        "commercial_gap_ids": [COURT_EXHIBIT_EXPORT_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+    manifest_hash = hashlib.sha256(
+        json.dumps(manifest_core, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {**manifest_core, "manifest_hash": manifest_hash}
 
 
 def build_tamper_evident_audit_bundle(
@@ -393,6 +453,12 @@ def build_tamper_evident_audit_bundle(
     blockers = []
     if trusted_diff.get("status") != "pass":
         blockers.append(TAMPER_EVIDENT_TRUSTED_DIFF_BLOCKER_100)
+    tamper_manifest = build_tamper_evident_audit_manifest(
+        entries=entries,
+        head_hash=previous_hash,
+        blockers=blockers,
+        trusted_diff=trusted_diff,
+    )
     return {
         "command": "tamper-evident-audit-bundle",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -400,14 +466,20 @@ def build_tamper_evident_audit_bundle(
         "summary": {
             "entry_count": len(entries),
             "head_hash": previous_hash,
+            "tamper_evident_manifest_hash": tamper_manifest["manifest_hash"],
             "commercial_gap_ids": [TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID],
         },
         "entries": entries,
+        "tamper_evident_manifest": tamper_manifest,
+        "tamper_evident_manifest_hash": tamper_manifest["manifest_hash"],
+        "verification_matrix_hash": tamper_manifest["verification_matrix_hash"],
+        "signing_slots": tamper_manifest["signing_slots"],
         "trusted_tamper_evident_diff": trusted_diff,
         "blockers": blockers,
         "core_accuracy_gates": tamper_evident_bundle_core_accuracy_gates(
             entries=entries,
             head_hash=previous_hash,
+            tamper_manifest=tamper_manifest,
             trusted_diff=trusted_diff,
         ),
         "verification_steps": [
@@ -423,6 +495,7 @@ def court_exhibit_core_accuracy_gates(
     *,
     exhibits: Sequence[Mapping[str, object]],
     output_hashes: Sequence[Mapping[str, object]],
+    exhibit_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["verification steps emitted"]
@@ -430,10 +503,18 @@ def court_exhibit_core_accuracy_gates(
         satisfied.append("exhibit IDs assigned")
     if any(item.get("sha256") for item in exhibits):
         satisfied.append("selected evidence hashes preserved")
+    if exhibits and all(item.get("exhibit_row_hash") for item in exhibits):
+        satisfied.append("exhibit row hashes emitted")
     if output_hashes:
         satisfied.append("generated output hashes captured")
     if any(item.get("source_reference") for item in exhibits):
         satisfied.append("source references preserved")
+    if exhibit_manifest and exhibit_manifest.get("selected_evidence_manifest_hash"):
+        satisfied.append("selected evidence manifest hash emitted")
+    if exhibit_manifest and exhibit_manifest.get("signing_slots"):
+        satisfied.append("external signing slot emitted")
+    if exhibit_manifest and exhibit_manifest.get("manifest_hash"):
+        satisfied.append("court exhibit package manifest hash emitted")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted court exhibit manifest diff pass")
     return [
@@ -443,6 +524,7 @@ def court_exhibit_core_accuracy_gates(
             evidence_refs=[
                 f"exhibit_count:{len(exhibits)}",
                 f"output_hash_count:{len(output_hashes)}",
+                f"court_exhibit_manifest_hash:{(exhibit_manifest or {}).get('manifest_hash', '')}",
             ],
         )
     ]
@@ -465,7 +547,7 @@ def build_court_exhibit_trusted_diff(
     trusted_tool: str = "court-exhibit-checklist",
 ) -> dict[str, object]:
     mismatches = []
-    for field in ("exhibits", "output_hashes"):
+    for field in ("exhibits", "output_hashes", "court_exhibit_manifest_hash"):
         rapid_value = normalize_court_exhibit_value(rapid_index.get(field))
         trusted_value = normalize_court_exhibit_value(trusted_index.get(field))
         if rapid_value != trusted_value:
@@ -475,7 +557,7 @@ def build_court_exhibit_trusted_diff(
         "status": status,
         "trusted_tool": trusted_tool,
         "commercial_gap_ids": [COURT_EXHIBIT_EXPORT_GAP_ID],
-        "compared_fields": ["exhibits", "output_hashes"],
+        "compared_fields": ["exhibits", "output_hashes", "court_exhibit_manifest_hash"],
         "mismatches": mismatches,
         "blocker": None if status == "pass" else COURT_EXHIBIT_TRUSTED_DIFF_BLOCKER_94,
     }
@@ -499,13 +581,76 @@ def missing_tamper_evident_trusted_diff() -> dict[str, object]:
     }
 
 
+def build_tamper_evident_audit_manifest(
+    *,
+    entries: Sequence[Mapping[str, object]],
+    head_hash: str,
+    blockers: Sequence[str],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    verification_matrix = build_tamper_verification_matrix(entries=entries, head_hash=head_hash)
+    manifest_core = {
+        "profile_version": "tamper-evident-audit-manifest-v1",
+        "item_number": 100,
+        "entry_count": len(entries),
+        "entry_hashes": [str(item.get("entry_hash") or "") for item in entries],
+        "head_hash": head_hash,
+        "verification_matrix": verification_matrix,
+        "verification_matrix_hash": verification_matrix["matrix_hash"],
+        "signing_slots": {
+            "external_signature": {
+                "status": "not-attached",
+                "expected_material": "detached signature, notarization receipt, or repository release attestation",
+            }
+        },
+        "blockers": list(blockers),
+        "trusted_diff_status": str(trusted_diff.get("status") or ""),
+        "commercial_gap_ids": [TAMPER_EVIDENT_AUDIT_BUNDLE_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "manifest_hash": stable_bundle_sha256(manifest_core)}
+
+
+def build_tamper_verification_matrix(*, entries: Sequence[Mapping[str, object]], head_hash: str) -> dict[str, object]:
+    rows = []
+    previous = ""
+    for entry in entries:
+        row_core = {
+            "label": str(entry.get("label") or ""),
+            "path": str(entry.get("path") or ""),
+            "sha256": str((entry.get("hashes") or {}).get("sha256") if isinstance(entry.get("hashes"), Mapping) else ""),
+            "previous_entry_hash": str(entry.get("previous_entry_hash") or ""),
+            "entry_hash": str(entry.get("entry_hash") or ""),
+            "previous_hash_matches_chain": str(entry.get("previous_entry_hash") or "") == previous,
+        }
+        previous = str(entry.get("entry_hash") or "")
+        rows.append({**row_core, "row_hash": stable_bundle_sha256(row_core)})
+    matrix_core = {
+        "profile_version": "tamper-verification-matrix-v1",
+        "item_number": 100,
+        "entry_count": len(entries),
+        "rows": rows,
+        "head_hash": head_hash,
+        "head_hash_matches_last_entry": head_hash == previous,
+        "chain_links_valid": all(row.get("previous_hash_matches_chain") for row in rows) if rows else True,
+        "commercial_claim_allowed": False,
+    }
+    return {**matrix_core, "matrix_hash": stable_bundle_sha256(matrix_core)}
+
+
+def stable_bundle_sha256(payload: Mapping[str, object] | Sequence[Mapping[str, object]]) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+
+
 def build_tamper_evident_trusted_diff(
     rapid_bundle: Mapping[str, object],
     trusted_bundle: Mapping[str, object],
     *,
     trusted_tool: str = "external-signature-attestation",
 ) -> dict[str, object]:
-    compared_fields = ["summary", "entries"]
+    compared_fields = ["summary", "entries", "tamper_evident_manifest_hash", "verification_matrix_hash"]
     mismatches = []
     for field in compared_fields:
         rapid_value = normalize_tamper_evident_value(rapid_bundle.get(field))
@@ -535,6 +680,7 @@ def tamper_evident_bundle_core_accuracy_gates(
     *,
     entries: Sequence[Mapping[str, object]],
     head_hash: str,
+    tamper_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["external signing limitation emitted"]
@@ -546,13 +692,24 @@ def tamper_evident_bundle_core_accuracy_gates(
         satisfied.append("entry hashes emitted")
     if head_hash:
         satisfied.append("head hash recorded")
+    if tamper_manifest and tamper_manifest.get("manifest_hash"):
+        satisfied.append("tamper-evident manifest hash emitted")
+    if tamper_manifest and tamper_manifest.get("verification_matrix_hash"):
+        satisfied.append("tamper verification matrix hash emitted")
+    if tamper_manifest and tamper_manifest.get("signing_slots"):
+        satisfied.append("external signing slot emitted")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted tamper signature attestation diff pass")
     return [
         build_accuracy_gate(
             100,
             satisfied_checks=satisfied,
-            evidence_refs=[f"entry_count:{len(entries)}", f"head_hash:{head_hash}"],
+            evidence_refs=[
+                f"entry_count:{len(entries)}",
+                f"head_hash:{head_hash}",
+                f"tamper_evident_manifest_hash:{(tamper_manifest or {}).get('manifest_hash', '')}",
+                f"verification_matrix_hash:{(tamper_manifest or {}).get('verification_matrix_hash', '')}",
+            ],
         )
     ]
 

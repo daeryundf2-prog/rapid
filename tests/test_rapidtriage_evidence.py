@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import tempfile
@@ -43,6 +44,14 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(result["source_integrity"]["hash_status"], "computed")
             self.assertIn("sha256", result["source_integrity"])
             self.assertTrue(result["tool_preflight"])
+            self.assertTrue(result["preflight_summary"])
+            self.assertIn(result["preflight_summary"]["status"], {"ready", "ready-version-unverified", "blocked"})
+            self.assertEqual(result["preflight_summary"]["missing_tools"], result["missing_tools"])
+            self.assertIn("fallback_strategy", result["preflight_summary"])
+            for row in result["tool_preflight"]:
+                self.assertIn("purpose", row)
+                self.assertIn("install_hint", row)
+                self.assertIn("windows_hint", row)
             self.assertIn("#22", result["commercial_gap_ids"])
             self.assertEqual(result["forensic_review"]["gap_id"], "#22")
             self.assertFalse(result["forensic_review"]["report_grade_ready"])
@@ -50,8 +59,15 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             e01_gate = result["core_accuracy_gates"][0]
             self.assertEqual(e01_gate["gap_id"], "#22")
             self.assertIn("source hash and segment integrity", e01_gate["satisfied_checks"])
+            self.assertIn("EWF segment-set order validation", e01_gate["satisfied_checks"])
             self.assertIn("tool version/command capture", e01_gate["satisfied_checks"])
             self.assertIn("corrupt/encrypted limitation reporting", e01_gate["satisfied_checks"])
+            self.assertEqual(result["segment_set_profile"]["segment_count"], 1)
+            self.assertEqual(result["ingest_workflow"]["profile_version"], "windows11-e01-single-case-workflow-v1")
+            self.assertEqual(result["ingest_workflow"]["stages"][0]["id"], "select-e01")
+            self.assertEqual(result["ingest_workflow"]["stages"][-1]["id"], "search-review-report")
+            self.assertIn("#22", result["ingest_workflow"]["commercial_gap_ids"])
+            self.assertIn(result["ingest_workflow"]["recommended_input_kind"], {"e01-derived", "mounted-or-exported-folder"})
             self.assertTrue(result["limitations"])
             self.assertTrue(result["fallback_guidance"])
             e01_uplift = result["commercial_uplift_evidence"]
@@ -71,6 +87,21 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 "#22-native-commercial-parser",
                 e01_uplift["reportability_decision"]["failed_validation_matrix_ids"],
             )
+
+    def test_e01_identify_exposes_failure_guidance_when_tools_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = Path(tmp_dir) / "case.E01"
+            image_path.write_bytes(b"EVF")
+
+            with patch("rapidtriage.core.evidence.missing_e01_tools", return_value=["ewfmount"]):
+                result = identify_evidence(image_path).to_dict()
+
+            self.assertEqual(result["supported"], False)
+            self.assertEqual(result["failure_guidance"]["category"], "missing-tool")
+            self.assertTrue(result["ingest_workflow"]["blocked"])
+            self.assertEqual(result["ingest_workflow"]["failure_category"], "missing-tool")
+            self.assertEqual(result["ingest_workflow"]["stages"][1]["status"], "blocked")
+            self.assertIn("WSL2", " ".join(result["failure_guidance"]["next_actions"]))
 
     def test_identifies_raw_image_as_direct_extract_when_sleuthkit_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -94,12 +125,15 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             raw_gate = result["core_accuracy_gates"][0]
             self.assertEqual(raw_gate["gap_id"], "#23")
             self.assertIn("split-set order and gap validation", raw_gate["satisfied_checks"])
+            self.assertIn("split-set provenance profile", raw_gate["satisfied_checks"])
             self.assertIn("encrypted volume limitation warning", raw_gate["satisfied_checks"])
+            self.assertEqual(result["split_set_profile"]["part_count"], 1)
             raw_uplift = result["commercial_uplift_evidence"]
             self.assertEqual(raw_uplift["item_numbers"], [23])
             self.assertIn("#23-source-integrity", raw_uplift["passed_validation_matrix_ids"])
             self.assertIn("#23-native-commercial-parser", raw_uplift["failed_validation_matrix_ids"])
             self.assertEqual(raw_uplift["large_data_controls"]["split_part_count"], 1)
+            self.assertEqual(raw_uplift["large_data_controls"]["split_set_contiguous"], True)
             self.assertEqual(
                 raw_uplift["reportability_decision"]["decision"],
                 "do-not-report-raw-split-workflow-as-native-complete",
@@ -147,7 +181,9 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(vm_gate["gap_id"], "#24")
             self.assertIn("qemu-img version/command capture", vm_gate["satisfied_checks"])
             self.assertIn("snapshot/differencing-chain detection", vm_gate["satisfied_checks"])
+            self.assertIn("virtual disk chain risk profile", vm_gate["satisfied_checks"])
             self.assertIn("unsupported/encrypted VM warning", vm_gate["satisfied_checks"])
+            self.assertEqual(result["virtual_disk_chain_profile"]["detected_format"], "vmdk")
             vm_uplift = result["commercial_uplift_evidence"]
             self.assertEqual(vm_uplift["item_numbers"], [24])
             self.assertIn("#24-source-integrity", vm_uplift["passed_validation_matrix_ids"])
@@ -184,6 +220,7 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
             self.assertEqual(xva_gate["gap_id"], "#24")
             self.assertIn("snapshot/differencing-chain detection", xva_gate["satisfied_checks"])
             self.assertIn("unsupported/encrypted VM warning", xva_gate["satisfied_checks"])
+            self.assertEqual(result["virtual_disk_chain_profile"]["detected_format"], "xva")
             self.assertTrue(result["fallback_guidance"])
             xva_uplift = result["commercial_uplift_evidence"]
             self.assertEqual(xva_uplift["item_numbers"], [24])
@@ -233,6 +270,7 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                 self.assertIn("native-vs-export workflow disclosure", container_gate["satisfied_checks"])
                 self.assertIn("metadata/deleted-entry validation", container_gate["satisfied_checks"])
                 self.assertIn("encrypted/compressed limitation warning", container_gate["satisfied_checks"])
+                self.assertEqual(result["container_export_profile"]["workflow"], "vendor-export-first")
                 self.assertTrue(result["limitations"])
                 container_uplift = result["commercial_uplift_evidence"]
                 self.assertEqual(container_uplift["item_numbers"], [25])
@@ -250,6 +288,44 @@ class RapidTriageEvidenceAdapterTests(unittest.TestCase):
                     container_uplift["reportability_decision"]["allowed_use"],
                     "vendor-export-container-triage-pivot",
                 )
+                self.assertFalse(result["verified_export_manifest_profile"]["manifest_present"])
+                self.assertEqual(result["verified_export_manifest_profile"]["validation_status"], "missing")
+
+    def test_forensic_container_reads_verified_export_manifest_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = Path(tmp_dir) / "case.ad1"
+            image_path.write_bytes(b"sample")
+            source_hash = hashlib.sha256(b"sample").hexdigest()
+            manifest_path = image_path.with_suffix(image_path.suffix + ".export-manifest.json")
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "vendor_tool": "FTK Imager",
+                        "vendor_tool_version": "4.7",
+                        "source_sha256": source_hash,
+                        "export_root": "case-export",
+                        "export_root_sha256": "a" * 64,
+                        "files": [{"path": "Users/Alice/evidence.txt", "sha256": "b" * 64, "size": 12}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = identify_evidence(image_path).to_dict()
+
+            profile = result["verified_export_manifest_profile"]
+            self.assertTrue(profile["manifest_present"])
+            self.assertEqual(profile["parse_status"], "json-parsed")
+            self.assertEqual(profile["validation_status"], "manifest-linked")
+            self.assertEqual(profile["vendor_tool"], "FTK Imager")
+            self.assertTrue(profile["source_hash_matches_manifest"])
+            self.assertEqual(profile["file_count"], 1)
+            self.assertEqual(profile["hashed_file_count"], 1)
+            self.assertEqual(profile["sample_files"][0]["path"], "Users/Alice/evidence.txt")
+            self.assertEqual(
+                result["commercial_uplift_evidence"]["large_data_controls"]["export_manifest_sha256"],
+                profile["manifest_sha256"],
+            )
 
     def test_unknown_format_is_not_supported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

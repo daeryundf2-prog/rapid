@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import hashlib
 import re
 import shutil
 import subprocess
@@ -13,6 +15,30 @@ from .forensic_accuracy import build_accuracy_gate
 E01_REQUIRED_TOOLS = ("ewfmount", "mmls", "tsk_recover")
 E01_SUFFIXES = (".e01", ".ex01")
 DIRECT_IMAGE_HASH_LIMIT_BYTES = 128 * 1024 * 1024
+E01_STAGE_CHECKPOINT_NAME = "rapidtriage-e01-stage-status.json"
+TOOL_PREFLIGHT_PROFILES: dict[str, dict[str, object]] = {
+    "ewfmount": {
+        "purpose": "Expose E01/Ex01 evidence as a read-only raw image through libewf.",
+        "package": "libewf",
+        "version_commands": (("ewfmount", "--version"), ("ewfmount", "-V")),
+        "install_hint": "Install libewf/ewf-tools, then verify `ewfmount` is on PATH.",
+        "windows_hint": "On Windows, use WSL2 with libewf installed or mount/export the image with a trusted forensic suite.",
+    },
+    "mmls": {
+        "purpose": "Enumerate partitions and filesystem offsets before recovery.",
+        "package": "sleuthkit",
+        "version_commands": (("mmls", "--version"), ("mmls", "-V")),
+        "install_hint": "Install Sleuth Kit, then verify `mmls` is on PATH.",
+        "windows_hint": "On Windows, install Sleuth Kit in WSL2 or use a trusted tool to export the filesystem folder.",
+    },
+    "tsk_recover": {
+        "purpose": "Recover files from the selected partition into the run output directory.",
+        "package": "sleuthkit",
+        "version_commands": (("tsk_recover", "--version"), ("tsk_recover", "-V")),
+        "install_hint": "Install Sleuth Kit, then verify `tsk_recover` is on PATH.",
+        "windows_hint": "On Windows, prefer WSL2 or a vendor export if native Sleuth Kit recovery is unavailable.",
+    },
+}
 E01_NATIVE_CAPABILITIES = {
     "ewf_libewf_mount_orchestration": True,
     "source_integrity_preflight": True,
@@ -31,6 +57,56 @@ E01_REPORT_GRADE_BLOCKERS = [
     "deleted-corrupt-filesystem-recovery-delegated-to-sleuthkit",
     "large-known-answer-e01-ex01-corpus-required",
 ]
+E01_FAILURE_GUIDANCE: dict[str, dict[str, object]] = {
+    "missing-tool": {
+        "title": "Required E01 tool is missing",
+        "analyst_message": "Direct E01 extraction cannot start until libewf/Sleuth Kit tools are available.",
+        "next_actions": [
+            "Install libewf/ewf-tools and Sleuth Kit, preferably in WSL2 on Windows.",
+            "Or mount/export the image read-only with a trusted forensic suite and scan the exported folder.",
+        ],
+    },
+    "unsupported-image": {
+        "title": "Unsupported or missing E01 input",
+        "analyst_message": "The selected path is not a readable E01/Ex01 image.",
+        "next_actions": [
+            "Confirm the path exists and has a supported .E01 or .Ex01 suffix.",
+            "For split EWF sets, keep all segments together and select the first image segment.",
+        ],
+    },
+    "encrypted-volume": {
+        "title": "Encrypted or locked volume suspected",
+        "analyst_message": "The image may contain an encrypted volume that needs a lawful unlock workflow before filesystem recovery.",
+        "next_actions": [
+            "Record the encryption indicator in case notes.",
+            "Unlock or export the decrypted filesystem with an authorized forensic workflow, then scan that folder.",
+        ],
+    },
+    "partition-ambiguity": {
+        "title": "Partition selection needs analyst review",
+        "analyst_message": "RapidForensic could not confidently select a supported filesystem partition.",
+        "next_actions": [
+            "Review the partition table with mmls or a trusted forensic suite.",
+            "Retry with --e01-partition-start-sector when the correct filesystem start sector is known.",
+        ],
+    },
+    "permission": {
+        "title": "Permission or mount access problem",
+        "analyst_message": "The workstation could not access the image, mount point, or recovered output path.",
+        "next_actions": [
+            "Check filesystem permissions and confirm the output directory is writable.",
+            "On macOS/Linux, verify FUSE/libewf permissions; on Windows, prefer WSL2 or trusted export.",
+        ],
+    },
+    "external-tool-failure": {
+        "title": "External forensic tool failed",
+        "analyst_message": "libewf or Sleuth Kit returned an error during mount, partition enumeration, or recovery.",
+        "next_actions": [
+            "Review the captured command history and stderr in the E01 output JSON.",
+            "Validate the image with a trusted tool and retry using a mounted/exported folder if needed.",
+        ],
+    },
+}
 IMAGE_WORKFLOW_TRUSTED_TOOLS = {
     "ewfverify",
     "libewf",
@@ -70,11 +146,15 @@ class E01ExtractionResult:
     raw_image_path: Path
     extract_dir: Path
     partition_start_sector: int
+    partition_selection: dict[str, object] = field(default_factory=dict)
     source_integrity: dict[str, object] = field(default_factory=dict)
     tool_preflight: tuple[dict[str, object], ...] = ()
     partition_table: tuple[dict[str, object], ...] = ()
     command_history: tuple[dict[str, object], ...] = ()
     warnings: tuple[str, ...] = ()
+    resume_status: dict[str, object] = field(default_factory=dict)
+    recovered_root_manifest: dict[str, object] = field(default_factory=dict)
+    segment_set_profile: dict[str, object] = field(default_factory=dict)
     commercial_grade_ready: bool = False
 
     def to_dict(self) -> dict[str, object]:
@@ -89,9 +169,14 @@ class E01ExtractionResult:
             "tools": list(E01_REQUIRED_TOOLS),
             "source_integrity": self.source_integrity,
             "tool_preflight": list(self.tool_preflight),
+            "preflight_summary": e01_preflight_summary(self.tool_preflight, missing_tools=[]),
             "partition_table": list(self.partition_table),
             "command_history": list(self.command_history),
             "warnings": list(self.warnings),
+            "partition_selection": self.partition_selection,
+            "resume_status": self.resume_status,
+            "recovered_root_manifest": self.recovered_root_manifest,
+            "segment_set_profile": self.segment_set_profile,
             "commercial_grade_ready": self.commercial_grade_ready,
             "commercial_gap_ids": ["#22"],
             "validation_matrix": image_validation_matrix(
@@ -112,6 +197,7 @@ class E01ExtractionResult:
                     "partition_start_sector": self.partition_start_sector,
                     "command_history": list(self.command_history),
                     "warnings": list(self.warnings),
+                    "segment_set_profile": self.segment_set_profile,
                     "limitations": E01_REPORT_GRADE_BLOCKERS,
                 },
             ),
@@ -126,6 +212,7 @@ class E01ExtractionResult:
                     "partition_start_sector": self.partition_start_sector,
                     "command_history": list(self.command_history),
                     "warnings": list(self.warnings),
+                    "segment_set_profile": self.segment_set_profile,
                     "limitations": E01_REPORT_GRADE_BLOCKERS,
                 },
             ),
@@ -147,8 +234,247 @@ def is_e01_path(path: Path) -> bool:
     return path.suffix.lower() in E01_SUFFIXES
 
 
+def ewf_segment_number(path: Path) -> int | None:
+    suffix = path.suffix
+    match = re.fullmatch(r"\.E(?P<number>\d{2})", suffix, flags=re.IGNORECASE)
+    if match:
+        return int(match.group("number"))
+    match = re.fullmatch(r"\.Ex(?P<number>\d{2})", suffix, flags=re.IGNORECASE)
+    if match:
+        return int(match.group("number"))
+    return None
+
+
+def discover_e01_segments(source_path: Path) -> list[Path]:
+    number = ewf_segment_number(source_path)
+    if number is None:
+        return [source_path]
+    family_match = re.fullmatch(r"\.(?P<family>E|Ex)\d{2}", source_path.suffix, flags=re.IGNORECASE)
+    if not family_match:
+        return [source_path]
+    family = family_match.group("family").lower()
+    candidates: list[Path] = []
+    for candidate in source_path.parent.iterdir():
+        if candidate.stem != source_path.stem:
+            continue
+        candidate_number = ewf_segment_number(candidate)
+        if candidate_number is None:
+            continue
+        candidate_family = "ex" if candidate.suffix.lower().startswith(".ex") else "e"
+        if candidate_family != family:
+            continue
+        candidates.append(candidate.resolve())
+    return sorted(candidates or [source_path], key=lambda path: ewf_segment_number(path) or 0)
+
+
+def build_e01_segment_set_profile(source_path: Path) -> dict[str, object]:
+    segments = discover_e01_segments(source_path)
+    numbers = [number for path in segments if (number := ewf_segment_number(path)) is not None]
+    warnings: list[str] = []
+    if numbers:
+        expected = list(range(min(numbers), max(numbers) + 1))
+        missing = sorted(set(expected) - set(numbers))
+        if missing:
+            warnings.append(f"EWF split sequence appears to have missing segment numbers: {missing}")
+        if min(numbers) != 1:
+            warnings.append(f"EWF split sequence starts at {min(numbers)}; select the first segment or confirm earlier segments are absent.")
+    if source_path.resolve() != segments[0].resolve():
+        warnings.append(f"Selected segment is not the first discovered EWF segment: first={segments[0].name}")
+    return {
+        "profile_version": "ewf-segment-set-v1",
+        "selected_segment": str(source_path.resolve()),
+        "segment_count": len(segments),
+        "segment_numbers": numbers,
+        "contiguous": not warnings or not any("missing segment" in warning for warning in warnings),
+        "selected_is_first_segment": source_path.resolve() == segments[0].resolve(),
+        "total_size_bytes": sum(path.stat().st_size for path in segments if path.is_file()),
+        "segments": [
+            {
+                "path": str(path),
+                "name": path.name,
+                "segment_number": ewf_segment_number(path),
+                "size": path.stat().st_size if path.is_file() else 0,
+                "mtime_ns": path.stat().st_mtime_ns if path.is_file() else None,
+            }
+            for path in segments
+        ],
+        "warnings": warnings,
+        "validation_status": "review-required" if warnings else "sequence-contiguous",
+        "commercial_note": "This is filename/segment-order provenance, not native EWF segment-table decoding.",
+    }
+
+
 def missing_e01_tools(tool_resolver: ToolResolver = shutil.which) -> list[str]:
     return [tool for tool in E01_REQUIRED_TOOLS if tool_resolver(tool) is None]
+
+
+def e01_preflight_summary(
+    tool_preflight: Sequence[Mapping[str, object]],
+    *,
+    missing_tools: Sequence[str] | None = None,
+) -> dict[str, object]:
+    rows = list(tool_preflight)
+    missing = list(missing_tools) if missing_tools is not None else [
+        str(row.get("tool")) for row in rows if not row.get("available")
+    ]
+    available = [str(row.get("tool")) for row in rows if row.get("available")]
+    version_missing = [
+        str(row.get("tool"))
+        for row in rows
+        if row.get("available") and not row.get("version")
+    ]
+    status = "ready" if rows and not missing else "blocked"
+    if status == "ready" and version_missing:
+        status = "ready-version-unverified"
+    remediation_steps = [
+        str(TOOL_PREFLIGHT_PROFILES.get(tool, {}).get("install_hint") or f"Install {tool} and ensure it is on PATH.")
+        for tool in missing
+    ]
+    if missing:
+        remediation_steps.append("If this workstation cannot install the tools, mount/export the image read-only with a trusted forensic suite and scan the exported folder.")
+    return {
+        "profile_version": "e01-dependency-preflight-v2",
+        "status": status,
+        "required_tools": list(E01_REQUIRED_TOOLS),
+        "available_tools": available,
+        "missing_tools": missing,
+        "available_count": len(available),
+        "missing_count": len(missing),
+        "version_unverified_tools": version_missing,
+        "blocked": bool(missing),
+        "direct_extract_ready": bool(rows and not missing),
+        "remediation_steps": remediation_steps,
+        "windows_guidance": [
+            "Use WSL2 with libewf and Sleuth Kit installed for direct extraction, or scan a trusted read-only export folder.",
+            "Keep the external mount/export log with the RapidForensic run output.",
+        ],
+        "fallback_strategy": "mount-or-export-first" if missing else "auto-extract-then-scan",
+        "operator_message": (
+            f"Missing E01 tools: {', '.join(missing)}. Install libewf/Sleuth Kit or mount/export first."
+            if missing
+            else "All required E01 tools are available; direct extraction can be attempted."
+        ),
+    }
+
+
+def e01_failure_guidance(message: str) -> dict[str, object]:
+    lowered = message.lower()
+    if "requires external tools" in lowered or "missing e01 tools" in lowered:
+        category = "missing-tool"
+    elif any(token in lowered for token in ("bitlocker", "encrypted", "locked volume", "decrypt")):
+        category = "encrypted-volume"
+    elif any(token in lowered for token in ("could not find", "requested partition", "partition start sector")):
+        category = "partition-ambiguity"
+    elif "not found" in lowered or "unsupported e01 image extension" in lowered:
+        category = "unsupported-image"
+    elif any(token in lowered for token in ("permission", "operation not permitted", "access denied")):
+        category = "permission"
+    else:
+        category = "external-tool-failure"
+    profile = E01_FAILURE_GUIDANCE[category]
+    return {
+        "profile_version": "e01-failure-guidance-v1",
+        "category": category,
+        "title": profile["title"],
+        "analyst_message": profile["analyst_message"],
+        "next_actions": list(profile["next_actions"]),
+        "raw_error": message,
+    }
+
+
+def build_e01_ingest_workflow_profile(
+    source_path: Path,
+    *,
+    supported: bool,
+    ready: bool,
+    preflight_summary: Mapping[str, object] | None = None,
+    segment_set_profile: Mapping[str, object] | None = None,
+    source_integrity: Mapping[str, object] | None = None,
+    failure_guidance: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    missing_tools = list((preflight_summary or {}).get("missing_tools") or [])
+    dependency_status = str((preflight_summary or {}).get("status") or "not-run")
+    selection_ready = bool(source_path.is_file() and supported)
+    direct_extract_ready = bool(ready and not missing_tools)
+    blocked_reason = ""
+    if not selection_ready:
+        blocked_reason = "Select a readable .E01/.Ex01 first segment before analysis."
+    elif missing_tools:
+        blocked_reason = "Install libewf/Sleuth Kit or scan a trusted read-only export folder."
+    elif not ready:
+        blocked_reason = "Evidence support is not ready for direct extraction."
+    stages = [
+        {
+            "id": "select-e01",
+            "label": "Select E01/Ex01",
+            "status": "complete" if selection_ready else "blocked",
+            "operator_action": "Choose the first EWF segment and keep all split segments in the same folder.",
+            "evidence": [
+                f"source={source_path.name}",
+                f"segments={(segment_set_profile or {}).get('segment_count', 'unknown')}",
+                f"hash_status={(source_integrity or {}).get('hash_status', 'not-run')}",
+            ],
+        },
+        {
+            "id": "dependency-preflight",
+            "label": "Dependency preflight",
+            "status": "complete" if dependency_status.startswith("ready") else "blocked",
+            "operator_action": "Verify ewfmount, mmls, and tsk_recover before direct extraction.",
+            "evidence": [
+                f"status={dependency_status}",
+                f"available={(preflight_summary or {}).get('available_count', 0)}",
+                f"missing={(preflight_summary or {}).get('missing_count', 0)}",
+            ],
+        },
+        {
+            "id": "partition-selection",
+            "label": "Partition selection",
+            "status": "ready" if direct_extract_ready else "blocked",
+            "operator_action": "Use auto largest supported filesystem first, or enter a known start sector for manual override.",
+            "evidence": ["mmls partition table will be captured during extraction."],
+        },
+        {
+            "id": "filesystem-extraction",
+            "label": "Read-only extraction",
+            "status": "ready" if direct_extract_ready else "blocked",
+            "operator_action": "Recover the selected filesystem into the output stage and preserve command history.",
+            "evidence": ["ewfmount + tsk_recover command history becomes provenance."],
+        },
+        {
+            "id": "artifact-analysis",
+            "label": "Artifact analysis",
+            "status": "pending-after-extraction" if direct_extract_ready else "blocked",
+            "operator_action": "Run Windows artifact collectors, document/file indexing, OCR sidecars, and timeline generation.",
+            "evidence": ["analysis starts from the extracted filesystem root."],
+        },
+        {
+            "id": "search-review-report",
+            "label": "Search, review, report",
+            "status": "pending-after-analysis" if direct_extract_ready else "blocked",
+            "operator_action": "Search all evidence, verify in source viewer, mark review decisions, and export report material.",
+            "evidence": ["Case DB review marks and report bundles keep source citations."],
+        },
+    ]
+    return {
+        "profile_version": "windows11-e01-single-case-workflow-v1",
+        "workflow_goal": "Select an E01, verify dependencies, choose a partition, extract read-only, analyze artifacts, search/review, and export report evidence from one flow.",
+        "source_path": str(source_path),
+        "direct_extract_ready": direct_extract_ready,
+        "blocked": not direct_extract_ready,
+        "blocked_reason": blocked_reason,
+        "failure_category": (failure_guidance or {}).get("category"),
+        "recommended_processing_profile": "fast-first-pass",
+        "recommended_input_kind": "e01-derived" if direct_extract_ready else "mounted-or-exported-folder",
+        "ui_primary_action": "Start run" if direct_extract_ready else "Mount/export first or install tools",
+        "large_case_controls": [
+            "Use Fast first pass before deep extraction.",
+            "Keep extraction caps unless a focused deep review requires more output.",
+            "Use cursor pages and virtualized tables for high-volume result sets.",
+        ],
+        "stages": stages,
+        "commercial_gap_ids": ["#22", "#23", "#78", "#79"],
+        "commercial_note": "This workflow is usable for triage, but commercial-grade E01 claims still require external corpus validation and trusted tool logs.",
+    }
 
 
 def default_runner(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -159,6 +485,7 @@ def extract_e01_to_directory(
     e01_path: Path,
     stage_dir: Path,
     *,
+    partition_start_sector: int | None = None,
     runner: CommandRunner = default_runner,
     tool_resolver: ToolResolver = shutil.which,
 ) -> E01ExtractionResult:
@@ -168,16 +495,6 @@ def extract_e01_to_directory(
     if not is_e01_path(source_path):
         raise E01ExtractionError(f"unsupported E01 image extension: {source_path.name}")
 
-    missing = missing_e01_tools(tool_resolver)
-    tool_preflight = collect_tool_preflight(E01_REQUIRED_TOOLS, runner=runner, tool_resolver=tool_resolver)
-    if missing:
-        joined = ", ".join(missing)
-        raise E01ExtractionError(
-            f"E01 direct input requires external tools: {joined}. "
-            "Install libewf/Sleuth Kit, run `rapidtriage evidence IMAGE.E01 --json` for preflight, "
-            "or mount/export the image read-only with a trusted forensic tool and scan that folder."
-        )
-
     stage = stage_dir.expanduser().resolve()
     mount_dir = stage / "_ewfmount"
     raw_image = mount_dir / "ewf1"
@@ -185,12 +502,94 @@ def extract_e01_to_directory(
     stage.mkdir(parents=True, exist_ok=True)
     mount_dir.mkdir(parents=True, exist_ok=True)
     extract_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = stage / E01_STAGE_CHECKPOINT_NAME
+    source_signature = e01_source_signature(source_path)
+    segment_set_profile = build_e01_segment_set_profile(source_path)
+
+    missing = missing_e01_tools(tool_resolver)
+    tool_preflight = collect_tool_preflight(E01_REQUIRED_TOOLS, runner=runner, tool_resolver=tool_resolver)
+    checkpoint = load_e01_stage_checkpoint(checkpoint_path)
+    if e01_checkpoint_resume_ready(
+        checkpoint,
+        source_signature=source_signature,
+        requested_start_sector=partition_start_sector,
+        extract_dir=extract_dir,
+    ):
+        partition_selection = dict(checkpoint.get("partition_selection") or {})
+        partition_table = list(checkpoint.get("partition_table") or [])
+        selected_start_sector = int(partition_selection.get("selected_start_sector") or 0)
+        return E01ExtractionResult(
+            source_path=source_path,
+            stage_dir=stage,
+            mount_dir=mount_dir,
+            raw_image_path=raw_image,
+            extract_dir=extract_dir,
+            partition_start_sector=selected_start_sector,
+            source_integrity=describe_source_integrity(source_path),
+            tool_preflight=tuple(tool_preflight),
+            partition_table=tuple(partition_table),
+            partition_selection=partition_selection,
+            command_history=tuple(checkpoint.get("command_history") or ()),
+            recovered_root_manifest=dict(checkpoint.get("recovered_root_manifest") or {}),
+            segment_set_profile=dict(checkpoint.get("segment_set_profile") or segment_set_profile),
+            warnings=(
+                "E01 extraction resumed from a completed filesystem recovery checkpoint; verify checkpoint provenance before report use.",
+            ),
+            resume_status=build_e01_resume_status(checkpoint_path, checkpoint, resumed=True),
+        )
+    if missing:
+        write_e01_stage_checkpoint(
+            checkpoint_path,
+            {
+                "profile_version": "e01-stage-checkpoint-v1",
+                "source_signature": source_signature,
+                "requested_start_sector": partition_start_sector,
+                "segment_set_profile": segment_set_profile,
+                "completed": False,
+                "resume_ready": False,
+                "stages": {
+                    "dependency-preflight": {
+                        "status": "blocked",
+                        "missing_tools": missing,
+                    }
+                },
+            },
+        )
+        joined = ", ".join(missing)
+        raise E01ExtractionError(
+            f"E01 direct input requires external tools: {joined}. "
+            "Install libewf/Sleuth Kit, run `rapidtriage evidence IMAGE.E01 --json` for preflight, "
+            "or mount/export the image read-only with a trusted forensic tool and scan that folder."
+        )
+
     command_history: list[dict[str, object]] = []
     partition_table: list[dict[str, object]] = []
+    checkpoint_payload: dict[str, object] = {
+        "profile_version": "e01-stage-checkpoint-v1",
+        "source_signature": source_signature,
+        "requested_start_sector": partition_start_sector,
+        "segment_set_profile": segment_set_profile,
+        "completed": False,
+        "resume_ready": False,
+        "stages": {
+            "dependency-preflight": {
+                "status": "completed",
+                "missing_tools": [],
+                "preflight_summary": e01_preflight_summary(tool_preflight, missing_tools=[]),
+            }
+        },
+    }
+    write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
 
     try:
         mount_result = runner(["ewfmount", str(source_path), str(mount_dir)])
         command_history.append(command_record("mount-ewf", ["ewfmount", str(source_path), str(mount_dir)], mount_result))
+        checkpoint_payload["command_history"] = command_history
+        checkpoint_payload["stages"] = {
+            **dict(checkpoint_payload.get("stages") or {}),
+            "mount-ewf": {"status": "completed" if mount_result.returncode == 0 else "failed"},
+        }
+        write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
         if mount_result.returncode != 0:
             raise E01ExtractionError(f"ewfmount failed: {mount_result.stderr.strip()}")
         if not raw_image.exists():
@@ -198,18 +597,50 @@ def extract_e01_to_directory(
 
         mmls_result = runner(["mmls", str(raw_image)])
         command_history.append(command_record("partition-enumeration", ["mmls", str(raw_image)], mmls_result))
+        checkpoint_payload["command_history"] = command_history
+        checkpoint_payload["stages"] = {
+            **dict(checkpoint_payload.get("stages") or {}),
+            "partition-enumeration": {"status": "completed" if mmls_result.returncode == 0 else "failed"},
+        }
+        write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
         if mmls_result.returncode != 0:
             raise E01ExtractionError(f"mmls failed: {mmls_result.stderr.strip()}")
         partition_table = parse_mmls_partitions(mmls_result.stdout)
-        start_sector = mmls_first_filesystem(mmls_result.stdout)
+        recommended_sector = mmls_first_filesystem(mmls_result.stdout)
+        start_sector = select_mmls_filesystem(
+            mmls_result.stdout,
+            preferred_start_sector=partition_start_sector,
+        )
         if start_sector is None:
             raise E01ExtractionError("mmls could not find a FAT/exFAT/NTFS/basic-data filesystem partition")
+        partition_selection = build_partition_selection_metadata(
+            partition_table,
+            selected_start_sector=start_sector,
+            recommended_start_sector=recommended_sector,
+            requested_start_sector=partition_start_sector,
+        )
+        checkpoint_payload["partition_table"] = mark_selected_partition(partition_table, start_sector)
+        checkpoint_payload["partition_selection"] = partition_selection
+        write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
 
         recover_command = ["tsk_recover", "-e", "-a", "-o", str(start_sector), str(raw_image), str(extract_dir)]
         recover_result = runner(recover_command)
         command_history.append(command_record("read-only-filesystem-recovery", recover_command, recover_result))
+        checkpoint_payload["command_history"] = command_history
+        checkpoint_payload["stages"] = {
+            **dict(checkpoint_payload.get("stages") or {}),
+            "read-only-filesystem-recovery": {"status": "completed" if recover_result.returncode == 0 else "failed"},
+        }
         if recover_result.returncode != 0:
+            write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
             raise E01ExtractionError(f"tsk_recover failed: {recover_result.stderr.strip()}")
+        recovered_manifest = build_recovered_root_manifest(extract_dir)
+        checkpoint_payload["completed"] = True
+        checkpoint_payload["resume_ready"] = True
+        checkpoint_payload["extract_dir"] = str(extract_dir)
+        checkpoint_payload["raw_image_path"] = str(raw_image)
+        checkpoint_payload["recovered_root_manifest"] = recovered_manifest
+        write_e01_stage_checkpoint(checkpoint_path, checkpoint_payload)
         return E01ExtractionResult(
             source_path=source_path,
             stage_dir=stage,
@@ -220,13 +651,160 @@ def extract_e01_to_directory(
             source_integrity=describe_source_integrity(source_path),
             tool_preflight=tuple(tool_preflight),
             partition_table=tuple(mark_selected_partition(partition_table, start_sector)),
+            partition_selection=partition_selection,
             command_history=tuple(command_history),
             warnings=(
                 "E01/Ex01 direct extraction is an orchestrated libewf/Sleuth Kit workflow; validate results against case requirements.",
             ),
+            resume_status=build_e01_resume_status(checkpoint_path, checkpoint_payload, resumed=False),
+            recovered_root_manifest=recovered_manifest,
+            segment_set_profile=segment_set_profile,
         )
     finally:
         unmount_e01_mount(mount_dir, runner=runner, tool_resolver=tool_resolver)
+
+
+def e01_source_signature(path: Path) -> dict[str, object]:
+    stat = path.stat()
+    return {
+        "path": str(path),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+    }
+
+
+def load_e01_stage_checkpoint(path: Path) -> dict[str, object]:
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def write_e01_stage_checkpoint(path: Path, payload: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def e01_checkpoint_resume_ready(
+    checkpoint: Mapping[str, object],
+    *,
+    source_signature: Mapping[str, object],
+    requested_start_sector: int | None,
+    extract_dir: Path,
+) -> bool:
+    if not checkpoint.get("completed") or not checkpoint.get("resume_ready"):
+        return False
+    if checkpoint.get("source_signature") != dict(source_signature):
+        return False
+    if checkpoint.get("requested_start_sector") != requested_start_sector:
+        return False
+    partition_selection = checkpoint.get("partition_selection")
+    if not isinstance(partition_selection, Mapping):
+        return False
+    if partition_selection.get("selected_start_sector") in (None, ""):
+        return False
+    if not extract_dir.is_dir():
+        return False
+    return any(extract_dir.iterdir())
+
+
+def build_e01_resume_status(
+    checkpoint_path: Path,
+    checkpoint: Mapping[str, object],
+    *,
+    resumed: bool,
+) -> dict[str, object]:
+    stages = checkpoint.get("stages") if isinstance(checkpoint.get("stages"), Mapping) else {}
+    return {
+        "profile_version": "e01-resume-status-v1",
+        "checkpoint_path": str(checkpoint_path),
+        "checkpoint_exists": checkpoint_path.is_file(),
+        "resumed_from_checkpoint": resumed,
+        "resume_ready": bool(checkpoint.get("resume_ready")),
+        "completed": bool(checkpoint.get("completed")),
+        "completed_stages": [
+            name
+            for name, stage in dict(stages).items()
+            if isinstance(stage, Mapping) and stage.get("status") == "completed"
+        ],
+        "failed_stages": [
+            name
+            for name, stage in dict(stages).items()
+            if isinstance(stage, Mapping) and stage.get("status") == "failed"
+        ],
+    }
+
+
+def build_recovered_root_manifest(
+    root: Path,
+    *,
+    max_files: int = 5000,
+    max_hash_bytes: int = DIRECT_IMAGE_HASH_LIMIT_BYTES,
+) -> dict[str, object]:
+    entries: list[dict[str, object]] = []
+    total_size = 0
+    visited_count = 0
+    hashed_count = 0
+    skipped_large_count = 0
+    error_count = 0
+    truncated = False
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        if visited_count >= max_files:
+            truncated = True
+            break
+        visited_count += 1
+        try:
+            stat = path.stat()
+        except OSError as exc:
+            error_count += 1
+            entries.append(
+                {
+                    "relative_path": str(path.relative_to(root)),
+                    "hash_status": "stat-error",
+                    "error": str(exc),
+                }
+            )
+            continue
+        total_size += stat.st_size
+        row: dict[str, object] = {
+            "relative_path": str(path.relative_to(root)),
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+        }
+        if stat.st_size <= max_hash_bytes:
+            try:
+                row["sha256"] = compute_sha256(path)
+                row["hash_status"] = "computed"
+                hashed_count += 1
+            except OSError as exc:
+                row["hash_status"] = "hash-error"
+                row["error"] = str(exc)
+                error_count += 1
+        else:
+            row["hash_status"] = "skipped-large-file"
+            row["hash_limit_bytes"] = max_hash_bytes
+            skipped_large_count += 1
+        entries.append(row)
+    return {
+        "profile_version": "e01-recovered-root-manifest-v1",
+        "root": str(root),
+        "max_files": max_files,
+        "max_hash_bytes": max_hash_bytes,
+        "visited_file_count": visited_count,
+        "hashed_file_count": hashed_count,
+        "skipped_large_file_count": skipped_large_count,
+        "error_count": error_count,
+        "total_size_bytes": total_size,
+        "truncated": truncated,
+        "files": entries,
+    }
 
 
 def mmls_first_filesystem(text: str) -> int | None:
@@ -249,6 +827,20 @@ def mmls_first_filesystem(text: str) -> int | None:
                 best_start = start
                 best_size = size
     return best_start
+
+
+def select_mmls_filesystem(text: str, *, preferred_start_sector: int | None = None) -> int | None:
+    partitions = parse_mmls_partitions(text)
+    if preferred_start_sector is None:
+        return mmls_first_filesystem(text)
+    for partition in partitions:
+        if int(partition.get("start_sector") or -1) == preferred_start_sector:
+            if not partition.get("supported_filesystem_hint"):
+                raise E01ExtractionError(
+                    f"requested partition start sector {preferred_start_sector} does not look like a supported filesystem"
+                )
+            return preferred_start_sector
+    raise E01ExtractionError(f"requested partition start sector {preferred_start_sector} was not found in mmls output")
 
 
 def parse_mmls_partitions(text: str) -> list[dict[str, object]]:
@@ -277,6 +869,35 @@ def mark_selected_partition(partitions: Sequence[dict[str, object]], start_secto
         row["selected_for_recovery"] = start_sector is not None and row.get("start_sector") == start_sector
         marked.append(row)
     return marked
+
+
+def build_partition_selection_metadata(
+    partitions: Sequence[dict[str, object]],
+    *,
+    selected_start_sector: int,
+    recommended_start_sector: int | None,
+    requested_start_sector: int | None,
+) -> dict[str, object]:
+    selected = next(
+        (partition for partition in partitions if int(partition.get("start_sector") or -1) == selected_start_sector),
+        {},
+    )
+    return {
+        "profile_version": "e01-partition-selection-v1",
+        "selected_start_sector": selected_start_sector,
+        "recommended_start_sector": recommended_start_sector,
+        "requested_start_sector": requested_start_sector,
+        "selection_source": "user-request" if requested_start_sector is not None else "largest-supported-filesystem",
+        "selected_supported_filesystem_hint": bool(selected.get("supported_filesystem_hint")),
+        "selected_description": selected.get("description", ""),
+        "partition_count": len(partitions),
+        "supported_partition_count": sum(1 for item in partitions if item.get("supported_filesystem_hint")),
+        "selection_warning": (
+            ""
+            if requested_start_sector is None or requested_start_sector == recommended_start_sector
+            else "User-selected partition differs from the automatic recommendation; preserve the reason in case notes."
+        ),
+    }
 
 
 def is_supported_mmls_description(description: str) -> bool:
@@ -308,6 +929,157 @@ def describe_source_integrity(path: Path, *, max_hash_bytes: int = DIRECT_IMAGE_
             "Source is larger than the preflight hash limit; acquire a full evidence hash in the acquisition workflow."
         )
     return payload
+
+
+def build_windows11_e01_known_answer_manifest(
+    source_path: Path,
+    *,
+    case_id: str = "windows11-e01-known-answer",
+    expected_partition_start_sector: int | None = None,
+    expected_artifacts: Sequence[str] | None = None,
+    validation_commands: Sequence[str] | None = None,
+) -> dict[str, object]:
+    source = source_path.expanduser().resolve()
+    source_integrity = describe_source_integrity(source)
+    segment_profile = build_e01_segment_set_profile(source) if source.is_file() and is_e01_path(source) else {
+        "profile_version": "ewf-segment-set-v1",
+        "selected_segment": str(source),
+        "segment_count": 0,
+        "segments": [],
+        "warnings": ["source image is missing or is not a supported E01/Ex01 path"],
+        "validation_status": "missing-or-unsupported",
+    }
+    expected_artifact_rows = [
+        {
+            "id": f"artifact-{index + 1:03d}",
+            "description": str(item),
+            "required": True,
+            "validation_status": "not-run",
+        }
+        for index, item in enumerate(expected_artifacts or [])
+        if str(item).strip()
+    ]
+    command_rows = [
+        {
+            "id": f"validation-command-{index + 1:03d}",
+            "command": str(command),
+            "purpose": "known-answer-validation",
+            "status": "not-run",
+        }
+        for index, command in enumerate(validation_commands or default_windows11_e01_validation_commands(source))
+        if str(command).strip()
+    ]
+    partition_rows = []
+    if expected_partition_start_sector is not None:
+        partition_rows.append(
+            {
+                "start_sector": expected_partition_start_sector,
+                "expected_filesystem": "NTFS or analyst-confirmed Windows filesystem",
+                "required": True,
+                "validation_status": "not-run",
+            }
+        )
+    details = {
+        "source_path": str(source),
+        "source_integrity": source_integrity,
+        "segment_set_profile": segment_profile,
+        "partition_start_sector": expected_partition_start_sector,
+        "command_history": command_rows,
+        "warnings": segment_profile.get("warnings", []),
+        "limitations": E01_REPORT_GRADE_BLOCKERS,
+    }
+    validation_matrix = image_validation_matrix(
+        gap_id="#22",
+        source_integrity=source_integrity.get("hash_status") in {"computed", "deferred-large-source"},
+        tool_preflight=False,
+        partition_table=bool(partition_rows),
+        command_history=bool(command_rows),
+        native_complete=False,
+    )
+    payload: dict[str, object] = {
+        "schema": "rapidforensic-windows11-e01-known-answer-manifest-v1",
+        "compatible_known_answer_schema": "rapidtriage-known-answer-manifest-v1",
+        "case_id": case_id,
+        "name": f"{case_id} Windows 11 E01 known-answer manifest",
+        "status": "draft-needs-execution",
+        "commercial_grade_ready": False,
+        "generated_for": {
+            "workflow": "Windows 11 E01 single-case validation",
+            "backlog_items": [22],
+            "commercial_gap_ids": ["#22"],
+        },
+        "source_image": {
+            "path": str(source),
+            "name": source.name,
+            "exists": source.is_file(),
+            "is_supported_e01": is_e01_path(source),
+            "integrity": source_integrity,
+            "segment_set_profile": segment_profile,
+        },
+        "expected": {
+            "partitions": partition_rows,
+            "high_value_artifacts": expected_artifact_rows,
+            "minimum_workflow_outputs": [
+                "dependency preflight",
+                "partition table and selected offset",
+                "read-only extraction command history",
+                "artifact collection summary",
+                "search/review/report bundle metadata",
+            ],
+        },
+        "validation_commands": command_rows,
+        "trusted_diff_targets": [
+            "libewf/ewfverify source integrity transcript",
+            "mmls partition table transcript",
+            "tsk_recover or trusted export manifest",
+            "RapidForensic run summary",
+            "selected trusted suite export log when direct extraction is unavailable",
+        ],
+        "required_evidence_slots": {
+            "source_image_hash": "Full E01/Ex01 acquisition hash or deferred-large-source acquisition hash record.",
+            "segment_set_inventory": "All EWF split segments with path, size, order, and missing-segment warnings.",
+            "partition_assertions": "Expected Windows partition start sector and filesystem description.",
+            "artifact_assertions": "Expected EVTX/Registry/MFT/USN/browser/document rows for this case.",
+            "command_transcripts": "Tool versions, commands, stdout/stderr, and exit codes for extraction and validation.",
+            "report_bundle": "Generated report/manifest hashes and citation coverage after the smoke run.",
+        },
+        "validation_matrix": validation_matrix,
+        "core_accuracy_gates": image_core_accuracy_gates(22, details),
+        "commercial_grade_blockers": list(E01_REPORT_GRADE_BLOCKERS),
+        "reportability_decision": image_reportability_decision(
+            22,
+            blockers=E01_REPORT_GRADE_BLOCKERS,
+            failed_validation_matrix_ids=[
+                str(item.get("id"))
+                for item in validation_matrix
+                if isinstance(item, Mapping) and not item.get("passed")
+            ],
+            details=details,
+        ),
+        "operator_next_steps": [
+            "Fill expected high-value artifacts from a trusted baseline case review.",
+            "Run the validation commands and attach command transcripts plus output hashes.",
+            "Diff extracted artifacts against trusted parser/export outputs before changing status to pass.",
+            "Keep this manifest with the case validation package and cite it in commercial-readiness input.",
+        ],
+    }
+    payload["manifest_sha256"] = stable_manifest_sha256(payload)
+    return payload
+
+
+def default_windows11_e01_validation_commands(source: Path) -> list[str]:
+    source_arg = str(source)
+    return [
+        f"rapidtriage evidence {json.dumps(source_arg)} --json",
+        f"rapidtriage run {json.dumps(source_arg)} --mode hacking --output-dir rapidforensic-e01-smoke --read-only",
+        "rapidtriage commercial-readiness --json",
+    ]
+
+
+def stable_manifest_sha256(payload: Mapping[str, object]) -> str:
+    redacted = {key: value for key, value in payload.items() if key != "manifest_sha256"}
+    encoded = json.dumps(redacted, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def image_validation_matrix(
@@ -423,52 +1195,332 @@ def build_image_workflow_trusted_diff(
 def index_image_workflow_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
     indexed: dict[str, dict[str, str]] = {}
     for row in rows:
-        source_path = normalized_image_diff_value(
-            first_image_alias(row, "source_path", "source", "source_file", "image_path", "container_path")
-        )
-        source_sha256 = normalized_image_diff_value(first_image_alias(row, "source_sha256", "sha256", "source_hash"))
-        partition_start = normalized_image_diff_value(
-            first_image_alias(row, "partition_start_sector", "start_sector", "offset_sector")
-        )
-        recovery_mode = normalized_image_diff_value(first_image_alias(row, "recovery_mode", "mode", "workflow"))
-        converted_raw_sha256 = normalized_image_diff_value(
-            first_image_alias(row, "converted_raw_sha256", "converted_sha256", "raw_sha256")
-        )
-        container_type = normalized_image_diff_value(first_image_alias(row, "container_type", "detected_format", "format"))
-        export_manifest_sha256 = normalized_image_diff_value(
-            first_image_alias(row, "export_manifest_sha256", "manifest_sha256", "vendor_manifest_sha256")
-        )
-        extracted_path = normalized_image_diff_value(
-            first_image_alias(row, "extracted_file_path", "file_path", "path", "name")
-        )
-        extracted_sha256 = normalized_image_diff_value(
-            first_image_alias(row, "extracted_sha256", "file_sha256", "recovered_sha256")
-        )
-        key = "|".join(
-            item
-            for item in (
-                source_path,
-                partition_start,
-                recovery_mode,
-                container_type,
-                extracted_path,
+        for payload in image_workflow_diff_payloads(row):
+            source_integrity = image_source_integrity_payload(payload)
+            partition_selection = (
+                payload.get("partition_selection")
+                if isinstance(payload.get("partition_selection"), Mapping)
+                else {}
             )
-            if item
-        )
-        if not key:
-            continue
-        indexed[key] = {
-            "source_path": source_path,
-            "source_sha256": source_sha256,
-            "partition_start_sector": partition_start,
-            "recovery_mode": recovery_mode,
-            "converted_raw_sha256": converted_raw_sha256,
-            "container_type": container_type,
-            "export_manifest_sha256": export_manifest_sha256,
-            "extracted_file_path": extracted_path,
-            "extracted_sha256": extracted_sha256,
-        }
+            segment_set_profile = (
+                payload.get("segment_set_profile")
+                if isinstance(payload.get("segment_set_profile"), Mapping)
+                else {}
+            )
+            split_set_profile = (
+                payload.get("split_set_profile")
+                if isinstance(payload.get("split_set_profile"), Mapping)
+                else {}
+            )
+            recovered_root_manifest = (
+                payload.get("recovered_root_manifest")
+                if isinstance(payload.get("recovered_root_manifest"), Mapping)
+                else {}
+            )
+            source_path = normalized_image_diff_value(
+                first_present(
+                    first_image_alias(payload, "source_path", "source", "source_file", "image_path", "container_path"),
+                    first_image_alias(source_integrity, "path", "source_path"),
+                )
+            )
+            source_sha256 = normalized_image_diff_value(
+                first_present(
+                    first_image_alias(payload, "source_sha256", "sha256", "source_hash"),
+                    first_image_alias(source_integrity, "sha256", "source_sha256", "source_hash"),
+                )
+            )
+            partition_start = normalized_image_int_text(
+                first_present(
+                    first_image_alias(payload, "partition_start_sector", "start_sector", "offset_sector"),
+                    first_image_alias(partition_selection, "selected_start_sector", "start_sector", "offset_sector"),
+                )
+            )
+            recovery_mode = normalized_image_diff_value(
+                first_image_alias(payload, "recovery_mode", "mode", "workflow")
+                or ("partition-offset" if partition_start else "")
+            )
+            converted_raw_sha256 = normalized_image_diff_value(
+                first_present(
+                    first_image_alias(payload, "converted_raw_sha256", "converted_sha256", "raw_sha256"),
+                    first_image_alias(
+                        payload.get("converted_raw_integrity")
+                        if isinstance(payload.get("converted_raw_integrity"), Mapping)
+                        else {},
+                        "sha256",
+                    ),
+                )
+            )
+            virtual_disk_chain_profile = (
+                payload.get("virtual_disk_chain_profile")
+                if isinstance(payload.get("virtual_disk_chain_profile"), Mapping)
+                else {}
+            )
+            container_type = normalized_image_diff_value(
+                first_present(
+                    first_image_alias(payload, "container_type", "detected_format", "format", "virtual_disk_format"),
+                    first_image_alias(virtual_disk_chain_profile, "detected_format", "format"),
+                )
+            )
+            export_manifest_sha256 = normalized_image_diff_value(
+                first_present(
+                    first_image_alias(payload, "export_manifest_sha256", "manifest_sha256", "vendor_manifest_sha256"),
+                    first_image_alias(
+                        payload.get("verified_export_manifest_profile")
+                        if isinstance(payload.get("verified_export_manifest_profile"), Mapping)
+                        else {},
+                        "manifest_sha256",
+                    ),
+                )
+            )
+            extracted_path = normalized_image_diff_value(
+                first_image_alias(payload, "extracted_file_path", "file_path", "relative_path", "path", "name")
+            )
+            extracted_sha256 = normalized_image_diff_value(
+                first_image_alias(payload, "extracted_sha256", "file_sha256", "recovered_sha256", "sha256")
+            )
+            key = "|".join(
+                item
+                for item in (
+                    source_path,
+                    partition_start,
+                    recovery_mode,
+                    container_type,
+                    extracted_path,
+                )
+                if item
+            )
+            if not key:
+                continue
+            indexed[key] = {
+                "source_path": source_path,
+                "source_sha256": source_sha256,
+                "partition_start_sector": partition_start,
+                "recovery_mode": recovery_mode,
+                "converted_raw_sha256": converted_raw_sha256,
+                "container_type": container_type,
+                "export_manifest_sha256": export_manifest_sha256,
+                "extracted_file_path": extracted_path,
+                "extracted_sha256": extracted_sha256,
+                "virtual_disk_format": normalized_image_diff_value(
+                    first_present(
+                        first_image_alias(payload, "virtual_disk_format"),
+                        first_image_alias(virtual_disk_chain_profile, "detected_format"),
+                    )
+                ),
+                "virtual_disk_chain_status": normalized_image_diff_value(
+                    first_present(
+                        first_image_alias(payload, "virtual_disk_chain_status", "chain_status"),
+                        first_image_alias(virtual_disk_chain_profile, "chain_validation_status"),
+                    )
+                ),
+                "suspected_snapshot_or_differencing_member": normalized_image_bool_text(
+                    first_present(
+                        first_image_alias(payload, "suspected_snapshot_or_differencing_member", "snapshot_member"),
+                        first_image_alias(virtual_disk_chain_profile, "suspected_snapshot_or_differencing_member"),
+                    )
+                ),
+                "parent_chain_resolution": normalized_image_diff_value(
+                    first_present(
+                        first_image_alias(payload, "parent_chain_resolution"),
+                        first_image_alias(virtual_disk_chain_profile, "parent_chain_resolution"),
+                    )
+                ),
+                "ewf_segment_count": normalized_image_int_text(
+                    first_present(
+                        first_image_alias(payload, "ewf_segment_count", "segment_count"),
+                        first_image_alias(segment_set_profile, "segment_count"),
+                    )
+                ),
+                "ewf_segment_numbers": normalized_image_list(
+                    first_present(
+                        first_image_alias(payload, "ewf_segment_numbers", "segment_numbers"),
+                        first_image_alias(segment_set_profile, "segment_numbers"),
+                    )
+                ),
+                "ewf_segments_contiguous": normalized_image_bool_text(
+                    first_present(
+                        first_image_alias(payload, "ewf_segments_contiguous", "contiguous"),
+                        first_image_alias(segment_set_profile, "contiguous"),
+                    )
+                ),
+                "selected_is_first_segment": normalized_image_bool_text(
+                    first_present(
+                        first_image_alias(payload, "selected_is_first_segment", "first_segment"),
+                        first_image_alias(segment_set_profile, "selected_is_first_segment"),
+                        first_image_alias(split_set_profile, "selected_is_first_segment"),
+                    )
+                ),
+                "split_part_count": normalized_image_int_text(
+                    first_present(
+                        first_image_alias(payload, "split_part_count", "part_count"),
+                        first_image_alias(split_set_profile, "part_count"),
+                    )
+                ),
+                "split_segment_numbers": normalized_image_list(
+                    first_present(
+                        first_image_alias(payload, "split_segment_numbers", "split_part_numbers"),
+                        first_image_alias(split_set_profile, "segment_numbers"),
+                    )
+                ),
+                "split_set_contiguous": normalized_image_bool_text(
+                    first_present(
+                        first_image_alias(payload, "split_set_contiguous"),
+                        first_image_alias(split_set_profile, "contiguous"),
+                    )
+                ),
+                "recovered_file_count": normalized_image_int_text(
+                    first_present(
+                        first_image_alias(payload, "recovered_file_count", "visited_file_count"),
+                        first_image_alias(recovered_root_manifest, "visited_file_count"),
+                    )
+                ),
+                "hashed_file_count": normalized_image_int_text(
+                    first_present(
+                        first_image_alias(payload, "hashed_file_count"),
+                        first_image_alias(recovered_root_manifest, "hashed_file_count"),
+                    )
+                ),
+            }
     return indexed
+
+
+def image_workflow_diff_payloads(row: Mapping[str, object]) -> list[Mapping[str, object]]:
+    payload = image_workflow_row_payload(row)
+    raw_extraction = payload.get("raw_extraction") if isinstance(payload.get("raw_extraction"), Mapping) else {}
+    if raw_extraction:
+        raw_payload = dict(raw_extraction)
+        if payload.get("source_path"):
+            raw_payload["source_path"] = payload.get("source_path")
+        if payload.get("source_integrity"):
+            raw_payload["source_integrity"] = payload.get("source_integrity")
+        for key in (
+            "converted_raw_path",
+            "converted_raw_integrity",
+            "conversion_tool",
+            "virtual_disk_chain_profile",
+            "qemu_img_info_profile",
+            "container_type",
+            "detected_format",
+        ):
+            raw_payload.setdefault(key, payload.get(key))
+        expanded_raw = image_workflow_diff_payloads(raw_payload)
+        if expanded_raw:
+            return expanded_raw
+    recovered_root_manifest = (
+        payload.get("recovered_root_manifest")
+        if isinstance(payload.get("recovered_root_manifest"), Mapping)
+        else {}
+    )
+    files = recovered_root_manifest.get("files")
+    if isinstance(files, Sequence) and not isinstance(files, (str, bytes, bytearray)):
+        expanded: list[Mapping[str, object]] = []
+        for item in files:
+            if not isinstance(item, Mapping):
+                continue
+            child = dict(item)
+            if child.get("sha256") and not child.get("extracted_sha256"):
+                child["extracted_sha256"] = child.get("sha256")
+                child.pop("sha256", None)
+            for key in (
+                "source_path",
+                "source_integrity",
+                "converted_raw_path",
+                "converted_raw_integrity",
+                "conversion_tool",
+                "virtual_disk_chain_profile",
+                "qemu_img_info_profile",
+                "partition_start_sector",
+                "partition_selection",
+                "recovery_mode",
+                "segment_set_profile",
+                "split_set_profile",
+                "recovered_root_manifest",
+                "container_type",
+                "detected_format",
+            ):
+                child.setdefault(key, payload.get(key))
+            expanded.append(child)
+        if expanded:
+            return expanded
+    return [payload]
+
+
+def image_workflow_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
+    details = row.get("details")
+    if not isinstance(details, Mapping):
+        return row
+    payload = dict(details)
+    for key, value in row.items():
+        if key == "details":
+            continue
+        payload.setdefault(key, value)
+    return payload
+
+
+def image_source_integrity_payload(payload: Mapping[str, object]) -> Mapping[str, object]:
+    source_integrity = payload.get("source_integrity")
+    if isinstance(source_integrity, Mapping):
+        return source_integrity
+    if isinstance(source_integrity, Sequence) and not isinstance(source_integrity, (str, bytes, bytearray)):
+        source_path = normalized_image_diff_value(
+            first_image_alias(payload, "source_path", "source", "source_file", "image_path", "container_path")
+        )
+        first_mapping: Mapping[str, object] | None = None
+        for item in source_integrity:
+            if not isinstance(item, Mapping):
+                continue
+            if first_mapping is None:
+                first_mapping = item
+            item_path = normalized_image_diff_value(first_image_alias(item, "path", "source_path"))
+            if source_path and item_path == source_path:
+                return item
+        if first_mapping is not None:
+            return first_mapping
+    return {}
+
+
+def first_present(*values: object) -> object:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalized_image_int_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        return normalized_image_diff_value(text)
+
+
+def normalized_image_bool_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    text = normalized_image_diff_value(value)
+    if text in {"1", "yes", "y", "true", "contiguous"}:
+        return "true"
+    if text in {"0", "no", "n", "false", "not-contiguous"}:
+        return "false"
+    return text
+
+
+def normalized_image_list(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        parts = [part.strip() for part in re.split(r"[\r\n,;|]", value) if part.strip()]
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+    else:
+        parts = [str(value).strip()]
+    return "|".join(sorted({normalized_image_diff_value(part) for part in parts if part}))
 
 
 def first_image_alias(row: Mapping[str, object], *aliases: str) -> object:
@@ -618,6 +1670,13 @@ def image_commercial_uplift_evidence(number: int, details: Mapping[str, object])
         if isinstance(details.get("image_trusted_diff"), Mapping)
         else {"status": "not-attached", "commercial_grade_evidence": False}
     )
+    segment_set_profile = details.get("segment_set_profile") if isinstance(details.get("segment_set_profile"), Mapping) else {}
+    split_set_profile = details.get("split_set_profile") if isinstance(details.get("split_set_profile"), Mapping) else {}
+    virtual_disk_chain_profile = (
+        details.get("virtual_disk_chain_profile")
+        if isinstance(details.get("virtual_disk_chain_profile"), Mapping)
+        else {}
+    )
     return {
         "batch_id": "commercial-uplift-021-025",
         "item_numbers": [number],
@@ -642,6 +1701,13 @@ def image_commercial_uplift_evidence(number: int, details: Mapping[str, object])
             "direct_image_hash_limit_bytes": DIRECT_IMAGE_HASH_LIMIT_BYTES,
             "source_hash_statuses": [status for status in hash_statuses if status],
             "split_part_count": int(details.get("split_part_count") or split_part_count),
+            "ewf_segment_count": int(segment_set_profile.get("segment_count") or 0),
+            "ewf_segment_warnings": list(segment_set_profile.get("warnings") or []),
+            "split_set_contiguous": split_set_profile.get("contiguous"),
+            "split_set_warnings": list(split_set_profile.get("warnings") or []),
+            "virtual_disk_chain_status": virtual_disk_chain_profile.get("chain_validation_status"),
+            "virtual_disk_chain_warnings": list(virtual_disk_chain_profile.get("warnings") or []),
+            "export_manifest_sha256": details.get("export_manifest_sha256", ""),
             "partition_table_row_count": len(details.get("partition_table") or []),
             "tool_preflight_count": len(details.get("tool_preflight") or []),
             "command_history_count": len(details.get("command_history") or []),
@@ -671,6 +1737,13 @@ def image_core_accuracy_gates(number: int, details: dict[str, object]) -> list[d
     limitations = [str(item) for item in details.get("limitations") or [] if str(item)]
     native_capabilities = details.get("native_capabilities") if isinstance(details.get("native_capabilities"), dict) else {}
     trusted_diff = details.get("image_trusted_diff") if isinstance(details.get("image_trusted_diff"), Mapping) else {}
+    segment_set_profile = details.get("segment_set_profile") if isinstance(details.get("segment_set_profile"), Mapping) else {}
+    split_set_profile = details.get("split_set_profile") if isinstance(details.get("split_set_profile"), Mapping) else {}
+    virtual_disk_chain_profile = (
+        details.get("virtual_disk_chain_profile")
+        if isinstance(details.get("virtual_disk_chain_profile"), Mapping)
+        else {}
+    )
 
     evidence_refs = [f"source_path:{details.get('source_path', '')}"]
     for value in source_hashes[:5]:
@@ -685,6 +1758,8 @@ def image_core_accuracy_gates(number: int, details: dict[str, object]) -> list[d
     if number == 22:
         if source_parts:
             satisfied.append("source hash and segment integrity")
+        if segment_set_profile:
+            satisfied.append("EWF segment-set order validation")
         if tool_preflight or command_history:
             satisfied.append("tool version/command capture")
         if details.get("partition_start_sector") is not None or any(item.get("selected_for_recovery") for item in partition_table):
@@ -696,8 +1771,10 @@ def image_core_accuracy_gates(number: int, details: dict[str, object]) -> list[d
         if trusted_diff.get("status") == "pass":
             satisfied.append("trusted E01/Ex01 workflow diff pass")
     elif number == 23:
-        if source_parts or details.get("split_part_warnings") is not None:
+        if source_parts or details.get("split_part_warnings") is not None or split_set_profile:
             satisfied.append("split-set order and gap validation")
+        if split_set_profile:
+            satisfied.append("split-set provenance profile")
         if partition_table or details.get("partition_start_sector") is not None:
             satisfied.append("partition table parsing")
         if command_history or details.get("recovery_mode"):
@@ -713,6 +1790,8 @@ def image_core_accuracy_gates(number: int, details: dict[str, object]) -> list[d
             satisfied.append("qemu-img version/command capture")
         if not native_capabilities.get("snapshot_chain_validation", True) or not native_capabilities.get("differencing_disk_resolution", True):
             satisfied.append("snapshot/differencing-chain detection")
+        if virtual_disk_chain_profile:
+            satisfied.append("virtual disk chain risk profile")
         if details.get("converted_raw_integrity") or details.get("converted_raw_path"):
             satisfied.append("converted raw hash/provenance")
         if partition_table or details.get("raw_extraction") or details.get("nested_raw_extraction"):
@@ -747,21 +1826,46 @@ def collect_tool_preflight(
     preflight: list[dict[str, object]] = []
     for tool in tools:
         resolved = tool_resolver(tool)
+        profile = TOOL_PREFLIGHT_PROFILES.get(tool, {})
+        version_commands = profile.get("version_commands")
+        if not isinstance(version_commands, tuple):
+            version_commands = ((tool, "--version"),)
         row: dict[str, object] = {
             "tool": tool,
             "path": resolved,
             "available": resolved is not None,
             "version": None,
-            "version_command": [tool, "--version"],
+            "purpose": profile.get("purpose") or "External tool required by the selected evidence workflow.",
+            "package": profile.get("package") or tool,
+            "install_hint": profile.get("install_hint") or f"Install {tool} and ensure it is on PATH.",
+            "windows_hint": profile.get("windows_hint") or "Use WSL2 or a trusted mounted/exported evidence folder when the tool is unavailable.",
+            "version_command": list(version_commands[0]),
+            "version_commands": [list(command) for command in version_commands],
+            "remediation": None if resolved is not None else profile.get("install_hint") or f"Install {tool} and ensure it is on PATH.",
         }
         if resolved is not None:
+            attempts: list[dict[str, object]] = []
             try:
-                result = runner([tool, "--version"])
-                text = (result.stdout or result.stderr or "").strip().splitlines()
-                row["version"] = text[0] if result.returncode == 0 and text else None
-                row["version_returncode"] = result.returncode
+                for command in version_commands:
+                    command_list = list(command)
+                    result = runner(command_list)
+                    text = (result.stdout or result.stderr or "").strip().splitlines()
+                    attempt = {
+                        "command": command_list,
+                        "returncode": result.returncode,
+                        "preview": text[0] if text else "",
+                    }
+                    attempts.append(attempt)
+                    if result.returncode == 0 and text:
+                        row["version"] = text[0]
+                        row["version_command"] = command_list
+                        row["version_returncode"] = result.returncode
+                        break
+                else:
+                    row["version_returncode"] = attempts[-1]["returncode"] if attempts else None
             except (OSError, IndexError) as exc:
                 row["version_error"] = str(exc)
+            row["version_attempts"] = attempts
         preflight.append(row)
     return preflight
 

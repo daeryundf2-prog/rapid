@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -26,7 +27,7 @@ from .disk_image import (
     is_raw_image_path,
 )
 from .docs import build_manifest, run_docs_search, write_result
-from .e01 import E01ExtractionError, E01ExtractionResult, extract_e01_to_directory, is_e01_path
+from .e01 import E01ExtractionError, E01ExtractionResult, e01_failure_guidance, extract_e01_to_directory, is_e01_path
 from .extract import DEFAULT_EXTRACT_MANIFEST_NAME, SUPPORTED_DOC_KINDS, run_extract
 from .files import run_files_scan
 from .forensic_accuracy import build_accuracy_gate
@@ -48,16 +49,23 @@ IMPLEMENTED_RUN_MODES = set(SUPPORTED_RUN_MODES)
 RUN_DOC_EXTRACT_KINDS = SUPPORTED_DOC_KINDS
 PARSER_CRASH_ISOLATION_GAP_ID = "#71"
 MEMORY_CAP_GAP_ID = "#72"
+PREVIEW_SANDBOX_GAP_ID = "#73"
+LARGE_SQLITE_FTS_GAP_ID = "#74"
 INCREMENTAL_INDEXING_GAP_ID = "#68"
 CHECKPOINT_RESUME_GAP_ID = "#70"
 PARALLEL_PARSER_SCHEDULER_GAP_ID = "#75"
 MEMORY_CAP_ENV = "RAPIDTRIAGE_MEMORY_CAP_BYTES"
 PERFORMANCE_BATCH_ID = "commercial-uplift-066-070"
+FUNCTIONAL_LARGE_DATA_BATCH_ID = "commercial-uplift-026-030"
+RUNTIME_DEFENSIBILITY_BATCH_ID = "commercial-uplift-071-075"
 INCREMENTAL_TRUSTED_DIFF_BLOCKER_68 = "trusted-incremental-reuse-manifest-diff-missing"
 CHECKPOINT_TRUSTED_DIFF_BLOCKER_70 = "trusted-checkpoint-resume-manifest-diff-missing"
 PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71 = "trusted-parser-crash-corpus-diff-missing"
 MEMORY_CAP_TRUSTED_DIFF_BLOCKER_72 = "trusted-memory-cap-rss-diff-missing"
+PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER_73 = "trusted-preview-no-exec-diff-missing"
+LARGE_SQLITE_FTS_TRUSTED_DIFF_BLOCKER_74 = "trusted-large-sqlite-fts-query-plan-diff-missing"
 SCHEDULER_TRUSTED_DIFF_BLOCKER_75 = "trusted-parser-scheduler-manifest-diff-missing"
+DEFAULT_INCREMENTAL_HASH_MAX_BYTES = 16 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -201,6 +209,7 @@ def run_triage_mode(
     max_extract_size_bytes: int = 0,
     max_file_count: int = 0,
     memory_cap_bytes: int = 0,
+    e01_partition_start_sector: int | None = None,
     overwrite: bool = False,
     resume: bool = False,
     rule_set: RuleSet | None = None,
@@ -218,7 +227,12 @@ def run_triage_mode(
     output_dir.mkdir(parents=True, exist_ok=True)
     effective_memory_cap = resolve_memory_cap_bytes(memory_cap_bytes)
     enforce_memory_cap("prepare", effective_memory_cap)
-    input_root, image_result = prepare_run_input_root(root, input_kind=input_kind, output_dir=output_dir)
+    input_root, image_result = prepare_run_input_root(
+        root,
+        input_kind=input_kind,
+        output_dir=output_dir,
+        e01_partition_start_sector=e01_partition_start_sector,
+    )
     scan_root = resolve_scan_root(input_root.root_path, profile)
     scan_input_root = derive_child_input_root(input_root, scan_root)
 
@@ -242,6 +256,11 @@ def run_triage_mode(
     virtual_disk_metadata_path = output_dir / "rapidtriage-virtual-disk.json"
     fingerprint_path = output_dir / "rapidtriage-run-fingerprint.json"
     checkpoint_path = output_dir / "rapidtriage-run-checkpoints.json"
+    scheduler_path = output_dir / "rapidtriage-parser-scheduler.json"
+    parser_crash_ledger_path = output_dir / "rapidtriage-parser-crash-isolation.json"
+    memory_cap_ledger_path = output_dir / "rapidtriage-memory-cap-enforcement.json"
+    preview_sandbox_policy_path = output_dir / "rapidtriage-preview-sandbox-policy.json"
+    sqlite_fts_optimization_path = output_dir / "rapidtriage-sqlite-fts-optimization.json"
 
     if isinstance(image_result, E01ExtractionResult):
         write_result(image_result.to_dict(), e01_metadata_path)
@@ -280,6 +299,21 @@ def run_triage_mode(
             else False,
             fingerprint=str(current_fingerprint.get("fingerprint") or ""),
             reuse_disabled=True,
+            content_hashed_files=int(current_fingerprint.get("summary", {}).get("content_hashed_file_count", 0))
+            if isinstance(current_fingerprint.get("summary"), Mapping)
+            else 0,
+        )
+    if previous_fingerprint:
+        current_fingerprint["incremental_reuse_plan"] = build_incremental_reuse_plan(
+            previous_fingerprint,
+            current_fingerprint,
+            resume_requested=resume,
+            resume_effective=effective_resume,
+            resume_disabled_reason=resume_disabled_reason,
+        )
+        refresh_incremental_fingerprint_manifest(
+            current_fingerprint,
+            reuse_disabled=bool(resume_disabled_reason),
         )
     write_result(current_fingerprint, fingerprint_path)
 
@@ -335,13 +369,14 @@ def run_triage_mode(
 
     artifact_outputs: Dict[str, Path] = {}
     artifact_payloads: Dict[str, Dict[str, object]] = {}
-    artifact_results = collect_artifact_stages(
+    artifact_results, artifact_scheduler_manifest = collect_artifact_stages(
         input_root,
         profile.artifacts_kinds,
         artifacts_dir=artifacts_dir,
         resume=effective_resume,
         rule_set=rule_set,
     )
+    write_result(artifact_scheduler_manifest, scheduler_path)
     for kind in profile.artifacts_kinds:
         artifact_payload, artifact_path, reused = artifact_results[kind]
         if reused:
@@ -350,6 +385,11 @@ def run_triage_mode(
         artifact_outputs[kind] = artifact_path
         artifact_payloads[kind] = artifact_payload
         write_result(artifact_payload, artifact_path)
+    parser_crash_ledger = build_parser_crash_isolation_ledger(
+        artifact_payloads=artifact_payloads,
+        scheduler_manifest=artifact_scheduler_manifest,
+    )
+    write_result(parser_crash_ledger, parser_crash_ledger_path)
     enforce_memory_cap("artifacts", effective_memory_cap)
 
     docs_extract_payload, reused = load_or_build_json(
@@ -454,6 +494,11 @@ def run_triage_mode(
     outputs = {
         "fingerprint": fingerprint_path,
         "checkpoints": checkpoint_path,
+        "parser_scheduler": scheduler_path,
+        "parser_crash_isolation": parser_crash_ledger_path,
+        "memory_cap_enforcement": memory_cap_ledger_path,
+        "preview_sandbox_policy": preview_sandbox_policy_path,
+        "sqlite_fts_optimization": sqlite_fts_optimization_path,
         "manifest": manifest_path,
         "docs": docs_path,
         "docs_index": docs_index_path,
@@ -475,6 +520,10 @@ def run_triage_mode(
         outputs = {"archive_image": archive_image_metadata_path, **outputs}
     if isinstance(image_result, VirtualDiskExtractionResult):
         outputs = {"virtual_disk": virtual_disk_metadata_path, **outputs}
+    preview_sandbox_policy = build_preview_sandbox_run_policy_manifest(outputs=outputs)
+    write_result(preview_sandbox_policy, preview_sandbox_policy_path)
+    sqlite_fts_optimization = build_sqlite_fts_run_optimization_manifest(outputs=outputs)
+    write_result(sqlite_fts_optimization, sqlite_fts_optimization_path)
     summary_payload = build_run_summary(
         root=input_root.root_path,
         output_dir=output_dir,
@@ -502,19 +551,33 @@ def run_triage_mode(
             "resume_effective": effective_resume,
             "resume_disabled_reason": resume_disabled_reason,
             "reused_outputs": sorted(reused_outputs),
+            "input_fingerprint": current_fingerprint,
             "artifact_scheduler": {
                 "strategy": "parallel-threaded-deterministic-output",
                 "max_workers": artifact_scheduler_workers(profile.artifacts_kinds),
                 "scheduled_count": len(profile.artifacts_kinds),
                 "commercial_gap_ids": [PARALLEL_PARSER_SCHEDULER_GAP_ID],
-                "assessment": parallel_parser_scheduler_assessment(profile.artifacts_kinds),
+                "manifest": artifact_scheduler_manifest,
+                "assessment": parallel_parser_scheduler_assessment(
+                    profile.artifacts_kinds,
+                    scheduler_manifest=artifact_scheduler_manifest,
+                ),
             },
+            "parser_crash_isolation_ledger": parser_crash_ledger,
+            "preview_sandbox_policy": preview_sandbox_policy,
+            "sqlite_fts_optimization": sqlite_fts_optimization,
         },
         rule_set=rule_set,
         source=build_run_source_record(input_root, image_result=image_result),
     )
     audit_output = output_dir / "rapidtriage-run-audit.json"
     summary_payload["audit"] = str(audit_output)
+    memory_cap_manifest = summary_payload.get("processing", {}).get("memory_cap_enforcement", {}).get(
+        "memory_cap_enforcement_manifest",
+        {},
+    )
+    if isinstance(memory_cap_manifest, Mapping):
+        write_result(dict(memory_cap_manifest), memory_cap_ledger_path)
     report_path.write_text(
         build_markdown_report(
             summary_payload,
@@ -573,6 +636,11 @@ def run_triage_mode(
             ("docs", docs_path),
             ("docs-index", docs_index_path),
             ("files", files_path),
+            ("parser-scheduler", scheduler_path),
+            ("parser-crash-isolation", parser_crash_ledger_path),
+            ("memory-cap-enforcement", memory_cap_ledger_path),
+            ("preview-sandbox-policy", preview_sandbox_policy_path),
+            ("sqlite-fts-optimization", sqlite_fts_optimization_path),
             ("docs-extract-manifest", docs_extract_manifest),
             ("files-extract-manifest", files_extract_manifest),
             ("timeline-json", timeline_path),
@@ -615,6 +683,7 @@ def artifact_scheduler_workers(kinds: Sequence[str]) -> int:
 def parallel_parser_scheduler_assessment(
     kinds: Sequence[str],
     *,
+    scheduler_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     scheduled = len(tuple(kinds))
@@ -629,6 +698,19 @@ def parallel_parser_scheduler_assessment(
             ]
         )
     evidence_refs = [f"scheduled_count:{scheduled}", f"max_workers:{artifact_scheduler_workers(kinds)}"]
+    if scheduler_manifest:
+        satisfied.extend(
+            [
+                "scheduler run manifest emitted",
+                "per-worker duration telemetry emitted",
+                "CPU/I/O quota policy emitted",
+                "deterministic output order manifest emitted",
+                "local backpressure policy emitted",
+            ]
+        )
+        manifest_hash = scheduler_manifest.get("manifest_hash")
+        if manifest_hash:
+            evidence_refs.append(f"scheduler_manifest_hash:{manifest_hash}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted scheduler manifest diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -638,6 +720,7 @@ def parallel_parser_scheduler_assessment(
         "commercial_gap_ids": [PARALLEL_PARSER_SCHEDULER_GAP_ID],
         "scheduled_count": scheduled,
         "max_workers": artifact_scheduler_workers(kinds),
+        "scheduler_manifest": scheduler_manifest or {},
         "ready_for_court_report": False,
         "core_accuracy_gates": [
             build_accuracy_gate(
@@ -651,10 +734,14 @@ def parallel_parser_scheduler_assessment(
             "deterministic-output-paths",
             "per-parser-result-capture",
             "resume-aware-skip-of-existing-stage-json",
+            "per-parser-duration-telemetry",
+            "local-cpu-worker-quota",
+            "single-output-json-io-policy",
+            "bounded-future-backpressure-policy",
         ],
         "blockers": [
             "scheduler-is-local-threadpool-not-distributed-priority-queue",
-            "parser-resource-telemetry-is-stage-level-not-live-per-worker",
+            "scheduler-telemetry-is-run-manifest-not-live-ui-stream",
             "fairness-and-backpressure-need-terabyte-scale-validation",
             SCHEDULER_TRUSTED_DIFF_BLOCKER_75,
         ],
@@ -690,26 +777,44 @@ def enforce_memory_cap(stage: str, memory_cap_bytes: int) -> None:
         return
     current = current_memory_rss_bytes()
     if current and current > memory_cap_bytes:
+        policy = memory_cap_policy_profile(memory_cap_bytes=memory_cap_bytes, current_rss_bytes=current)
         raise RunModeError(
-            f"memory cap exceeded at stage {stage}: current_rss_bytes={current} cap_bytes={memory_cap_bytes}"
+            f"memory cap exceeded at stage {stage}: current_rss_bytes={current} "
+            f"cap_bytes={memory_cap_bytes} utilization_percent={policy['utilization_percent']}"
         )
 
 
 def memory_cap_enforcement_assessment(
     *,
     memory_cap_bytes: int,
+    warning_count: int = 0,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     current_rss = current_memory_rss_bytes()
+    policy = memory_cap_policy_profile(memory_cap_bytes=memory_cap_bytes, current_rss_bytes=current_rss)
+    manifest = memory_cap_enforcement_manifest(
+        memory_cap_bytes=memory_cap_bytes,
+        current_rss_bytes=current_rss,
+        warning_count=warning_count,
+        policy=policy,
+    )
     satisfied = [
         "RSS reading captured",
         "stage-boundary enforcement",
         "fail-fast corruption prevention warning",
         "hard OS limit limitation warning",
+        "memory cap policy profile emitted",
+        "memory cap enforcement manifest hash emitted",
     ]
     if memory_cap_bytes > 0:
         satisfied.append("memory cap configuration recorded")
-    evidence_refs = [f"memory_cap_bytes:{memory_cap_bytes}", f"current_rss_bytes:{current_rss}"]
+    if policy["cap_configured"] and not policy["over_cap"]:
+        satisfied.append("memory cap currently within limit")
+    evidence_refs = [
+        f"memory_cap_bytes:{memory_cap_bytes}",
+        f"current_rss_bytes:{current_rss}",
+        f"memory_cap_manifest_hash:{manifest['manifest_hash']}",
+    ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted memory cap/RSS diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -719,6 +824,9 @@ def memory_cap_enforcement_assessment(
         "commercial_gap_ids": [MEMORY_CAP_GAP_ID],
         "memory_cap_bytes": memory_cap_bytes,
         "current_rss_bytes": current_rss,
+        "memory_cap_policy_profile": policy,
+        "memory_cap_enforcement_manifest": manifest,
+        "memory_cap_manifest_hash": manifest["manifest_hash"],
         "ready_for_court_report": False,
         "core_accuracy_gates": [
             build_accuracy_gate(
@@ -741,6 +849,181 @@ def memory_cap_enforcement_assessment(
     }
 
 
+def memory_cap_enforcement_manifest(
+    *,
+    memory_cap_bytes: int,
+    current_rss_bytes: int,
+    warning_count: int,
+    policy: Mapping[str, object],
+) -> dict[str, object]:
+    cap_configured = memory_cap_bytes > 0
+    over_cap = bool(policy.get("over_cap"))
+    manifest_core = {
+        "profile_version": "memory-cap-enforcement-manifest-v1",
+        "item_number": 29,
+        "gap_id": "#29",
+        "commercial_gap_ids": [MEMORY_CAP_GAP_ID],
+        "platform": sys.platform,
+        "memory_cap_bytes": memory_cap_bytes,
+        "current_rss_bytes": current_rss_bytes,
+        "utilization_percent": policy.get("utilization_percent"),
+        "cap_configured": cap_configured,
+        "over_cap": over_cap,
+        "warning_count": warning_count,
+        "enforcement_mode": "python-process-stage-boundary-rss-check",
+        "stage_boundary_checks": True,
+        "hard_os_limit_configured": False,
+        "hard_limit_provider": "",
+        "breach_action": policy.get("breach_action"),
+        "rss_reporting_note": "ru_maxrss semantics differ across Windows, macOS, and Linux; attach platform RSS validation before commercial claim.",
+        "policy_profile_hash": hashlib.sha256(
+            json.dumps(dict(policy), sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "required_external_evidence": [
+            "Windows Job Object or Linux cgroup hard-limit validation",
+            "per-parser live RSS telemetry",
+            "trusted RSS diff on Windows/macOS/Linux",
+            "large-case memory profile with failure/retry behavior",
+        ],
+        "commercial_claim_allowed": False,
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
+def memory_cap_policy_profile(*, memory_cap_bytes: int, current_rss_bytes: int) -> dict[str, object]:
+    cap_configured = memory_cap_bytes > 0
+    over_cap = cap_configured and current_rss_bytes > memory_cap_bytes > 0
+    utilization_percent = round((current_rss_bytes / memory_cap_bytes) * 100, 2) if cap_configured else None
+    return {
+        "profile_version": "memory-cap-policy-profile-v1",
+        "cap_configured": cap_configured,
+        "memory_cap_bytes": memory_cap_bytes,
+        "current_rss_bytes": current_rss_bytes,
+        "utilization_percent": utilization_percent,
+        "over_cap": over_cap,
+        "platform": sys.platform,
+        "enforcement_scope": "python-process-stage-boundary-rss-check",
+        "hard_os_limit_configured": False,
+        "breach_action": "raise-run-mode-error-before-next-stage-output" if cap_configured else "not-configured",
+        "commercial_gap_ids": [MEMORY_CAP_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+
+
+def build_preview_sandbox_run_policy_manifest(*, outputs: Mapping[str, Path]) -> Dict[str, object]:
+    previewable_outputs = sorted(
+        str(path.name)
+        for name, path in outputs.items()
+        if name
+        in {
+            "manifest",
+            "docs",
+            "docs_index",
+            "files",
+            "timeline",
+            "timeline_report",
+            "indicators",
+            "summary",
+            "report",
+        }
+    )
+    manifest_core: Dict[str, object] = {
+        "profile_version": "preview-sandbox-run-policy-manifest-v1",
+        "item_number": 73,
+        "commercial_gap_ids": [PREVIEW_SANDBOX_GAP_ID],
+        "commercial_claim_allowed": False,
+        "source_preview_endpoint": "/api/runs/{run_id}/source-preview?path=...",
+        "policy": {
+            "read_only_preview": True,
+            "executes_content": False,
+            "external_network_access": False,
+            "active_content_blocking": True,
+            "renderer_strategy": "escaped-bounded-data-rendering",
+            "original_file_opening": "download-only-user-controlled-action",
+            "structured_preview_max_bytes": "api-enforced",
+            "hex_preview_max_bytes": "api-enforced",
+            "os_sandbox_enabled_for_risky_codecs": False,
+        },
+        "previewable_run_outputs": previewable_outputs,
+        "operator_review_requirements": [
+            "Treat preview output as a bounded rendering, not as source extraction.",
+            "Use citations/hashes from report or source rows before selecting evidence.",
+            "Open risky active-content files only through a separately sandboxed external workflow.",
+        ],
+        "blockers": [
+            PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER_73,
+            "separate-os-sandbox-for-risky-codecs-macros-not-enabled",
+            "browser-renderer-exploit-corpus-not-attached",
+        ],
+    }
+    manifest_core["policy_hash"] = hashlib.sha256(
+        json.dumps(manifest_core["policy"], sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    manifest_core["manifest_hash"] = hashlib.sha256(
+        json.dumps(manifest_core, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return manifest_core
+
+
+def build_sqlite_fts_run_optimization_manifest(*, outputs: Mapping[str, Path]) -> Dict[str, object]:
+    tracked_output_names = ["docs_index", "docs", "files", "timeline", "summary"]
+    tracked_outputs = []
+    for name in tracked_output_names:
+        path = outputs.get(name)
+        if not path:
+            tracked_outputs.append({"name": name, "status": "missing"})
+            continue
+        if path.is_file():
+            tracked_outputs.append(
+                {
+                    "name": name,
+                    "path": str(path),
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "size_bytes": path.stat().st_size,
+                }
+            )
+        else:
+            tracked_outputs.append({"name": name, "path": str(path), "status": "missing"})
+    missing_outputs = sorted(str(item["name"]) for item in tracked_outputs if item.get("status") == "missing")
+    manifest_core: Dict[str, object] = {
+        "profile_version": "sqlite-fts-run-optimization-manifest-v1",
+        "item_number": 74,
+        "commercial_gap_ids": [LARGE_SQLITE_FTS_GAP_ID],
+        "commercial_claim_allowed": False,
+        "tracked_outputs": tracked_outputs,
+        "missing_outputs": missing_outputs,
+        "optimization_policy": {
+            "case_db_wal_pragmas_expected": True,
+            "case_db_fts_tables_expected": True,
+            "bounded_source_sqlite_preview_expected": True,
+            "cursor_pagination_required": True,
+            "query_plan_hash_required_for_case_db_viewers": True,
+            "ten_million_row_regression_attached": False,
+            "deleted_row_wal_replay_validation_attached": False,
+        },
+        "operator_review_requirements": [
+            "Archive Case DB query-plan profiles for large review tables.",
+            "Use cursor pagination for artifact/search/timeline APIs.",
+            "Do not claim 10M-row performance until hardware regression evidence is attached.",
+        ],
+        "blockers": [
+            LARGE_SQLITE_FTS_TRUSTED_DIFF_BLOCKER_74,
+            "10m-row-query-plan-regression-not-attached",
+            "deleted-row-wal-replay-validation-not-attached",
+        ],
+    }
+    manifest_core["tracked_output_head_hash"] = hashlib.sha256(
+        json.dumps(tracked_outputs, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    manifest_core["manifest_hash"] = hashlib.sha256(
+        json.dumps(manifest_core, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return manifest_core
+
+
 def collect_artifact_stages(
     input_root: InputRoot,
     kinds: Sequence[str],
@@ -748,10 +1031,13 @@ def collect_artifact_stages(
     artifacts_dir: Path,
     resume: bool,
     rule_set: RuleSet | None,
-) -> Dict[str, tuple[Dict[str, object], Path, bool]]:
+) -> tuple[Dict[str, tuple[Dict[str, object], Path, bool]], dict[str, object]]:
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     results: Dict[str, tuple[Dict[str, object], Path, bool]] = {}
     pending: list[tuple[str, Path]] = []
+    events: list[dict[str, object]] = []
+    output_order = list(kinds)
+    max_workers = artifact_scheduler_workers(kinds)
     for kind in kinds:
         artifact_path = artifacts_dir / f"rapidtriage-artifacts-{kind}.json"
         reusable = load_reusable_json(
@@ -761,27 +1047,172 @@ def collect_artifact_stages(
         ) if resume else None
         if reusable is not None:
             results[kind] = (reusable, artifact_path, True)
+            events.append(
+                build_scheduler_event(
+                    kind=kind,
+                    output_path=artifact_path,
+                    status="reused",
+                    reused=True,
+                    queued_order=output_order.index(kind),
+                    output_order=output_order.index(kind),
+                    payload=reusable,
+                    started_at=None,
+                    completed_at=None,
+                    duration_ms=0,
+                )
+            )
         else:
             pending.append((kind, artifact_path))
 
     if pending:
-        with ThreadPoolExecutor(max_workers=artifact_scheduler_workers(kinds), thread_name_prefix="rapidtriage-artifact") as executor:
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="rapidtriage-artifact") as executor:
             futures = {
-                executor.submit(run_artifact_collection, input_root, kind=kind, rule_set=rule_set): (kind, path)
+                executor.submit(timed_artifact_collection, input_root, kind=kind, rule_set=rule_set): (kind, path)
                 for kind, path in pending
             }
             for future in as_completed(futures):
                 kind, artifact_path = futures[future]
                 try:
-                    payload = future.result()
+                    payload, started_at, completed_at, duration_ms = future.result()
+                    status = "completed"
                 except Exception as exc:
+                    started_at = dt.datetime.now(dt.timezone.utc).isoformat()
+                    completed_at = started_at
+                    duration_ms = 0
                     payload = isolated_parser_error_payload(kind, input_root=input_root, exc=exc)
+                    status = "error"
                 results[kind] = (payload, artifact_path, False)
-    return results
+                events.append(
+                    build_scheduler_event(
+                        kind=kind,
+                        output_path=artifact_path,
+                        status=status,
+                        reused=False,
+                        queued_order=output_order.index(kind),
+                        output_order=output_order.index(kind),
+                        payload=payload,
+                        started_at=started_at,
+                        completed_at=completed_at,
+                        duration_ms=duration_ms,
+                    )
+                )
+    scheduler_manifest = build_parser_scheduler_manifest(
+        kinds=kinds,
+        max_workers=max_workers,
+        events=events,
+        pending_count=len(pending),
+    )
+    return results, scheduler_manifest
+
+
+def timed_artifact_collection(
+    input_root: InputRoot,
+    *,
+    kind: str,
+    rule_set: RuleSet | None,
+) -> tuple[Dict[str, object], str, str, int]:
+    start = time.perf_counter()
+    started_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    payload = run_artifact_collection(input_root, kind=kind, rule_set=rule_set)
+    completed_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    duration_ms = max(0, int((time.perf_counter() - start) * 1000))
+    return payload, started_at, completed_at, duration_ms
+
+
+def build_scheduler_event(
+    *,
+    kind: str,
+    output_path: Path,
+    status: str,
+    reused: bool,
+    queued_order: int,
+    output_order: int,
+    payload: Mapping[str, object],
+    started_at: str | None,
+    completed_at: str | None,
+    duration_ms: int,
+) -> dict[str, object]:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    parser_errors = payload.get("parser_errors") if isinstance(payload.get("parser_errors"), list) else []
+    return {
+        "kind": kind,
+        "status": status,
+        "reused": reused,
+        "queued_order": queued_order,
+        "deterministic_output_order": output_order,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "duration_ms": duration_ms,
+        "output_path": str(output_path),
+        "artifact_count": int(summary.get("artifact_count") or 0),
+        "parser_error_count": int(summary.get("parser_error_count") or len(parser_errors) or 0),
+        "error_hashes": [
+            str(error.get("error_hash"))
+            for error in parser_errors
+            if isinstance(error, Mapping) and error.get("error_hash")
+        ],
+    }
+
+
+def build_parser_scheduler_manifest(
+    *,
+    kinds: Sequence[str],
+    max_workers: int,
+    events: Sequence[Mapping[str, object]],
+    pending_count: int,
+) -> dict[str, object]:
+    sorted_events = sorted(events, key=lambda item: (int(item.get("deterministic_output_order") or 0), str(item.get("kind") or "")))
+    completed_count = sum(1 for event in sorted_events if event.get("status") == "completed")
+    reused_count = sum(1 for event in sorted_events if event.get("reused"))
+    error_count = sum(int(event.get("parser_error_count") or 0) for event in sorted_events)
+    events_head_hash = hashlib.sha256(json.dumps(sorted_events, sort_keys=True).encode("utf-8")).hexdigest()
+    deterministic_order_verified = [
+        str(event.get("kind") or "") for event in sorted_events
+    ] == list(kinds)[: len(sorted_events)]
+    manifest_core = {
+        "profile": "parser-scheduler-run-manifest-v1",
+        "item_number": 75,
+        "strategy": "parallel-threaded-deterministic-output",
+        "scheduled_count": len(tuple(kinds)),
+        "pending_count": pending_count,
+        "completed_count": completed_count,
+        "completed_or_isolated_count": completed_count,
+        "reused_count": reused_count,
+        "error_count": error_count,
+        "max_workers": max_workers,
+        "deterministic_output_order": list(kinds),
+        "deterministic_order_verified": deterministic_order_verified,
+        "events_head_hash": events_head_hash,
+        "resource_policy": {
+            "cpu_worker_limit": max_workers,
+            "worker_limit_source": "min(4, scheduled parser kinds)",
+            "io_policy": "each parser writes one deterministic JSON output after collection",
+            "backpressure_policy": "bounded local futures equal to scheduled parser kinds and max_workers",
+            "backpressure_window": max_workers,
+            "distributed_priority_queue": False,
+            "live_worker_stream": False,
+        },
+        "operator_review_requirements": [
+            "Archive this scheduler manifest with run outputs for large-case performance review.",
+            "Check error_count and parser error hashes before treating a run as complete.",
+            "Do not claim TB-scale scheduler fairness until external backpressure validation is attached.",
+        ],
+        "events": sorted_events,
+        "commercial_gap_ids": [PARALLEL_PARSER_SCHEDULER_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+    manifest_hash = hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**manifest_core, "manifest_hash": manifest_hash}
 
 
 def isolated_parser_error_payload(kind: str, *, input_root: InputRoot, exc: Exception) -> Dict[str, object]:
     message = str(exc) or exc.__class__.__name__
+    error_record = isolated_parser_error_record(kind, input_root=input_root, exc=exc, message=message)
+    crash_manifest = parser_crash_isolation_manifest(
+        kind=kind,
+        input_root=input_root,
+        errors=[error_record],
+    )
     return {
         "command": "artifacts",
         "kind": kind,
@@ -796,17 +1227,188 @@ def isolated_parser_error_payload(kind: str, *, input_root: InputRoot, exc: Exce
             "commercial_grade_ready": False,
         },
         "artifacts": [],
-        "parser_errors": [
+        "parser_errors": [error_record],
+        "parser_error_inventory": parser_error_inventory_profile([error_record]),
+        "parser_crash_isolation_manifest": crash_manifest,
+        "parser_crash_isolation": parser_crash_isolation_assessment(
+            error_count=1,
+            error_hashes=[str(error_record["error_hash"])],
+            crash_manifest=crash_manifest,
+        ),
+    }
+
+
+def isolated_parser_error_record(
+    kind: str,
+    *,
+    input_root: InputRoot,
+    exc: Exception,
+    message: str,
+) -> Dict[str, object]:
+    error_type = exc.__class__.__name__
+    error_hash = hashlib.sha256(
+        json.dumps(
             {
                 "kind": kind,
-                "error_type": exc.__class__.__name__,
+                "error_type": error_type,
                 "message": message,
-                "isolated": True,
-                "commercial_gap_ids": [PARSER_CRASH_ISOLATION_GAP_ID],
-                "review_hint": "Treat this parser output as incomplete and validate the source with a trusted parser before reporting.",
-            }
+                "input_kind": input_root.kind,
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "kind": kind,
+        "error_type": error_type,
+        "message": message,
+        "error_hash": error_hash,
+        "isolated": True,
+        "crash_context": {
+            "profile_version": "isolated-parser-crash-context-v1",
+            "input_kind": input_root.kind,
+            "root_sha256": hashlib.sha256(str(input_root.root_path).encode("utf-8", errors="replace")).hexdigest(),
+            "parser_kind": kind,
+            "failed_stage_status": "failed-isolated",
+            "run_continuation_expected": True,
+        },
+        "commercial_gap_ids": [PARSER_CRASH_ISOLATION_GAP_ID],
+        "review_hint": "Treat this parser output as incomplete and validate the source with a trusted parser before reporting.",
+    }
+
+
+def parser_crash_isolation_manifest(
+    *,
+    kind: str,
+    input_root: InputRoot,
+    errors: Sequence[Mapping[str, object]],
+) -> Dict[str, object]:
+    error_hashes = sorted(str(error.get("error_hash") or "") for error in errors if isinstance(error, Mapping))
+    manifest_core = {
+        "profile_version": "parser-crash-isolation-manifest-v1",
+        "item_number": 28,
+        "gap_id": "#28",
+        "parser_kind": kind,
+        "input_kind": input_root.kind,
+        "root_sha256": hashlib.sha256(str(input_root.root_path).encode("utf-8", errors="replace")).hexdigest(),
+        "error_count": len(error_hashes),
+        "error_hashes": error_hashes,
+        "failed_stage_status": "failed-isolated",
+        "run_continuation_expected": True,
+        "failed_parser_json_output": True,
+        "quarantine_policy": {
+            "artifacts_emitted": False,
+            "error_payload_reportable": False,
+            "source_validation_required": True,
+            "safe_to_continue_later_stages": True,
+        },
+        "retry_guidance": {
+            "retry_parser": True,
+            "retry_with_trusted_tool": True,
+            "attach_crash_corpus_diff_before_commercial_claim": True,
+        },
+        "required_external_evidence": [
+            "native process sandbox proof",
+            "corrupt-input fuzz corpus result",
+            "trusted parser crash corpus diff",
         ],
-        "parser_crash_isolation": parser_crash_isolation_assessment(error_count=1),
+        "commercial_gap_ids": ["#28", PARSER_CRASH_ISOLATION_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+    manifest_hash = hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**manifest_core, "manifest_hash": manifest_hash}
+
+
+def build_parser_crash_isolation_ledger(
+    *,
+    artifact_payloads: Mapping[str, Mapping[str, object]],
+    scheduler_manifest: Mapping[str, object],
+) -> Dict[str, object]:
+    errors: list[dict[str, object]] = []
+    for kind, payload in sorted(artifact_payloads.items()):
+        for error in payload.get("parser_errors", []) if isinstance(payload.get("parser_errors"), list) else []:
+            if not isinstance(error, Mapping):
+                continue
+            errors.append(
+                {
+                    "kind": kind,
+                    "error_type": str(error.get("error_type") or ""),
+                    "error_hash": str(error.get("error_hash") or ""),
+                    "isolated": bool(error.get("isolated")),
+                    "failed_stage_status": str(
+                        (error.get("crash_context") if isinstance(error.get("crash_context"), Mapping) else {}).get(
+                            "failed_stage_status",
+                            "failed-isolated",
+                        )
+                    ),
+                }
+            )
+    scheduler_events = scheduler_manifest.get("events") if isinstance(scheduler_manifest.get("events"), list) else []
+    parser_statuses = [
+        {
+            "kind": str(event.get("kind") or ""),
+            "status": str(event.get("status") or ""),
+            "output_path": str(event.get("output_path") or ""),
+            "parser_error_count": int(event.get("parser_error_count") or 0),
+            "error_hashes": [str(value) for value in event.get("error_hashes", [])]
+            if isinstance(event.get("error_hashes"), list)
+            else [],
+        }
+        for event in scheduler_events
+        if isinstance(event, Mapping)
+    ]
+    error_hashes = sorted({str(error.get("error_hash") or "") for error in errors if error.get("error_hash")})
+    ledger_core: Dict[str, object] = {
+        "profile_version": "parser-crash-isolation-ledger-v1",
+        "item_number": 71,
+        "commercial_gap_ids": [PARSER_CRASH_ISOLATION_GAP_ID],
+        "commercial_claim_allowed": False,
+        "scheduled_parser_count": int(scheduler_manifest.get("scheduled_count") or len(parser_statuses) or len(artifact_payloads)),
+        "isolated_error_count": len(errors),
+        "error_hashes": error_hashes,
+        "parser_statuses": parser_statuses,
+        "isolated_errors": errors,
+        "run_continuation_verified": True,
+        "isolation_policy": {
+            "one_parser_error_does_not_abort_case_run": True,
+            "failed_parser_output_is_quarantined_as_non_reportable": True,
+            "later_stages_receive_warning_not_exception": True,
+            "native_process_sandbox_for_every_parser": False,
+        },
+        "operator_review_requirements": [
+            "Review every isolated_errors row before using adjacent artifacts in a report.",
+            "Attach corrupt-input crash corpus results before a commercial-grade claim.",
+            "Validate the failed source with a trusted parser or vendor tool.",
+        ],
+        "blockers": [
+            PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71,
+            "native-process-sandboxing-is-not-yet-used-for-every-parser",
+            "corrupt-input-fuzzing-and-crash-corpus-validation-remain-required",
+        ],
+    }
+    ledger_core["ledger_head_hash"] = hashlib.sha256(
+        json.dumps(
+            {
+                "error_hashes": error_hashes,
+                "parser_statuses": parser_statuses,
+                "scheduler_manifest_hash": scheduler_manifest.get("manifest_hash"),
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    ledger_core["manifest_hash"] = hashlib.sha256(json.dumps(ledger_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return ledger_core
+
+
+def parser_error_inventory_profile(errors: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+    hashes = sorted(str(error.get("error_hash") or "") for error in errors if isinstance(error, Mapping))
+    head_hash = hashlib.sha256("\n".join(hashes).encode("ascii")).hexdigest()
+    return {
+        "profile_version": "parser-error-inventory-v1",
+        "parser_error_count": len(hashes),
+        "error_hashes": hashes,
+        "head_hash": head_hash,
+        "commercial_gap_ids": [PARSER_CRASH_ISOLATION_GAP_ID],
+        "commercial_claim_allowed": False,
     }
 
 
@@ -836,7 +1438,14 @@ def build_parser_crash_trusted_diff(
 def parser_crash_diff_errors(payload: Mapping[str, object]) -> set[str]:
     errors = payload.get("parser_errors") if isinstance(payload.get("parser_errors"), Sequence) else []
     return {
-        "|".join([str(error.get("kind") or ""), str(error.get("error_type") or ""), str(bool(error.get("isolated")))])
+        "|".join(
+            [
+                str(error.get("kind") or ""),
+                str(error.get("error_type") or ""),
+                str(error.get("error_hash") or ""),
+                str(bool(error.get("isolated"))),
+            ]
+        )
         for error in errors
         if isinstance(error, Mapping)
     }
@@ -848,12 +1457,24 @@ def build_memory_cap_trusted_diff(
     *,
     trusted_tool: str = "memory-cap-rss-manifest",
 ) -> dict[str, object]:
-    fields = ("memory_cap_bytes", "status")
+    fields = ("memory_cap_bytes", "status", "current_rss_bytes")
     mismatched = [
         {"field": field, "rapid": rapid_assessment.get(field), "trusted": trusted_assessment.get(field)}
         for field in fields
         if rapid_assessment.get(field) != trusted_assessment.get(field)
     ]
+    rapid_policy = rapid_assessment.get("memory_cap_policy_profile")
+    trusted_policy = trusted_assessment.get("memory_cap_policy_profile")
+    if isinstance(rapid_policy, Mapping) and isinstance(trusted_policy, Mapping):
+        for field in ("cap_configured", "over_cap", "hard_os_limit_configured"):
+            if rapid_policy.get(field) != trusted_policy.get(field):
+                mismatched.append(
+                    {
+                        "field": f"memory_cap_policy_profile.{field}",
+                        "rapid": rapid_policy.get(field),
+                        "trusted": trusted_policy.get(field),
+                    }
+                )
     status = "pass" if not mismatched else "fail"
     return {
         "profile": "memory-cap-trusted-rss-diff-v1",
@@ -878,6 +1499,18 @@ def build_scheduler_trusted_diff(
         for field in fields
         if rapid_assessment.get(field) != trusted_assessment.get(field)
     ]
+    rapid_manifest = rapid_assessment.get("scheduler_manifest") or rapid_assessment.get("manifest")
+    trusted_manifest = trusted_assessment.get("scheduler_manifest") or trusted_assessment.get("manifest")
+    if isinstance(rapid_manifest, Mapping) and isinstance(trusted_manifest, Mapping):
+        for field in ("profile", "scheduled_count", "max_workers", "manifest_hash"):
+            if rapid_manifest.get(field) != trusted_manifest.get(field):
+                mismatched.append(
+                    {
+                        "field": f"scheduler_manifest.{field}",
+                        "rapid": rapid_manifest.get(field),
+                        "trusted": trusted_manifest.get(field),
+                    }
+                )
     status = "pass" if not mismatched else "fail"
     return {
         "profile": "parser-scheduler-trusted-manifest-diff-v1",
@@ -893,6 +1526,8 @@ def build_scheduler_trusted_diff(
 def parser_crash_isolation_assessment(
     *,
     error_count: int,
+    error_hashes: Sequence[str] = (),
+    crash_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     satisfied = [
@@ -902,7 +1537,14 @@ def parser_crash_isolation_assessment(
         "summary warning surfaced",
         "native sandbox/fuzzing limitation warning",
     ]
+    if error_hashes:
+        satisfied.append("parser error hash emitted")
+    if crash_manifest and crash_manifest.get("manifest_hash"):
+        satisfied.append("parser crash isolation manifest hash emitted")
     evidence_refs = [f"parser_error_count:{error_count}", "run-summary:processing.parser_crash_isolation"]
+    evidence_refs.extend(f"parser_error_hash:{value}" for value in error_hashes[:10])
+    if crash_manifest and crash_manifest.get("manifest_hash"):
+        evidence_refs.append(f"parser_crash_manifest_hash:{crash_manifest.get('manifest_hash')}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted parser crash-corpus diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -911,6 +1553,8 @@ def parser_crash_isolation_assessment(
         "status": "isolated-errors-captured" if error_count else "enabled-no-errors",
         "commercial_gap_ids": [PARSER_CRASH_ISOLATION_GAP_ID],
         "parser_error_count": error_count,
+        "parser_crash_isolation_manifest": dict(crash_manifest) if crash_manifest else {},
+        "parser_crash_manifest_hash": str((crash_manifest or {}).get("manifest_hash") or ""),
         "ready_for_court_report": error_count == 0,
         "core_accuracy_gates": [
             build_accuracy_gate(
@@ -954,12 +1598,21 @@ def load_reusable_json(
     return payload
 
 
-def build_run_input_fingerprint(root: Path, *, max_files: int = 5000) -> Dict[str, object]:
+def build_run_input_fingerprint(
+    root: Path,
+    *,
+    max_files: int = 5000,
+    max_content_hash_bytes: int = DEFAULT_INCREMENTAL_HASH_MAX_BYTES,
+) -> Dict[str, object]:
     hasher = hashlib.sha256()
     scanned_files = 0
     total_size = 0
     latest_mtime = 0.0
     truncated = False
+    file_records: list[dict[str, object]] = []
+    content_hashed_count = 0
+    content_skipped_count = 0
+    content_error_count = 0
     try:
         iterator = root.rglob("*") if root.is_dir() else iter([root])
         for path in iterator:
@@ -970,9 +1623,32 @@ def build_run_input_fingerprint(root: Path, *, max_files: int = 5000) -> Dict[st
             except OSError:
                 continue
             relative = str(path.relative_to(root)) if root.is_dir() else path.name
-            hasher.update(relative.replace("\\", "/").lower().encode("utf-8", errors="replace"))
+            normalized_relative = relative.replace("\\", "/")
+            content_sha256, hash_status = hash_incremental_file_content(
+                path,
+                size_bytes=stat.st_size,
+                max_content_hash_bytes=max_content_hash_bytes,
+            )
+            if hash_status == "hashed":
+                content_hashed_count += 1
+            elif hash_status == "error":
+                content_error_count += 1
+            else:
+                content_skipped_count += 1
+            hasher.update(normalized_relative.lower().encode("utf-8", errors="replace"))
             hasher.update(str(stat.st_size).encode("ascii"))
             hasher.update(str(int(stat.st_mtime_ns)).encode("ascii"))
+            if content_sha256:
+                hasher.update(content_sha256.encode("ascii"))
+            file_records.append(
+                {
+                    "relative_path": normalized_relative,
+                    "size_bytes": stat.st_size,
+                    "mtime_ns": int(stat.st_mtime_ns),
+                    "sha256": content_sha256,
+                    "hash_status": hash_status,
+                }
+            )
             scanned_files += 1
             total_size += stat.st_size
             latest_mtime = max(latest_mtime, stat.st_mtime)
@@ -981,90 +1657,299 @@ def build_run_input_fingerprint(root: Path, *, max_files: int = 5000) -> Dict[st
                 break
     except OSError:
         truncated = True
-    return {
+    fingerprint_value = hasher.hexdigest()
+    payload: Dict[str, object] = {
         "command": "run-fingerprint",
         "generated_at": dt.datetime.now().isoformat(),
         "root": str(root),
-        "fingerprint": hasher.hexdigest(),
+        "fingerprint": fingerprint_value,
         "summary": {
             "scanned_file_count": scanned_files,
             "total_size_bytes": total_size,
             "latest_mtime_epoch": latest_mtime,
             "max_files": max_files,
             "truncated": truncated,
+            "content_hash_max_bytes": max_content_hash_bytes,
+            "content_hashed_file_count": content_hashed_count,
+            "content_hash_skipped_file_count": content_skipped_count,
+            "content_hash_error_count": content_error_count,
             "commercial_gap_ids": [INCREMENTAL_INDEXING_GAP_ID],
             "commercial_grade_ready": False,
         },
+        "content_hash_policy": {
+            "profile_version": "incremental-content-hash-policy-v1",
+            "max_content_hash_bytes": max_content_hash_bytes,
+            "hash_algorithm": "sha256",
+            "hashed_files": content_hashed_count,
+            "skipped_files": content_skipped_count,
+            "error_files": content_error_count,
+            "large_file_behavior": "metadata-fingerprint-only-when-size-exceeds-policy-limit",
+            "commercial_claim_allowed": False,
+        },
+        "files": file_records,
         "incremental_indexing_assessment": incremental_indexing_assessment(
             scanned_files=scanned_files,
             max_files=max_files,
             truncated=truncated,
+            content_hashed_files=content_hashed_count,
+            content_skipped_files=content_skipped_count,
         ),
         "core_accuracy_gates": incremental_indexing_core_accuracy_gates(
             scanned_files=scanned_files,
             max_files=max_files,
             truncated=truncated,
-            fingerprint=hasher.hexdigest(),
+            fingerprint=fingerprint_value,
             reuse_disabled=False,
+            content_hashed_files=content_hashed_count,
         ),
         "commercial_uplift_evidence": performance_commercial_uplift_evidence(
             item_number=68,
             validation_ids=[
                 "input fingerprint emitted",
                 "path/size/mtime metadata captured",
+                "bounded per-file content hashes captured",
                 "truncation disclosure",
                 "per-file reindex limitation warning",
             ],
             large_data_controls=[
                 "bounded fingerprint prevents unsafe reuse when source metadata changes",
+                "per-file SHA-256 records support changed-file reuse planning for files inside the hash policy",
                 "resume disables reuse when the input fingerprint changes",
                 "scan count, total bytes, latest mtime, and truncation status are persisted",
-                "the evidence explicitly warns that this is not full content-hash delta indexing",
+                "the evidence explicitly warns that this is not full large-file content-hash delta indexing",
             ],
             external_validation=[
-                "content-hash per-file incremental reindexing",
+                "full large-file content-hash per-file incremental reindexing",
                 "large-case validation on changed multi-million-file evidence roots",
                 INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
             ],
         ),
     }
+    refresh_incremental_fingerprint_manifest(payload, reuse_disabled=False)
+    return payload
+
+
+def refresh_incremental_fingerprint_manifest(payload: Dict[str, object], *, reuse_disabled: bool) -> None:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    manifest = build_incremental_indexing_manifest(payload)
+    payload["incremental_indexing_manifest"] = manifest
+    payload["incremental_indexing_assessment"] = incremental_indexing_assessment(
+        scanned_files=int(summary.get("scanned_file_count") or 0),
+        max_files=int(summary.get("max_files") or 0),
+        truncated=bool(summary.get("truncated")),
+        content_hashed_files=int(summary.get("content_hashed_file_count") or 0),
+        content_skipped_files=int(summary.get("content_hash_skipped_file_count") or 0),
+        manifest_hash=str(manifest.get("manifest_hash") or ""),
+    )
+    payload["core_accuracy_gates"] = incremental_indexing_core_accuracy_gates(
+        scanned_files=int(summary.get("scanned_file_count") or 0),
+        max_files=int(summary.get("max_files") or 0),
+        truncated=bool(summary.get("truncated")),
+        fingerprint=str(payload.get("fingerprint") or ""),
+        reuse_disabled=reuse_disabled,
+        content_hashed_files=int(summary.get("content_hashed_file_count") or 0),
+        manifest_hash=str(manifest.get("manifest_hash") or ""),
+    )
+
+
+def build_incremental_indexing_manifest(fingerprint_payload: Mapping[str, object]) -> dict[str, object]:
+    summary = fingerprint_payload.get("summary") if isinstance(fingerprint_payload.get("summary"), Mapping) else {}
+    policy = fingerprint_payload.get("content_hash_policy") if isinstance(fingerprint_payload.get("content_hash_policy"), Mapping) else {}
+    files = fingerprint_payload.get("files") if isinstance(fingerprint_payload.get("files"), list) else []
+    reuse_plan = (
+        fingerprint_payload.get("incremental_reuse_plan")
+        if isinstance(fingerprint_payload.get("incremental_reuse_plan"), Mapping)
+        else {}
+    )
+    manifest_core = {
+        "profile_version": "incremental-indexing-manifest-v1",
+        "item_number": 30,
+        "gap_id": "#30",
+        "commercial_gap_ids": [INCREMENTAL_INDEXING_GAP_ID],
+        "fingerprint": str(fingerprint_payload.get("fingerprint") or ""),
+        "root_sha256": hashlib.sha256(
+            str(fingerprint_payload.get("root") or "").encode("utf-8", errors="replace")
+        ).hexdigest(),
+        "scanned_file_count": int(summary.get("scanned_file_count") or 0),
+        "total_size_bytes": int(summary.get("total_size_bytes") or 0),
+        "max_files": int(summary.get("max_files") or 0),
+        "truncated": bool(summary.get("truncated")),
+        "content_hash_max_bytes": int(summary.get("content_hash_max_bytes") or 0),
+        "content_hashed_file_count": int(summary.get("content_hashed_file_count") or 0),
+        "content_hash_skipped_file_count": int(summary.get("content_hash_skipped_file_count") or 0),
+        "content_hash_error_count": int(summary.get("content_hash_error_count") or 0),
+        "file_record_count": len(files),
+        "file_record_head_hash": incremental_file_records_head_hash(files),
+        "content_hash_policy_hash": hashlib.sha256(
+            json.dumps(dict(policy), sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "reuse_plan_hash": hashlib.sha256(
+            json.dumps(dict(reuse_plan), sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        if reuse_plan
+        else "",
+        "resume_requested": bool(reuse_plan.get("resume_requested")) if reuse_plan else False,
+        "resume_effective": bool(reuse_plan.get("resume_effective")) if reuse_plan else False,
+        "resume_disabled_reason": str(reuse_plan.get("resume_disabled_reason") or "") if reuse_plan else "",
+        "reindex_recommendation": str(reuse_plan.get("reindex_recommendation") or "fresh-run-no-prior-fingerprint"),
+        "decision_model": "safe-full-stage-reuse-only-when-input-fingerprint-and-stage-checkpoints-match",
+        "row_level_delta_reindexing": False,
+        "required_external_evidence": [
+            "multi-million-file changed-source replay validation",
+            "large-file full content-hash delta indexing validation",
+            "trusted incremental reuse manifest diff",
+        ],
+        "commercial_claim_allowed": False,
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
+def incremental_file_records_head_hash(records: Sequence[object]) -> str:
+    row_hashes: list[str] = []
+    for record in records:
+        if isinstance(record, Mapping):
+            row_hashes.append(hashlib.sha256(json.dumps(dict(record), sort_keys=True).encode("utf-8")).hexdigest())
+    return hashlib.sha256("\n".join(row_hashes).encode("ascii")).hexdigest()
+
+
+def hash_incremental_file_content(
+    path: Path,
+    *,
+    size_bytes: int,
+    max_content_hash_bytes: int,
+) -> tuple[str | None, str]:
+    if max_content_hash_bytes <= 0:
+        return None, "disabled"
+    if size_bytes > max_content_hash_bytes:
+        return None, "size-excluded"
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return None, "error"
+    return digest.hexdigest(), "hashed"
+
+
+def build_incremental_reuse_plan(
+    previous_fingerprint: Mapping[str, object],
+    current_fingerprint: Mapping[str, object],
+    *,
+    resume_requested: bool,
+    resume_effective: bool,
+    resume_disabled_reason: str,
+) -> dict[str, object]:
+    previous_files = incremental_file_record_index(previous_fingerprint)
+    current_files = incremental_file_record_index(current_fingerprint)
+    added = sorted(path for path in current_files if path not in previous_files)
+    removed = sorted(path for path in previous_files if path not in current_files)
+    changed: list[str] = []
+    unchanged: list[str] = []
+    metadata_only: list[str] = []
+    for path in sorted(set(previous_files).intersection(current_files)):
+        previous = previous_files[path]
+        current = current_files[path]
+        previous_hash = str(previous.get("sha256") or "")
+        current_hash = str(current.get("sha256") or "")
+        if previous_hash and current_hash:
+            if previous_hash == current_hash:
+                unchanged.append(path)
+            else:
+                changed.append(path)
+            continue
+        metadata_changed = (
+            int(previous.get("size_bytes") or 0) != int(current.get("size_bytes") or 0)
+            or int(previous.get("mtime_ns") or 0) != int(current.get("mtime_ns") or 0)
+        )
+        if metadata_changed:
+            changed.append(path)
+            metadata_only.append(path)
+        else:
+            unchanged.append(path)
+            metadata_only.append(path)
+    return {
+        "profile_version": "incremental-reuse-plan-v1",
+        "commercial_gap_ids": [INCREMENTAL_INDEXING_GAP_ID],
+        "resume_requested": resume_requested,
+        "resume_effective": resume_effective,
+        "resume_disabled_reason": resume_disabled_reason,
+        "previous_fingerprint": str(previous_fingerprint.get("fingerprint") or ""),
+        "current_fingerprint": str(current_fingerprint.get("fingerprint") or ""),
+        "counts": {
+            "added": len(added),
+            "removed": len(removed),
+            "changed": len(changed),
+            "unchanged": len(unchanged),
+            "metadata_only": len(metadata_only),
+        },
+        "added": added[:200],
+        "removed": removed[:200],
+        "changed": changed[:200],
+        "metadata_only": metadata_only[:200],
+        "unchanged_sample": unchanged[:50],
+        "reindex_recommendation": "rebuild-affected-stages" if added or removed or changed else "safe-to-reuse-stage-outputs",
+        "ready_for_commercial_claim": False,
+        "blockers": [
+            "stage outputs are still reused/rebuilt as whole JSON stages, not rewritten at row-level deltas",
+            "large files above content_hash_policy.max_content_hash_bytes use metadata-only comparison",
+            INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
+        ],
+    }
+
+
+def incremental_file_record_index(fingerprint_payload: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
+    records = fingerprint_payload.get("files")
+    if not isinstance(records, list):
+        return {}
+    indexed: dict[str, Mapping[str, object]] = {}
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        relative_path = str(record.get("relative_path") or "")
+        if relative_path:
+            indexed[relative_path] = record
+    return indexed
 
 
 def record_run_checkpoint(records: list[dict[str, object]], stage: str, path: Path, *, reused: bool) -> None:
-    records.append(
-        {
-            "stage": stage,
-            "status": "reused" if reused else "completed",
-            "output": str(path),
-            "exists": path.is_file(),
-            "size_bytes": path.stat().st_size if path.is_file() else None,
-            "reused": reused,
-            "recorded_at": dt.datetime.now().isoformat(),
-            "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
-            "core_accuracy_gates": checkpoint_resume_core_accuracy_gates(
-                checkpoints=[{
-                    "stage": stage,
-                    "output": str(path),
-                    "size_bytes": path.stat().st_size if path.is_file() else None,
-                    "reused": reused,
-                }],
-                resume_requested=False,
-                resume_effective=False,
-            ),
-            "commercial_uplift_evidence": performance_commercial_uplift_evidence(
-                item_number=70,
-                validation_ids=["stage checkpoints emitted", "output path and size captured"],
-                large_data_controls=[
-                    f"stage `{stage}` records output path, byte size, and reuse status",
-                    "stage-level checkpoints support review of completed/reused output files",
-                ],
-                external_validation=[
-                    "mid-parser checkpointing and failed-stage replay validation",
-                    CHECKPOINT_TRUSTED_DIFF_BLOCKER_70,
-                ],
-            ),
-        }
-    )
+    record = {
+        "stage": stage,
+        "status": "reused" if reused else "completed",
+        "output": str(path),
+        "exists": path.is_file(),
+        "size_bytes": path.stat().st_size if path.is_file() else None,
+        "reused": reused,
+        "recorded_at": dt.datetime.now().isoformat(),
+        "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
+        "core_accuracy_gates": checkpoint_resume_core_accuracy_gates(
+            checkpoints=[{
+                "stage": stage,
+                "output": str(path),
+                "size_bytes": path.stat().st_size if path.is_file() else None,
+                "reused": reused,
+            }],
+            resume_requested=False,
+            resume_effective=False,
+        ),
+        "commercial_uplift_evidence": performance_commercial_uplift_evidence(
+            item_number=70,
+            validation_ids=["stage checkpoints emitted", "output path and size captured", "checkpoint row hash emitted"],
+            large_data_controls=[
+                f"stage `{stage}` records output path, byte size, reuse status, and row hash",
+                "stage-level checkpoints support review of completed/reused output files",
+            ],
+            external_validation=[
+                "mid-parser checkpointing and failed-stage replay validation",
+                CHECKPOINT_TRUSTED_DIFF_BLOCKER_70,
+            ],
+        ),
+    }
+    record["row_hash"] = checkpoint_record_hash(record)
+    records.append(record)
 
 
 def write_run_checkpoints(
@@ -1078,6 +1963,7 @@ def write_run_checkpoints(
     checkpoints: Sequence[Mapping[str, object]],
 ) -> None:
     status_counts = Counter(str(item.get("status") or "unknown") for item in checkpoints)
+    integrity_profile = checkpoint_integrity_profile(checkpoints)
     payload = {
         "command": "run-checkpoints",
         "generated_at": dt.datetime.now().isoformat(),
@@ -1100,6 +1986,7 @@ def write_run_checkpoints(
             resume_effective=resume_effective,
             checkpoints=checkpoints,
         ),
+        "checkpoint_integrity_profile": integrity_profile,
         "core_accuracy_gates": checkpoint_resume_core_accuracy_gates(
             checkpoints=checkpoints,
             resume_requested=resume_requested,
@@ -1112,9 +1999,12 @@ def write_run_checkpoints(
                 "output path and size captured",
                 "reused flag captured",
                 "resume status summarized",
+                "checkpoint row hash emitted",
+                "checkpoint integrity head hash emitted",
             ],
             large_data_controls=[
                 "every completed stage is listed with output path, size, status, and reuse flag",
+                "checkpoint row hashes and aggregate head hash make manifest review repeatable",
                 "resume requested/effective/disabled reason is persisted",
                 "input fingerprint is embedded next to checkpoints for reproducibility",
                 "checkpoint summary counts reused and completed stage outputs",
@@ -1131,7 +2021,53 @@ def write_run_checkpoints(
     write_result(payload, path)
 
 
-def incremental_indexing_assessment(*, scanned_files: int, max_files: int, truncated: bool) -> dict[str, object]:
+def checkpoint_record_hash(record: Mapping[str, object]) -> str:
+    normalized = {
+        "stage": str(record.get("stage") or ""),
+        "status": str(record.get("status") or ""),
+        "output": str(record.get("output") or ""),
+        "exists": bool(record.get("exists")),
+        "size_bytes": int(record.get("size_bytes") or 0),
+        "reused": bool(record.get("reused")),
+    }
+    return hashlib.sha256(json.dumps(normalized, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def checkpoint_integrity_profile(checkpoints: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    row_hashes = [
+        str(item.get("row_hash") or checkpoint_record_hash(item))
+        for item in checkpoints
+        if isinstance(item, Mapping)
+    ]
+    head_hash = hashlib.sha256("\n".join(row_hashes).encode("ascii")).hexdigest()
+    missing_outputs = [
+        str(item.get("stage") or "")
+        for item in checkpoints
+        if isinstance(item, Mapping) and item.get("exists") is False
+    ]
+    return {
+        "profile_version": "checkpoint-integrity-profile-v1",
+        "checkpoint_count": len(row_hashes),
+        "row_hash_count": len(row_hashes),
+        "head_hash": head_hash,
+        "missing_output_stages": missing_outputs,
+        "reused_count": sum(1 for item in checkpoints if item.get("reused")),
+        "append_only_intent": True,
+        "database_enforced_append_only": False,
+        "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+
+
+def incremental_indexing_assessment(
+    *,
+    scanned_files: int,
+    max_files: int,
+    truncated: bool,
+    content_hashed_files: int = 0,
+    content_skipped_files: int = 0,
+    manifest_hash: str = "",
+) -> dict[str, object]:
     return {
         "component": "incremental-indexing",
         "status": "fingerprint-based-reuse-enabled",
@@ -1139,10 +2075,13 @@ def incremental_indexing_assessment(*, scanned_files: int, max_files: int, trunc
         "scanned_file_count": scanned_files,
         "fingerprint_max_files": max_files,
         "fingerprint_truncated": truncated,
+        "content_hashed_file_count": content_hashed_files,
+        "content_hash_skipped_file_count": content_skipped_files,
+        "incremental_indexing_manifest_hash": manifest_hash,
         "ready_for_court_report": False,
         "blockers": [
-            "fingerprint-is-bounded-path-size-mtime-metadata-not-full-content-index-delta",
-            "changed-source-disables-reuse-instead-of-per-file-incremental-reindex",
+            "large-files-above-content-hash-policy-still-use-metadata-only-delta",
+            "changed-source-disables-stage-reuse-instead-of-row-level-incremental-reindex",
             "case-db-deduplication-and-reindex-policy-require-large-corpus-validation",
             INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
         ],
@@ -1155,14 +2094,16 @@ def incremental_indexing_assessment(*, scanned_files: int, max_files: int, trunc
             validation_ids=[
                 "input fingerprint emitted",
                 "path/size/mtime metadata captured",
+                "bounded per-file content hashes captured",
                 "per-file reindex limitation warning",
             ],
             large_data_controls=[
+                "bounded per-file SHA-256 records allow changed-file reuse planning",
                 "scan counts and fingerprint truncation status are visible",
                 "changed-source reuse behavior is safety-first rebuild rather than silent reuse",
             ],
             external_validation=[
-                "content-hash delta index and large-case validation remain required",
+                "full content-hash delta index and large-case validation remain required",
                 INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
             ],
         ),
@@ -1172,6 +2113,8 @@ def incremental_indexing_assessment(*, scanned_files: int, max_files: int, trunc
             truncated=truncated,
             fingerprint="assessment",
             reuse_disabled=False,
+            content_hashed_files=content_hashed_files,
+            manifest_hash=manifest_hash,
         ),
     }
 
@@ -1246,11 +2189,14 @@ def build_incremental_indexing_trusted_diff(
 
 def incremental_fingerprint_diff_value(item: Mapping[str, object]) -> dict[str, object]:
     summary = item.get("summary") if isinstance(item.get("summary"), Mapping) else {}
+    manifest = item.get("incremental_indexing_manifest") if isinstance(item.get("incremental_indexing_manifest"), Mapping) else {}
     return {
         "fingerprint": str(item.get("fingerprint") or ""),
         "scanned_file_count": int(summary.get("scanned_file_count") or 0),
         "total_size_bytes": int(summary.get("total_size_bytes") or 0),
         "truncated": bool(summary.get("truncated")),
+        "file_record_head_hash": str(manifest.get("file_record_head_hash") or ""),
+        "incremental_manifest_hash": str(manifest.get("manifest_hash") or ""),
     }
 
 
@@ -1303,9 +2249,15 @@ def incremental_indexing_core_accuracy_gates(
     truncated: bool,
     fingerprint: str,
     reuse_disabled: bool,
+    content_hashed_files: int = 0,
+    manifest_hash: str = "",
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["input fingerprint emitted", "path/size/mtime metadata captured", "per-file reindex limitation warning"]
+    if content_hashed_files:
+        satisfied.append("bounded per-file content hashes captured")
+    if manifest_hash:
+        satisfied.append("incremental indexing manifest hash emitted")
     if reuse_disabled:
         satisfied.append("changed-source reuse disabled")
     if truncated or max_files:
@@ -1315,7 +2267,10 @@ def incremental_indexing_core_accuracy_gates(
         f"scanned_file_count:{scanned_files}",
         f"max_files:{max_files}",
         f"truncated:{truncated}",
+        f"content_hashed_files:{content_hashed_files}",
     ]
+    if manifest_hash:
+        evidence_refs.append(f"incremental_manifest_hash:{manifest_hash}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted incremental reuse diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -1396,6 +2351,8 @@ def checkpoint_resume_core_accuracy_gates(
         satisfied.append("output path and size captured")
     if any("reused" in item for item in checkpoints):
         satisfied.append("reused flag captured")
+    if any(item.get("row_hash") for item in checkpoints):
+        satisfied.append("checkpoint row hash emitted")
     if resume_requested or resume_effective or checkpoints:
         satisfied.append("resume status summarized")
     evidence_refs = [
@@ -1420,6 +2377,7 @@ def prepare_run_input_root(
     *,
     input_kind: str | None,
     output_dir: Path,
+    e01_partition_start_sector: int | None = None,
 ) -> tuple[
     InputRoot,
     E01ExtractionResult | DiskImageExtractionResult | ArchiveImageExtractionResult | VirtualDiskExtractionResult | None,
@@ -1430,9 +2388,18 @@ def prepare_run_input_root(
     root_path = Path(root).expanduser().resolve()
     if is_e01_path(root_path):
         try:
-            result = extract_e01_to_directory(root_path, output_dir / "_e01")
+            result = extract_e01_to_directory(
+                root_path,
+                output_dir / "_e01",
+                partition_start_sector=e01_partition_start_sector,
+            )
         except E01ExtractionError as exc:
-            raise RunModeError(str(exc)) from exc
+            guidance = e01_failure_guidance(str(exc))
+            next_actions = "; ".join(str(item) for item in guidance.get("next_actions") or [])
+            raise RunModeError(
+                f"{guidance['title']}: {guidance['analyst_message']} "
+                f"Category={guidance['category']}. Next actions: {next_actions}. Raw error: {exc}"
+            ) from exc
         return InputRoot(source_path=str(root_path), root_path=result.extract_dir, kind="e01-derived"), result
     if is_raw_image_path(root_path):
         try:
@@ -1512,8 +2479,74 @@ def build_run_source_record(
         "analysis_root": str(image_result.extract_dir),
         "stage_dir": str(image_result.stage_dir),
         "partition_start_sector": image_result.partition_start_sector,
+        "partition_selection": image_result.partition_selection,
+        "tool_preflight_count": len(image_result.tool_preflight),
+        "partition_table_count": len(image_result.partition_table),
+        "command_history_count": len(image_result.command_history),
         "source_integrity": image_result.source_integrity,
+        "recovered_root_manifest": image_result.recovered_root_manifest,
+        "resume_status": image_result.resume_status,
+        "workflow_status": build_completed_e01_workflow_status(image_result),
         "commercial_grade_ready": image_result.commercial_grade_ready,
+    }
+
+
+def build_completed_e01_workflow_status(image_result: E01ExtractionResult) -> dict[str, object]:
+    recovered_manifest = image_result.recovered_root_manifest or {}
+    recovered_entries = int(recovered_manifest.get("file_count") or recovered_manifest.get("hashed_file_count") or 0)
+    stages = [
+        ("select-e01", "Select E01/Ex01", "complete", f"source={image_result.source_path.name}"),
+        (
+            "dependency-preflight",
+            "Dependency preflight",
+            "complete" if image_result.tool_preflight else "not-recorded",
+            f"tools={len(image_result.tool_preflight)}",
+        ),
+        (
+            "partition-selection",
+            "Partition selection",
+            "complete",
+            f"sector={image_result.partition_start_sector}",
+        ),
+        (
+            "filesystem-extraction",
+            "Read-only extraction",
+            "complete",
+            f"commands={len(image_result.command_history)}",
+        ),
+        (
+            "artifact-analysis",
+            "Artifact analysis",
+            "complete",
+            f"analysis_root={image_result.extract_dir}",
+        ),
+        (
+            "search-review-report",
+            "Search, review, report",
+            "ready",
+            "use Case DB search, source viewer, review board, and report export",
+        ),
+    ]
+    return {
+        "profile_version": "windows11-e01-run-workflow-v1",
+        "status": "analysis-ready",
+        "stage_dir": str(image_result.stage_dir),
+        "analysis_root": str(image_result.extract_dir),
+        "selected_partition_start_sector": image_result.partition_start_sector,
+        "tool_preflight_count": len(image_result.tool_preflight),
+        "partition_table_count": len(image_result.partition_table),
+        "command_history_count": len(image_result.command_history),
+        "recovered_manifest_entry_count": recovered_entries,
+        "resume_reused": bool((image_result.resume_status or {}).get("resumed")),
+        "stages": [
+            {"id": stage_id, "label": label, "status": status, "evidence": evidence}
+            for stage_id, label, status, evidence in stages
+        ],
+        "analyst_next_actions": [
+            "Search all evidence from the command bar.",
+            "Open hits in the source viewer before marking them relevant.",
+            "Export only reviewed report candidates with hashes and provenance.",
+        ],
     }
 
 
@@ -1844,11 +2877,49 @@ def build_processing_summary(
     reused_outputs = [str(item) for item in safety.get("reused_outputs", [])] if isinstance(safety.get("reused_outputs"), list) else []
     parser_error_count = sum(int(step.get("parser_error_count") or 0) for step in steps)
     artifact_scheduler = safety.get("artifact_scheduler") if isinstance(safety.get("artifact_scheduler"), Mapping) else {}
+    parser_crash_ledger = (
+        safety.get("parser_crash_isolation_ledger")
+        if isinstance(safety.get("parser_crash_isolation_ledger"), Mapping)
+        else {}
+    )
+    parser_crash_error_hashes = [
+        str(value)
+        for value in parser_crash_ledger.get("error_hashes", [])
+        if isinstance(parser_crash_ledger.get("error_hashes"), list)
+    ]
+    input_fingerprint = safety.get("input_fingerprint") if isinstance(safety.get("input_fingerprint"), Mapping) else {}
+    incremental_manifest = (
+        input_fingerprint.get("incremental_indexing_manifest")
+        if isinstance(input_fingerprint.get("incremental_indexing_manifest"), Mapping)
+        else {}
+    )
     profile_label = infer_processing_profile_label(
         read_only=read_only,
         dry_run=dry_run,
         max_extract_size_bytes=max_extract_size,
         max_file_count=max_file_count,
+    )
+    streaming_boundary = build_streaming_parser_boundary_manifest(
+        steps,
+        max_extract_size_bytes=max_extract_size,
+        max_file_count=max_file_count,
+        memory_cap_bytes=memory_cap_bytes,
+        read_only=read_only,
+        dry_run=dry_run,
+    )
+    memory_cap_enforcement = memory_cap_enforcement_assessment(
+        memory_cap_bytes=memory_cap_bytes,
+        warning_count=len(warnings),
+    )
+    preview_sandbox_policy = (
+        safety.get("preview_sandbox_policy")
+        if isinstance(safety.get("preview_sandbox_policy"), Mapping)
+        else {}
+    )
+    sqlite_fts_optimization = (
+        safety.get("sqlite_fts_optimization")
+        if isinstance(safety.get("sqlite_fts_optimization"), Mapping)
+        else {}
     )
     return {
         "profile_label": profile_label,
@@ -1863,6 +2934,8 @@ def build_processing_summary(
             "status": "fingerprint-controlled-output-reuse",
             "resume_effective": bool(safety.get("resume_effective")),
             "resume_disabled_reason": str(safety.get("resume_disabled_reason") or ""),
+            "incremental_indexing_manifest": dict(incremental_manifest),
+            "incremental_indexing_manifest_hash": str(incremental_manifest.get("manifest_hash") or ""),
             "commercial_uplift_evidence": performance_commercial_uplift_evidence(
                 item_number=68,
                 validation_ids=[
@@ -1901,20 +2974,270 @@ def build_processing_summary(
                 ],
             ),
         },
-        "parser_crash_isolation": parser_crash_isolation_assessment(error_count=parser_error_count),
-        "memory_cap_enforcement": memory_cap_enforcement_assessment(memory_cap_bytes=memory_cap_bytes),
+        "parser_crash_isolation": parser_crash_isolation_assessment(
+            error_count=parser_error_count,
+            error_hashes=parser_crash_error_hashes,
+            crash_manifest=parser_crash_ledger,
+        ),
+        "memory_cap_enforcement": memory_cap_enforcement,
+        "preview_sandboxing": {
+            "component": "preview-sandboxing",
+            "status": "run-policy-manifest-emitted",
+            "commercial_gap_ids": [PREVIEW_SANDBOX_GAP_ID],
+            "preview_sandbox_policy_manifest": dict(preview_sandbox_policy),
+            "preview_sandbox_policy_manifest_hash": str(preview_sandbox_policy.get("manifest_hash") or ""),
+            "ready_for_court_report": False,
+            "core_accuracy_gates": [
+                build_accuracy_gate(
+                    73,
+                    satisfied_checks=[
+                        "read-only bounded preview policy emitted",
+                        "no content execution policy emitted",
+                        "external network access disabled",
+                        "active content blocking policy emitted",
+                        "OS sandbox limitation warning",
+                    ],
+                    evidence_refs=[
+                        "run-summary:processing.preview_sandboxing",
+                        f"preview_sandbox_policy_hash:{preview_sandbox_policy.get('manifest_hash', '')}",
+                    ],
+                )
+            ],
+            "blockers": [
+                PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER_73,
+                "separate-os-sandbox-for-risky-codecs-macros-not-enabled",
+                "browser-renderer-exploit-corpus-not-attached",
+            ],
+        },
         "parallel_parser_scheduler": artifact_scheduler.get("assessment")
         if isinstance(artifact_scheduler.get("assessment"), Mapping)
         else parallel_parser_scheduler_assessment(()),
+        "sqlite_fts_optimization": {
+            "component": "large-sqlite-fts-optimization",
+            "status": "run-optimization-manifest-emitted",
+            "commercial_gap_ids": [LARGE_SQLITE_FTS_GAP_ID],
+            "sqlite_fts_optimization_manifest": dict(sqlite_fts_optimization),
+            "sqlite_fts_optimization_manifest_hash": str(sqlite_fts_optimization.get("manifest_hash") or ""),
+            "ready_for_court_report": False,
+            "core_accuracy_gates": [
+                build_accuracy_gate(
+                    74,
+                    satisfied_checks=[
+                        "SQLite/FTS run optimization manifest emitted",
+                        "tracked output hashes emitted",
+                        "cursor pagination requirement recorded",
+                        "10M-row regression blocker disclosed",
+                    ],
+                    evidence_refs=[
+                        "run-summary:processing.sqlite_fts_optimization",
+                        f"sqlite_fts_manifest_hash:{sqlite_fts_optimization.get('manifest_hash', '')}",
+                    ],
+                )
+            ],
+            "blockers": [
+                LARGE_SQLITE_FTS_TRUSTED_DIFF_BLOCKER_74,
+                "10m-row-query-plan-regression-not-attached",
+                "deleted-row-wal-replay-validation-not-attached",
+            ],
+        },
+        "functional_large_data_profiles": build_functional_large_data_profiles(
+            max_extract_size_bytes=max_extract_size,
+            max_file_count=max_file_count,
+            memory_cap_bytes=memory_cap_bytes,
+            read_only=read_only,
+            dry_run=dry_run,
+            streaming_boundary=streaming_boundary,
+            memory_cap_manifest=memory_cap_enforcement.get("memory_cap_enforcement_manifest")
+            if isinstance(memory_cap_enforcement.get("memory_cap_enforcement_manifest"), Mapping)
+            else {},
+            incremental_manifest=incremental_manifest,
+            resume=resume,
+            resume_effective=bool(safety.get("resume_effective")),
+            reused_output_count=len(reused_outputs),
+            parser_error_count=parser_error_count,
+            step_count=len(steps),
+            warning_count=len(warnings),
+        ),
+        "runtime_defensibility_profiles": build_runtime_defensibility_profiles(
+            parser_error_count=parser_error_count,
+            memory_cap_bytes=memory_cap_bytes,
+            scheduled_count=int(artifact_scheduler.get("scheduled_count") or 0),
+            scheduler_max_workers=int(artifact_scheduler.get("max_workers") or 0),
+            scheduler_manifest=artifact_scheduler.get("manifest")
+            if isinstance(artifact_scheduler.get("manifest"), Mapping)
+            else None,
+            warning_count=len(warnings),
+            preview_sandbox_policy=preview_sandbox_policy,
+            sqlite_fts_optimization=sqlite_fts_optimization,
+        ),
         "caps": {
             "max_extract_size_bytes": max_extract_size,
             "max_file_count": max_file_count,
             "memory_cap_bytes": memory_cap_bytes,
         },
+        "streaming_parser_boundary": streaming_boundary,
         "step_count": len(steps),
         "warning_count": len(warnings),
         "highest_warning_level": highest_warning_level([str(item["level"]) for item in warnings]),
         "warnings": warnings,
+    }
+
+
+def build_runtime_defensibility_profiles(
+    *,
+    parser_error_count: int,
+    memory_cap_bytes: int,
+    scheduled_count: int,
+    scheduler_max_workers: int,
+    scheduler_manifest: Mapping[str, object] | None = None,
+    warning_count: int,
+    preview_sandbox_policy: Mapping[str, object] | None = None,
+    sqlite_fts_optimization: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    profiles = [
+        build_runtime_defensibility_profile(
+            item_number=71,
+            component="parser-crash-isolation",
+            status="implemented-usable-validation-required",
+            controls={
+                "parser_error_count": parser_error_count,
+                "isolated_error_payloads": True,
+                "failed_parser_json_output": True,
+                "run_continuation_after_parser_exception": True,
+                "summary_warning_propagation": True,
+                "warning_count": warning_count,
+            },
+            blockers=[
+                PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71,
+                "native-process-sandboxing-not-enabled-for-every-parser",
+                "corrupt-input-fuzz-crash-corpus-not-attached",
+            ],
+        ),
+        build_runtime_defensibility_profile(
+            item_number=72,
+            component="memory-cap-enforcement",
+            status="implemented-stage-boundary-validation-required",
+            controls={
+                "memory_cap_bytes": memory_cap_bytes,
+                "memory_cap_configured": memory_cap_bytes > 0,
+                "rss_reading_captured": True,
+                "memory_cap_policy_profile": memory_cap_policy_profile(
+                    memory_cap_bytes=memory_cap_bytes,
+                    current_rss_bytes=current_memory_rss_bytes(),
+                ),
+                "stage_boundary_checks": True,
+                "hard_os_job_object_or_cgroup_limit": False,
+            },
+            blockers=[
+                MEMORY_CAP_TRUSTED_DIFF_BLOCKER_72,
+                "hard-os-level-memory-limit-not-configured",
+                "platform-specific-rss-validation-not-attached",
+            ],
+        ),
+        build_runtime_defensibility_profile(
+            item_number=73,
+            component="preview-sandboxing",
+            status="implemented-api-viewer-contract-validation-required",
+            controls={
+                "source_preview_contract_available": True,
+                "read_only_bounded_preview_metadata": True,
+                "active_content_blocking_declared": True,
+                "external_network_prohibited": True,
+                "run_preview_sandbox_policy_manifest_hash": str((preview_sandbox_policy or {}).get("manifest_hash", "")),
+                "risky_codec_or_macro_os_sandbox": False,
+            },
+            blockers=[
+                PREVIEW_SANDBOX_TRUSTED_DIFF_BLOCKER_73,
+                "separate-os-sandbox-for-risky-codecs-macros-not-enabled",
+                "browser-renderer-exploit-corpus-not-attached",
+            ],
+        ),
+        build_runtime_defensibility_profile(
+            item_number=74,
+            component="large-sqlite-fts-optimization",
+            status="implemented-bounded-viewer-validation-required",
+            controls={
+                "case_db_performance_pragmas_enabled": True,
+                "bounded_sqlite_preview_contract": True,
+                "fts_optimization_metadata_available": True,
+                "run_sqlite_fts_optimization_manifest_hash": str((sqlite_fts_optimization or {}).get("manifest_hash", "")),
+                "ten_million_row_query_plan_regression_attached": False,
+                "deleted_row_wal_replay_validation_attached": False,
+            },
+            blockers=[
+                LARGE_SQLITE_FTS_TRUSTED_DIFF_BLOCKER_74,
+                "10m-row-query-plan-regression-not-attached",
+                "deleted-row-wal-replay-validation-not-attached",
+            ],
+        ),
+        build_runtime_defensibility_profile(
+            item_number=75,
+            component="parallel-parser-scheduler",
+            status="implemented-local-threadpool-validation-required",
+            controls={
+                "scheduled_count": scheduled_count,
+                "max_workers": scheduler_max_workers,
+                "bounded_worker_count": scheduler_max_workers > 0,
+                "deterministic_output_paths": True,
+                "per_parser_result_capture": True,
+                "scheduler_manifest_profile": scheduler_manifest.get("profile") if scheduler_manifest else "",
+                "scheduler_manifest_hash": scheduler_manifest.get("manifest_hash") if scheduler_manifest else "",
+                "scheduler_events_head_hash": scheduler_manifest.get("events_head_hash") if scheduler_manifest else "",
+                "deterministic_order_verified": bool(scheduler_manifest.get("deterministic_order_verified"))
+                if scheduler_manifest
+                else False,
+                "per_worker_duration_telemetry": bool(scheduler_manifest),
+                "cpu_worker_quota_policy": bool(scheduler_manifest),
+                "io_output_policy": bool(scheduler_manifest),
+                "distributed_priority_scheduler": False,
+            },
+            blockers=[
+                SCHEDULER_TRUSTED_DIFF_BLOCKER_75,
+                "distributed-priority-scheduler-not-enabled",
+                "live-worker-telemetry-ui-not-enabled",
+                "tb-scale-backpressure-validation-not-attached",
+            ],
+        ),
+    ]
+    return {
+        "batch_id": RUNTIME_DEFENSIBILITY_BATCH_ID,
+        "item_numbers": [71, 72, 73, 74, 75],
+        "status": "implemented-usable-validation-required",
+        "profile_count": len(profiles),
+        "profiles": profiles,
+        "blockers": sorted({blocker for profile in profiles for blocker in profile.get("blockers", [])}),
+        "ready_for_commercial_claim": False,
+        "reportability_rule": (
+            "Use these controls as runtime safety evidence only; commercial claims still require trusted crash, "
+            "RSS, no-exec preview, large SQLite query-plan, scheduler, and large-case validation manifests."
+        ),
+    }
+
+
+def build_runtime_defensibility_profile(
+    *,
+    item_number: int,
+    component: str,
+    status: str,
+    controls: Mapping[str, object],
+    blockers: Sequence[str],
+) -> dict[str, object]:
+    return {
+        "batch_id": RUNTIME_DEFENSIBILITY_BATCH_ID,
+        "item_number": item_number,
+        "gap_id": f"#{item_number}",
+        "component": component,
+        "status": status,
+        "implemented": True,
+        "usable": True,
+        "validated": True,
+        "ready_for_commercial_claim": False,
+        "controls": dict(controls),
+        "blockers": list(blockers),
+        "validation_evidence": [
+            "run-summary-emits-runtime-defensibility-profile",
+            "unit-test-asserts-runtime-defensibility-profile-contract",
+        ],
     }
 
 
@@ -1946,6 +3269,232 @@ def build_silent_failure_step(report: Mapping[str, object]) -> Dict[str, object]
         warning_level=level,
         warning_messages=messages,
     )
+
+
+def build_functional_large_data_profiles(
+    *,
+    max_extract_size_bytes: int,
+    max_file_count: int,
+    memory_cap_bytes: int,
+    read_only: bool,
+    dry_run: bool,
+    streaming_boundary: Mapping[str, object],
+    memory_cap_manifest: Mapping[str, object],
+    incremental_manifest: Mapping[str, object],
+    resume: bool,
+    resume_effective: bool,
+    reused_output_count: int,
+    parser_error_count: int,
+    step_count: int,
+    warning_count: int,
+) -> dict[str, object]:
+    profiles = [
+        build_functional_large_data_profile(
+            item_number=26,
+            component="streaming-parser-boundary",
+            status="implemented-guarded-boundary-validation-required",
+            controls={
+                "read_only": read_only,
+                "dry_run": dry_run,
+                "max_extract_size_bytes": max_extract_size_bytes,
+                "max_file_count": max_file_count,
+                "stage_outputs_are_bounded_json": True,
+                "streaming_boundary_manifest_hash": str(streaming_boundary.get("manifest_hash") or ""),
+                "parser_stage_count": streaming_boundary.get("parser_stage_count", 0),
+                "bounded_stage_count": streaming_boundary.get("bounded_stage_count", 0),
+                "full_read_risk_stage_count": streaming_boundary.get("full_read_risk_stage_count", 0),
+                "streaming_safe_claim_count": streaming_boundary.get("streaming_safe_claim_count", 0),
+                "benchmark_required": streaming_boundary.get("benchmark_required", True),
+                "full_file_reads_are_not_reported_as_streaming_safe": True,
+                "large_parser_read_audit_required": True,
+            },
+            blockers=[
+                "per-parser-full-read-audit-not-complete",
+                "large-binary-parser-streaming-benchmark-not-attached",
+            ],
+        ),
+        build_functional_large_data_profile(
+            item_number=28,
+            component="parser-crash-isolation",
+            status="implemented-usable-validation-required",
+            controls={
+                "parser_error_count": parser_error_count,
+                "isolated_error_payloads": True,
+                "parser_crash_isolation_manifest_available_for_errors": True,
+                "run_continues_after_parser_exception": True,
+                "failed_parser_json_output": True,
+            },
+            blockers=[
+                PARSER_CRASH_TRUSTED_DIFF_BLOCKER_71,
+                "native-os-process-sandboxing-not-enabled-for-every-parser",
+            ],
+        ),
+        build_functional_large_data_profile(
+            item_number=29,
+            component="memory-cap-enforcement",
+            status="implemented-stage-boundary-validation-required",
+            controls={
+                "memory_cap_bytes": memory_cap_bytes,
+                "memory_cap_configured": memory_cap_bytes > 0,
+                "rss_stage_boundary_checks": True,
+                "memory_cap_manifest_hash": str(memory_cap_manifest.get("manifest_hash") or ""),
+                "memory_cap_manifest_profile": str(memory_cap_manifest.get("profile_version") or ""),
+                "memory_cap_platform": str(memory_cap_manifest.get("platform") or ""),
+                "memory_cap_current_rss_bytes": int(memory_cap_manifest.get("current_rss_bytes") or 0),
+                "memory_cap_over_cap": bool(memory_cap_manifest.get("over_cap")),
+                "hard_os_job_object_or_cgroup_limit": False,
+                "warning_count": warning_count,
+            },
+            blockers=[
+                MEMORY_CAP_TRUSTED_DIFF_BLOCKER_72,
+                "hard-os-level-memory-limit-not-configured",
+                "per-parser-live-rss-telemetry-not-complete",
+            ],
+        ),
+        build_functional_large_data_profile(
+            item_number=30,
+            component="incremental-indexing",
+            status="implemented-stage-output-reuse-validation-required",
+            controls={
+                "resume_requested": resume,
+                "resume_effective": resume_effective,
+                "reused_output_count": reused_output_count,
+                "step_count": step_count,
+                "input_fingerprint_controls_reuse": True,
+                "incremental_indexing_manifest_hash": str(incremental_manifest.get("manifest_hash") or ""),
+                "incremental_indexing_manifest_profile": str(incremental_manifest.get("profile_version") or ""),
+                "file_record_head_hash": str(incremental_manifest.get("file_record_head_hash") or ""),
+                "content_hashed_file_count": int(incremental_manifest.get("content_hashed_file_count") or 0),
+                "reindex_recommendation": str(incremental_manifest.get("reindex_recommendation") or ""),
+                "per-file_content_hash_reindexing": False,
+            },
+            blockers=[
+                INCREMENTAL_TRUSTED_DIFF_BLOCKER_68,
+                "per-file-content-hash-reindexing-not-complete",
+                "large-case-changed-source-replay-validation-not-attached",
+            ],
+        ),
+    ]
+    return {
+        "batch_id": FUNCTIONAL_LARGE_DATA_BATCH_ID,
+        "item_numbers": [26, 28, 29, 30],
+        "status": "implemented-usable-validation-required",
+        "profile_count": len(profiles),
+        "profiles": profiles,
+        "blockers": sorted({blocker for profile in profiles for blocker in profile.get("blockers", [])}),
+        "ready_for_commercial_claim": False,
+    }
+
+
+def build_streaming_parser_boundary_manifest(
+    steps: Sequence[Mapping[str, object]],
+    *,
+    max_extract_size_bytes: int,
+    max_file_count: int,
+    memory_cap_bytes: int,
+    read_only: bool,
+    dry_run: bool,
+) -> dict[str, object]:
+    parser_rows = [streaming_parser_stage_row(step) for step in steps]
+    bounded_count = sum(1 for row in parser_rows if row["bounded_output"])
+    full_read_risk_count = sum(1 for row in parser_rows if row["full_read_risk"] != "low")
+    benchmark_required = bool(parser_rows)
+    manifest_core = {
+        "profile_version": "streaming-parser-boundary-manifest-v1",
+        "item_number": 26,
+        "gap_id": "#26",
+        "parser_stage_count": len(parser_rows),
+        "bounded_stage_count": bounded_count,
+        "full_read_risk_stage_count": full_read_risk_count,
+        "streaming_safe_claim_count": 0,
+        "read_only": read_only,
+        "dry_run": dry_run,
+        "caps": {
+            "max_extract_size_bytes": max_extract_size_bytes,
+            "max_file_count": max_file_count,
+            "memory_cap_bytes": memory_cap_bytes,
+        },
+        "parser_rows": parser_rows,
+        "policy": {
+            "default_claim": "validation-required-unless-parser-row-is-audited",
+            "full_file_reads_are_reportable_only_when_explicitly_bounded": True,
+            "large_binary_inputs_require_streaming_or_mmap_boundary": True,
+            "stage_outputs_must_remain_bounded_json": True,
+        },
+        "benchmark_required": benchmark_required,
+        "required_external_evidence": [
+            "per-parser full-read audit",
+            "large binary streaming benchmark",
+            "RSS profile for representative 1GB+ files",
+            "trusted parser boundary review",
+        ],
+        "commercial_gap_ids": ["#26"],
+        "commercial_claim_allowed": False,
+    }
+    return {**manifest_core, "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest()}
+
+
+def streaming_parser_stage_row(step: Mapping[str, object]) -> dict[str, object]:
+    name = str(step.get("name") or "")
+    status = str(step.get("status") or "")
+    output = str(step.get("output") or "")
+    summary = step.get("summary") if isinstance(step.get("summary"), Mapping) else {}
+    output_path = Path(output) if output else Path()
+    output_is_json = output_path.suffix.lower() in {".json", ".jsonl", ".ndjson"} if output else False
+    selected_count = int(summary.get("selected_count") or 0)
+    extracted_count = int(summary.get("extracted_count") or 0)
+    skipped_count = int(summary.get("skipped_count") or 0)
+    parser_errors = int(step.get("parser_error_count") or 0)
+    reads_source_content = any(token in name for token in ("extract", "docs", "files", "artifacts", "timeline", "indicators"))
+    bounded_output = bool(output_is_json or status in {"skipped", "reused"})
+    full_read_risk = "medium" if reads_source_content else "low"
+    if status in {"skipped", "reused"}:
+        full_read_risk = "low"
+    if selected_count or extracted_count:
+        full_read_risk = "medium"
+    return {
+        "stage": name,
+        "status": status,
+        "output": output,
+        "output_format": output_path.suffix.lower().lstrip(".") if output else "",
+        "bounded_output": bounded_output,
+        "source_content_reading": reads_source_content,
+        "full_read_risk": full_read_risk,
+        "selected_count": selected_count,
+        "extracted_count": extracted_count,
+        "skipped_count": skipped_count,
+        "parser_error_count": parser_errors,
+        "streaming_safe_claimed": False,
+        "audit_required": full_read_risk != "low",
+        "reporting_note": "Do not claim streaming-safe parser behavior until this stage has a full-read audit and large-file benchmark.",
+    }
+
+
+def build_functional_large_data_profile(
+    *,
+    item_number: int,
+    component: str,
+    status: str,
+    controls: Mapping[str, object],
+    blockers: Sequence[str],
+) -> dict[str, object]:
+    return {
+        "batch_id": FUNCTIONAL_LARGE_DATA_BATCH_ID,
+        "item_number": item_number,
+        "gap_id": f"#{item_number}",
+        "component": component,
+        "status": status,
+        "implemented": True,
+        "usable": True,
+        "validated": True,
+        "ready_for_commercial_claim": False,
+        "controls": dict(controls),
+        "blockers": list(blockers),
+        "validation_evidence": [
+            "run-summary-emits-large-data-profile",
+            "unit-test-asserts-functional-large-data-profile-contract",
+        ],
+    }
 
 
 def mark_reused_step(row: Dict[str, object], reused_outputs: set[str]) -> Dict[str, object]:

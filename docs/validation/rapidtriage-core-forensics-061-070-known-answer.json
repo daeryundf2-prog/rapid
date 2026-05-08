@@ -11,8 +11,8 @@
       "status": "pass",
       "backlog_items": [61],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_search_analysis.py"],
-      "expected": {"required_assertions": ["Search output preserves query mode/options, fuzzy/stem/regex support, proximity metadata, hit pointers, verification warnings, trusted query-hit diff status, and #61 core_accuracy_gates.", "Advanced search reportability decisions block source-proof claims until source rows are hash verified, regex/fuzzy/proximity false-positive review is documented, and a trusted query-hit manifest diff passes."]},
-      "notes": "Internal fixture pass; broad relevance/false-positive corpus and external trusted query-hit manifest remain commercial blockers."
+      "expected": {"required_assertions": ["Search output preserves query mode/options, fuzzy/stem/regex support, proximity metadata, hit pointers, advanced_search_profile query validation, regex validity warnings, web mode/fuzzy/proximity controls, verification warnings, trusted query-hit diff status, and #61 core_accuracy_gates.", "Advanced search reportability decisions block source-proof claims until source rows are hash verified, regex/fuzzy/proximity false-positive review is documented, and a trusted query-hit manifest diff passes."]},
+      "notes": "Internal fixture pass; broad relevance/false-positive corpus, full browser query-builder validation, and external trusted query-hit manifest remain commercial blockers."
     },
     {
       "id": "core-forensics-062-keyword-pack-fixture",
@@ -22,8 +22,8 @@
       "status": "pass",
       "backlog_items": [62],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_api.py", "tests/test_rapidtriage_search_analysis.py"],
-      "expected": {"required_assertions": ["Keyword-pack outputs preserve built-in inventory, custom JSON support, deduplicated expansion, pack provenance, trusted expansion diff status, case-specific warnings, and #62 core_accuracy_gates.", "Keyword-pack reportability decisions block release-reviewed pack claims until signed/versioned packs, case edits, language/domain corpus validation, and a trusted expansion manifest diff exist."]},
-      "notes": "Internal fixture pass; signed pack library, trusted pack manifest diff, and per-case editing UI remain blockers."
+      "expected": {"required_assertions": ["Keyword-pack outputs preserve built-in inventory, custom JSON support, deduplicated expansion, pack provenance, API search keyword_pack_selection_profile, web built-in pack selection controls, trusted expansion diff status, case-specific warnings, and #62 core_accuracy_gates.", "Keyword-pack reportability decisions block release-reviewed pack claims until signed/versioned packs, case edits, language/domain corpus validation, and a trusted expansion manifest diff exist."]},
+      "notes": "Internal fixture pass; signed pack library, trusted pack manifest diff, per-case editing UI, and language/domain corpus validation remain blockers."
     },
     {
       "id": "core-forensics-063-ioc-ti-fixture",
@@ -32,8 +32,8 @@
       "corpus_family": "core-forensics",
       "status": "pass",
       "backlog_items": [63],
-      "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_indicators.py"],
-      "expected": {"required_assertions": ["Indicator output preserves source links, local rule matches, offline feed provenance, match mode, local-only warning, trusted IOC/TI diff status, and #63 core_accuracy_gates.", "IOC/TI reportability decisions block live TI verdict claims until signed feed provenance, STIX/TAXII/provider validation, confidence decay, trusted enrichment diff, and API governance exist."]},
+      "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_indicators.py", "tests/test_rapidtriage_api.py"],
+      "expected": {"required_assertions": ["Indicator output preserves source links, local rule matches, offline feed provenance with feed hash/size, API/web local enrichment review package fields, match mode, local-only warning, trusted IOC/TI diff status, and #63 core_accuracy_gates.", "IOC/TI reportability decisions block live TI verdict claims until signed feed provenance, STIX/TAXII/provider validation, confidence decay, trusted enrichment diff, and API governance exist."]},
       "notes": "Internal fixture pass; signed/STIX/TAXII feed validation and trusted enrichment oracle remain blockers."
     },
     {
@@ -44,7 +44,7 @@
       "status": "pass",
       "backlog_items": [64],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Case DB report export preserves review/source citation IDs, source references, citation counts, report-use warnings, trusted citation-index diff status, and #64 core_accuracy_gates.", "Citation manager reportability decisions block court exhibit claims until review/source citations, source hashes, parser versions, exhibit numbering, trusted citation manifest diff, manifests, and reviewer sign-off exist."]},
+      "expected": {"required_assertions": ["Case DB report export preserves review/source citation IDs, copy-safe citation strings, source references, source-hash/parser-version coverage profile, citation counts, report-use warnings, trusted citation-index diff status, and #64 core_accuracy_gates.", "Citation manager reportability decisions block court exhibit claims until review/source citations, source hashes, parser versions, exhibit numbering, trusted citation manifest diff, manifests, and reviewer sign-off exist."]},
       "notes": "Internal fixture pass; exhibit numbering, trusted citation manifest diff, and jurisdiction-specific packaging remain blockers."
     },
     {
@@ -55,7 +55,7 @@
       "status": "pass",
       "backlog_items": [65],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["Review history preserves version rows, changed fields, previous/current state, report inclusion changes, multi-user warning, trusted history diff status, and #65 core_accuracy_gates.", "Evidence history reportability decisions block multi-user signed-history claims until immutable signed selection history, trusted history manifest diff, and conflict handling exist."]},
+      "expected": {"required_assertions": ["Review history preserves version rows, changed fields, previous/current state, report inclusion changes, per-row hashes, export-time history hash chain/head hash, multi-user warning, trusted history diff status, and #65 core_accuracy_gates.", "Evidence history reportability decisions block multi-user signed-history claims until immutable signed selection history, trusted history manifest diff, and conflict handling exist."]},
       "notes": "Internal fixture pass; signed multi-user append-only enforcement and trusted history oracle remain blockers."
     },
     {
@@ -66,7 +66,7 @@
       "status": "pass",
       "backlog_items": [66],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Benchmark output preserves scale matrix, ingest/search metrics, memory/output size, run-summary link, hardware-scale warning, trusted threshold diff status, #66 core_accuracy_gates, and #66 commercial_uplift_evidence.", "Benchmark reportability decisions block published scale-proof claims until hardware, OS, dependency, evidence-size, wall-time, memory, p95, trusted threshold manifest, and independent reproduction evidence exists."]},
+      "expected": {"required_assertions": ["Benchmark output preserves scale matrix, ingest/search metrics, raw latency samples, environment profile, release-threshold guardrail profile, memory/output size, run-summary link, hardware-scale warning, trusted threshold diff status, #66 core_accuracy_gates, and #66 commercial_uplift_evidence.", "Benchmark reportability decisions block published scale-proof claims until hardware, OS, dependency, evidence-size, wall-time, memory, p95, trusted threshold manifest, and independent reproduction evidence exists."]},
       "notes": "Internal fixture pass; published hardware matrix and trusted threshold manifest remain required."
     },
     {
@@ -77,7 +77,7 @@
       "status": "pass",
       "backlog_items": [67],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, real-hardware warning, trusted run-log diff status, #67 core_accuracy_gates, and #67 commercial_uplift_evidence.", "Stress-plan reportability decisions block executed TB-validation claims until actual 1TB-10TB hardware runs, trusted run-log manifests, bottleneck traces, and independent reproduction logs exist."]},
+      "expected": {"required_assertions": ["Stress-plan output preserves TB scenarios, resource caps, failure thresholds, evidence bundle requirements, per-scenario run-log templates, telemetry/evidence capture profile, real-hardware warning, trusted run-log diff status, #67 core_accuracy_gates, and #67 commercial_uplift_evidence.", "Stress-plan reportability decisions block executed TB-validation claims until actual 1TB-10TB hardware runs, trusted run-log manifests, bottleneck traces, and independent reproduction logs exist."]},
       "notes": "Internal fixture pass; actual 1TB-10TB hardware runs and trusted run-log manifests remain required."
     },
     {
@@ -88,8 +88,8 @@
       "status": "pass",
       "backlog_items": [68],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Run fingerprint output preserves fingerprint, path/size/mtime metadata, changed-source reuse behavior, truncation disclosure, trusted reuse diff status, limitation warning, #68 core_accuracy_gates, and #68 commercial_uplift_evidence.", "Incremental indexing reportability decisions block content-hash-complete claims until content-hash reuse, changed-source behavior, trusted reuse manifests, and large-case replay validation exists."]},
-      "notes": "Internal fixture pass; content-hash incremental reindexing and trusted reuse manifests remain blockers."
+      "expected": {"required_assertions": ["Run fingerprint output preserves fingerprint, path/size/mtime metadata, bounded per-file SHA-256 hashes, incremental reuse plan counts, changed-source reuse behavior, truncation disclosure, trusted reuse diff status, limitation warning, #68 core_accuracy_gates, and #68 commercial_uplift_evidence.", "Incremental indexing reportability decisions block content-hash-complete claims until full large-file delta reuse, row-level stage reuse, trusted reuse manifests, and large-case replay validation exist."]},
+      "notes": "Internal fixture pass; full large-file content-hash delta reindexing and trusted reuse manifests remain blockers."
     },
     {
       "id": "core-forensics-069-job-queue-fixture",
@@ -99,7 +99,7 @@
       "status": "pass",
       "backlog_items": [69],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_ops.py"],
-      "expected": {"required_assertions": ["Job payloads preserve status, step progress, state persistence, cancel/retry state, local-threadpool limitation, trusted transition-log diff status, #69 core_accuracy_gates, and #69 commercial_uplift_evidence.", "Job queue reportability decisions block distributed parser-scheduler claims until distributed worker, trusted transition logs, parser-level progress, resource telemetry, cancellation, and retry validation under load exists."]},
+      "expected": {"required_assertions": ["Job payloads preserve status, step progress, state persistence, append-intent transition logs, transition head hashes, cancel/retry state, local-threadpool limitation, trusted transition-log diff status, #69 core_accuracy_gates, and #69 commercial_uplift_evidence.", "Job queue reportability decisions block distributed parser-scheduler claims until distributed worker, externally trusted transition logs, parser-level progress, resource telemetry, cancellation, and retry validation under load exists."]},
       "notes": "Internal fixture pass; distributed workers, trusted transition logs, and parser-level progress telemetry remain blockers."
     },
     {
@@ -110,7 +110,7 @@
       "status": "pass",
       "backlog_items": [70],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Run checkpoint output preserves stage checkpoints, output path/size, reused flags, resume summary, partial-stage warning, trusted checkpoint diff status, #70 core_accuracy_gates, and #70 commercial_uplift_evidence.", "Checkpoint reportability decisions block mid-parser-complete resume claims until failed-stage and mid-parser resume are validated against trusted manifests across long-running corpora."]},
+      "expected": {"required_assertions": ["Run checkpoint output preserves stage checkpoints, output path/size, reused flags, row hashes, checkpoint integrity head hash, resume summary, partial-stage warning, trusted checkpoint diff status, #70 core_accuracy_gates, and #70 commercial_uplift_evidence.", "Checkpoint reportability decisions block mid-parser-complete resume claims until failed-stage and mid-parser resume are validated against trusted manifests across long-running corpora."]},
       "notes": "Internal fixture pass; mid-parser checkpointing, trusted checkpoint manifests, and failed-stage resume remain blockers."
     }
   ]

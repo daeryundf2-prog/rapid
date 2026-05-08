@@ -1,26 +1,36 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>rapidtriage</title>
+    <title>RapidForensic Analyst Console</title>
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
-    <main class="shell">
+    <a class="skip-link" href="#detailPanel">Skip to case workspace</a>
+    <main class="shell" data-testid="workbench-shell">
       <section class="run-panel" aria-label="Run triage">
         <div class="brand-row">
-          <div>
-            <p class="eyebrow">local forensic triage</p>
-            <h1>rapidtriage</h1>
+          <div class="brand-lockup">
+            <span class="brand-mark" aria-hidden="true">RF</span>
+            <div>
+              <p class="eyebrow">single-case forensic workspace</p>
+              <h1>RapidForensic</h1>
+              <p class="brand-subtitle">증거 입력부터 검색, 원본 확인, 리뷰 표시, 보고서 후보 정리까지 한 흐름으로 진행합니다.</p>
+            </div>
           </div>
           <span id="apiStatus" class="status-pill">checking</span>
         </div>
+        <div class="operator-badges" aria-label="Console strengths">
+          <span>Read-only first</span>
+          <span>Mass data aware</span>
+          <span>Review-ready</span>
+        </div>
         <ol class="quick-start" aria-label="Recommended workflow">
-          <li><strong>1. Add evidence</strong><span>Folder, mounted image, or E01.</span></li>
-          <li><strong>2. Run triage</strong><span>Keep read-only unless extracting is intended.</span></li>
-          <li><strong>3. Search hits</strong><span>Use presets or your own keywords.</span></li>
-          <li><strong>4. Review</strong><span>Classify hits and build the case board.</span></li>
+          <li><strong>1. 증거 선택</strong><span>폴더, 마운트 이미지, E01/파생 경로를 넣습니다.</span></li>
+          <li><strong>2. 빠른 분석</strong><span>대용량은 Fast first pass로 먼저 범위를 좁힙니다.</span></li>
+          <li><strong>3. 검색/뷰어</strong><span>전체 검색 후 원본 파일 안에서 다시 확인합니다.</span></li>
+          <li><strong>4. 리뷰/보고서</strong><span>relevant, excluded, report set을 명확히 남깁니다.</span></li>
         </ol>
         <section class="mode-help" aria-label="Mode selection help">
           <p class="eyebrow">if unsure</p>
@@ -36,17 +46,18 @@
           </ol>
         </section>
         <section class="quick-actions" aria-label="Convenience actions">
-          <button id="sampleRunButton" class="secondary-button" type="button">Run sample case</button>
-          <button id="doctorButton" class="secondary-button" type="button">Check runtime</button>
+          <button id="sampleRunButton" class="secondary-button" type="button" data-testid="sample-run-button">Run sample case</button>
+          <button id="doctorButton" class="secondary-button" type="button" data-testid="runtime-check-button">Check runtime</button>
+          <button id="crashReportsButton" class="secondary-button" type="button" data-testid="crash-reports-button">Crash reports</button>
         </section>
 
         <form id="runForm" class="run-form">
           <label>
             Evidence root or E01 image
-            <input id="rootInput" name="root" required placeholder="/cases/case-001 or /cases/case.E01" />
+            <input id="rootInput" name="root" required placeholder="/cases/case-001 or /cases/case.E01" data-testid="evidence-root-input" />
           </label>
           <div class="evidence-check-row">
-            <button id="evidenceCheckButton" class="secondary-button" type="button">Check evidence support</button>
+            <button id="evidenceCheckButton" class="secondary-button" type="button" data-testid="evidence-support-button">Check evidence support</button>
             <span id="evidenceCheckStatus" class="help-text">Folders scan directly; images usually need mounting/extraction first.</span>
           </div>
 
@@ -119,13 +130,18 @@
             </label>
           </div>
 
+          <label>
+            E01 partition start sector optional
+            <input id="e01PartitionStartSectorInput" name="e01PartitionStartSector" type="number" min="0" placeholder="auto: largest supported filesystem from mmls" />
+          </label>
+
           <div class="toggle-row">
             <label><input id="readOnlyInput" type="checkbox" checked /> Read-only</label>
             <label><input id="dryRunInput" type="checkbox" /> Dry run</label>
             <label><input id="overwriteInput" type="checkbox" /> Overwrite extracts</label>
           </div>
 
-          <button id="runButton" type="submit">Start run</button>
+          <button id="runButton" type="submit" data-testid="run-submit-button">Start run</button>
         </form>
 
         <form id="importForm" class="import-form">
@@ -143,11 +159,24 @@
 
       <section class="results-panel" aria-label="Run results">
         <div class="results-header">
-          <h2>Runs</h2>
-          <button id="refreshButton" type="button">Refresh</button>
+          <div>
+            <p class="eyebrow">case operations</p>
+            <h2>Analyst cockpit</h2>
+          </div>
+          <div class="results-actions">
+            <span class="results-mode-pill">single case</span>
+            <button id="refreshButton" type="button">Refresh</button>
+          </div>
         </div>
-        <div id="runList" class="run-list"></div>
-        <div id="detailPanel" class="detail-panel">
+        <div class="mission-strip" aria-label="Review workflow reminder">
+          <span><strong>1</strong> Ingest</span>
+          <span><strong>2</strong> Index</span>
+          <span><strong>3</strong> Search</span>
+          <span><strong>4</strong> Verify</span>
+          <span><strong>5</strong> Report</span>
+        </div>
+        <div id="runList" class="run-list" data-testid="run-list"></div>
+        <div id="detailPanel" class="detail-panel" data-testid="detail-panel">
           <p class="empty-state">Run a case to see summary, outputs, and timeline details here.</p>
         </div>
       </section>

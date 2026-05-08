@@ -96,6 +96,7 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
         self.assertIn("--keyword-pack", commands["case-search"].format_help())
         self.assertIn("case-review", commands)
         self.assertIn("--include-in-report", commands["case-review"].format_help())
+        self.assertIn("--exclude-from-report", commands["case-review"].format_help())
         self.assertIn("case-db-report", commands)
         self.assertIn("--include-all", commands["case-db-report"].format_help())
         self.assertIn("evidence", commands)
@@ -114,8 +115,28 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(second["schema_version"], SCHEMA_VERSION)
             self.assertTrue(REQUIRED_TABLES.issubset(set(second["tables"])))
             self.assertIn("#74", second["large_sqlite_fts_optimization"]["commercial_gap_ids"])
+            self.assertEqual(second["large_sqlite_fts_optimization"]["functional_priority_profile"]["item_number"], 32)
+            self.assertEqual(
+                second["large_sqlite_fts_optimization"]["functional_priority_profile"]["batch_id"],
+                "commercial-uplift-031-035",
+            )
+            self.assertTrue(
+                second["large_sqlite_fts_optimization"]["functional_priority_profile"]["controls"]["wal_when_supported"]
+            )
             self.assertEqual(second["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["gap_id"], "#74")
             self.assertIn("artifact_fts", second["large_sqlite_fts_optimization"]["fts_tables"])
+            self.assertEqual(
+                second["large_sqlite_fts_optimization"]["query_plan_profile"]["profile_version"],
+                "case-db-query-plan-profile-v1",
+            )
+            self.assertRegex(
+                second["large_sqlite_fts_optimization"]["query_plan_profile"]["plan_hash"],
+                r"^[0-9a-f]{64}$",
+            )
+            self.assertIn(
+                "case DB query plan profile emitted",
+                second["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertIn(
                 "trusted-case-db-sqlite-fts-query-plan-diff-missing",
                 second["large_sqlite_fts_optimization"]["blockers"],
@@ -182,6 +203,33 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertEqual(records[0]["write_blocker"], "Tableau TX1 SN WB-01 verified read-only")
             self.assertEqual(export["acquisition_metadata"]["status"], "metadata-recorded")
             self.assertEqual(export["summary"]["acquisition_metadata_missing_count"], 0)
+            self.assertEqual(
+                export["acquisition_metadata"]["acquisition_metadata_handoff_manifest"]["profile_version"],
+                "acquisition-metadata-handoff-manifest-v1",
+            )
+            self.assertEqual(len(export["acquisition_metadata"]["acquisition_metadata_handoff_manifest_hash"]), 64)
+            self.assertEqual(
+                export["acquisition_metadata"]["acquisition_field_completion_matrix"]["profile_version"],
+                "acquisition-field-completion-matrix-v1",
+            )
+            self.assertEqual(len(export["acquisition_metadata"]["acquisition_field_completion_matrix_hash"]), 64)
+            self.assertEqual(
+                export["acquisition_metadata"]["acquisition_field_completion_matrix_hash"],
+                export["acquisition_metadata"]["acquisition_metadata_handoff_manifest"]["field_completion_matrix_hash"],
+            )
+            self.assertEqual(
+                export["acquisition_metadata"]["acquisition_metadata_input_manifest"]["profile_version"],
+                "acquisition-metadata-input-manifest-v1",
+            )
+            self.assertEqual(export["acquisition_metadata"]["acquisition_metadata_input_manifest"]["item_number"], 41)
+            self.assertEqual(export["acquisition_metadata"]["acquisition_metadata_input_manifest"]["gap_id"], "#41")
+            self.assertEqual(len(export["acquisition_metadata"]["acquisition_metadata_input_manifest_hash"]), 64)
+            self.assertTrue(export["acquisition_metadata"]["acquisition_metadata_input_manifest"]["ready_for_submission"])
+            self.assertEqual(
+                export["acquisition_metadata"]["functional_priority_profile"]["implemented_controls"]["acquisition_metadata_input_manifest_hash"],
+                export["acquisition_metadata"]["acquisition_metadata_input_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(len(export["acquisition_metadata"]["records"][0]["acquisition_metadata_row_hash"]), 64)
 
     def test_create_case_rejects_duplicate_case_id(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -611,6 +659,16 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 sources=["documents"],
                 limit=20,
             )
+            self.assertIn("#51", unfiltered["review_workflow_summary"]["commercial_gap_ids"])
+            self.assertEqual(
+                unfiltered["review_workflow_summary"]["profile_version"],
+                "case-search-review-workflow-summary-v1",
+            )
+            self.assertGreaterEqual(unfiltered["review_workflow_summary"]["review_queue_count"], 1)
+            self.assertIn(
+                "assignment queue metadata emitted",
+                unfiltered["review_workflow_summary"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             document_match = unfiltered["matches"][0]
 
             review = database.mark_review(
@@ -661,6 +719,13 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertGreaterEqual(filtered["summary"]["match_count"], 1)
             self.assertEqual(filtered["options"]["sources"], ["documents"])
             self.assertEqual(filtered["options"]["verification_status"], "source_opened")
+            self.assertEqual(filtered["review_workflow_summary"]["filters"]["verification_status"], "source_opened")
+            self.assertEqual(filtered["review_workflow_summary"]["assigned_count"], 0)
+            self.assertGreaterEqual(filtered["review_workflow_summary"]["report_candidate_count"], 1)
+            self.assertIn(
+                "verification status filter applied",
+                filtered["review_workflow_summary"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertTrue(all(match["source"] == "documents" for match in filtered["matches"]))
             self.assertTrue(all(match["review"]["verification_status"] == "source_opened" for match in filtered["matches"]))
             self.assertEqual(filtered["matches"][0]["review"]["status"], "relevant")
@@ -766,6 +831,66 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertGreaterEqual(filtered_payload["summary"]["match_count"], 1)
             self.assertEqual(filtered_payload["matches"][0]["review"]["verification_status"], "source_opened")
 
+    def test_case_review_updates_preserve_report_selection_until_explicitly_changed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "case.db"
+            database = open_case_database(db_path)
+            database.create_case(case_id="CASE-PRESERVE")
+
+            created = database.mark_review(
+                case_id="CASE-PRESERVE",
+                target_type="artifact",
+                target_id="1",
+                status="relevant",
+                verification_status="source_opened",
+                tags=["credential"],
+                note="Initial review",
+                reviewer="analyst-a",
+                include_in_report=True,
+            )
+            updated = database.mark_review(
+                case_id="CASE-PRESERVE",
+                target_type="artifact",
+                target_id="1",
+                verification_status="verified",
+                include_in_report=None,
+                status=None,
+                tags=None,
+                note=None,
+                reviewer=None,
+            )
+
+            self.assertTrue(created["include_in_report"])
+            self.assertTrue(updated["include_in_report"])
+            self.assertEqual(updated["status"], "relevant")
+            self.assertEqual(updated["verification_status"], "verified")
+            self.assertEqual(updated["tags"], ["credential"])
+            self.assertEqual(updated["note"], "Initial review")
+            self.assertEqual(updated["reviewer"], "analyst-a")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "case-review",
+                        str(db_path),
+                        "--case-id",
+                        "CASE-PRESERVE",
+                        "--target-type",
+                        "artifact",
+                        "--target-id",
+                        "1",
+                        "--exclude-from-report",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            excluded = json.loads(stdout.getvalue())
+            self.assertFalse(excluded["include_in_report"])
+            self.assertEqual(excluded["status"], "relevant")
+            self.assertEqual(excluded["verification_status"], "verified")
+
     def test_saved_searches_and_batch_review_support_repeated_case_work(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -849,9 +974,114 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertTrue(all(item["target_citation_id"].startswith("CASE-75-") for item in export["items"]))
             self.assertTrue(all("source_reference" in item for item in export["items"]))
             self.assertGreaterEqual(export["summary"]["citation_count"], len(targets) * 2)
+            self.assertEqual(export["summary"]["functional_priority_gap_ids"], ["#21", "#22", "#23", "#24"])
+            self.assertEqual(export["summary"]["functional_priority_status"], "implemented-usable-validation-required")
+            self.assertEqual(export["functional_reporting_profiles"]["batch_id"], "commercial-uplift-021-025")
+            self.assertEqual(export["functional_reporting_profiles"]["item_numbers"], [21, 22, 23, 24])
+            self.assertFalse(export["functional_reporting_profiles"]["ready_for_commercial_claim"])
+            profile_by_number = {
+                profile["item_number"]: profile
+                for profile in export["functional_reporting_profiles"]["profiles"]
+            }
+            self.assertEqual(profile_by_number[21]["component"], "citation-manager-user-workflow")
+            self.assertGreaterEqual(profile_by_number[21]["controls"]["citation_index_count"], len(targets) * 2)
+            self.assertEqual(profile_by_number[22]["component"], "report-generation-user-workflow")
+            self.assertTrue(profile_by_number[22]["controls"]["json_case_export"])
+            self.assertTrue(profile_by_number[22]["controls"]["case_db_markdown_document"])
+            self.assertTrue(profile_by_number[22]["controls"]["case_db_report_manifest"])
+            self.assertTrue(profile_by_number[22]["controls"]["case_db_hash_bundle"])
+            self.assertEqual(len(profile_by_number[22]["controls"]["report_generation_manifest_hash"]), 64)
+            self.assertEqual(profile_by_number[23]["component"], "court-exhibit-package-readiness")
+            self.assertTrue(profile_by_number[23]["controls"]["court_exhibit_manifest"])
+            self.assertEqual(len(profile_by_number[23]["controls"]["court_exhibit_manifest_hash"]), 64)
+            self.assertEqual(len(profile_by_number[23]["controls"]["court_exhibit_package_hash"]), 64)
+            self.assertTrue(profile_by_number[23]["controls"]["external_signature_slot"])
+            self.assertFalse(profile_by_number[23]["controls"]["external_signature_attached"])
+            self.assertEqual(profile_by_number[24]["component"], "validation-warning-user-experience")
+            self.assertGreaterEqual(profile_by_number[24]["controls"]["validation_assessment_count"], len(targets))
+            self.assertEqual(profile_by_number[24]["controls"]["warning_display_profile_count"], len(export["items"]))
+            self.assertGreaterEqual(profile_by_number[24]["controls"]["validation_required_count"], 1)
+            self.assertGreaterEqual(profile_by_number[24]["controls"]["external_evidence_needed_count"], 1)
+            self.assertGreaterEqual(profile_by_number[24]["controls"]["report_grade_candidate_count"], 1)
+            self.assertTrue(all(item["functional_priority_gap_ids"] == ["#21", "#22", "#23", "#24"] for item in export["items"]))
+            self.assertTrue(all(item["warning_display_profile"]["item_number"] == 24 for item in export["items"]))
+            self.assertTrue(all(len(item["warning_display_profile"]["profile_hash"]) == 64 for item in export["items"]))
+            self.assertTrue(all("validation-required" in item["warning_display_profile"]["state_badges"] for item in export["items"]))
+            warning_summary = export["summary"]["warning_ux_summary"]
+            self.assertEqual(warning_summary["profile_count"], len(export["items"]))
+            self.assertGreaterEqual(warning_summary["validation_required_count"], 1)
+            self.assertEqual(export["summary"]["warning_ux_profile_count"], len(export["items"]))
+            self.assertTrue(all(item["report_citation_profile"]["item_number"] == 21 for item in export["items"]))
+            self.assertTrue(all(len(item["report_citation_profile"]["profile_hash"]) == 64 for item in export["items"]))
+            self.assertTrue(all(item["report_citation_profile"]["citation_pair_available"] for item in export["items"]))
+            self.assertTrue(all(item["report_citation_profile"]["source_path"] for item in export["items"]))
+            self.assertTrue(all(item["report_citation_profile"]["legal_limitation_status"] == "present" for item in export["items"]))
+            self.assertTrue(all("trusted-citation-index-diff-is-required-before-commercial-claim" in item["report_citation_profile"]["blockers"] for item in export["items"]))
+            citation_workflow_summary = export["summary"]["report_citation_profile_summary"]
+            self.assertEqual(citation_workflow_summary["item_number"], 21)
+            self.assertEqual(citation_workflow_summary["profile_count"], len(export["items"]))
+            self.assertGreaterEqual(citation_workflow_summary["ready_for_report_export_count"], 1)
+            self.assertGreaterEqual(citation_workflow_summary["legal_limitation_count"], len(export["items"]))
+            self.assertEqual(export["summary"]["report_citation_ready_count"], citation_workflow_summary["ready_for_report_export_count"])
+            self.assertEqual(export["summary"]["report_citation_blocker_count"], citation_workflow_summary["blocker_count"])
+            report_package = export["report_generation_package"]
+            self.assertEqual(report_package["manifest"]["profile_version"], "case-db-report-generation-manifest-v1")
+            self.assertEqual(report_package["manifest"]["item_number"], 22)
+            self.assertEqual(len(report_package["manifest"]["manifest_hash"]), 64)
+            self.assertEqual(len(report_package["hash_bundle_sha256"]), 64)
+            self.assertIn("# RapidForensic Case DB Report Export", report_package["markdown_document"])
+            self.assertIn("Report Candidates", report_package["markdown_document"])
+            self.assertEqual(report_package["manifest"]["hash_bundle_sha256"], report_package["hash_bundle_sha256"])
+            self.assertEqual(export["summary"]["report_generation_manifest_hash"], report_package["manifest"]["manifest_hash"])
+            self.assertEqual(export["summary"]["report_generation_hash_bundle_sha256"], report_package["hash_bundle_sha256"])
+            self.assertEqual(len(report_package["hash_bundle"]["item_row_hashes"]), len(export["items"]))
+            self.assertEqual(len(report_package["hash_bundle"]["citation_row_hashes"]), len(export["citation_index"]))
+            exhibit_package = export["court_exhibit_package"]
+            self.assertEqual(exhibit_package["manifest"]["profile_version"], "court-exhibit-package-manifest-v1")
+            self.assertEqual(exhibit_package["manifest"]["item_number"], 94)
+            self.assertEqual(exhibit_package["manifest"]["functional_item_number"], 23)
+            self.assertIn("#94", exhibit_package["commercial_gap_ids"])
+            self.assertEqual(exhibit_package["manifest"]["exhibit_count"], len(export["items"]))
+            self.assertEqual(len(exhibit_package["manifest"]["manifest_hash"]), 64)
+            self.assertEqual(len(exhibit_package["manifest"]["exhibit_readiness_matrix_hash"]), 64)
+            self.assertEqual(
+                exhibit_package["court_exhibit_readiness_matrix_hash"],
+                exhibit_package["manifest"]["exhibit_readiness_matrix_hash"],
+            )
+            self.assertEqual(
+                exhibit_package["court_exhibit_readiness_matrix"]["profile_version"],
+                "court-exhibit-readiness-matrix-v1",
+            )
+            self.assertEqual(len(exhibit_package["package_hash"]), 64)
+            self.assertEqual(export["summary"]["court_exhibit_manifest_hash"], exhibit_package["manifest"]["manifest_hash"])
+            self.assertEqual(export["summary"]["court_exhibit_package_hash"], exhibit_package["package_hash"])
+            self.assertEqual(export["summary"]["court_exhibit_count"], len(export["items"]))
+            self.assertTrue(exhibit_package["manifest"]["external_signature"]["slot_present"])
+            self.assertFalse(exhibit_package["ready_for_court_report"])
+            self.assertTrue(all(row["exhibit_id"].startswith("EXH-") for row in exhibit_package["exhibits"]))
+            self.assertTrue(all(len(row["exhibit_row_hash"]) == 64 for row in exhibit_package["exhibits"]))
+            self.assertTrue(all(row["review_citation_id"] for row in exhibit_package["exhibits"]))
+            self.assertTrue(all(row["source_citation_id"] for row in exhibit_package["exhibits"]))
+            self.assertEqual(profile_by_number[21]["controls"]["report_candidate_profile_count"], len(export["items"]))
+            self.assertEqual(
+                profile_by_number[21]["controls"]["ready_for_report_export_count"],
+                citation_workflow_summary["ready_for_report_export_count"],
+            )
+            self.assertGreaterEqual(profile_by_number[21]["controls"]["legal_limitation_count"], len(export["items"]))
             self.assertTrue(export["citation_index"])
             self.assertIn("#64", export["citation_index"][0]["commercial_gap_ids"])
+            self.assertTrue(all(item.get("copy_safe_citation") for item in export["citation_index"]))
+            source_citations = [item for item in export["citation_index"] if item["role"] == "source-record"]
+            self.assertTrue(source_citations)
+            self.assertTrue(all(item["source_hash_status"] in {"present", "missing"} for item in source_citations))
+            self.assertTrue(all(item["parser_version_status"] in {"present", "missing"} for item in source_citations))
             self.assertIn("#64", export["report_citation_manager"]["commercial_gap_ids"])
+            coverage = export["report_citation_manager"]["coverage_profile"]
+            self.assertEqual(coverage["profile_version"], "report-citation-coverage-profile-v1")
+            self.assertEqual(coverage["citation_count"], len(export["citation_index"]))
+            self.assertGreaterEqual(coverage["copy_safe_citation_count"], len(export["citation_index"]))
+            self.assertEqual(coverage["source_record_count"], len(source_citations))
+            self.assertIn("#64", coverage["commercial_gap_ids"])
             self.assertEqual(export["report_citation_manager"]["core_accuracy_gates"][0]["gap_id"], "#64")
             self.assertIn("citation count summary", export["report_citation_manager"]["core_accuracy_gates"][0]["satisfied_checks"])
             citation_uplift = export["report_citation_manager"]["commercial_uplift_evidence"]
@@ -874,12 +1104,23 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("trusted citation index diff pass", citation_gates[0]["satisfied_checks"])
             self.assertGreaterEqual(len(export["items"][0]["review_history"]), 1)
             self.assertIn("#65", export["items"][0]["review_history"][0]["commercial_gap_ids"])
+            self.assertEqual(len(export["items"][0]["review_history"][0]["row_hash"]), 64)
             self.assertEqual(export["items"][0]["review_history"][0]["core_accuracy_gates"][0]["gap_id"], "#65")
             self.assertIn("#65", export["evidence_selection_version_history"]["commercial_gap_ids"])
             self.assertEqual(export["evidence_selection_version_history"]["core_accuracy_gates"][0]["gap_id"], "#65")
+            integrity = export["evidence_selection_version_history"]["integrity_profile"]
+            self.assertEqual(integrity["profile_version"], "evidence-selection-history-integrity-profile-v1")
+            self.assertGreaterEqual(integrity["history_row_count"], len(targets))
+            self.assertGreaterEqual(integrity["row_hash_count"], len(targets))
+            self.assertEqual(len(integrity["head_hash"]), 64)
+            self.assertGreaterEqual(integrity["include_in_report_change_count"], 1)
+            self.assertTrue(integrity["tamper_evident_export_only"])
+            self.assertFalse(integrity["database_enforced_append_only"])
             history_uplift = export["evidence_selection_version_history"]["commercial_uplift_evidence"]
             self.assertEqual(history_uplift["item_numbers"], [65])
             self.assertIn("versioned review history rows", history_uplift["passed_validation_check_ids"])
+            self.assertGreaterEqual(history_uplift["large_data_controls"]["row_hash_count"], len(targets))
+            self.assertEqual(history_uplift["large_data_controls"]["history_head_hash"], integrity["head_hash"])
             self.assertIn("trusted-evidence-history-diff-is-required-before-commercial-claim", history_uplift["failed_validation_check_ids"])
             self.assertFalse(history_uplift["large_data_controls"]["multi_user_signed_history"])
             self.assertEqual(
@@ -899,21 +1140,86 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             self.assertIn("custody_workflow", export)
             self.assertGreaterEqual(export["custody_workflow"]["summary"]["evidence_source_count"], 1)
             self.assertIn("#86", export["custody_workflow"]["commercial_gap_ids"])
+            self.assertEqual(export["custody_workflow"]["functional_priority_profile"]["item_number"], 40)
+            self.assertEqual(export["custody_workflow"]["custody_event_manifest"]["profile_version"], "custody-event-manifest-v1")
+            self.assertEqual(len(export["custody_workflow"]["custody_event_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                export["custody_workflow"]["custody_manifest_hash"],
+                export["custody_workflow"]["custody_event_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(export["custody_workflow"]["custody_chain_manifest"]["profile_version"], "custody-chain-manifest-v1")
+            self.assertEqual(export["custody_workflow"]["custody_chain_manifest"]["item_number"], 40)
+            self.assertEqual(export["custody_workflow"]["custody_chain_manifest"]["gap_id"], "#40")
+            self.assertEqual(len(export["custody_workflow"]["custody_chain_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(len(export["custody_workflow"]["custody_chain_manifest"]["hash_chain_head"]), 64)
+            self.assertEqual(
+                export["custody_workflow"]["custody_completeness_matrix"]["profile_version"],
+                "custody-completeness-matrix-v1",
+            )
+            self.assertEqual(len(export["custody_workflow"]["custody_completeness_matrix_hash"]), 64)
+            self.assertEqual(
+                export["custody_workflow"]["custody_chain_manifest"]["custody_completeness_matrix_hash"],
+                export["custody_workflow"]["custody_completeness_matrix_hash"],
+            )
+            self.assertEqual(
+                export["custody_workflow"]["custody_chain_manifest_hash"],
+                export["custody_workflow"]["custody_chain_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                export["custody_workflow"]["functional_priority_profile"]["implemented_controls"]["custody_chain_manifest_hash"],
+                export["custody_workflow"]["custody_chain_manifest"]["manifest_hash"],
+            )
+            self.assertTrue(all(len(item["custody_row_hash"]) == 64 for item in export["custody_workflow"]["evidence_sources"]))
+            self.assertTrue(all(len(item["custody_row_hash"]) == 64 for item in export["custody_workflow"]["custody_events"]))
+            self.assertIn(
+                "trusted-custody-event-manifest-diff-missing",
+                export["custody_workflow"]["functional_priority_profile"]["failed_validation_check_ids"],
+            )
             self.assertEqual(export["custody_workflow"]["core_accuracy_gates"][0]["gap_id"], "#86")
             self.assertIn("evidence source inventory", export["custody_workflow"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("custody row hashes emitted", export["custody_workflow"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("custody event manifest hash emitted", export["custody_workflow"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("custody chain manifest hash emitted", export["custody_workflow"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("custody completeness matrix hash emitted", export["custody_workflow"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertEqual(export["custody_workflow"]["trusted_custody_diff"]["status"], "missing")
             self.assertIn("trusted-custody-event-manifest-diff-missing", export["custody_workflow"]["blockers"])
             custody_diff = build_custody_workflow_trusted_diff(export["custody_workflow"], export["custody_workflow"])
             custody_gates = custody_workflow_core_accuracy_gates(
                 evidence_sources=export["custody_workflow"]["evidence_sources"],
                 custody_events=export["custody_workflow"]["custody_events"],
+                custody_event_manifest=export["custody_workflow"]["custody_event_manifest"],
                 trusted_diff=custody_diff,
             )
             self.assertEqual(custody_diff["status"], "pass")
+            self.assertIn("manifest_hash", custody_diff["compared_fields"])
             self.assertIn("trusted custody event manifest diff pass", custody_gates[0]["satisfied_checks"])
             self.assertIn("acquisition_hash_workflow", export)
             self.assertIn("#87", export["acquisition_hash_workflow"]["commercial_gap_ids"])
+            self.assertEqual(
+                export["acquisition_hash_workflow"]["acquisition_hash_manifest"]["profile_version"],
+                "acquisition-hash-manifest-v1",
+            )
+            self.assertEqual(
+                len(export["acquisition_hash_workflow"]["acquisition_hash_manifest"]["manifest_hash"]),
+                64,
+            )
+            self.assertTrue(
+                all(len(item["acquisition_hash_row_hash"]) == 64 for item in export["acquisition_hash_workflow"]["hashes"])
+            )
+            self.assertEqual(export["acquisition_hash_workflow"]["functional_priority_profile"]["item_number"], 87)
+            self.assertIn(
+                "trusted-acquisition-hash-manifest-diff-missing",
+                export["acquisition_hash_workflow"]["functional_priority_profile"]["failed_validation_check_ids"],
+            )
             self.assertEqual(export["acquisition_hash_workflow"]["core_accuracy_gates"][0]["gap_id"], "#87")
+            self.assertIn(
+                "acquisition hash row hashes emitted",
+                export["acquisition_hash_workflow"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "acquisition hash manifest hash emitted",
+                export["acquisition_hash_workflow"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(export["acquisition_hash_workflow"]["trusted_acquisition_hash_diff"]["status"], "missing")
             self.assertIn("trusted-acquisition-hash-manifest-diff-missing", export["acquisition_hash_workflow"]["blockers"])
             hash_diff = build_acquisition_hash_trusted_diff(
@@ -922,29 +1228,123 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             )
             hash_gates = acquisition_hash_core_accuracy_gates(
                 hashes=export["acquisition_hash_workflow"]["hashes"],
+                acquisition_hash_manifest=export["acquisition_hash_workflow"]["acquisition_hash_manifest"],
                 trusted_diff=hash_diff,
             )
             self.assertEqual(hash_diff["status"], "pass")
+            self.assertIn("manifest_hash", hash_diff["compared_fields"])
+            self.assertIn("hash_inventory_matrix_hash", hash_diff["compared_fields"])
             self.assertIn("trusted acquisition hash manifest diff pass", hash_gates[0]["satisfied_checks"])
+            self.assertEqual(
+                export["acquisition_hash_workflow"]["acquisition_hash_manifest"]["hash_inventory_matrix"]["profile_version"],
+                "acquisition-hash-inventory-matrix-v1",
+            )
+            self.assertEqual(len(export["acquisition_hash_workflow"]["acquisition_hash_manifest"]["hash_inventory_matrix_hash"]), 64)
+            self.assertIn(
+                "acquisition hash inventory matrix emitted",
+                export["acquisition_hash_workflow"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertIn("audit_integrity", export)
             self.assertIn("#88", export["audit_integrity"]["commercial_gap_ids"])
+            self.assertEqual(
+                export["audit_integrity"]["audit_hash_chain_manifest"]["profile_version"],
+                "audit-hash-chain-manifest-v1",
+            )
+            self.assertEqual(len(export["audit_integrity"]["audit_hash_chain_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                export["audit_integrity"]["audit_hash_chain_manifest"]["actor_action_matrix"]["profile_version"],
+                "audit-actor-action-matrix-v1",
+            )
+            self.assertEqual(len(export["audit_integrity"]["audit_hash_chain_manifest"]["actor_action_matrix_hash"]), 64)
+            self.assertEqual(
+                export["audit_integrity"]["audit_replay_manifest"]["profile_version"],
+                "audit-replay-manifest-v1",
+            )
+            self.assertEqual(export["audit_integrity"]["audit_replay_manifest"]["item_number"], 44)
+            self.assertEqual(export["audit_integrity"]["audit_replay_manifest"]["gap_id"], "#44")
+            self.assertEqual(len(export["audit_integrity"]["audit_replay_manifest_hash"]), 64)
+            self.assertTrue(export["audit_integrity"]["audit_replay_manifest"]["chain_valid"])
+            self.assertEqual(len(export["audit_integrity"]["audit_replay_manifest"]["replay_matrix_hash"]), 64)
+            self.assertEqual(export["audit_integrity"]["functional_priority_profile"]["item_number"], 44)
+            self.assertTrue(export["audit_integrity"]["functional_priority_profile"]["implemented_controls"]["head_hash_present"])
+            self.assertEqual(
+                len(export["audit_integrity"]["functional_priority_profile"]["implemented_controls"]["audit_chain_manifest_hash"]),
+                64,
+            )
+            self.assertEqual(
+                export["audit_integrity"]["functional_priority_profile"]["implemented_controls"]["audit_replay_manifest_hash"],
+                export["audit_integrity"]["audit_replay_manifest"]["manifest_hash"],
+            )
+            self.assertIn(
+                "trusted-audit-hash-chain-manifest-diff-missing",
+                export["audit_integrity"]["functional_priority_profile"]["failed_validation_check_ids"],
+            )
             self.assertEqual(export["audit_integrity"]["core_accuracy_gates"][0]["gap_id"], "#88")
+            self.assertIn(
+                "audit hash-chain manifest hash emitted",
+                export["audit_integrity"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertGreaterEqual(export["audit_integrity"]["summary"]["event_count"], 1)
             self.assertTrue(export["audit_integrity"]["summary"]["head_hash"])
+            self.assertEqual(
+                export["audit_integrity"]["summary"]["audit_chain_manifest_hash"],
+                export["audit_integrity"]["audit_hash_chain_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                export["audit_integrity"]["summary"]["audit_replay_manifest_hash"],
+                export["audit_integrity"]["audit_replay_manifest"]["manifest_hash"],
+            )
             self.assertEqual(export["audit_integrity"]["trusted_audit_integrity_diff"]["status"], "missing")
             self.assertIn("trusted-audit-hash-chain-manifest-diff-missing", export["audit_integrity"]["blockers"])
             audit_diff = build_immutable_audit_trusted_diff(export["audit_integrity"], export["audit_integrity"])
             audit_gates = immutable_audit_core_accuracy_gates(
                 events=export["audit_integrity"]["events"],
                 head_hash=export["audit_integrity"]["summary"]["head_hash"],
+                audit_hash_chain_manifest=export["audit_integrity"]["audit_hash_chain_manifest"],
+                audit_replay_manifest=export["audit_integrity"]["audit_replay_manifest"],
                 trusted_diff=audit_diff,
             )
             self.assertEqual(audit_diff["status"], "pass")
+            self.assertIn("manifest_hash", audit_diff["compared_fields"])
+            self.assertIn("actor_action_matrix_hash", audit_diff["compared_fields"])
+            self.assertIn("audit_replay_manifest_hash", audit_diff["compared_fields"])
+            self.assertIn("replay_matrix_hash", audit_diff["compared_fields"])
+            self.assertIn("audit actor/action matrix hash emitted", audit_gates[0]["satisfied_checks"])
+            self.assertIn("audit replay manifest hash emitted", audit_gates[0]["satisfied_checks"])
+            self.assertIn("audit replay matrix hash emitted", audit_gates[0]["satisfied_checks"])
+            self.assertIn("audit replay chain validation pass", audit_gates[0]["satisfied_checks"])
             self.assertIn("trusted audit hash-chain manifest diff pass", audit_gates[0]["satisfied_checks"])
             self.assertIn("reproducibility", export)
             self.assertIn("#89", export["reproducibility"]["commercial_gap_ids"])
             self.assertEqual(export["reproducibility"]["core_accuracy_gates"][0]["gap_id"], "#89")
             self.assertTrue(export["reproducibility"]["stable_payload_sha256"])
+            self.assertEqual(
+                export["reproducibility"]["report_replay_manifest"]["profile_version"],
+                "report-replay-manifest-v1",
+            )
+            self.assertEqual(len(export["reproducibility"]["report_replay_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                export["reproducibility"]["report_replay_manifest_hash"],
+                export["reproducibility"]["report_replay_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                len(export["reproducibility"]["report_replay_manifest"]["item_row_hashes"]),
+                export["reproducibility"]["stable_item_count"],
+            )
+            self.assertEqual(
+                len(export["reproducibility"]["report_replay_manifest"]["citation_row_hashes"]),
+                export["reproducibility"]["citation_count"],
+            )
+            self.assertEqual(len(export["reproducibility"]["report_replay_manifest"]["row_hash_set_hash"]), 64)
+            self.assertEqual(len(export["reproducibility"]["report_replay_manifest"]["replay_contract_hash"]), 64)
+            self.assertIn(
+                "report replay manifest hash emitted",
+                export["reproducibility"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "item/citation row hashes emitted",
+                export["reproducibility"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(export["reproducibility"]["trusted_reproducibility_diff"]["status"], "missing")
             self.assertIn("trusted-report-replay-manifest-diff-missing", export["reproducibility"]["blockers"])
             reproducibility_diff = build_report_reproducibility_trusted_diff(
@@ -955,13 +1355,27 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 stable_hash=export["reproducibility"]["stable_payload_sha256"],
                 item_count=export["reproducibility"]["stable_item_count"],
                 citation_count=export["reproducibility"]["citation_count"],
+                report_replay_manifest=export["reproducibility"]["report_replay_manifest"],
                 trusted_diff=reproducibility_diff,
             )
             self.assertEqual(reproducibility_diff["status"], "pass")
+            self.assertIn("manifest_hash", reproducibility_diff["compared_fields"])
+            self.assertIn("row_hash_set_hash", reproducibility_diff["compared_fields"])
+            self.assertIn("replay_contract_hash", reproducibility_diff["compared_fields"])
+            self.assertIn("row hash set hash emitted", reproducibility_gates[0]["satisfied_checks"])
+            self.assertIn("replay contract hash emitted", reproducibility_gates[0]["satisfied_checks"])
             self.assertIn("trusted report replay manifest diff pass", reproducibility_gates[0]["satisfied_checks"])
             self.assertTrue(all("provenance" in item for item in export["items"]))
             self.assertTrue(all("#90" in item["provenance"]["commercial_gap_ids"] for item in export["items"]))
             self.assertTrue(all(item["provenance"]["core_accuracy_gates"][0]["gap_id"] == "#90" for item in export["items"]))
+            self.assertTrue(all(len(item["provenance"]["provenance_row_hash"]) == 64 for item in export["items"]))
+            self.assertTrue(all(item["provenance"]["provenance_manifest"]["profile_version"] == "report-provenance-row-manifest-v1" for item in export["items"]))
+            self.assertTrue(all(len(item["provenance"]["provenance_manifest_hash"]) == 64 for item in export["items"]))
+            self.assertTrue(all(len(item["provenance"]["provenance_manifest"]["field_presence_hash"]) == 64 for item in export["items"]))
+            self.assertTrue(all(item["provenance"]["provenance_manifest"]["completeness_score"] > 0 for item in export["items"]))
+            self.assertTrue(all("provenance row hash emitted" in item["provenance"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
+            self.assertTrue(all("provenance manifest hash emitted" in item["provenance"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
+            self.assertTrue(all("provenance field-presence hash emitted" in item["provenance"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all(item["provenance"]["trusted_provenance_diff"]["status"] == "missing" for item in export["items"]))
             self.assertTrue(all("trusted-report-provenance-manifest-diff-missing" in item["provenance"]["blockers"] for item in export["items"]))
             self.assertIn("#90", export["summary"]["forensic_integrity_gap_ids"])
@@ -979,17 +1393,48 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 source_index=provenance_rows[0]["source_index"],
                 review_status=provenance_rows[0]["review_status"],
                 reportability=provenance_rows[0]["reportability"],
+                provenance_manifest=provenance_rows[0]["provenance_manifest"],
                 trusted_diff=provenance_diff,
             )
             self.assertEqual(provenance_diff["status"], "pass")
+            self.assertIn("manifest_hash", provenance_diff["compared_fields"])
+            self.assertIn("field_presence_hash", provenance_diff["compared_fields"])
+            self.assertIn("completeness_score", provenance_diff["compared_fields"])
             self.assertIn("trusted report provenance manifest diff pass", provenance_gate[0]["satisfied_checks"])
+            self.assertEqual(export["forensic_integrity_matrix"]["profile_version"], "forensic-integrity-matrix-v1")
+            self.assertEqual(export["forensic_integrity_matrix"]["item_numbers"], [86, 87, 88, 89, 90])
+            self.assertEqual(len(export["forensic_integrity_matrix"]["matrix_hash"]), 64)
+            self.assertEqual(
+                export["summary"]["forensic_integrity_matrix_hash"],
+                export["forensic_integrity_matrix"]["matrix_hash"],
+            )
+            self.assertTrue(export["forensic_integrity_matrix"]["all_primary_hashes_present"])
             self.assertTrue(all("validation_assessment" in item for item in export["items"]))
             self.assertTrue(all("#91" in item["validation_assessment"]["commercial_gap_ids"] for item in export["items"]))
             self.assertTrue(all("#92" in item["validation_assessment"]["commercial_gap_ids"] for item in export["items"]))
             self.assertTrue(all(item["validation_assessment"]["core_accuracy_gates"][0]["gap_id"] == "#91" for item in export["items"]))
             self.assertTrue(all(item["validation_assessment"]["core_accuracy_gates"][1]["gap_id"] == "#92" for item in export["items"]))
+            self.assertTrue(all(item["validation_assessment"]["parser_confidence_calibration_manifest"]["profile_version"] == "parser-confidence-calibration-manifest-v1" for item in export["items"]))
+            self.assertTrue(all(len(item["validation_assessment"]["parser_confidence_manifest_hash"]) == 64 for item in export["items"]))
+            self.assertTrue(all(len(item["validation_assessment"]["calibration_field_presence_hash"]) == 64 for item in export["items"]))
+            self.assertTrue(all(item["validation_assessment"]["confidence_band"] for item in export["items"]))
+            self.assertTrue(all(isinstance(item["validation_assessment"]["reportability_score"], int) for item in export["items"]))
+            self.assertTrue(all("confidence band assigned" in item["validation_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
+            self.assertTrue(all("reportability score emitted" in item["validation_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
+            self.assertTrue(all("parser confidence calibration manifest hash emitted" in item["validation_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
+            self.assertTrue(all("parser confidence field-presence hash emitted" in item["validation_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all(item["validation_assessment"]["trusted_parser_confidence_diff"]["status"] == "missing" for item in export["items"]))
             self.assertTrue(all(item["validation_assessment"]["trusted_validation_warning_diff"]["status"] == "missing" for item in export["items"]))
+            self.assertTrue(all(item["validation_assessment"]["validation_warning_checklist_manifest"]["profile_version"] == "validation-warning-checklist-manifest-v1" for item in export["items"]))
+            self.assertTrue(all(len(item["validation_assessment"]["validation_warning_manifest_hash"]) == 64 for item in export["items"]))
+            self.assertTrue(all(len(item["validation_assessment"]["warning_action_matrix_hash"]) == 64 for item in export["items"]))
+            self.assertTrue(all(isinstance(item["validation_assessment"]["warning_details"], list) for item in export["items"]))
+            self.assertTrue(all(isinstance(item["validation_assessment"]["warning_severity_counts"], dict) for item in export["items"]))
+            self.assertTrue(all(isinstance(item["validation_assessment"]["warning_ux_badges"], list) for item in export["items"]))
+            self.assertTrue(all("warning detail metadata emitted" in item["validation_assessment"]["core_accuracy_gates"][1]["satisfied_checks"] for item in export["items"] if item["validation_assessment"]["warnings"]))
+            self.assertTrue(all("warning UX badges emitted" in item["validation_assessment"]["core_accuracy_gates"][1]["satisfied_checks"] for item in export["items"] if item["validation_assessment"]["warnings"]))
+            self.assertTrue(all("validation warning checklist manifest hash emitted" in item["validation_assessment"]["core_accuracy_gates"][1]["satisfied_checks"] for item in export["items"]))
+            self.assertTrue(all("warning action matrix hash emitted" in item["validation_assessment"]["core_accuracy_gates"][1]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all("trusted-parser-confidence-calibration-diff-missing" in item["validation_assessment"]["blockers"] for item in export["items"]))
             self.assertTrue(all("trusted-validation-warning-checklist-diff-missing" in item["validation_assessment"]["blockers"] for item in export["items"]))
             validation_assessment = export["items"][0]["validation_assessment"]
@@ -1001,41 +1446,90 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 coverage_status=validation_assessment["coverage_status"],
                 warnings=validation_assessment["warnings"],
                 evidence_strength=export["items"][0]["provenance"]["evidence_strength"],
+                confidence_manifest=validation_assessment["parser_confidence_calibration_manifest"],
                 trusted_diff=confidence_diff,
             )
             warning_gate = validation_warning_ux_core_accuracy_gates(
                 warnings=validation_assessment["warnings"],
+                warning_manifest=validation_assessment["validation_warning_checklist_manifest"],
                 trusted_diff=warning_diff,
             )
             self.assertEqual(confidence_diff["status"], "pass")
+            self.assertIn("parser_confidence_manifest_hash", confidence_diff["compared_fields"])
+            self.assertIn("calibration_field_presence_hash", confidence_diff["compared_fields"])
             self.assertIn("trusted parser confidence calibration diff pass", confidence_gate[0]["satisfied_checks"])
             self.assertEqual(warning_diff["status"], "pass")
+            self.assertIn("validation_warning_manifest_hash", warning_diff["compared_fields"])
+            self.assertIn("warning_action_matrix_hash", warning_diff["compared_fields"])
             self.assertIn("trusted validation warning checklist diff pass", warning_gate[0]["satisfied_checks"])
             self.assertGreaterEqual(export["summary"]["validation_warning_count"], 0)
             self.assertTrue(all(item["legal_limitations"] for item in export["items"]))
             self.assertTrue(all("#93" in item["legal_limitations_assessment"]["commercial_gap_ids"] for item in export["items"]))
             self.assertTrue(all(item["legal_limitations_assessment"]["core_accuracy_gates"][0]["gap_id"] == "#93" for item in export["items"]))
+            self.assertTrue(all(item["legal_limitations_assessment"]["legal_limitation_manifest"]["profile_version"] == "legal-limitation-wording-manifest-v1" for item in export["items"]))
+            self.assertTrue(all(len(item["legal_limitations_assessment"]["legal_limitation_manifest_hash"]) == 64 for item in export["items"]))
+            self.assertTrue(all(len(item["legal_limitations_assessment"]["limitation_wording_matrix_hash"]) == 64 for item in export["items"]))
+            self.assertTrue(all(isinstance(item["legal_limitations_assessment"]["limitation_details"], list) for item in export["items"]))
+            self.assertTrue(all(isinstance(item["legal_limitations_assessment"]["limitation_category_counts"], dict) for item in export["items"]))
+            self.assertTrue(all("legal limitation detail metadata emitted" in item["legal_limitations_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
+            self.assertTrue(all("legal limitation wording manifest hash emitted" in item["legal_limitations_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
+            self.assertTrue(all("limitation wording matrix hash emitted" in item["legal_limitations_assessment"]["core_accuracy_gates"][0]["satisfied_checks"] for item in export["items"]))
             self.assertTrue(all(item["legal_limitations_assessment"]["trusted_legal_limitation_diff"]["status"] == "missing" for item in export["items"]))
             self.assertTrue(all("trusted-legal-limitation-wording-diff-missing" in item["legal_limitations_assessment"]["blockers"] for item in export["items"]))
             legal_assessment = export["items"][0]["legal_limitations_assessment"]
             legal_diff = build_legal_limitation_trusted_diff(legal_assessment, legal_assessment)
             legal_gate = legal_limitation_core_accuracy_gates(
                 limitations=export["items"][0]["legal_limitations"],
+                limitation_manifest=legal_assessment["legal_limitation_manifest"],
                 trusted_diff=legal_diff,
             )
             self.assertEqual(legal_diff["status"], "pass")
+            self.assertIn("legal_limitation_manifest_hash", legal_diff["compared_fields"])
+            self.assertIn("limitation_wording_matrix_hash", legal_diff["compared_fields"])
             self.assertIn("trusted legal limitation wording diff pass", legal_gate[0]["satisfied_checks"])
             self.assertIn("#91", export["summary"]["parser_confidence_gap_ids"])
             self.assertIn("#92", export["summary"]["validation_warning_ux_gap_ids"])
             self.assertIn("#93", export["summary"]["legal_limitation_gap_ids"])
+            self.assertIn("#94", export["summary"]["report_quality_gap_ids"])
+            self.assertEqual(export["report_quality_matrix"]["profile_version"], "report-quality-matrix-v1")
+            self.assertEqual(export["report_quality_matrix"]["item_numbers"], [91, 92, 93, 94])
+            self.assertEqual(len(export["report_quality_matrix"]["matrix_hash"]), 64)
+            self.assertEqual(export["summary"]["report_quality_matrix_hash"], export["report_quality_matrix"]["matrix_hash"])
+            self.assertTrue(export["report_quality_matrix"]["all_item_manifests_present"])
             self.assertIn("acquisition_metadata", export)
             self.assertGreaterEqual(export["summary"]["acquisition_metadata_missing_count"], 1)
             self.assertIn("#96", export["summary"]["forensic_integrity_gap_ids"])
             self.assertIn("#96", export["summary"]["acquisition_metadata_gap_ids"])
             self.assertIn("#96", export["acquisition_metadata"]["commercial_gap_ids"])
+            self.assertEqual(export["acquisition_metadata"]["functional_priority_profile"]["item_number"], 41)
+            self.assertIn(
+                "acquisition-required-fields-missing",
+                export["acquisition_metadata"]["functional_priority_profile"]["failed_validation_check_ids"],
+            )
             self.assertIn("#96", export["acquisition_metadata"]["validation_assessment"]["commercial_gap_ids"])
             self.assertEqual(export["acquisition_metadata"]["validation_assessment"]["core_accuracy_gates"][0]["gap_id"], "#96")
             self.assertEqual(export["acquisition_metadata"]["trusted_acquisition_metadata_diff"]["status"], "missing")
+            self.assertEqual(
+                export["acquisition_metadata"]["acquisition_metadata_handoff_manifest"]["profile_version"],
+                "acquisition-metadata-handoff-manifest-v1",
+            )
+            self.assertEqual(len(export["acquisition_metadata"]["acquisition_metadata_handoff_manifest_hash"]), 64)
+            self.assertEqual(
+                export["acquisition_metadata"]["acquisition_metadata_input_manifest"]["profile_version"],
+                "acquisition-metadata-input-manifest-v1",
+            )
+            self.assertEqual(len(export["acquisition_metadata"]["acquisition_metadata_input_manifest_hash"]), 64)
+            self.assertFalse(export["acquisition_metadata"]["acquisition_metadata_input_manifest"]["ready_for_submission"])
+            self.assertIn(
+                "write_blocker",
+                export["acquisition_metadata"]["acquisition_metadata_input_manifest"]["missing_required_fields"],
+            )
+            self.assertTrue(
+                all(
+                    len(source["acquisition_evidence_source_row_hash"]) == 64
+                    for source in export["acquisition_metadata"]["evidence_sources"]
+                )
+            )
             self.assertIn("trusted-acquisition-metadata-handoff-diff-missing", export["acquisition_metadata"]["blockers"])
             acquisition_diff = build_acquisition_metadata_trusted_diff(
                 export["acquisition_metadata"],
@@ -1044,32 +1538,94 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             acquisition_gates = acquisition_metadata_core_accuracy_gates(
                 records=export["acquisition_metadata"]["records"],
                 missing_required_fields=export["acquisition_metadata"]["missing_required_fields"],
+                handoff_manifest=export["acquisition_metadata"]["acquisition_metadata_handoff_manifest"],
+                input_manifest=export["acquisition_metadata"]["acquisition_metadata_input_manifest"],
                 trusted_diff=acquisition_diff,
             )
             self.assertEqual(acquisition_diff["status"], "pass")
+            self.assertIn("acquisition_metadata_handoff_manifest_hash", acquisition_diff["compared_fields"])
+            self.assertIn("acquisition_field_completion_matrix_hash", acquisition_diff["compared_fields"])
+            self.assertIn("acquisition field completion matrix hash emitted", acquisition_gates[0]["satisfied_checks"])
+            self.assertIn("acquisition handoff manifest hash emitted", acquisition_gates[0]["satisfied_checks"])
+            self.assertIn("acquisition metadata input manifest hash emitted", acquisition_gates[0]["satisfied_checks"])
             self.assertIn("trusted acquisition handoff diff pass", acquisition_gates[0]["satisfied_checks"])
             self.assertIn("timezone_validation", export)
             self.assertIn("#97", export["summary"]["timezone_validation_gap_ids"])
             self.assertIn("#97", export["timezone_validation"]["commercial_gap_ids"])
+            self.assertEqual(export["timezone_validation"]["functional_priority_profile"]["item_number"], 42)
+            self.assertIn(
+                "trusted-timezone-normalization-matrix-diff-missing",
+                export["timezone_validation"]["functional_priority_profile"]["failed_validation_check_ids"],
+            )
             self.assertIn("#97", export["timezone_validation"]["validation_assessment"]["commercial_gap_ids"])
             self.assertEqual(export["timezone_validation"]["validation_assessment"]["core_accuracy_gates"][0]["gap_id"], "#97")
             self.assertEqual(export["timezone_validation"]["trusted_timezone_validation_diff"]["status"], "missing")
+            self.assertEqual(
+                export["timezone_validation"]["timezone_normalization_manifest"]["profile_version"],
+                "timezone-normalization-manifest-v1",
+            )
+            self.assertEqual(len(export["timezone_validation"]["timezone_normalization_manifest_hash"]), 64)
+            self.assertEqual(len(export["timezone_validation"]["parser_assumption_matrix_hash"]), 64)
+            self.assertEqual(
+                export["timezone_validation"]["parser_assumption_matrix_hash"],
+                export["timezone_validation"]["timezone_normalization_manifest"]["parser_assumption_matrix_hash"],
+            )
+            self.assertEqual(
+                export["timezone_validation"]["time_semantics_manifest"]["profile_version"],
+                "time-semantics-manifest-v1",
+            )
+            self.assertEqual(export["timezone_validation"]["time_semantics_manifest"]["item_number"], 42)
+            self.assertEqual(export["timezone_validation"]["time_semantics_manifest"]["gap_id"], "#42")
+            self.assertEqual(len(export["timezone_validation"]["time_semantics_manifest_hash"]), 64)
+            self.assertEqual(
+                export["timezone_validation"]["functional_priority_profile"]["implemented_controls"]["time_semantics_manifest_hash"],
+                export["timezone_validation"]["time_semantics_manifest"]["manifest_hash"],
+            )
+            self.assertTrue(
+                all("normalized_utc" in sample for sample in export["timezone_validation"]["samples"])
+            )
+            self.assertTrue(
+                all(len(sample["timezone_sample_row_hash"]) == 64 for sample in export["timezone_validation"]["samples"])
+            )
             self.assertIn("trusted-timezone-normalization-matrix-diff-missing", export["timezone_validation"]["blockers"])
             timezone_diff = build_timezone_validation_trusted_diff(export["timezone_validation"], export["timezone_validation"])
             timezone_gates = timezone_validation_core_accuracy_gates(
                 event_count=export["timezone_validation"]["summary"]["event_count"],
                 missing_timezone_count=export["timezone_validation"]["summary"]["missing_timezone_count"],
                 samples=export["timezone_validation"]["samples"],
+                timezone_manifest=export["timezone_validation"]["timezone_normalization_manifest"],
+                time_semantics_manifest=export["timezone_validation"]["time_semantics_manifest"],
                 trusted_diff=timezone_diff,
             )
             self.assertEqual(timezone_diff["status"], "pass")
+            self.assertIn("timezone_normalization_manifest_hash", timezone_diff["compared_fields"])
+            self.assertIn("parser_assumption_matrix_hash", timezone_diff["compared_fields"])
+            self.assertIn("parser assumption matrix hash emitted", timezone_gates[0]["satisfied_checks"])
+            self.assertIn("time_semantics_manifest_hash", timezone_diff["compared_fields"])
+            self.assertIn("timezone normalization manifest hash emitted", timezone_gates[0]["satisfied_checks"])
+            self.assertIn("time semantics manifest hash emitted", timezone_gates[0]["satisfied_checks"])
             self.assertIn("trusted timezone normalization matrix diff pass", timezone_gates[0]["satisfied_checks"])
             self.assertIn("clock_skew_analysis", export)
             self.assertIn("#98", export["summary"]["clock_skew_gap_ids"])
             self.assertIn("#98", export["clock_skew_analysis"]["commercial_gap_ids"])
+            self.assertEqual(export["clock_skew_analysis"]["functional_priority_profile"]["item_number"], 42)
+            self.assertIn(
+                "trusted-clock-skew-baseline-diff-missing",
+                export["clock_skew_analysis"]["functional_priority_profile"]["failed_validation_check_ids"],
+            )
             self.assertIn("#98", export["clock_skew_analysis"]["validation_assessment"]["commercial_gap_ids"])
             self.assertEqual(export["clock_skew_analysis"]["validation_assessment"]["core_accuracy_gates"][0]["gap_id"], "#98")
             self.assertEqual(export["clock_skew_analysis"]["trusted_clock_skew_diff"]["status"], "missing")
+            self.assertEqual(
+                export["clock_skew_analysis"]["clock_skew_baseline_manifest"]["profile_version"],
+                "clock-skew-baseline-manifest-v1",
+            )
+            self.assertEqual(len(export["clock_skew_analysis"]["clock_skew_baseline_manifest_hash"]), 64)
+            self.assertEqual(len(export["clock_skew_analysis"]["clock_skew_range_matrix_hash"]), 64)
+            self.assertEqual(
+                export["clock_skew_analysis"]["clock_skew_range_matrix_hash"],
+                export["clock_skew_analysis"]["clock_skew_baseline_manifest"]["clock_skew_range_matrix_hash"],
+            )
             self.assertIn("trusted-clock-skew-baseline-diff-missing", export["clock_skew_analysis"]["blockers"])
             clock_diff = build_clock_skew_trusted_diff(export["clock_skew_analysis"], export["clock_skew_analysis"])
             clock_gates = clock_skew_core_accuracy_gates(
@@ -1077,16 +1633,47 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
                 warnings=export["clock_skew_analysis"]["warnings"],
                 earliest=export["clock_skew_analysis"]["summary"]["earliest_timestamp"],
                 latest=export["clock_skew_analysis"]["summary"]["latest_timestamp"],
+                clock_manifest=export["clock_skew_analysis"]["clock_skew_baseline_manifest"],
                 trusted_diff=clock_diff,
             )
             self.assertEqual(clock_diff["status"], "pass")
+            self.assertIn("clock_skew_baseline_manifest_hash", clock_diff["compared_fields"])
+            self.assertIn("clock_skew_range_matrix_hash", clock_diff["compared_fields"])
+            self.assertIn("clock skew range matrix hash emitted", clock_gates[0]["satisfied_checks"])
+            self.assertIn("clock-skew baseline manifest hash emitted", clock_gates[0]["satisfied_checks"])
             self.assertIn("trusted clock-skew baseline diff pass", clock_gates[0]["satisfied_checks"])
             self.assertIn("contamination_warnings", export)
             self.assertIn("#99", export["summary"]["contamination_warning_gap_ids"])
             self.assertIn("#99", export["contamination_warnings"]["commercial_gap_ids"])
+            self.assertEqual(export["contamination_warnings"]["functional_priority_profile"]["item_number"], 43)
+            self.assertIn(
+                "trusted-contamination-checklist-diff-missing",
+                export["contamination_warnings"]["functional_priority_profile"]["failed_validation_check_ids"],
+            )
             self.assertIn("#99", export["contamination_warnings"]["validation_assessment"]["commercial_gap_ids"])
             self.assertEqual(export["contamination_warnings"]["validation_assessment"]["core_accuracy_gates"][0]["gap_id"], "#99")
             self.assertEqual(export["contamination_warnings"]["trusted_contamination_warning_diff"]["status"], "missing")
+            self.assertEqual(
+                export["contamination_warnings"]["contamination_checklist_manifest"]["profile_version"],
+                "contamination-checklist-manifest-v1",
+            )
+            self.assertEqual(len(export["contamination_warnings"]["contamination_checklist_manifest_hash"]), 64)
+            self.assertEqual(len(export["contamination_warnings"]["warning_review_matrix_hash"]), 64)
+            self.assertEqual(
+                export["contamination_warnings"]["warning_review_matrix_hash"],
+                export["contamination_warnings"]["contamination_checklist_manifest"]["warning_review_matrix_hash"],
+            )
+            self.assertEqual(
+                export["contamination_warnings"]["contamination_acquisition_context_manifest"]["profile_version"],
+                "contamination-acquisition-context-manifest-v1",
+            )
+            self.assertEqual(export["contamination_warnings"]["contamination_acquisition_context_manifest"]["item_number"], 43)
+            self.assertEqual(export["contamination_warnings"]["contamination_acquisition_context_manifest"]["gap_id"], "#43")
+            self.assertEqual(len(export["contamination_warnings"]["contamination_acquisition_context_manifest_hash"]), 64)
+            self.assertEqual(
+                export["contamination_warnings"]["functional_priority_profile"]["implemented_controls"]["contamination_acquisition_context_manifest_hash"],
+                export["contamination_warnings"]["contamination_acquisition_context_manifest"]["manifest_hash"],
+            )
             self.assertIn("trusted-contamination-checklist-diff-missing", export["contamination_warnings"]["blockers"])
             contamination_diff = build_contamination_warning_trusted_diff(
                 export["contamination_warnings"],
@@ -1094,9 +1681,17 @@ class RapidTriageCaseDatabaseTests(unittest.TestCase):
             )
             contamination_gates = contamination_warning_core_accuracy_gates(
                 warnings=export["contamination_warnings"]["warnings"],
+                contamination_manifest=export["contamination_warnings"]["contamination_checklist_manifest"],
+                acquisition_context_manifest=export["contamination_warnings"]["contamination_acquisition_context_manifest"],
                 trusted_diff=contamination_diff,
             )
             self.assertEqual(contamination_diff["status"], "pass")
+            self.assertIn("contamination_checklist_manifest_hash", contamination_diff["compared_fields"])
+            self.assertIn("warning_review_matrix_hash", contamination_diff["compared_fields"])
+            self.assertIn("contamination_acquisition_context_manifest_hash", contamination_diff["compared_fields"])
+            self.assertIn("contamination checklist manifest hash emitted", contamination_gates[0]["satisfied_checks"])
+            self.assertIn("contamination warning review matrix hash emitted", contamination_gates[0]["satisfied_checks"])
+            self.assertIn("contamination acquisition context manifest hash emitted", contamination_gates[0]["satisfied_checks"])
             self.assertIn("trusted contamination checklist diff pass", contamination_gates[0]["satisfied_checks"])
 
             output_path = root / "case-db-report.json"

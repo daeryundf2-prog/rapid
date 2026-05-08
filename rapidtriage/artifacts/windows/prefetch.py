@@ -10,7 +10,7 @@ from ...core.models import ArtifactRecord
 from .common import build_forensic_review, isoformat_from_timestamp
 
 PREFETCH_ROOT = ("Windows", "Prefetch")
-PARSER_VERSION = "prefetch-inventory-v7"
+PARSER_VERSION = "prefetch-inventory-v8"
 MAX_PREFETCH_SCAN_BYTES = 1024 * 1024
 MAX_REFERENCED_PATHS = 200
 MAX_CANDIDATES = 200
@@ -60,6 +60,8 @@ PREFETCH_COMMERCIAL_BLOCKERS = [
 ]
 PREFETCH_NATIVE_CAPABILITIES = {
     "scca_signature_validation": True,
+    "compressed_prefetch_detection": True,
+    "compressed_prefetch_decompression": False,
     "common_header_version_offsets": True,
     "run_count_and_last_run_times": True,
     "bounded_referenced_path_pivots": True,
@@ -202,6 +204,7 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
     except OSError:
         return {"binary_format_detected": False}
     header = blob[:4096]
+    compression_probe = prefetch_compression_probe(blob)
     is_scca = len(header) >= 8 and header[4:8] == b"SCCA"
     prefetch_version = int.from_bytes(header[:4], "little") if is_scca else 0
     version_metadata = prefetch_version_metadata(prefetch_version)
@@ -221,6 +224,7 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
         "volume_candidate_count": 0,
         "file_reference_candidates": [],
         "file_reference_candidate_count": 0,
+        "prefetch_compression": compression_probe,
         "prefetch_validation_checks": prefetch_validation_checks(
             is_scca=is_scca,
             prefetch_version=prefetch_version,
@@ -230,6 +234,7 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
             run_times=[],
             referenced_paths=[],
             volume_candidates=[],
+            compression_probe=compression_probe,
         ),
         "parser_confidence": "medium" if is_scca else "low",
     }
@@ -270,9 +275,24 @@ def prefetch_header_hints(path: Path) -> dict[str, object]:
         run_times=list(hints["last_run_times"]),
         referenced_paths=referenced_paths,
         volume_candidates=volume_candidates,
+        compression_probe=compression_probe,
     )
     hints["parser_confidence"] = "medium" if version_metadata["supported_common_layout"] else "low"
     return hints
+
+
+def prefetch_compression_probe(blob: bytes) -> dict[str, object]:
+    magic = blob[:4]
+    detected = magic[:3] == b"MAM"
+    declared_uncompressed_size = int.from_bytes(blob[4:8], "little") if detected and len(blob) >= 8 else 0
+    return {
+        "detected": detected,
+        "format": "windows-prefetch-mam" if detected else "plain-or-unknown",
+        "magic_hex": magic.hex(),
+        "declared_uncompressed_size": declared_uncompressed_size,
+        "decompression_status": "not-implemented-recorded" if detected else "not-needed",
+        "reportability": "external-decompression-required" if detected else "normal-scca-path",
+    }
 
 
 def prefetch_version_metadata(prefetch_version: int) -> dict[str, object]:
@@ -480,7 +500,9 @@ def prefetch_validation_checks(
     run_times: list[str],
     referenced_paths: list[str],
     volume_candidates: list[dict[str, object]],
+    compression_probe: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    compression = compression_probe or {}
     now = datetime.now(tz=timezone.utc)
     parsed_run_times = [parse_iso_datetime(item) for item in run_times]
     valid_run_times = [item for item in parsed_run_times if item is not None]
@@ -489,6 +511,9 @@ def prefetch_validation_checks(
         file_size_matches_declared = declared_file_size == blob_size
     return {
         "has_scca_signature": is_scca,
+        "compressed_prefetch_detected": bool(compression.get("detected")),
+        "compressed_prefetch_status_recorded": bool(compression.get("decompression_status")),
+        "compressed_prefetch_decompressed": False,
         "supported_common_layout": prefetch_version in PREFETCH_VERSION_LAYOUTS,
         "declared_file_size": declared_file_size,
         "actual_file_size": blob_size,
@@ -523,6 +548,13 @@ def prefetch_validation_matrix(checks: object) -> list[dict[str, object]]:
             "label": "Common header offsets are known for this Prefetch version",
             "passed": bool(check_map.get("supported_common_layout")),
             "severity": "high",
+        },
+        {
+            "id": "compressed-prefetch-status-recorded",
+            "label": "Compressed Prefetch status is detected and disclosed",
+            "passed": (not bool(check_map.get("compressed_prefetch_detected")))
+            or bool(check_map.get("compressed_prefetch_status_recorded")),
+            "severity": "medium",
         },
         {
             "id": "declared-size-match",
@@ -662,6 +694,8 @@ def prefetch_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str
         satisfied.append("run count and last-run timestamps")
     if details.get("volume_candidates") or details.get("file_reference_candidates") or details.get("referenced_path"):
         satisfied.append("volume/file metrics")
+    if checks.get("compressed_prefetch_status_recorded") or details.get("prefetch_compression"):
+        satisfied.append("compressed PF handling")
     if trusted_diff.get("status") == "pass":
         satisfied.append("trusted Prefetch parser diff pass")
     return [build_accuracy_gate(16, satisfied_checks=satisfied, evidence_refs=evidence_refs)]
@@ -683,19 +717,73 @@ def build_prefetch_trusted_diff(
 def index_prefetch_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
     indexed: dict[str, dict[str, str]] = {}
     for row in rows:
-        executable = normalized_diff_value(first_alias(row, "executable_hint", "executable", "filename", "application_name"))
-        pf_hash = normalized_diff_value(first_alias(row, "prefetch_hash", "hash"))
+        payload = prefetch_diff_row_payload(row)
+        version_metadata = (
+            payload.get("prefetch_version_metadata")
+            if isinstance(payload.get("prefetch_version_metadata"), Mapping)
+            else {}
+        )
+        compression = (
+            payload.get("prefetch_compression")
+            if isinstance(payload.get("prefetch_compression"), Mapping)
+            else {}
+        )
+        executable = normalized_diff_value(
+            first_alias(payload, "executable_hint", "executable", "filename", "application_name", "executable_name")
+        )
+        pf_hash = normalized_diff_value(first_alias(payload, "prefetch_hash", "hash", "prefetchhash"))
         key = "|".join(item for item in (executable, pf_hash) if item)
         if not key:
             continue
         indexed[key] = {
             "executable": executable,
             "prefetch_hash": pf_hash,
-            "run_count": normalized_diff_value(first_alias(row, "run_count", "runcount")),
-            "last_run": normalized_diff_value(first_alias(row, "last_run_at", "last_run", "lastrun")),
-            "referenced_path": normalized_diff_value(first_alias(row, "referenced_path", "file_name", "path")),
+            "run_count": normalized_int_text(first_alias(payload, "run_count", "runcount")),
+            "last_run": normalized_diff_value(first_alias(payload, "last_run_at", "last_run", "lastrun")),
+            "last_run_times": normalized_diff_list(first_alias(payload, "last_run_times", "previous_run_times", "run_times")),
+            "prefetch_version": normalized_int_text(first_alias(payload, "prefetch_version", "version")),
+            "layout_name": normalized_diff_value(
+                first_present(
+                    first_alias(payload, "layout_name", "prefetch_layout"),
+                    first_alias(version_metadata, "layout_name", "prefetch_layout"),
+                )
+            ),
+            "declared_file_size": normalized_int_text(first_alias(payload, "declared_file_size", "filesize", "file_size")),
+            "referenced_path": normalized_diff_list(
+                first_alias(payload, "referenced_path", "referenced_paths", "file_name", "files_loaded", "path")
+            ),
+            "volume_device_path": normalized_diff_list(
+                first_alias(payload, "volume_device_path", "volume_candidates", "volume_paths", "volumedevicepath")
+            ),
+            "file_reference": normalized_diff_list(
+                first_alias(payload, "file_reference", "file_reference_candidates", "mft_reference", "filemetrics")
+            ),
+            "compression_format": normalized_diff_value(
+                first_present(
+                    first_alias(payload, "compression_format", "prefetch_compression_format"),
+                    first_alias(compression, "format", "compression_format"),
+                )
+            ),
+            "compression_status": normalized_diff_value(
+                first_present(
+                    first_alias(payload, "decompression_status", "compression_status"),
+                    first_alias(compression, "decompression_status", "compression_status"),
+                )
+            ),
         }
     return indexed
+
+
+def prefetch_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
+    details = row.get("details")
+    if not isinstance(details, Mapping):
+        return row
+    payload = dict(details)
+    for key, value in row.items():
+        if key == "details":
+            continue
+        payload.setdefault(key, value)
+    return payload
 
 
 def build_prefetch_diff_payload(
@@ -755,6 +843,57 @@ def normalize_key(value: object) -> str:
 
 def normalized_diff_value(value: object) -> str:
     return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
+
+
+def first_present(*values: object) -> object:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalized_int_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        return normalized_diff_value(text)
+
+
+def normalized_diff_list(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        parts = [part.strip() for part in value.replace("\n", ";").split(";") if part.strip()]
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        parts = [normalize_prefetch_list_item(item) for item in value]
+    else:
+        parts = [str(value).strip()]
+    return "|".join(sorted({normalized_diff_value(part) for part in parts if part}))
+
+
+def normalize_prefetch_list_item(value: object) -> str:
+    if isinstance(value, Mapping):
+        return str(
+            first_alias(
+                value,
+                "referenced_path",
+                "path",
+                "file_name",
+                "volume_device_path",
+                "device_path",
+                "file_reference",
+                "mft_reference",
+                "timestamp",
+                "value",
+            )
+            or ""
+        ).strip()
+    return str(value).strip()
 
 
 def read_prefetch_executable_name(blob: bytes) -> str:

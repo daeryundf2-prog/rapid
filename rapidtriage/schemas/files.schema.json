@@ -255,13 +255,43 @@
               "type": "string"
             }
           },
+          "group_id": {
+            "type": "string"
+          },
+          "group_fingerprint": {
+            "type": "string"
+          },
+          "representative_path": {
+            "type": "string"
+          },
+          "representative_name": {
+            "type": "string"
+          },
+          "report_suppression_status": {
+            "type": "string"
+          },
+          "analyst_review_required": {
+            "type": "boolean"
+          },
+          "suppression_policy": {
+            "type": "object",
+            "additionalProperties": true
+          },
           "duplicate_resolution_status": {
             "type": "string"
           }
         }
       }
     },
+    "duplicate_content_manifest": {
+      "type": "object",
+      "additionalProperties": true
+    },
     "hash_cache_assessment": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "hash_cache_manifest": {
       "type": "object",
       "additionalProperties": true
     },

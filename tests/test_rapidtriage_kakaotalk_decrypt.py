@@ -879,6 +879,28 @@ class RapidTriageKakaoTalkDecryptTests(unittest.TestCase):
             collection = case_dirs[0] / "collection"
             self.assertTrue((collection / "KakaoTalk" / "users" / "abc" / "chat_data" / "chatLogs_1.edb").exists())
             self.assertTrue((collection / "hash_manifest.csv").exists())
+            metadata = json.loads((collection / "collection_metadata.json").read_text(encoding="utf-8"))
+            profile = metadata["functional_priority_profile"]
+            self.assertEqual(profile["item_number"], 51)
+            self.assertEqual(profile["batch_id"], "commercial-uplift-051-055")
+            self.assertFalse(profile["implemented_controls"]["raw_sensitive_keys_exported"])
+            self.assertTrue(profile["implemented_controls"]["split_strategy_manifest_emitted"])
+            self.assertEqual(len(profile["implemented_controls"]["split_strategy_manifest_hash"]), 64)
+            self.assertIn("kakaotalk-split-strategy-manifest-emitted", profile["passed_validation_check_ids"])
+            manifest = profile["split_strategy_manifest"]
+            self.assertEqual(manifest["manifest_version"], "kakaotalk-windows-split-strategy-manifest-v1")
+            self.assertEqual(manifest["item_number"], 51)
+            self.assertEqual(manifest["command"], "kakaotalk-collect-windows")
+            self.assertEqual(manifest["manifest_sha256"], profile["implemented_controls"]["split_strategy_manifest_hash"])
+            self.assertTrue(manifest["mode_statuses"]["authorized_windows_collection"]["implemented"])
+            self.assertFalse(manifest["mode_statuses"]["authorized_windows_collection"]["raw_sensitive_keys_exported"])
+            self.assertEqual(manifest["evidence_counts"]["chat_database_count"], 1)
+            self.assertTrue(manifest["large_case_controls"]["raw_values_redacted_by_default"])
+            self.assertIn(
+                "trusted-pc-kakaotalk-extractor-diff-required",
+                manifest["commercial_blockers"],
+            )
+            self.assertIn("known-answer-before-and-after-bigbang-corpus-required", profile["failed_validation_check_ids"])
             zips = [path for path in case_dirs[0].glob("*.zip") if not path.name.endswith(".audit.zip")]
             self.assertEqual(len(zips), 1)
             with zipfile.ZipFile(zips[0]) as archive:

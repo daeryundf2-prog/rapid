@@ -274,29 +274,56 @@ class RapidTriageFinalRoadmapTests(unittest.TestCase):
             self.assertIn("#94", court_exhibit["commercial_gap_ids"])
             self.assertEqual(court_exhibit["core_accuracy_gates"][0]["gap_id"], "#94")
             self.assertTrue(court_exhibit["output_hashes"])
+            self.assertEqual(court_exhibit["court_exhibit_manifest"]["profile_version"], "court-exhibit-package-manifest-v1")
+            self.assertEqual(len(court_exhibit["court_exhibit_manifest_hash"]), 64)
+            self.assertTrue(court_exhibit["court_exhibit_manifest"]["selected_evidence_manifest_hash"])
+            self.assertTrue(all(len(item["exhibit_row_hash"]) == 64 for item in court_exhibit["exhibits"]))
+            self.assertIn("external_signature", court_exhibit["signing_slots"])
             self.assertEqual(court_exhibit["trusted_court_exhibit_diff"]["status"], "missing")
             self.assertIn("trusted-court-exhibit-manifest-diff-missing", court_exhibit["blockers"])
             court_diff = build_court_exhibit_trusted_diff(court_exhibit, court_exhibit)
             court_gates = court_exhibit_core_accuracy_gates(
                 exhibits=court_exhibit["exhibits"],
                 output_hashes=court_exhibit["output_hashes"],
+                exhibit_manifest=court_exhibit["court_exhibit_manifest"],
                 trusted_diff=court_diff,
             )
             self.assertEqual(court_diff["status"], "pass")
+            self.assertIn("court_exhibit_manifest_hash", court_diff["compared_fields"])
+            self.assertIn("court exhibit package manifest hash emitted", court_gates[0]["satisfied_checks"])
+            self.assertIn("external signing slot emitted", court_gates[0]["satisfied_checks"])
             self.assertIn("trusted court exhibit manifest diff pass", court_gates[0]["satisfied_checks"])
             self.assertIn("#100", tamper_bundle["commercial_gap_ids"])
             self.assertIn("#100", tamper_bundle["summary"]["commercial_gap_ids"])
             self.assertEqual(tamper_bundle["core_accuracy_gates"][0]["gap_id"], "#100")
             self.assertTrue(tamper_bundle["summary"]["head_hash"])
+            self.assertEqual(tamper_bundle["tamper_evident_manifest"]["profile_version"], "tamper-evident-audit-manifest-v1")
+            self.assertEqual(len(tamper_bundle["tamper_evident_manifest_hash"]), 64)
+            self.assertEqual(len(tamper_bundle["verification_matrix_hash"]), 64)
+            self.assertEqual(
+                tamper_bundle["verification_matrix_hash"],
+                tamper_bundle["tamper_evident_manifest"]["verification_matrix_hash"],
+            )
+            self.assertEqual(
+                tamper_bundle["tamper_evident_manifest"]["verification_matrix"]["profile_version"],
+                "tamper-verification-matrix-v1",
+            )
+            self.assertIn("external_signature", tamper_bundle["signing_slots"])
             self.assertEqual(tamper_bundle["trusted_tamper_evident_diff"]["status"], "missing")
             self.assertIn("trusted-tamper-signature-attestation-diff-missing", tamper_bundle["blockers"])
             tamper_diff = build_tamper_evident_trusted_diff(tamper_bundle, tamper_bundle)
             tamper_gates = tamper_evident_bundle_core_accuracy_gates(
                 entries=tamper_bundle["entries"],
                 head_hash=tamper_bundle["summary"]["head_hash"],
+                tamper_manifest=tamper_bundle["tamper_evident_manifest"],
                 trusted_diff=tamper_diff,
             )
             self.assertEqual(tamper_diff["status"], "pass")
+            self.assertIn("tamper_evident_manifest_hash", tamper_diff["compared_fields"])
+            self.assertIn("verification_matrix_hash", tamper_diff["compared_fields"])
+            self.assertIn("tamper-evident manifest hash emitted", tamper_gates[0]["satisfied_checks"])
+            self.assertIn("tamper verification matrix hash emitted", tamper_gates[0]["satisfied_checks"])
+            self.assertIn("external signing slot emitted", tamper_gates[0]["satisfied_checks"])
             self.assertIn("trusted tamper signature attestation diff pass", tamper_gates[0]["satisfied_checks"])
             self.assertIn("reviewer", payload["outputs"])
             selected = json.loads((bundle_dir / "rapidtriage-selected-evidence.json").read_text(encoding="utf-8"))

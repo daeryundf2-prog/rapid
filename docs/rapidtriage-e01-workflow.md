@@ -7,12 +7,26 @@ RapidTriage can identify E01/Ex01 files and can run direct extraction only when 
 When you select an E01/Ex01 directly:
 
 1. RapidTriage checks for `ewfmount`, `mmls`, and `tsk_recover`.
+   The preflight output records each tool's role, resolved path, version command attempts, version result, package/install hint, Windows/WSL2 guidance, and a structured remediation summary.
 2. If the tools exist, RapidTriage mounts/exposes the image through `ewfmount`.
-3. It uses `mmls` to find the first likely FAT/exFAT/NTFS/basic-data filesystem partition.
+3. It uses `mmls` to enumerate partitions and chooses the largest supported filesystem partition by default.
+   Analysts can override this with an explicit start sector when a case requires a different partition.
 4. It uses `tsk_recover` to recover files into the run output staging directory.
 5. It runs the normal folder triage workflow on the recovered filesystem.
 
+For split EWF sets, the output records `segment_set_profile`: selected segment, discovered segment count,
+segment numbers, contiguous/missing-segment warnings, selected-is-first status, total segment bytes, and a
+commercial note that this is filename/sequence provenance rather than native EWF segment-table decoding.
+
 If any required tool is missing, direct E01 processing is blocked and the UI/API tells you to mount or export first.
+
+The GUI `Check evidence support` action now shows a compact E01 readiness card:
+
+- available vs missing tool count
+- exact missing tool names
+- operator-facing remediation steps
+- per-tool details such as purpose, path/version, and install hint
+- fallback strategy: direct extraction when ready, mount/export-first when blocked
 
 ## Recommended Windows Workflow
 
@@ -35,6 +49,33 @@ rapidtriage evidence ./case.E01 --json
 rapidtriage run ./case.E01 --mode fraud --output-dir ./case-run
 ```
 
+If the automatic partition choice is wrong, pass the start sector shown by `mmls` or a trusted tool:
+
+```bash
+rapidtriage run ./case.E01 --mode fraud --output-dir ./case-run --e01-partition-start-sector 2048
+```
+
+The API/job payload accepts `e01_partition_start_sector`, and the GUI Run form has an optional `E01 partition start sector` field. The output records `partition_selection.selected_start_sector`, `recommended_start_sector`, `requested_start_sector`, and a warning if the analyst override differs from the automatic recommendation.
+
+Direct extraction also writes a durable stage checkpoint at:
+
+```text
+<output-dir>/_e01/rapidtriage-e01-stage-status.json
+```
+
+The checkpoint records dependency preflight, mount, partition enumeration, filesystem recovery, command history, source signature, selected partition, recovered-root hash manifest, and resume readiness. If filesystem recovery already completed and the source signature plus requested partition still match, a later run can reuse the recovered filesystem instead of running the external tools again.
+
+The recovered-root manifest is intentionally bounded for large cases. It records relative path, size, mtime, SHA-256 for files under the configured hash limit, skipped-large-file counters, truncation state, and per-file errors. Use it as triage provenance, then preserve full acquisition hashes and trusted-tool logs for report-grade evidence.
+
+Failure guidance is normalized so the operator sees the likely class of problem instead of a raw command failure only:
+
+- `missing-tool`: libewf/Sleuth Kit dependency is unavailable.
+- `unsupported-image`: path or suffix is not a readable E01/Ex01 input.
+- `encrypted-volume`: BitLocker/locked/decryption indicators appear.
+- `partition-ambiguity`: no supported partition or the requested start sector is invalid.
+- `permission`: mount/output access is denied.
+- `external-tool-failure`: ewfmount, mmls, or tsk_recover failed for another reason.
+
 If tools are missing:
 
 ```bash
@@ -49,7 +90,8 @@ rapidtriage run ./mounted-case-folder --mode fraud --output-dir ./case-run --rea
 
 ## Current Limitations
 
-- Direct E01 extraction selects the first likely filesystem partition; complex multi-partition analysis should be mounted/exported externally.
+- Direct E01 extraction can auto-select or use one explicit partition start sector; complex multi-partition analysis should still be mounted/exported externally until the full partition browser and multi-partition processing workflow are complete.
+- Checkpoint/resume currently reuses completed filesystem recovery; interrupted mid-stage resume and live progress visualization are roadmap work.
 - Deep deleted-file carving is not implemented.
 - Volume Shadow Copy comparison and preservation packaging are available through `rapidtriage vsc-compare` and `rapidtriage vsc-extract` after VSC/current folders are mounted or exported; direct VSC mounting from an E01 is still external-tool/operator work.
 - Tool versions and extraction actions are recorded in run outputs/audit records, but full commercial chain-of-custody automation is still roadmap work.

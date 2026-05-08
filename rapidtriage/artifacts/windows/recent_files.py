@@ -13,12 +13,14 @@ from ...core.models import ArtifactRecord
 from .common import build_forensic_review, isoformat_from_timestamp, iter_windows_user_homes
 
 RECENT_ROOT = ("AppData", "Roaming", "Microsoft", "Windows", "Recent")
-PARSER_VERSION = "windows-recent-files-v4"
+PARSER_VERSION = "windows-recent-files-v6"
 MAX_JUMPLIST_EMBEDDED_LNKS = 50
 MAX_OLE_STREAMS = 128
 MAX_OLE_STREAM_BYTES = 8 * 1024 * 1024
 MAX_LNK_EXTRA_DATA_BLOCKS = 64
 MAX_LNK_SHELL_ITEMS = 128
+MAX_LNK_PROPERTY_STORE_STRING_CANDIDATES = 12
+MAX_LNK_PROPERTY_STORE_GUID_CANDIDATES = 12
 MAX_DESTLIST_ENTRIES = 128
 MAX_DESTLIST_CANDIDATE_TIMES = 8
 MAX_DESTLIST_NUMERIC_CANDIDATES = 12
@@ -40,6 +42,7 @@ JUMPLIST_CAPABILITIES = {
     "lnk_header_decode": True,
     "lnk_linkinfo_decode": True,
     "lnk_tracker_block_candidate_decode": True,
+    "lnk_property_store_block_candidate_decode": True,
     "ole_stream_inventory": True,
     "embedded_lnk_destination_extraction": True,
     "destlist_header_candidate_decode": True,
@@ -202,6 +205,11 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
     string_data, string_offset = parse_lnk_string_data(data, link_flags)
     link_info = parse_lnk_link_info(data, link_flags)
     extra_data_blocks, tracker_data = parse_lnk_extra_data(data, string_offset)
+    property_store_blocks = [
+        block["property_store_data"]
+        for block in extra_data_blocks
+        if isinstance(block.get("property_store_data"), dict)
+    ]
     target_path = first_non_empty(
         link_info.get("local_base_path"),
         string_data.get("relative_path"),
@@ -218,6 +226,7 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
         "has_link_info": bool(link_info),
         "has_shell_item_idlist": bool(shell_item_metadata.get("items")),
         "has_tracker_data": bool(tracker_data),
+        "has_property_store_data_block": bool(property_store_blocks),
         "extra_data_block_count": len(extra_data_blocks),
         "full_property_store_decode_available": False,
     }
@@ -254,6 +263,7 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
         "shell_item_metadata": shell_item_metadata,
         "extra_data_blocks": extra_data_blocks,
         "tracker_data": tracker_data,
+        "property_store_blocks": property_store_blocks,
         "string_data_offset": string_offset,
         "validation_checks": validation_checks,
         "core_accuracy_gates": lnk_core_accuracy_gates(
@@ -264,6 +274,7 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
                 "command_line_arguments": string_data.get("command_line_arguments", ""),
                 "link_info": link_info,
                 "tracker_data": tracker_data,
+                "property_store_blocks": property_store_blocks,
                 "target_created_at": windows_filetime_to_iso(read_u64(data, 0x1C)),
                 "target_accessed_at": windows_filetime_to_iso(read_u64(data, 0x24)),
                 "target_modified_at": windows_filetime_to_iso(read_u64(data, 0x2C)),
@@ -283,6 +294,7 @@ def parse_lnk_metadata_from_bytes(data: bytes) -> dict[str, object]:
                 f"embedded_paths={len(paths)}",
                 f"extra_data_blocks={len(extra_data_blocks)}",
                 f"tracker_present={bool(tracker_data)}",
+                f"property_store_blocks={len(property_store_blocks)}",
             ],
             validation_required=True,
             report_grade_assessment=report_grade,
@@ -359,6 +371,8 @@ def lnk_core_accuracy_gates(details: dict[str, object]) -> list[dict[str, object
         satisfied.append("drive/network metadata")
     if tracker_data:
         satisfied.append("tracker GUID validation")
+    if details.get("property_store_blocks") or checks.get("has_property_store_data_block"):
+        satisfied.append("property-store block provenance")
     if details.get("target_created_at") or details.get("target_accessed_at") or details.get("target_modified_at"):
         satisfied.append("timestamp/source field provenance")
     if trusted_diff.get("status") == "pass":
@@ -398,9 +412,33 @@ def parse_lnk_extra_data(data: bytes, offset: int) -> tuple[list[dict[str, objec
         if signature == 0xA0000003:
             tracker_data = parse_lnk_tracker_data_block(block_data)
             block_summary["tracker_data"] = tracker_data
+        elif signature == 0xA0000009:
+            block_summary["property_store_data"] = parse_lnk_property_store_data_block(block_data)
         blocks.append(block_summary)
         offset += block_size
     return blocks, tracker_data
+
+
+def parse_lnk_property_store_data_block(block_data: bytes) -> dict[str, object]:
+    payload = block_data[8:]
+    guid_candidates = []
+    for offset in range(0, max(0, len(payload) - 15)):
+        chunk = payload[offset : offset + 16]
+        if chunk == b"\x00" * 16 or len(guid_candidates) >= MAX_LNK_PROPERTY_STORE_GUID_CANDIDATES:
+            continue
+        guid_text = format_guid_le(chunk)
+        if guid_text and guid_text not in [item["guid"] for item in guid_candidates]:
+            guid_candidates.append({"relative_offset": offset + 8, "guid": guid_text})
+    return {
+        "parse_status": "parsed-candidate" if len(block_data) >= 12 else "truncated-candidate",
+        "declared_block_size": read_u32(block_data, 0) if len(block_data) >= 4 else len(block_data),
+        "payload_size": len(payload),
+        "embedded_paths": extract_windows_paths(payload),
+        "string_candidates": extract_property_store_string_candidates(payload),
+        "guid_candidates": guid_candidates,
+        "validation_status": "candidate-requires-property-store-schema-validation",
+        "reportability": "review-only",
+    }
 
 
 def parse_lnk_tracker_data_block(block_data: bytes) -> dict[str, object]:
@@ -414,6 +452,25 @@ def parse_lnk_tracker_data_block(block_data: bytes) -> dict[str, object]:
         "birth_droid_file_identifier": format_guid_le(block_data[0x50:0x60]),
         "validation_status": "candidate-requires-known-answer-corpus",
     }
+
+
+def extract_property_store_string_candidates(data: bytes) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+    patterns = (
+        re.compile(rb"[\x20-\x7e]{4,160}"),
+        re.compile(rb"(?:[\x20-\x7e]\x00){4,160}"),
+    )
+    for pattern, encoding in ((patterns[0], "cp1252"), (patterns[1], "utf-16le")):
+        for match in pattern.finditer(data):
+            if len(candidates) >= MAX_LNK_PROPERTY_STORE_STRING_CANDIDATES:
+                return candidates
+            text = decode_text(match.group(0), encoding)
+            if text and text not in seen:
+                seen.add(text)
+                candidates.append(text)
+    return candidates
+
 
 
 def shell_item_type_hint(value: int) -> str:
@@ -605,6 +662,12 @@ def jumplist_evidence(
             "parse_status": destlist_metadata.get("destlist_parse_status", ""),
             "declared_entry_count": destlist_metadata.get("destlist_declared_entry_count", 0),
             "candidate_count": destlist_metadata.get("destlist_entry_candidate_count", 0),
+            "unlinked_entry_candidate_count": destlist_metadata.get("destlist_unlinked_entry_candidate_count", 0),
+            "deleted_or_unlinked_entry_review_status": destlist_metadata.get(
+                "destlist_deleted_or_unlinked_entry_review_status",
+                "",
+            ),
+            "unlinked_entry_candidates": list(destlist_metadata.get("destlist_unlinked_entry_candidates") or [])[:10],
             "validation_checks": dict(destlist_metadata.get("destlist_validation_checks") or {}),
         },
         "destinations": [
@@ -655,6 +718,10 @@ def jumplist_core_accuracy_gates(details: dict[str, object]) -> list[dict[str, o
         satisfied.append("embedded LNK linkage")
     if details.get("application_id_hash"):
         satisfied.append("AppID mapping provenance")
+    if (destlist_metadata.get("destlist_unlinked_entry_candidate_count") or 0) or checks.get(
+        "deleted_or_unlinked_entry_review_available"
+    ):
+        satisfied.append("deleted/unlinked entry candidate review")
     if not JUMPLIST_CAPABILITIES["destlist_deleted_entry_recovery"]:
         satisfied.append("deleted-entry warning")
     if trusted_diff.get("status") == "pass":
@@ -741,6 +808,11 @@ def parse_destlist_metadata(ole_streams: Sequence[dict[str, object]]) -> dict[st
         len(entry_candidates),
         entry_candidates,
     )
+    unlinked_entry_candidates = [
+        candidate
+        for candidate in entry_candidates
+        if not candidate.get("matched_lnk_stream_candidates")
+    ]
     return {
         "destlist_parse_status": parse_status,
         "destlist_stream_count": len(destlist_streams),
@@ -749,6 +821,13 @@ def parse_destlist_metadata(ole_streams: Sequence[dict[str, object]]) -> dict[st
         "destlist_declared_entry_count_candidates": declared_counts,
         "destlist_entry_candidate_count": len(entry_candidates),
         "destlist_entry_candidates": entry_candidates[:MAX_DESTLIST_ENTRIES],
+        "destlist_unlinked_entry_candidate_count": len(unlinked_entry_candidates),
+        "destlist_unlinked_entry_candidates": unlinked_entry_candidates[:MAX_DESTLIST_ENTRIES],
+        "destlist_deleted_or_unlinked_entry_review_status": (
+            "candidate-review-only-not-recovered"
+            if unlinked_entry_candidates
+            else "none-detected"
+        ),
         "destlist_validation_checks": validation_checks,
     }
 
@@ -935,6 +1014,8 @@ def destlist_validation_checks(
         "entry_candidate_count": entry_candidate_count,
         "declared_count_matches_candidates": bool(declared_total and declared_total == entry_candidate_count),
         "linked_lnk_stream_candidate_count": linked_count,
+        "unlinked_destlist_entry_candidate_count": max(entry_candidate_count - linked_count, 0),
+        "deleted_or_unlinked_entry_review_available": entry_candidate_count > linked_count,
         "all_candidates_link_to_lnk_stream": bool(entry_candidate_count and linked_count == entry_candidate_count),
         "account_metadata_report_grade": False,
         "deleted_entry_recovery_available": False,
@@ -1002,18 +1083,25 @@ def recent_validation_matrix(checks: dict[str, object]) -> list[dict[str, object
         "has_link_info": ("LinkInfo", "medium"),
         "has_shell_item_idlist": ("Shell item IDList", "medium"),
         "has_tracker_data": ("TrackerDataBlock", "medium"),
+        "has_property_store_data_block": ("PropertyStoreDataBlock candidate provenance", "medium"),
         "full_property_store_decode_available": ("Full property store decode", "critical"),
         "is_ole_compound": ("OLE compound file", "high"),
         "ole_streams_recovered": ("OLE streams recovered", "medium"),
         "embedded_lnk_destinations_recovered": ("Embedded LNK destinations", "high"),
         "has_destlist_stream": ("DestList stream", "high"),
         "destlist_candidate_decoding_available": ("DestList candidate decoding", "medium"),
+        "unlinked_destlist_entry_candidate_count": ("Unlinked DestList entry candidates", "medium"),
+        "deleted_or_unlinked_entry_review_available": ("Deleted/unlinked entry review candidates", "medium"),
         "destlist_report_grade": ("DestList report-grade decode", "critical"),
         "requires_external_validation": ("External validation", "critical"),
     }
     matrix: list[dict[str, object]] = []
     for key, value in checks.items():
-        if key in {"extra_data_block_count"}:
+        if key in {
+            "extra_data_block_count",
+            "unlinked_destlist_entry_candidate_count",
+            "deleted_or_unlinked_entry_review_available",
+        }:
             continue
         label, severity = labels.get(key, (key.replace("_", " "), "medium"))
         negative_requirement = key.startswith("requires_")
@@ -1229,21 +1317,85 @@ def build_lnk_trusted_diff(
 def index_lnk_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
     indexed: dict[str, dict[str, str]] = {}
     for row in rows:
-        target = normalized_diff_value(first_alias(row, "target_path", "target", "local_base_path", "path"))
-        working_dir = normalized_diff_value(first_alias(row, "working_dir", "working_directory"))
-        arguments = normalized_diff_value(first_alias(row, "command_line_arguments", "arguments"))
-        key = target or normalized_diff_value(first_alias(row, "source_path", "entry_name", "filename"))
+        payload = lnk_diff_row_payload(row)
+        link_info = payload.get("link_info") if isinstance(payload.get("link_info"), Mapping) else {}
+        tracker = payload.get("tracker_data") if isinstance(payload.get("tracker_data"), Mapping) else {}
+        property_store_blocks = payload.get("property_store_blocks")
+        first_property_store = (
+            property_store_blocks[0]
+            if isinstance(property_store_blocks, Sequence)
+            and not isinstance(property_store_blocks, (str, bytes, bytearray))
+            and property_store_blocks
+            and isinstance(property_store_blocks[0], Mapping)
+            else {}
+        )
+
+        target = normalized_diff_value(
+            first_alias(payload, "target_path", "target", "local_base_path", "path", "targetpath")
+            or first_alias(link_info, "local_base_path", "local_base_path_unicode", "common_path_suffix")
+        )
+        working_dir = normalized_diff_value(first_alias(payload, "working_dir", "working_directory"))
+        arguments = normalized_diff_value(first_alias(payload, "command_line_arguments", "arguments", "commandlinearguments"))
+        key = target or normalized_diff_value(first_alias(payload, "source_path", "entry_name", "filename"))
         if not key:
             continue
         indexed[key] = {
             "target_path": target,
             "working_dir": working_dir,
             "arguments": arguments,
-            "created": normalized_diff_value(first_alias(row, "target_created_at", "created", "creation_time")),
-            "modified": normalized_diff_value(first_alias(row, "target_modified_at", "modified", "modified_time")),
-            "tracker_machine": normalized_diff_value(first_alias(row, "machine_id", "tracker_machine_id")),
+            "created": normalized_diff_value(first_alias(payload, "target_created_at", "created", "creation_time", "creationtime")),
+            "accessed": normalized_diff_value(first_alias(payload, "target_accessed_at", "accessed", "accessed_time", "accesstime")),
+            "modified": normalized_diff_value(first_alias(payload, "target_modified_at", "modified", "modified_time", "modifiedtime")),
+            "description": normalized_diff_value(first_alias(payload, "description", "name")),
+            "relative_path": normalized_diff_value(first_alias(payload, "relative_path", "relativepath")),
+            "icon_location": normalized_diff_value(first_alias(payload, "icon_location", "iconlocation")),
+            "link_flags": normalized_diff_list(first_alias(payload, "link_flag_names", "link_flags", "flags")),
+            "file_attributes": normalized_diff_list(first_alias(payload, "file_attribute_names", "file_attributes", "attributes")),
+            "target_file_size": normalized_int_text(first_alias(payload, "target_file_size", "file_size", "filesize")),
+            "show_command": normalized_int_text(first_alias(payload, "show_command", "showcommand")),
+            "hot_key": normalized_int_text(first_alias(payload, "hot_key", "hotkey")),
+            "link_info_local_base_path": normalized_diff_value(
+                first_alias(link_info, "local_base_path", "localbasepath")
+                or first_alias(payload, "local_base_path", "localbasepath")
+            ),
+            "link_info_common_path_suffix": normalized_diff_value(
+                first_alias(link_info, "common_path_suffix", "commonpathsuffix")
+                or first_alias(payload, "common_path_suffix", "commonpathsuffix")
+            ),
+            "tracker_machine": normalized_diff_value(
+                first_alias(payload, "machine_id", "tracker_machine_id")
+                or first_alias(tracker, "machine_id", "tracker_machine_id")
+            ),
+            "tracker_droid_file": normalized_diff_value(
+                first_alias(payload, "droid_file_identifier")
+                or first_alias(tracker, "droid_file_identifier", "droid_file")
+            ),
+            "tracker_birth_droid_file": normalized_diff_value(
+                first_alias(payload, "birth_droid_file_identifier")
+                or first_alias(tracker, "birth_droid_file_identifier", "birth_droid_file")
+            ),
+            "property_store_paths": normalized_diff_list(
+                first_alias(payload, "property_store_paths", "property_store_embedded_paths")
+                or first_alias(first_property_store, "embedded_paths", "path")
+            ),
+            "property_store_strings": normalized_diff_list(
+                first_alias(payload, "property_store_strings", "string_candidates")
+                or first_alias(first_property_store, "string_candidates", "strings")
+            ),
         }
     return indexed
+
+
+def lnk_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
+    details = row.get("details")
+    if not isinstance(details, Mapping):
+        return row
+    payload = dict(details)
+    for key, value in row.items():
+        if key == "details":
+            continue
+        payload.setdefault(key, value)
+    return payload
 
 
 def build_lnk_diff_payload(
@@ -1291,20 +1443,105 @@ def build_lnk_diff_payload(
 def index_jumplist_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
     indexed: dict[str, dict[str, str]] = {}
     for row in rows:
-        app_id = normalized_diff_value(first_alias(row, "application_id_hash", "appid", "app_id"))
-        entry_id = normalized_diff_value(first_alias(row, "entry_id", "entry_number", "destlist_entry_id", "stream_path"))
-        target_path = normalized_diff_value(first_alias(row, "target_path", "path", "file_path", "filename"))
-        key = "|".join(item for item in (app_id, entry_id, target_path) if item)
-        if not key:
-            continue
-        indexed[key] = {
-            "application_id_hash": app_id,
-            "entry_id": entry_id,
-            "target_path": target_path,
-            "timestamp": normalized_diff_value(first_alias(row, "timestamp", "last_modified", "last_accessed", "accessed_at")),
-            "mru": normalized_diff_value(first_alias(row, "mru", "rank", "pin_status", "pinned")),
-        }
+        for candidate in jumplist_diff_candidate_rows(row):
+            app_id = normalized_diff_value(first_alias(candidate, "application_id_hash", "appid", "app_id", "application_id"))
+            entry_id = normalized_int_text(
+                first_alias(
+                    candidate,
+                    "entry_id",
+                    "entry_number",
+                    "destlist_entry_id",
+                    "destlist_entry_index_candidate",
+                    "stream_path",
+                    "entrynumber",
+                    "index",
+                )
+            )
+            target_path = normalized_diff_value(
+                first_alias(candidate, "target_path", "destlist_path_candidate", "path_candidate", "path", "file_path", "filename")
+            )
+            stream_path = normalized_diff_value(first_alias(candidate, "stream_path", "stream", "lnk_stream", "stream_name"))
+            entry_offset = normalized_int_text(
+                first_alias(candidate, "destlist_entry_offset_candidate", "entry_offset", "destlist_entry_offset", "offset")
+            )
+            key = jumplist_diff_key(app_id=app_id, entry_id=entry_id, target_path=target_path, stream_path=stream_path, entry_offset=entry_offset)
+            if not key:
+                continue
+            indexed[key] = {
+                "application_id_hash": app_id,
+                "entry_id": entry_id,
+                "stream_path": stream_path,
+                "target_path": target_path,
+                "timestamp": normalized_diff_value(
+                    first_alias(
+                        candidate,
+                        "timestamp",
+                        "last_modified",
+                        "last_accessed",
+                        "accessed_at",
+                        "last_access_time",
+                        "lastaccesstime",
+                    )
+                ),
+                "mru": normalized_diff_value(first_alias(candidate, "mru", "rank", "pin_status", "pinned")),
+                "entry_offset": entry_offset,
+                "hostname": normalized_diff_list(
+                    first_alias(candidate, "hostname", "host_name", "machine_id", "destlist_hostname_candidates", "hostname_candidates")
+                ),
+                "validation_status": normalized_diff_value(
+                    first_alias(candidate, "destlist_validation_status", "validation_status", "entry_validation_status")
+                ),
+            }
     return indexed
+
+
+def jumplist_diff_candidate_rows(row: Mapping[str, object]) -> list[Mapping[str, object]]:
+    payload = jumplist_diff_row_payload(row)
+    candidates: list[Mapping[str, object]] = []
+    destinations = payload.get("destinations")
+    if isinstance(destinations, Sequence) and not isinstance(destinations, (str, bytes, bytearray)):
+        for destination in destinations:
+            if isinstance(destination, Mapping):
+                candidates.append(merge_jumplist_candidate(payload, destination))
+    destlist_metadata = payload.get("destlist_metadata") if isinstance(payload.get("destlist_metadata"), Mapping) else payload
+    entry_candidates = destlist_metadata.get("destlist_entry_candidates") if isinstance(destlist_metadata, Mapping) else None
+    if isinstance(entry_candidates, Sequence) and not isinstance(entry_candidates, (str, bytes, bytearray)):
+        for entry in entry_candidates:
+            if isinstance(entry, Mapping):
+                candidates.append(merge_jumplist_candidate(payload, entry))
+    return candidates or [payload]
+
+
+def jumplist_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
+    details = row.get("details")
+    if not isinstance(details, Mapping):
+        return row
+    payload = dict(details)
+    for key, value in row.items():
+        if key == "details":
+            continue
+        payload.setdefault(key, value)
+    return payload
+
+
+def merge_jumplist_candidate(parent: Mapping[str, object], child: Mapping[str, object]) -> Mapping[str, object]:
+    merged = dict(parent)
+    merged.update(child)
+    merged.setdefault("application_id_hash", parent.get("application_id_hash", ""))
+    merged.setdefault("entry_id", child.get("destlist_entry_index_candidate", child.get("index", "")))
+    merged.setdefault("entry_offset", child.get("destlist_entry_offset_candidate", child.get("entry_offset", "")))
+    merged.setdefault("target_path", child.get("target_path", child.get("destlist_path_candidate", child.get("path_candidate", ""))))
+    return merged
+
+
+def jumplist_diff_key(*, app_id: str, entry_id: str, target_path: str, stream_path: str, entry_offset: str) -> str:
+    if app_id and entry_id and target_path:
+        return f"{app_id}|{entry_id}|{target_path}"
+    if app_id and stream_path and target_path:
+        return f"{app_id}|{stream_path}|{target_path}"
+    if app_id and entry_offset and target_path:
+        return f"{app_id}|{entry_offset}|{target_path}"
+    return "|".join(item for item in (app_id, entry_id, stream_path, target_path, entry_offset) if item)
 
 
 def build_jumplist_diff_payload(
@@ -1371,6 +1608,51 @@ def normalize_key(value: object) -> str:
 
 def normalized_diff_value(value: object) -> str:
     return " ".join(str(value or "").strip().lower().replace("\\", "/").split())
+
+
+def normalized_int_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        return normalized_diff_value(text)
+
+
+def normalized_diff_list(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        parts = [part.strip() for part in re.split(r"[,;|]", value) if part.strip()]
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        parts = [normalize_jumplist_list_item(item) for item in value]
+    else:
+        parts = [str(value).strip()]
+    return "|".join(sorted({normalized_diff_value(part) for part in parts if part}))
+
+
+def normalize_jumplist_list_item(value: object) -> str:
+    if isinstance(value, Mapping):
+        return str(
+            first_alias(
+                value,
+                "hostname_candidate",
+                "hostname",
+                "machine_id",
+                "path",
+                "embedded_path",
+                "string",
+                "string_candidate",
+                "guid",
+                "value",
+                "name",
+            )
+            or ""
+        ).strip()
+    return str(value).strip()
 
 
 def append_lnk_destinations(

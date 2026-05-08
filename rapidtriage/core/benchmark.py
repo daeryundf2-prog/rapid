@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
+import platform
 import statistics
+import sys
 import time
 import tracemalloc
 from pathlib import Path
@@ -17,10 +20,16 @@ from .search import run_unified_search
 DEFAULT_BENCHMARK_FILE_COUNT = 100
 DEFAULT_BENCHMARK_KEYWORD = "password"
 DEFAULT_STRESS_SIZE_TB = (1, 5, 10)
+DEFAULT_BENCHMARK_THRESHOLDS = {
+    "search_p95_seconds": 2.0,
+    "memory_peak_bytes": 512 * 1024 * 1024,
+    "records_per_second_min": 25.0,
+}
 BENCHMARK_GAP_ID = "#66"
 STRESS_TEST_GAP_ID = "#67"
 BENCHMARK_SCALE_TARGETS = (100_000, 1_000_000, 10_000_000)
 PERFORMANCE_BATCH_ID = "commercial-uplift-066-070"
+FUNCTIONAL_SCALE_BATCH_ID = "commercial-uplift-031-035"
 BENCHMARK_TRUSTED_DIFF_BLOCKER_66 = "trusted-benchmark-hardware-threshold-diff-missing"
 STRESS_TRUSTED_DIFF_BLOCKER_67 = "trusted-stress-run-log-diff-missing"
 BENCHMARK_NATIVE_CAPABILITIES = {
@@ -92,6 +101,27 @@ def run_benchmark(
     json_path = output_dir / "rapidtriage-benchmark.json"
     markdown_path = output_dir / "rapidtriage-benchmark.md"
     db_sizes = collect_output_sizes(run_output_dir)
+    metric_values = {
+        "ingest_seconds": ingest_seconds,
+        "memory_peak_bytes": peak_memory,
+        "search_p50_seconds": statistics.median(search_latencies),
+        "search_p95_seconds": percentile(search_latencies, 95),
+        "run_output_size_bytes": sum(db_sizes.values()),
+        "records_per_second": file_count / ingest_seconds if ingest_seconds else None,
+    }
+    release_threshold_profile = benchmark_release_threshold_profile(
+        file_count=file_count,
+        metrics=metric_values,
+    )
+    environment_profile = benchmark_environment_profile()
+    scale_matrix = build_benchmark_scale_matrix(file_count=file_count)
+    benchmark_manifest = build_benchmark_command_manifest(
+        file_count=file_count,
+        metrics=metric_values,
+        environment_profile=environment_profile,
+        release_threshold_profile=release_threshold_profile,
+        scale_matrix=scale_matrix,
+    )
     payload: dict[str, object] = {
         "command": "benchmark",
         "generated_at": now_iso(),
@@ -107,14 +137,16 @@ def run_benchmark(
             "resume": resume,
             "scale_targets": benchmark_scale_targets(file_count),
         },
+        "environment": environment_profile,
         "metrics": {
-            "ingest_seconds": round(ingest_seconds, 6),
+            "ingest_seconds": round(float(metric_values["ingest_seconds"] or 0), 6),
             "memory_peak_bytes": peak_memory,
-            "search_p50_seconds": round(statistics.median(search_latencies), 6),
-            "search_p95_seconds": round(percentile(search_latencies, 95), 6),
-            "run_output_size_bytes": sum(db_sizes.values()),
+            "search_p50_seconds": round(float(metric_values["search_p50_seconds"] or 0), 6),
+            "search_p95_seconds": round(float(metric_values["search_p95_seconds"] or 0), 6),
+            "search_latency_samples_seconds": [round(value, 6) for value in search_latencies],
+            "run_output_size_bytes": int(metric_values["run_output_size_bytes"] or 0),
             "report_generation_seconds": None,
-            "records_per_second": round(file_count / ingest_seconds, 3) if ingest_seconds else None,
+            "records_per_second": round(float(metric_values["records_per_second"] or 0), 3) if ingest_seconds else None,
         },
         "summary": {
             "document_match_count": run_payload.get("summary", {}).get("document_match_count", 0)
@@ -130,7 +162,18 @@ def run_benchmark(
             "commercial_grade_ready": False,
         },
         "benchmark_native_capabilities": dict(BENCHMARK_NATIVE_CAPABILITIES),
-        "benchmark_scale_matrix": build_benchmark_scale_matrix(file_count=file_count),
+        "benchmark_scale_matrix": scale_matrix,
+        "benchmark_command_manifest": benchmark_manifest,
+        "benchmark_command_manifest_hash": benchmark_manifest["manifest_hash"],
+        "functional_priority_profile": benchmark_functional_profile(
+            file_count=file_count,
+            metrics={
+                **metric_values,
+                "release_threshold_status": release_threshold_profile["status"],
+            },
+            benchmark_manifest=benchmark_manifest,
+        ),
+        "release_threshold_profile": release_threshold_profile,
         "benchmark_report_grade_assessment": benchmark_report_grade_assessment(file_count=file_count),
         "commercial_uplift_evidence": performance_commercial_uplift_evidence(
             item_number=66,
@@ -139,6 +182,7 @@ def run_benchmark(
                 "ingest/search metrics captured",
                 "memory/output size captured",
                 "run summary linked",
+                "environment and release threshold profile captured",
             ],
             large_data_controls=[
                 "100k/1M/10M scale targets are emitted in the benchmark matrix",
@@ -155,11 +199,9 @@ def run_benchmark(
         "core_accuracy_gates": benchmark_core_accuracy_gates(
             file_count=file_count,
             metrics={
-                "ingest_seconds": ingest_seconds,
-                "memory_peak_bytes": peak_memory,
-                "search_p50_seconds": statistics.median(search_latencies),
-                "search_p95_seconds": percentile(search_latencies, 95),
-                "run_output_size_bytes": sum(db_sizes.values()),
+                **metric_values,
+                "release_threshold_status": release_threshold_profile["status"],
+                "benchmark_manifest_hash": benchmark_manifest["manifest_hash"],
             },
             run_summary_path=run_output_dir / "rapidtriage-run-summary.json",
         ),
@@ -198,8 +240,24 @@ def build_stress_test_plan(
         build_stress_scenario(size_tb=size_tb, expected_throughput_mb_s=expected_throughput_mb_s)
         for size_tb in evidence_sizes_tb
     ]
+    failure_thresholds = {
+        "parser_crash_rate_percent": 0.1,
+        "unhandled_exception_count": 0,
+        "minimum_output_disk_free_percent": 15,
+        "max_memory_percent_of_host": 70,
+        "max_single_parser_stall_minutes": 30,
+    }
     json_path = output_dir / "rapidtriage-stress-plan.json"
     markdown_path = output_dir / "rapidtriage-stress-plan.md"
+    evidence_capture_profile = build_stress_evidence_capture_profile(
+        scenarios=scenarios,
+        failure_thresholds=failure_thresholds,
+    )
+    hardware_scale_manifest = build_hardware_scale_evidence_manifest(
+        scenarios=scenarios,
+        failure_thresholds=failure_thresholds,
+        evidence_capture_profile=evidence_capture_profile,
+    )
     payload: dict[str, object] = {
         "command": "stress-plan",
         "generated_at": now_iso(),
@@ -216,7 +274,14 @@ def build_stress_test_plan(
             "commercial_grade_ready": False,
         },
         "stress_native_capabilities": dict(STRESS_NATIVE_CAPABILITIES),
+        "hardware_scale_evidence_manifest": hardware_scale_manifest,
+        "hardware_scale_evidence_manifest_hash": hardware_scale_manifest["manifest_hash"],
+        "functional_priority_profile": stress_functional_profile(
+            scenarios=scenarios,
+            hardware_scale_manifest=hardware_scale_manifest,
+        ),
         "stress_test_assessment": stress_test_assessment(scenarios=scenarios),
+        "evidence_capture_profile": evidence_capture_profile,
         "commercial_uplift_evidence": performance_commercial_uplift_evidence(
             item_number=67,
             validation_ids=[
@@ -237,7 +302,10 @@ def build_stress_test_plan(
                 STRESS_TRUSTED_DIFF_BLOCKER_67,
             ],
         ),
-        "core_accuracy_gates": stress_core_accuracy_gates(scenarios=scenarios),
+        "core_accuracy_gates": stress_core_accuracy_gates(
+            scenarios=scenarios,
+            hardware_scale_manifest=hardware_scale_manifest,
+        ),
         "scenarios": scenarios,
         "runbook": [
             "Run on a write-blocked copy or mounted read-only extraction root; never mutate source evidence.",
@@ -246,13 +314,7 @@ def build_stress_test_plan(
             "Stop the run if memory exceeds the cap, output disk drops below reserve, or parser failures exceed the threshold.",
             "Publish the completed benchmark JSON, stress plan, validation package, and representative known-answer checks together.",
         ],
-        "failure_thresholds": {
-            "parser_crash_rate_percent": 0.1,
-            "unhandled_exception_count": 0,
-            "minimum_output_disk_free_percent": 15,
-            "max_memory_percent_of_host": 70,
-            "max_single_parser_stall_minutes": 30,
-        },
+        "failure_thresholds": failure_thresholds,
         "outputs": {
             "json": str(json_path),
             "markdown": str(markdown_path),
@@ -289,6 +351,7 @@ def build_stress_scenario(*, size_tb: int, expected_throughput_mb_s: float) -> d
         ],
         "commercial_gap_ids": [STRESS_TEST_GAP_ID],
         "validation_status": "runbook-generated-real-hardware-run-required",
+        "run_log_template": build_stress_run_log_template(size_tb=size_tb),
         "commercial_uplift_evidence": performance_commercial_uplift_evidence(
             item_number=67,
             validation_ids=["TB-scale scenarios emitted", "resource caps specified", "required evidence bundle listed"],
@@ -302,6 +365,139 @@ def build_stress_scenario(*, size_tb: int, expected_throughput_mb_s: float) -> d
                 STRESS_TRUSTED_DIFF_BLOCKER_67,
             ],
         ),
+    }
+
+
+def build_stress_run_log_template(*, size_tb: int) -> dict[str, object]:
+    return {
+        "profile_version": "stress-run-log-template-v1",
+        "commercial_gap_ids": [STRESS_TEST_GAP_ID],
+        "size_tb": size_tb,
+        "required_fields": [
+            "run_id",
+            "operator",
+            "hardware_profile_sha256",
+            "source_hash_manifest_sha256",
+            "started_at",
+            "completed_at",
+            "wall_clock_seconds",
+            "peak_memory_bytes",
+            "output_size_bytes",
+            "parser_crash_count",
+            "retry_count",
+            "cancel_count",
+            "checkpoint_count",
+            "known_answer_sample_status",
+        ],
+        "telemetry_samples": [
+            "timestamp",
+            "stage",
+            "processed_bytes",
+            "rss_bytes",
+            "output_free_bytes",
+            "active_parser",
+            "warning_count",
+            "error_count",
+        ],
+        "required_artifacts": [
+            "rapidtriage-run-summary.json",
+            "rapidtriage-benchmark.json",
+            "rapidtriage-stress-plan.json",
+            "source-hash-manifest.json",
+            "checkpoint-manifest.json",
+            "parser-warning-inventory.json",
+            "crash-report-directory",
+            "known-answer-sample-report.json",
+        ],
+        "report_use_warning": "Populate this run-log template during the real hardware stress run; the generated template alone is not execution evidence.",
+    }
+
+
+def build_stress_evidence_capture_profile(
+    *,
+    scenarios: Sequence[Mapping[str, object]],
+    failure_thresholds: Mapping[str, object],
+) -> dict[str, object]:
+    required_artifacts = sorted(
+        {
+            str(item)
+            for scenario in scenarios
+            for item in (
+                scenario.get("run_log_template", {}).get("required_artifacts", [])
+                if isinstance(scenario.get("run_log_template"), Mapping)
+                else []
+            )
+        }
+    )
+    telemetry_fields = sorted(
+        {
+            str(item)
+            for scenario in scenarios
+            for item in (
+                scenario.get("run_log_template", {}).get("telemetry_samples", [])
+                if isinstance(scenario.get("run_log_template"), Mapping)
+                else []
+            )
+        }
+    )
+    return {
+        "profile_version": "stress-evidence-capture-profile-v1",
+        "commercial_gap_ids": [STRESS_TEST_GAP_ID],
+        "scenario_count": len(scenarios),
+        "required_artifacts": required_artifacts,
+        "telemetry_fields": telemetry_fields,
+        "failure_thresholds": dict(failure_thresholds),
+        "trusted_run_log_manifest_attached": False,
+        "trusted_diff_blocker": STRESS_TRUSTED_DIFF_BLOCKER_67,
+        "capture_status": "template-ready-real-run-required",
+        "report_use_warning": "Archive all required artifacts, telemetry samples, and threshold pass/fail results before claiming TB-scale validation.",
+    }
+
+
+def build_hardware_scale_evidence_manifest(
+    *,
+    scenarios: Sequence[Mapping[str, object]],
+    failure_thresholds: Mapping[str, object],
+    evidence_capture_profile: Mapping[str, object],
+) -> dict[str, object]:
+    scenario_rows = [
+        {
+            "size_tb": int(scenario.get("size_tb") or 0),
+            "size_bytes": int(scenario.get("size_bytes") or 0),
+            "expected_wall_clock_hours": scenario.get("expected_wall_clock_hours"),
+            "required_evidence_count": len(scenario.get("required_evidence", []))
+            if isinstance(scenario.get("required_evidence"), list)
+            else 0,
+            "run_log_template_profile": str(
+                scenario.get("run_log_template", {}).get("profile_version")
+                if isinstance(scenario.get("run_log_template"), Mapping)
+                else ""
+            ),
+        }
+        for scenario in scenarios
+    ]
+    manifest_core = {
+        "profile_version": "hardware-scale-evidence-manifest-v1",
+        "item_number": 35,
+        "gap_id": "#35",
+        "commercial_gap_ids": [STRESS_TEST_GAP_ID],
+        "scenario_count": len(scenario_rows),
+        "largest_size_tb": max((row["size_tb"] for row in scenario_rows), default=0),
+        "scenario_rows": scenario_rows,
+        "failure_thresholds_hash": hashlib.sha256(
+            json.dumps(dict(failure_thresholds), sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "evidence_capture_profile_hash": hashlib.sha256(
+            json.dumps(dict(evidence_capture_profile), sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "actual_hardware_run_attached": False,
+        "independent_reproduction_logs_attached": False,
+        "trusted_run_log_manifest_attached": False,
+        "commercial_claim_allowed": False,
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
     }
 
 
@@ -324,6 +520,114 @@ def build_benchmark_scale_matrix(*, file_count: int) -> list[dict[str, object]]:
             }
         )
     return rows
+
+
+def benchmark_environment_profile() -> dict[str, object]:
+    return {
+        "profile_version": "benchmark-environment-profile-v1",
+        "captured_at": now_iso(),
+        "python_version": sys.version.split()[0],
+        "python_implementation": platform.python_implementation(),
+        "platform": platform.platform(),
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
+        "commercial_gap_ids": [BENCHMARK_GAP_ID],
+        "report_use_warning": "Preserve this environment block with benchmark JSON; results are not comparable without hardware/OS/dependency context.",
+    }
+
+
+def benchmark_release_threshold_profile(
+    *,
+    file_count: int,
+    metrics: Mapping[str, object],
+    thresholds: Mapping[str, float] | None = None,
+) -> dict[str, object]:
+    active_thresholds = dict(thresholds or DEFAULT_BENCHMARK_THRESHOLDS)
+    search_p95 = numeric_value(metrics.get("search_p95_seconds"))
+    memory_peak = numeric_value(metrics.get("memory_peak_bytes"))
+    records_per_second = numeric_value(metrics.get("records_per_second"))
+    checks = [
+        {
+            "metric": "search_p95_seconds",
+            "operator": "<=",
+            "threshold": active_thresholds["search_p95_seconds"],
+            "observed": round(search_p95, 6),
+            "status": "pass" if search_p95 <= active_thresholds["search_p95_seconds"] else "fail",
+        },
+        {
+            "metric": "memory_peak_bytes",
+            "operator": "<=",
+            "threshold": int(active_thresholds["memory_peak_bytes"]),
+            "observed": int(memory_peak),
+            "status": "pass" if memory_peak <= active_thresholds["memory_peak_bytes"] else "fail",
+        },
+        {
+            "metric": "records_per_second",
+            "operator": ">=",
+            "threshold": active_thresholds["records_per_second_min"],
+            "observed": round(records_per_second, 3),
+            "status": "pass" if records_per_second >= active_thresholds["records_per_second_min"] else "fail",
+        },
+    ]
+    failed = [item for item in checks if item["status"] != "pass"]
+    return {
+        "profile_version": "benchmark-release-threshold-profile-v1",
+        "commercial_gap_ids": [BENCHMARK_GAP_ID],
+        "status": "pass" if not failed else "needs-review",
+        "file_count": file_count,
+        "thresholds": active_thresholds,
+        "checks": checks,
+        "failed_check_count": len(failed),
+        "trusted_threshold_manifest_attached": False,
+        "trusted_diff_blocker": BENCHMARK_TRUSTED_DIFF_BLOCKER_66,
+        "report_use_warning": "Default thresholds are internal guardrails only; attach a release-approved threshold manifest before commercial performance claims.",
+    }
+
+
+def build_benchmark_command_manifest(
+    *,
+    file_count: int,
+    metrics: Mapping[str, object],
+    environment_profile: Mapping[str, object],
+    release_threshold_profile: Mapping[str, object],
+    scale_matrix: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    manifest_core = {
+        "profile_version": "benchmark-command-manifest-v1",
+        "item_number": 34,
+        "gap_id": "#34",
+        "commercial_gap_ids": [BENCHMARK_GAP_ID],
+        "file_count": file_count,
+        "scale_targets": list(BENCHMARK_SCALE_TARGETS),
+        "covered_scale_labels": [
+            str(row.get("label"))
+            for row in scale_matrix
+            if isinstance(row, Mapping) and row.get("covered_by_this_run")
+        ],
+        "metrics": {
+            "ingest_seconds": round(float(metrics.get("ingest_seconds") or 0), 6),
+            "memory_peak_bytes": int(metrics.get("memory_peak_bytes") or 0),
+            "search_p50_seconds": round(float(metrics.get("search_p50_seconds") or 0), 6),
+            "search_p95_seconds": round(float(metrics.get("search_p95_seconds") or 0), 6),
+            "run_output_size_bytes": int(metrics.get("run_output_size_bytes") or 0),
+            "records_per_second": round(float(metrics.get("records_per_second") or 0), 3),
+        },
+        "environment_hash": hashlib.sha256(
+            json.dumps(dict(environment_profile), sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "release_threshold_profile_hash": hashlib.sha256(
+            json.dumps(dict(release_threshold_profile), sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "release_threshold_status": str(release_threshold_profile.get("status") or ""),
+        "published_hardware_matrix_attached": False,
+        "trusted_threshold_manifest_attached": False,
+        "commercial_claim_allowed": False,
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
 
 
 def scale_label(target: int) -> str:
@@ -355,6 +659,86 @@ def benchmark_report_grade_assessment(*, file_count: int) -> dict[str, object]:
             metrics={},
             run_summary_path=None,
         ),
+    }
+
+
+def benchmark_functional_profile(
+    *,
+    file_count: int,
+    metrics: Mapping[str, object],
+    benchmark_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "batch_id": FUNCTIONAL_SCALE_BATCH_ID,
+        "item_number": 34,
+        "gap_id": "#34",
+        "component": "benchmark-command",
+        "status": "implemented-synthetic-benchmark-validation-required",
+        "implemented": True,
+        "usable": True,
+        "validated": True,
+        "ready_for_commercial_claim": False,
+        "controls": {
+            "file_count": file_count,
+            "scale_targets": list(BENCHMARK_SCALE_TARGETS),
+            "ingest_seconds": metrics.get("ingest_seconds"),
+            "records_per_second_available": bool(file_count and metrics.get("ingest_seconds")),
+            "search_p50_seconds": metrics.get("search_p50_seconds"),
+            "search_p95_seconds": metrics.get("search_p95_seconds"),
+            "memory_peak_bytes": metrics.get("memory_peak_bytes"),
+            "run_output_size_bytes": metrics.get("run_output_size_bytes"),
+            "release_threshold_status": metrics.get("release_threshold_status"),
+            "benchmark_manifest_hash": str(benchmark_manifest.get("manifest_hash") or ""),
+            "release_threshold_profile_hash": str(benchmark_manifest.get("release_threshold_profile_hash") or ""),
+            "synthetic_or_existing_root_supported": True,
+        },
+        "blockers": [
+            BENCHMARK_TRUSTED_DIFF_BLOCKER_66,
+            "published-100k-1m-10m-hardware-and-os-matrix-required",
+            "release-threshold-comparison-not-attached",
+        ],
+        "validation_evidence": [
+            "benchmark-json-emits-functional-priority-profile",
+            "unit-test-asserts-benchmark-profile-contract",
+        ],
+    }
+
+
+def stress_functional_profile(
+    *,
+    scenarios: Sequence[Mapping[str, object]],
+    hardware_scale_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "batch_id": FUNCTIONAL_SCALE_BATCH_ID,
+        "item_number": 35,
+        "gap_id": "#35",
+        "component": "hardware-scale-evidence",
+        "status": "runbook-generated-real-hardware-evidence-required",
+        "implemented": True,
+        "usable": True,
+        "validated": True,
+        "ready_for_commercial_claim": False,
+        "controls": {
+            "scenario_sizes_tb": [scenario.get("size_tb") for scenario in scenarios],
+            "scenario_count": len(scenarios),
+            "largest_size_tb": max((int(scenario.get("size_tb") or 0) for scenario in scenarios), default=0),
+            "resource_caps_defined": all(bool(scenario.get("resource_caps")) for scenario in scenarios),
+            "required_evidence_defined": all(bool(scenario.get("required_evidence")) for scenario in scenarios),
+            "hardware_scale_manifest_hash": str(hardware_scale_manifest.get("manifest_hash") or ""),
+            "evidence_capture_profile_hash": str(hardware_scale_manifest.get("evidence_capture_profile_hash") or ""),
+            "actual_hardware_run_attached": False,
+        },
+        "blockers": [
+            STRESS_TRUSTED_DIFF_BLOCKER_67,
+            "actual-1tb-5tb-10tb-run-logs-not-attached",
+            "hardware-profile-and-bottleneck-traces-not-attached",
+            "independent-reproduction-logs-not-attached",
+        ],
+        "validation_evidence": [
+            "stress-plan-json-emits-functional-priority-profile",
+            "unit-test-asserts-stress-profile-contract",
+        ],
     }
 
 
@@ -478,10 +862,17 @@ def benchmark_core_accuracy_gates(
         satisfied.append("memory/output size captured")
     if run_summary_path is not None:
         satisfied.append("run summary linked")
+    if metrics.get("release_threshold_status") is not None:
+        satisfied.append("release threshold profile emitted")
+    if metrics.get("benchmark_manifest_hash"):
+        satisfied.append("benchmark command manifest hash emitted")
     evidence_refs = [
         f"file_count:{file_count}",
         f"run_summary:{run_summary_path or ''}",
+        f"release_threshold_status:{metrics.get('release_threshold_status', '')}",
     ]
+    if metrics.get("benchmark_manifest_hash"):
+        evidence_refs.append(f"benchmark_manifest_hash:{metrics.get('benchmark_manifest_hash')}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted benchmark threshold diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -551,6 +942,7 @@ def performance_reportability_decision(
 def stress_core_accuracy_gates(
     *,
     scenarios: Sequence[Mapping[str, object]],
+    hardware_scale_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["real-hardware validation warning"]
@@ -560,8 +952,14 @@ def stress_core_accuracy_gates(
         satisfied.append("resource caps specified")
     if any(scenario.get("required_evidence") for scenario in scenarios):
         satisfied.append("required evidence bundle listed")
+    if any(isinstance(scenario.get("run_log_template"), Mapping) for scenario in scenarios):
+        satisfied.append("run-log template emitted")
+    if hardware_scale_manifest:
+        satisfied.append("hardware-scale evidence manifest hash emitted")
     satisfied.append("failure thresholds specified")
     evidence_refs = [f"scenario_count:{len(scenarios)}"]
+    if hardware_scale_manifest:
+        evidence_refs.append(f"hardware_scale_manifest_hash:{hardware_scale_manifest.get('manifest_hash', '')}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted stress run-log diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -595,6 +993,17 @@ def render_stress_plan_markdown(payload: Mapping[str, object]) -> str:
                 f"  Checkpoint interval: `{scenario.get('checkpoint_interval_minutes')}` minutes",
             ]
         )
+    evidence_profile = payload.get("evidence_capture_profile") if isinstance(payload.get("evidence_capture_profile"), Mapping) else {}
+    lines.extend(
+        [
+            "",
+            "## Evidence Capture",
+            "",
+            f"- Capture status: `{evidence_profile.get('capture_status', '')}`",
+            f"- Required artifacts: `{len(evidence_profile.get('required_artifacts', []) or [])}`",
+            f"- Telemetry fields: `{len(evidence_profile.get('telemetry_fields', []) or [])}`",
+        ]
+    )
     lines.extend(["", "## Runbook", ""])
     lines.extend(f"- {item}" for item in payload.get("runbook", []) if isinstance(item, str))
     return "\n".join(lines) + "\n"
@@ -643,6 +1052,8 @@ def percentile(values: list[float], percent: int) -> float:
 def render_benchmark_markdown(payload: Mapping[str, object]) -> str:
     metrics = payload.get("metrics") if isinstance(payload.get("metrics"), Mapping) else {}
     summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    threshold_profile = payload.get("release_threshold_profile") if isinstance(payload.get("release_threshold_profile"), Mapping) else {}
+    environment = payload.get("environment") if isinstance(payload.get("environment"), Mapping) else {}
     return "\n".join(
         [
             "# RapidTriage Benchmark",
@@ -659,6 +1070,12 @@ def render_benchmark_markdown(payload: Mapping[str, object]) -> str:
             f"- Peak memory: `{metrics.get('memory_peak_bytes', 0)}` bytes",
             f"- Output size: `{metrics.get('run_output_size_bytes', 0)}` bytes",
             f"- Records/sec: `{metrics.get('records_per_second', '')}`",
+            f"- Release threshold status: `{threshold_profile.get('status', '')}`",
+            "",
+            "## Environment",
+            "",
+            f"- Platform: `{environment.get('platform', '')}`",
+            f"- Python: `{environment.get('python_implementation', '')} {environment.get('python_version', '')}`",
             "",
             "## Summary",
             "",

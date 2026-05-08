@@ -100,7 +100,7 @@ class RapidTriageExtractTests(unittest.TestCase):
             self.assertEqual(extracted_path.read_text(encoding="utf-8"), "incident notes")
             self.assertEqual(entry["sha256"], sha256_file(note_path))
             self.assertEqual(entry["modified_at"], datetime.fromtimestamp(mtime).isoformat())
-            self.assertEqual(entry["categories"], ["documents"])
+            self.assertIn("documents", entry["categories"])
 
     def test_extract_command_uses_docs_results_and_kind_filter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

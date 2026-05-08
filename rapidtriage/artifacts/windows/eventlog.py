@@ -19,7 +19,7 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 
 EVENT_LOG_ROOT = ("Windows", "System32", "winevt", "Logs")
-PARSER_VERSION = "eventlog-normalized-v14"
+PARSER_VERSION = "eventlog-normalized-v16"
 BUILTIN_RULEPACK_VERSION = "eventlog-builtin-rules-v1"
 EVENT_EXPORT_SUFFIXES = {".xml", ".json", ".jsonl", ".ndjson", ".csv"}
 EVENT_EXPORT_HINTS = ("event", "evtx", "hayabusa", "chainsaw", "winevt", "winlog")
@@ -1134,6 +1134,10 @@ def collect_native_evtx_events(
                 details.update(data)
                 details["parser_confidence"] = native_evtx_confidence(details)
                 details["evtx_report_grade_assessment"] = native_evtx_report_grade_assessment(details)
+                details["evtx_record_provenance"] = native_evtx_record_provenance(details)
+                details["evtx_native_parse_profile"] = native_evtx_native_parse_profile(details)
+                details["evtx_message_rendering_profile"] = native_evtx_message_rendering_profile(details)
+                details["evtx_commercial_readiness_profile"] = native_evtx_commercial_readiness_profile(details)
                 details["core_accuracy_gates"] = native_evtx_core_accuracy_gates(details)
                 details["commercial_uplift_evidence"] = native_evtx_commercial_uplift_evidence(details)
                 details["commercial_grade_ready"] = details["evtx_report_grade_assessment"]["report_grade_ready"]
@@ -1727,6 +1731,225 @@ def native_evtx_report_grade_assessment(details: Mapping[str, object]) -> dict[s
     }
 
 
+def native_evtx_record_provenance(details: Mapping[str, object]) -> dict[str, object]:
+    hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    chunk = details.get("evtx_chunk_context") if isinstance(details.get("evtx_chunk_context"), Mapping) else {}
+    integrity = details.get("evtx_record_integrity") if isinstance(details.get("evtx_record_integrity"), Mapping) else {}
+    matrix = details.get("evtx_validation_matrix") if isinstance(details.get("evtx_validation_matrix"), list) else []
+    return {
+        "profile_version": "evtx-record-provenance-v1",
+        "source_path": str(details.get("source_path") or ""),
+        "source_sha256": str(hashes.get("sha256") or ""),
+        "record_id": str(details.get("record_id") or ""),
+        "event_id": str(details.get("event_id") or ""),
+        "record_offset": int(details.get("evtx_record_offset") or 0),
+        "record_size": int(details.get("evtx_record_size") or 0),
+        "record_sha256": str(details.get("evtx_record_sha256") or ""),
+        "record_integrity_status": str(integrity.get("status") or ""),
+        "chunk_offset": int(chunk.get("chunk_offset") or 0),
+        "chunk_boundary_status": str(chunk.get("chunk_boundary_status") or ""),
+        "chunk_signature_valid": bool(chunk.get("chunk_signature_valid")),
+        "validation_matrix_ids": [
+            str(item.get("id"))
+            for item in matrix
+            if isinstance(item, Mapping) and item.get("id")
+        ],
+        "reportability_note": (
+            "Record-level offsets, hashes, chunk context, and validation checks are attached so native EVTX rows "
+            "can be diffed against EvtxECmd/Hayabusa/Windows exports before report use."
+        ),
+    }
+
+
+def native_evtx_native_parse_profile(details: Mapping[str, object]) -> dict[str, object]:
+    binxml = details.get("evtx_binxml") if isinstance(details.get("evtx_binxml"), Mapping) else {}
+    value_fields = binxml.get("value_fields") if isinstance(binxml.get("value_fields"), list) else []
+    system_fields = details.get("binxml_system_fields") if isinstance(details.get("binxml_system_fields"), Mapping) else {}
+    event_data_fields = (
+        details.get("binxml_event_data_fields")
+        if isinstance(details.get("binxml_event_data_fields"), Mapping)
+        else {}
+    )
+    user_data_fields = details.get("binxml_user_data_fields") if isinstance(details.get("binxml_user_data_fields"), Mapping) else {}
+    decoded_types = Counter(
+        str(item.get("value_type") or "")
+        for item in value_fields
+        if isinstance(item, Mapping) and item.get("value_type")
+    )
+    status = str(details.get("evtx_binxml_status") or "")
+    remaining_blockers = ["trusted-tool-record-diff-required"]
+    if status not in {"basic-rendered", "template-substituted-partial"}:
+        remaining_blockers.append("binxml-field-decode-incomplete")
+    if not NATIVE_EVTX_CAPABILITIES.get("full_binxml_dom"):
+        remaining_blockers.append("full-binxml-object-model-not-implemented")
+    return {
+        "profile_version": "evtx-native-binxml-parse-profile-v1",
+        "parse_scope": NATIVE_EVTX_PARSE_SCOPE,
+        "reader_strategy": NATIVE_EVTX_READER_STRATEGY,
+        "binxml_status": status,
+        "field_fidelity": str(details.get("evtx_field_fidelity") or ""),
+        "scalar_value_count": len(value_fields),
+        "decoded_value_type_counts": counter_items(decoded_types),
+        "system_field_count": len(system_fields),
+        "event_data_field_count": len(event_data_fields),
+        "user_data_field_count": len(user_data_fields),
+        "template_ids": list(binxml.get("template_ids") or []),
+        "template_substitution_count": int(binxml.get("template_substitution_count") or 0),
+        "promoted_field_sections": {
+            "system": sorted(system_fields.keys()),
+            "event_data": sorted(event_data_fields.keys()),
+            "user_data": sorted(user_data_fields.keys()),
+        },
+        "commercial_blockers": sorted(set(remaining_blockers)),
+        "reportability_decision": {
+            "decision": "native-evtx-triage-row",
+            "allowed_use": "record-level-search-and-timeline-pivot",
+            "ready_for_final_report": False,
+            "required_before_report": [
+                "record-level trusted parser diff",
+                "message rendering trusted diff",
+                "known-answer malformed/deleted EVTX corpus pass",
+            ],
+        },
+    }
+
+
+def native_evtx_message_rendering_profile(details: Mapping[str, object]) -> dict[str, object]:
+    rendering = details.get("message_rendering") if isinstance(details.get("message_rendering"), Mapping) else {}
+    provenance = rendering.get("provenance") if isinstance(rendering.get("provenance"), Mapping) else {}
+    provider_source = (
+        provenance.get("provider_message_resource_source")
+        if isinstance(provenance.get("provider_message_resource_source"), Mapping)
+        else {}
+    )
+    provider_resolved = bool(provenance.get("provider_message_resource_resolved"))
+    blockers = []
+    if not provider_resolved:
+        blockers.append("provider-message-resource-or-manifest-required")
+    if rendering.get("validation_required"):
+        blockers.append("rendered-message-trusted-diff-required")
+    return {
+        "profile_version": "evtx-message-rendering-profile-v1",
+        "status": str(rendering.get("status") or ""),
+        "renderer": str(provenance.get("renderer") or ""),
+        "provider_message_resource_resolved": provider_resolved,
+        "provider_message_resource_source": dict(provider_source),
+        "validation_required": bool(rendering.get("validation_required")),
+        "used_field_count": len(rendering.get("used_fields") or []),
+        "template_ids": list(rendering.get("template_ids") or []),
+        "blockers": sorted(set(blockers)),
+        "analyst_wording": (
+            "Treat built-in or unresolved EVTX messages as search/review aids. Use provider manifest/resource "
+            "rendering plus trusted rendered-message diff before quoting the rendered text as final evidence."
+        ),
+    }
+
+
+def native_evtx_commercial_readiness_profile(details: Mapping[str, object]) -> dict[str, object]:
+    report_grade = (
+        details.get("evtx_report_grade_assessment")
+        if isinstance(details.get("evtx_report_grade_assessment"), Mapping)
+        else native_evtx_report_grade_assessment(details)
+    )
+    parse_profile = (
+        details.get("evtx_native_parse_profile")
+        if isinstance(details.get("evtx_native_parse_profile"), Mapping)
+        else native_evtx_native_parse_profile(details)
+    )
+    message_profile = (
+        details.get("evtx_message_rendering_profile")
+        if isinstance(details.get("evtx_message_rendering_profile"), Mapping)
+        else native_evtx_message_rendering_profile(details)
+    )
+    recovery_profile = (
+        details.get("evtx_recovery_validation_profile")
+        if isinstance(details.get("evtx_recovery_validation_profile"), Mapping)
+        else {}
+    )
+    trusted_diff = (
+        details.get("evtx_trusted_tool_record_diff")
+        if isinstance(details.get("evtx_trusted_tool_record_diff"), Mapping)
+        else {}
+    )
+    message_diff = (
+        details.get("evtx_message_rendering_diff")
+        if isinstance(details.get("evtx_message_rendering_diff"), Mapping)
+        else {}
+    )
+    recovery_diff = (
+        details.get("evtx_recovery_corpus_diff")
+        if isinstance(details.get("evtx_recovery_corpus_diff"), Mapping)
+        else {}
+    )
+    blockers = list(report_grade.get("blockers") or [])
+    blocker_rows = evtx_commercial_blocker_analysis(blockers)
+    engineering_blockers = [row["blocker"] for row in blocker_rows if row["owner"] == "engineering"]
+    external_blockers = [row["blocker"] for row in blocker_rows if row["owner"] != "engineering"]
+    return {
+        "profile_version": "evtx-commercial-readiness-v1",
+        "commercial_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "readiness_status": str(report_grade.get("status") or "validation-required"),
+        "allowed_current_use": (
+            "report-grade-testimony"
+            if report_grade.get("report_grade_ready")
+            else "triage-search-timeline-pivot"
+        ),
+        "commercial_gap_ids": ["#1", "#2", "#3"],
+        "row_identity": {
+            "source_path": str(details.get("source_path") or ""),
+            "record_id": str(details.get("record_id") or ""),
+            "event_id": str(details.get("event_id") or ""),
+            "record_offset": int(details.get("evtx_record_offset") or 0),
+            "record_sha256": str(details.get("evtx_record_sha256") or ""),
+        },
+        "native_binxml": {
+            "status": str(parse_profile.get("binxml_status") or details.get("evtx_binxml_status") or ""),
+            "field_fidelity": str(parse_profile.get("field_fidelity") or details.get("evtx_field_fidelity") or ""),
+            "scalar_value_count": int(parse_profile.get("scalar_value_count") or 0),
+            "template_substitution_count": int(parse_profile.get("template_substitution_count") or 0),
+            "commercial_blockers": list(parse_profile.get("commercial_blockers") or []),
+        },
+        "message_rendering": {
+            "status": str(message_profile.get("status") or ""),
+            "renderer": str(message_profile.get("renderer") or ""),
+            "provider_resource_resolved": bool(message_profile.get("provider_message_resource_resolved")),
+            "validation_required": bool(message_profile.get("validation_required")),
+            "blockers": list(message_profile.get("blockers") or []),
+        },
+        "recovery_validation": {
+            "status": str(recovery_profile.get("recovery_status") or details.get("evtx_recovery_status") or ""),
+            "allocation_status": str(details.get("evtx_allocation_status") or ""),
+            "reportable_without_secondary_validation": bool(
+                recovery_profile.get("reportable_without_secondary_validation")
+            ),
+            "confidence": float(recovery_profile.get("confidence") or 0),
+            "evidence_reasons": list(recovery_profile.get("evidence_reasons") or []),
+        },
+        "trusted_evidence": {
+            "record_diff_status": str(trusted_diff.get("status") or "not-attached"),
+            "message_diff_status": str(message_diff.get("status") or "not-attached"),
+            "recovery_diff_status": str(recovery_diff.get("status") or "not-attached"),
+        },
+        "blocker_counts": {
+            "total": len(set(blockers)),
+            "engineering": len(set(engineering_blockers)),
+            "external_or_lab": len(set(external_blockers)),
+        },
+        "blockers": sorted(set(blockers)),
+        "blocker_analysis": blocker_rows,
+        "next_engineering_actions": [
+            "Extend full BinXML object-model coverage while preserving record offsets and hashes.",
+            "Add provider manifest/resource DLL message rendering with locale/version provenance.",
+            "Attach EvtxECmd/Hayabusa/Windows XML record-level diffs to this row family.",
+            "Attach deleted/corrupt EVTX corpus expected offsets before reporting recovered candidates as fact.",
+        ],
+        "analyst_warning": (
+            "This native EVTX row is usable for triage/search/timeline review. Do not quote it as final "
+            "commercial-grade evidence until the trusted diff and corpus blockers are cleared."
+        ),
+    }
+
+
 def native_evtx_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str, object]]:
     checks = details.get("evtx_validation_checks") if isinstance(details.get("evtx_validation_checks"), Mapping) else {}
     recovery = details.get("evtx_recovery_context") if isinstance(details.get("evtx_recovery_context"), Mapping) else {}
@@ -2184,6 +2407,7 @@ def build_evtx_recovery_corpus_diff(
 
 
 def _normalize_evtx_diff_record(record: Mapping[str, object]) -> tuple[str, dict[str, str]]:
+    record = _evtx_row_payload(record)
     key = _first_present_string(
         record,
         ("record_id", "event_record_id", "event_record_number", "record_number", "recordid"),
@@ -2197,7 +2421,10 @@ def _normalize_evtx_diff_record(record: Mapping[str, object]) -> tuple[str, dict
         "channel": _first_present_string(record, ("channel", "log_name", "logname")),
         "computer": _first_present_string(record, ("computer", "computer_name", "hostname", "system_computer")),
         "timestamp": _normalize_evtx_timestamp(
-            _first_present_string(record, ("timestamp", "time_created", "timeCreated", "time_created_system_time"))
+            _first_present_string(
+                record,
+                ("timestamp", "event_created_at", "time_created", "timeCreated", "time_created_system_time"),
+            )
         ),
         "message_sha256": _first_present_string(
             record,
@@ -2215,6 +2442,7 @@ def _normalize_evtx_diff_record(record: Mapping[str, object]) -> tuple[str, dict
 
 
 def _normalize_evtx_message_record(record: Mapping[str, object]) -> tuple[str, dict[str, str]]:
+    record = _evtx_row_payload(record)
     key = _first_present_string(
         record,
         ("record_id", "event_record_id", "event_record_number", "record_number", "recordid"),
@@ -2237,6 +2465,7 @@ def _normalize_evtx_message_record(record: Mapping[str, object]) -> tuple[str, d
 
 
 def _normalize_evtx_recovery_candidate(candidate: Mapping[str, object]) -> tuple[str, dict[str, str]]:
+    candidate = _evtx_row_payload(candidate)
     offset = _first_present_string(candidate, ("evtx_record_offset", "record_offset", "offset", "byte_offset"))
     if not offset:
         return "", {}
@@ -2250,6 +2479,20 @@ def _normalize_evtx_recovery_candidate(candidate: Mapping[str, object]) -> tuple
         "allocation_status": _first_present_string(candidate, ("evtx_allocation_status", "allocation_status")),
         "recovery_status": _first_present_string(candidate, ("evtx_recovery_status", "recovery_status", "status")),
     }
+
+
+def _evtx_row_payload(record: Mapping[str, object]) -> Mapping[str, object]:
+    """Accept flat exports and RapidTriage artifact rows with nested details."""
+
+    details = record.get("details") if isinstance(record.get("details"), Mapping) else {}
+    if not details:
+        return record
+    flattened = dict(details)
+    for key, value in record.items():
+        if key == "details":
+            continue
+        flattened.setdefault(key, value)
+    return flattened
 
 
 def _normalize_numeric_string(value: str) -> str:

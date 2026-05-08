@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -11,6 +12,7 @@ from ..core.submission import compute_hashes
 from .review import build_forensic_review
 
 PARSER_VERSION = "cloud-export-v3"
+FUNCTIONAL_EXPANSION_BATCH_ID = "commercial-uplift-051-055"
 CLOUD_JSON_SUFFIXES = {".json"}
 CloudGap = tuple[list[str], str]
 CLOUD_NATIVE_CAPABILITIES = {
@@ -211,6 +213,79 @@ def build_record(
     detail_payload = dict(details)
     service = str(detail_payload.get("service") or "")
     gap_ids, family = cloud_gap_ids(service, artifact_type)
+    detail_payload.setdefault(
+        "cloud_provider_strategy_profile",
+        cloud_provider_strategy_profile(
+            family=family,
+            service=service,
+            artifact_type=artifact_type,
+            details=detail_payload,
+        ),
+    )
+    google_review_profile = google_takeout_review_profile(
+        family=family,
+        service=service,
+        artifact_type=artifact_type,
+        source_path=str(path.resolve()),
+        details=detail_payload,
+    )
+    if google_review_profile:
+        detail_payload["google_takeout_review_profile"] = google_review_profile
+        checks = dict(detail_payload.get("validation_checks") or {})
+        checks.update(
+            {
+                "google_takeout_review_profile_emitted": True,
+                "google_takeout_product_inferred": bool(google_review_profile.get("product_family")),
+                "google_takeout_row_pivot_present": bool(google_review_profile.get("primary_pivot_present")),
+            }
+        )
+        detail_payload["validation_checks"] = checks
+    icloud_review_profile = icloud_export_review_profile(
+        family=family,
+        service=service,
+        artifact_type=artifact_type,
+        source_path=str(path.resolve()),
+        details=detail_payload,
+    )
+    if icloud_review_profile:
+        detail_payload["icloud_export_review_profile"] = icloud_review_profile
+        checks = dict(detail_payload.get("validation_checks") or {})
+        checks.update(
+            {
+                "icloud_export_review_profile_emitted": True,
+                "icloud_product_inferred": bool(icloud_review_profile.get("product_family")),
+                "icloud_row_pivot_present": bool(icloud_review_profile.get("primary_pivot_present")),
+            }
+        )
+        detail_payload["validation_checks"] = checks
+    m365_review_profile = m365_export_review_profile(
+        family=family,
+        service=service,
+        artifact_type=artifact_type,
+        source_path=str(path.resolve()),
+        details=detail_payload,
+    )
+    if m365_review_profile:
+        detail_payload["m365_export_review_profile"] = m365_review_profile
+        checks = dict(detail_payload.get("validation_checks") or {})
+        checks.update(
+            {
+                "m365_export_review_profile_emitted": True,
+                "m365_workload_inferred": bool(m365_review_profile.get("workload_family")),
+                "m365_row_pivot_present": bool(m365_review_profile.get("primary_pivot_present")),
+            }
+        )
+        detail_payload["validation_checks"] = checks
+    detail_payload["cloud_export_import_manifest"] = build_cloud_export_import_manifest(
+        artifact_type=artifact_type,
+        family=family,
+        service=service,
+        source_index=source_index,
+        source_hashes=source_hashes,
+        source_path=str(path.resolve()),
+        details=detail_payload,
+    )
+    detail_payload["cloud_export_import_manifest_hash"] = detail_payload["cloud_export_import_manifest"]["manifest_sha256"]
     validation_checks = detail_payload.get("validation_checks")
     if not isinstance(validation_checks, Mapping):
         validation_checks = {}
@@ -605,6 +680,80 @@ def cloud_report_grade_assessment(gap_ids: list[str], family: str, service: str)
     }
 
 
+def cloud_export_import_functional_profile(
+    *,
+    family: str,
+    service: str,
+    artifact_type: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    validation_checks: Mapping[str, object],
+    details: Mapping[str, object],
+    trusted_diff: Mapping[str, object],
+) -> dict[str, object]:
+    export_manifest = (
+        details.get("cloud_export_import_manifest")
+        if isinstance(details.get("cloud_export_import_manifest"), Mapping)
+        else {}
+    )
+    failed_checks = [
+        check
+        for check, failed in {
+            "provider-export-scope-not-verified": not validation_checks.get("provider_scope_verified"),
+            "original-cloud-export-hash-not-verified": not validation_checks.get("original_export_hash_verified"),
+            "provider-known-answer-corpus-required": not validation_checks.get("provider_known_answer_validated"),
+            "cloud-export-import-manifest-not-emitted": not export_manifest,
+            "trusted-provider-export-diff-required": trusted_diff.get("status") != "pass",
+        }.items()
+        if failed
+    ]
+    return {
+        "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
+        "item_number": 55,
+        "implementation_track": "cloud-export-import-provider-matrix",
+        "status": "usable-internal-triage-not-provider-complete",
+        "family": family,
+        "service": service,
+        "artifact_type": artifact_type,
+        "source_index": source_index,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "implemented_controls": {
+            "google_takeout_gmail_drive_photos_location_inventory": family == "google",
+            "icloud_photos_files_account_inventory": family == "apple-icloud",
+            "m365_teams_onedrive_sharepoint_inventory": family == "microsoft-365",
+            "provider_specific_schema_warning": True,
+            "source_hash_preserved": bool(source_hashes.get("sha256")),
+            "provider_export_scope_verified": bool(validation_checks.get("provider_scope_verified")),
+            "deleted_cloud_object_recovery": False,
+            "tenant_permission_graph_complete": False,
+            "strategy_track": optional_text(
+                details.get("cloud_provider_strategy_profile", {}).get("selected_track")
+                if isinstance(details.get("cloud_provider_strategy_profile"), Mapping)
+                else ""
+            ),
+            "cloud_export_import_manifest_hash": optional_text(export_manifest.get("manifest_sha256")),
+            "cloud_export_import_manifest_emitted": bool(export_manifest),
+            "source_viewer_locator_emitted": isinstance(export_manifest.get("source_viewer_locator"), Mapping),
+        },
+        "source_subject_or_object": optional_text(
+            details.get("subject") or details.get("file_name") or details.get("chat_id") or details.get("account_email")
+        ),
+        "trusted_diff_status": str(trusted_diff.get("status") or "not-attached"),
+        "passed_validation_check_ids": [
+            check
+            for check, passed in {
+                "cloud-export-import-manifest-emitted": bool(export_manifest),
+                "cloud-export-source-locator-emitted": isinstance(export_manifest.get("source_viewer_locator"), Mapping),
+                "cloud-source-hash-preserved": bool(source_hashes.get("sha256")),
+            }.items()
+            if passed
+        ],
+        "failed_validation_check_ids": failed_checks,
+        "ready_for_court_report": False,
+        "next_internal_step": "Attach provider export manifest/scope proof and known-answer exports for each claimed provider family.",
+    }
+
+
 def cloud_commercial_uplift_evidence(
     *,
     gap_ids: list[str],
@@ -639,6 +788,13 @@ def cloud_commercial_uplift_evidence(
         f"service:{service}",
         f"artifact_type:{artifact_type}",
     ]
+    export_manifest = (
+        details.get("cloud_export_import_manifest")
+        if isinstance(details.get("cloud_export_import_manifest"), Mapping)
+        else {}
+    )
+    if export_manifest.get("manifest_sha256"):
+        source_refs.append(f"cloud_export_manifest_sha256:{export_manifest['manifest_sha256']}")
     for key in ("subject", "file_name", "chat_id", "operation", "account_email", "message_id", "file_id"):
         value = optional_text(details.get(key))
         if value:
@@ -664,6 +820,21 @@ def cloud_commercial_uplift_evidence(
             trusted_diff=trusted_diff,
         ),
         "source_refs": source_refs,
+        "cloud_provider_strategy_profile": (
+            dict(details["cloud_provider_strategy_profile"])
+            if isinstance(details.get("cloud_provider_strategy_profile"), Mapping)
+            else {}
+        ),
+        "functional_priority_profile": cloud_export_import_functional_profile(
+            family=family,
+            service=service,
+            artifact_type=artifact_type,
+            source_index=source_index,
+            source_hashes=source_hashes,
+            validation_checks=validation_checks,
+            details=details,
+            trusted_diff=trusted_diff,
+        ),
         "passed_validation_matrix_ids": passed_validation_matrix_ids,
         "failed_validation_matrix_ids": failed_validation_matrix_ids,
         "passed_issue_matrix_ids": passed_issue_matrix_ids,
@@ -686,6 +857,11 @@ def cloud_commercial_uplift_evidence(
         "large_data_controls": {
             "provider_export_scope_verified": bool(validation_checks.get("provider_scope_verified")),
             "original_export_hash_verified": bool(validation_checks.get("original_export_hash_verified")),
+            "google_takeout_review_profile_present": bool(details.get("google_takeout_review_profile")),
+            "icloud_export_review_profile_present": bool(details.get("icloud_export_review_profile")),
+            "m365_export_review_profile_present": bool(details.get("m365_export_review_profile")),
+            "cloud_export_import_manifest_hash": optional_text(export_manifest.get("manifest_sha256")),
+            "cloud_export_source_locator_present": isinstance(export_manifest.get("source_viewer_locator"), Mapping),
             "deleted_cloud_object_recovery": False,
             "tenant_permission_graph_complete": False,
             "known_answer_cloud_corpus_required": True,
@@ -693,6 +869,105 @@ def cloud_commercial_uplift_evidence(
         "next_internal_step": "Add provider-specific export manifests, sidecar merge validation, sharing/retention graph capture, and provider known-answer corpora.",
         "external_evidence_required": True,
     }
+
+
+def build_cloud_export_import_manifest(
+    *,
+    artifact_type: str,
+    family: str,
+    service: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    source_path: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    strategy = (
+        details.get("cloud_provider_strategy_profile")
+        if isinstance(details.get("cloud_provider_strategy_profile"), Mapping)
+        else {}
+    )
+    google_profile = (
+        details.get("google_takeout_review_profile")
+        if isinstance(details.get("google_takeout_review_profile"), Mapping)
+        else {}
+    )
+    icloud_profile = (
+        details.get("icloud_export_review_profile")
+        if isinstance(details.get("icloud_export_review_profile"), Mapping)
+        else {}
+    )
+    m365_profile = (
+        details.get("m365_export_review_profile")
+        if isinstance(details.get("m365_export_review_profile"), Mapping)
+        else {}
+    )
+    primary_profile = google_profile or icloud_profile or m365_profile
+    row_pivots = {
+        key: optional_text(details.get(key))
+        for key in ("message_id", "file_id", "subject", "file_name", "chat_id", "operation", "account_email", "timestamp")
+        if optional_text(details.get(key))
+    }
+    manifest: dict[str, object] = {
+        "manifest_version": "cloud-export-import-manifest-v1",
+        "item_number": 55,
+        "batch_id": FUNCTIONAL_EXPANSION_BATCH_ID,
+        "artifact_type": artifact_type,
+        "family": family,
+        "service": service,
+        "source_path": source_path,
+        "source_index": source_index,
+        "source_sha256": source_hashes.get("sha256", ""),
+        "source_record_id": str(source_index),
+        "source_viewer_locator": {
+            "viewer": "cloud-provider-export-row",
+            "source_path": source_path,
+            "source_index": source_index,
+            "family": family,
+            "service": service,
+            "artifact_type": artifact_type,
+            "row_pivots": row_pivots,
+        },
+        "provider_strategy": {
+            "selected_track": optional_text(strategy.get("selected_track")),
+            "provider_product_matrix": strategy.get("provider_product_matrix", []),
+            "expected_source_pivots": strategy.get("expected_source_pivots", []),
+            "source_scope_blockers": strategy.get("source_scope_blockers", []),
+        },
+        "provider_review": {
+            "profile_version": optional_text(primary_profile.get("profile_version")),
+            "product_or_workload_family": optional_text(
+                primary_profile.get("product_family") or primary_profile.get("workload_family")
+            ),
+            "present_primary_pivots": primary_profile.get("present_primary_pivots", []),
+            "primary_pivot_present": bool(primary_profile.get("primary_pivot_present")),
+            "review_display_mode": optional_text(primary_profile.get("review_display_mode")),
+        },
+        "row_pivots": row_pivots,
+        "large_data_controls": {
+            "raw_values_redacted_by_default": True,
+            "deleted_cloud_object_recovery": False,
+            "tenant_permission_graph_complete": False,
+        },
+        "commercial_blockers": [
+            "provider-export-scope-proof-required",
+            "provider-known-answer-export-required",
+            "deleted-state-and-share-permission-validation-required",
+            "provider-native-export-or-api-diff-required",
+        ],
+        "validation_status": "implemented-usable-validation-required",
+    }
+    manifest["manifest_sha256"] = stable_cloud_json_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def stable_cloud_json_sha256(value: Mapping[str, object] | list[object] | str) -> str:
+    if isinstance(value, str):
+        payload = value
+    else:
+        payload = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()
 
 
 def cloud_reportability_decision(
@@ -772,6 +1047,13 @@ def cloud_core_accuracy_gates(
     ]
     if source_hashes.get("sha256"):
         evidence_refs.append(f"source_sha256:{source_hashes['sha256']}")
+    export_manifest = (
+        details.get("cloud_export_import_manifest")
+        if isinstance(details.get("cloud_export_import_manifest"), Mapping)
+        else {}
+    )
+    if export_manifest.get("manifest_sha256"):
+        evidence_refs.append(f"cloud_export_manifest_sha256:{export_manifest['manifest_sha256']}")
     trusted_diff = details.get("cloud_trusted_diff") if isinstance(details.get("cloud_trusted_diff"), Mapping) else {}
     if trusted_diff:
         evidence_refs.append(f"trusted_diff_status:{trusted_diff.get('status', '')}")
@@ -783,6 +1065,12 @@ def cloud_core_accuracy_gates(
         if number == 37:
             if family == "google" or "google" in service or "gmail" in service:
                 satisfied.append("Google service/profile detection")
+            if details.get("cloud_provider_strategy_profile"):
+                satisfied.append("Google Takeout product matrix strategy")
+            if details.get("google_takeout_review_profile"):
+                satisfied.append("Google Takeout product review profile")
+            if validation.get("google_takeout_row_pivot_present"):
+                satisfied.append("Google Takeout row pivot inventory")
             if artifact_type in {"cloud-mail", "cloud-file", "cloud-activity", "cloud-location"}:
                 satisfied.append("Gmail/Drive/Activity/Location normalization")
             if source_hashes.get("sha256") and not validation.get("provider_scope_verified"):
@@ -790,11 +1078,21 @@ def cloud_core_accuracy_gates(
             if details.get("commercial_grade_blockers"):
                 satisfied.append("sidecar/media/linkage limitation")
                 satisfied.append("provider schema/timezone warning")
+            if export_manifest:
+                satisfied.append("cloud export import manifest")
+                if isinstance(export_manifest.get("source_viewer_locator"), Mapping):
+                    satisfied.append("cloud export source locator")
             if trusted_diff.get("status") == "pass" and int(trusted_diff.get("gap_number") or 0) == 37:
                 satisfied.append("trusted Google Takeout/provider diff pass")
         elif number == 38:
             if family == "apple-icloud" or "icloud" in service or "apple" in service:
                 satisfied.append("Apple/iCloud service profile detection")
+            if details.get("cloud_provider_strategy_profile"):
+                satisfied.append("iCloud export scope strategy")
+            if details.get("icloud_export_review_profile"):
+                satisfied.append("iCloud account/file/photo review profile")
+            if validation.get("icloud_row_pivot_present"):
+                satisfied.append("iCloud row pivot inventory")
             if artifact_type in {"cloud-account", "cloud-file", "cloud-mail"}:
                 satisfied.append("account/file/photo metadata normalization")
             if source_hashes.get("sha256") and not validation.get("provider_scope_verified"):
@@ -802,11 +1100,21 @@ def cloud_core_accuracy_gates(
             if details.get("commercial_grade_blockers"):
                 satisfied.append("ADP/shared-album limitation warning")
                 satisfied.append("provider retention/schema warning")
+            if export_manifest:
+                satisfied.append("cloud export import manifest")
+                if isinstance(export_manifest.get("source_viewer_locator"), Mapping):
+                    satisfied.append("cloud export source locator")
             if trusted_diff.get("status") == "pass" and int(trusted_diff.get("gap_number") or 0) == 38:
                 satisfied.append("trusted iCloud/provider export diff pass")
         elif number == 39:
             if family == "microsoft-365" or "microsoft" in service or "teams" in service or "onedrive" in service:
                 satisfied.append("Microsoft 365 service profile detection")
+            if details.get("cloud_provider_strategy_profile"):
+                satisfied.append("M365/Teams eDiscovery strategy")
+            if details.get("m365_export_review_profile"):
+                satisfied.append("M365 workload review profile")
+            if validation.get("m365_row_pivot_present"):
+                satisfied.append("M365 row pivot inventory")
             if artifact_type in {"cloud-mail", "cloud-file", "cloud-message", "cloud-audit"}:
                 satisfied.append("mail/file/message/audit normalization")
             if source_hashes.get("sha256") and not validation.get("provider_scope_verified"):
@@ -814,6 +1122,10 @@ def cloud_core_accuracy_gates(
             if details.get("commercial_grade_blockers"):
                 satisfied.append("permissions/retention/deleted limitation")
                 satisfied.append("provider schema/timestamp warning")
+            if export_manifest:
+                satisfied.append("cloud export import manifest")
+                if isinstance(export_manifest.get("source_viewer_locator"), Mapping):
+                    satisfied.append("cloud export source locator")
             if trusted_diff.get("status") == "pass" and int(trusted_diff.get("gap_number") or 0) == 39:
                 satisfied.append("trusted M365/eDiscovery export diff pass")
         gates.append(build_accuracy_gate(number, satisfied_checks=satisfied, evidence_refs=evidence_refs))
@@ -935,6 +1247,306 @@ def cloud_provider_profile(family: str, service: str) -> dict[str, object]:
         "known_gaps": list(profile.get("known_gaps", ("provider-schema-version-validation",))),
         "reporting_boundary": "provider-export-scoped-until-source-scope-and-retention-validated",
     }
+
+
+def cloud_provider_strategy_profile(
+    *,
+    family: str,
+    service: str,
+    artifact_type: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    tracks = {
+        "google": "google-takeout-product-matrix-validation",
+        "apple-icloud": "icloud-export-account-photo-file-scope-validation",
+        "microsoft-365": "m365-purview-graph-ediscovery-validation",
+        "collaboration-saas": "collaboration-saas-admin-export-scope-validation",
+    }
+    product_matrix = {
+        "google": [
+            "Gmail messages/MBOX or JSON exports",
+            "Drive file metadata and file bytes",
+            "Photos media plus JSON sidecars/EXIF",
+            "My Activity products and browser/search history",
+            "Location History timeline records",
+        ],
+        "apple-icloud": [
+            "Apple ID account export",
+            "iCloud Drive file inventory",
+            "iCloud Photos EXIF/album/share metadata",
+            "Mail/Contacts/Calendar client-export differences",
+            "device/account association metadata",
+        ],
+        "microsoft-365": [
+            "Purview/eDiscovery mail and Teams exports",
+            "Graph API messages/files/audit rows",
+            "OneDrive and SharePoint file metadata",
+            "Teams reactions/attachments/compliance records",
+            "tenant audit, retention, hold, and permission context",
+        ],
+        "collaboration-saas": [
+            "workspace export scope",
+            "threads/reactions/edits/deletes where available",
+            "file sharing/version state",
+            "admin audit and legal-hold scope",
+        ],
+    }
+    expected_pivots = {
+        "cloud-mail": ["message_id", "subject", "sender/recipient", "body hash", "attachment count"],
+        "cloud-file": ["file_id", "file_name", "web/download URL hash", "owner", "size"],
+        "cloud-message": ["chat/channel/team id", "message id", "sender", "message hash", "attachment/reaction fields"],
+        "cloud-audit": ["operation", "actor", "IP address", "user agent", "object id"],
+        "cloud-account": ["account email", "account name", "created timestamp", "device/account relation"],
+        "cloud-location": ["timestamp", "latitude", "longitude", "accuracy", "source device"],
+        "cloud-activity": ["timestamp", "title", "products", "detail rows", "source device"],
+    }
+    blockers = [
+        "provider-export-scope-not-verified",
+        "original-cloud-export-hash-not-verified",
+        "provider-known-answer-corpus-not-attached",
+    ]
+    if family == "google":
+        blockers.append("takeout-selected-products-and-sidecars-not-fully-merged")
+    elif family == "apple-icloud":
+        blockers.append("icloud-adp-shared-album-third-party-container-limits-not-validated")
+    elif family == "microsoft-365":
+        blockers.append("m365-retention-hold-permission-graph-not-validated")
+    else:
+        blockers.append("workspace-plan-admin-export-scope-not-validated")
+    return {
+        "profile_version": "cloud-provider-strategy-v1",
+        "family": family,
+        "service": service or "unknown",
+        "artifact_type": artifact_type,
+        "selected_track": tracks.get(family, "generic-cloud-export-scope-validation"),
+        "provider_product_matrix": product_matrix.get(family, ["provider export/API rows", "source hashes", "scope record"]),
+        "expected_row_pivots": expected_pivots.get(artifact_type, ["timestamp", "source hash", "provider row id"]),
+        "provider_scope_verified": bool(
+            details.get("validation_checks", {}).get("provider_scope_verified")
+            if isinstance(details.get("validation_checks"), Mapping)
+            else False
+        ),
+        "message_or_object_reportable": False,
+        "deleted_retention_permission_graph_complete": False,
+        "trusted_provider_diff_required": True,
+        "blockers": blockers,
+        "required_before_report": [
+            "attach original export/API manifest, selected products/scopes, account or tenant owner, and export timestamp",
+            "hash and preserve the original provider archive or response set",
+            "diff important rows against provider-native export/admin/eDiscovery views",
+            "document deleted-state, retention/hold, sharing/permission, sidecar, and timezone semantics",
+        ],
+    }
+
+
+def google_takeout_review_profile(
+    *,
+    family: str,
+    service: str,
+    artifact_type: str,
+    source_path: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    if family != "google":
+        return {}
+    product_family = google_takeout_product_family(service=service, artifact_type=artifact_type, source_path=source_path)
+    primary_pivots = {
+        "gmail": ["message_id", "subject", "from", "to", "body_sha256", "attachment_count"],
+        "drive": ["file_id", "file_name", "mime_type", "owner", "url_sha256", "size"],
+        "activity": ["timestamp", "title", "products"],
+        "location": ["timestamp", "latitude", "longitude", "accuracy_meters", "source"],
+        "photos": ["file_id", "file_name", "timestamp", "url_sha256"],
+        "account": ["account_email", "account_name", "timestamp"],
+    }
+    expected = primary_pivots.get(product_family, ["timestamp", "source_hashes"])
+    present = [pivot for pivot in expected if optional_text(details.get(pivot)) or details.get(pivot) not in (None, "", [])]
+    source_lower = source_path.lower()
+    return {
+        "profile_version": "google-takeout-review-v1",
+        "product_family": product_family,
+        "service": service or "unknown",
+        "artifact_type": artifact_type,
+        "source_track": "google-takeout-product-matrix-review",
+        "source_path_hints": {
+            "takeout_path": "takeout" in source_lower,
+            "gmail_path": "mail" in source_lower or "gmail" in source_lower,
+            "drive_path": "drive" in source_lower,
+            "activity_path": "my activity" in source_lower,
+            "location_path": "location history" in source_lower,
+            "photos_path": "photos" in source_lower,
+        },
+        "expected_primary_pivots": expected,
+        "present_primary_pivots": present,
+        "primary_pivot_present": bool(present),
+        "selected_products_manifest_attached": False,
+        "original_takeout_archive_hash_verified": False,
+        "sidecar_merge_status": "not-performed",
+        "timezone_semantics_status": "not-validated",
+        "deleted_or_retention_state_status": "not-validated",
+        "provider_native_diff_status": "not-attached",
+        "review_display_mode": "product-matrix-row-with-scope-sidecar-metadata-collapsed",
+        "required_before_report": [
+            "attach Google Takeout archive manifest, selected products, account owner, export time, and original archive hash",
+            "merge product sidecars such as Drive/Photos metadata JSON before file/photo conclusions",
+            "validate Gmail threading, Drive sharing, My Activity product semantics, and Location timezone/source fields with known-answer exports",
+            "diff important rows against Google native export/admin/API evidence before report-grade claims",
+        ],
+    }
+
+
+def google_takeout_product_family(*, service: str, artifact_type: str, source_path: str) -> str:
+    lowered = f"{service} {artifact_type} {source_path}".lower()
+    if "gmail" in lowered or "mail" in lowered:
+        return "gmail"
+    if "drive" in lowered or artifact_type == "cloud-file":
+        return "drive"
+    if "photos" in lowered or "photo" in lowered:
+        return "photos"
+    if "activity" in lowered or artifact_type == "cloud-activity":
+        return "activity"
+    if "location" in lowered or artifact_type == "cloud-location":
+        return "location"
+    if artifact_type == "cloud-account":
+        return "account"
+    return "google-export"
+
+
+def icloud_export_review_profile(
+    *,
+    family: str,
+    service: str,
+    artifact_type: str,
+    source_path: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    if family != "apple-icloud":
+        return {}
+    product_family = icloud_product_family(service=service, artifact_type=artifact_type, source_path=source_path)
+    primary_pivots = {
+        "account": ["account_email", "account_name", "timestamp"],
+        "icloud-drive": ["file_id", "file_name", "mime_type", "owner", "url_sha256", "size"],
+        "icloud-photos": ["file_id", "file_name", "mime_type", "timestamp", "url_sha256"],
+        "icloud-mail": ["message_id", "subject", "from", "to", "body_sha256"],
+        "device-association": ["account_email", "timestamp"],
+    }
+    expected = primary_pivots.get(product_family, ["timestamp", "source_hashes"])
+    present = [pivot for pivot in expected if optional_text(details.get(pivot)) or details.get(pivot) not in (None, "", [])]
+    source_lower = source_path.lower()
+    return {
+        "profile_version": "icloud-export-review-v1",
+        "product_family": product_family,
+        "service": service or "unknown",
+        "artifact_type": artifact_type,
+        "source_track": "icloud-export-account-photo-file-scope-review",
+        "source_path_hints": {
+            "apple_export_path": "apple" in source_lower,
+            "icloud_path": "icloud" in source_lower,
+            "photos_path": "photo" in source_lower,
+            "drive_path": "drive" in source_lower,
+            "mail_path": "mail" in source_lower,
+        },
+        "expected_primary_pivots": expected,
+        "present_primary_pivots": present,
+        "primary_pivot_present": bool(present),
+        "advanced_data_protection_status": "not-validated",
+        "shared_album_semantics_status": "not-validated",
+        "photo_sidecar_exif_merge_status": "not-performed",
+        "third_party_container_visibility_status": "not-validated",
+        "original_export_hash_verified": False,
+        "provider_native_diff_status": "not-attached",
+        "review_display_mode": "icloud-product-row-with-scope-adp-sidecar-metadata-collapsed",
+        "required_before_report": [
+            "attach Apple privacy export/iCloud copy scope, account owner proof, export timestamp, and original archive hash",
+            "validate Advanced Data Protection and third-party iCloud container visibility for the acquisition context",
+            "merge photo sidecars, EXIF, album/share metadata, comments, and likes before photo timeline conclusions",
+            "diff key account/file/photo/mail rows against Apple/iCloud native export or known-answer provider evidence",
+        ],
+    }
+
+
+def icloud_product_family(*, service: str, artifact_type: str, source_path: str) -> str:
+    lowered = f"{service} {artifact_type} {source_path}".lower()
+    if "photo" in lowered:
+        return "icloud-photos"
+    if "drive" in lowered or artifact_type == "cloud-file":
+        return "icloud-drive"
+    if "mail" in lowered or artifact_type == "cloud-mail":
+        return "icloud-mail"
+    if "device" in lowered:
+        return "device-association"
+    if artifact_type == "cloud-account":
+        return "account"
+    return "icloud-export"
+
+
+def m365_export_review_profile(
+    *,
+    family: str,
+    service: str,
+    artifact_type: str,
+    source_path: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    if family != "microsoft-365":
+        return {}
+    workload_family = m365_workload_family(service=service, artifact_type=artifact_type, source_path=source_path)
+    primary_pivots = {
+        "exchange": ["message_id", "subject", "from", "to", "body_sha256"],
+        "teams": ["chat_id", "channel_id", "team_id", "message_id", "sender", "message_text_sha256"],
+        "onedrive-sharepoint": ["file_id", "file_name", "owner", "url_sha256", "size"],
+        "audit": ["operation", "actor", "ip_address", "user_agent", "object_id"],
+        "tenant-account": ["account_email", "account_name", "timestamp"],
+    }
+    expected = primary_pivots.get(workload_family, ["timestamp", "source_hashes"])
+    present = [pivot for pivot in expected if optional_text(details.get(pivot)) or details.get(pivot) not in (None, "", [])]
+    source_lower = source_path.lower()
+    return {
+        "profile_version": "m365-export-review-v1",
+        "workload_family": workload_family,
+        "service": service or "unknown",
+        "artifact_type": artifact_type,
+        "source_track": "m365-purview-graph-ediscovery-review",
+        "source_path_hints": {
+            "purview_or_ediscovery_path": "purview" in source_lower or "ediscovery" in source_lower,
+            "teams_path": "teams" in source_lower,
+            "onedrive_path": "onedrive" in source_lower,
+            "sharepoint_path": "sharepoint" in source_lower,
+            "exchange_path": "exchange" in source_lower or "mail" in source_lower,
+            "audit_path": "audit" in source_lower,
+        },
+        "expected_primary_pivots": expected,
+        "present_primary_pivots": present,
+        "primary_pivot_present": bool(present),
+        "purview_export_manifest_attached": False,
+        "graph_api_scope_status": "not-validated",
+        "teams_compliance_record_status": "not-validated",
+        "sharepoint_permission_graph_status": "not-built",
+        "retention_hold_policy_status": "not-validated",
+        "deleted_or_version_history_status": "not-validated",
+        "provider_native_diff_status": "not-attached",
+        "review_display_mode": "m365-workload-row-with-ediscovery-retention-permission-metadata-collapsed",
+        "required_before_report": [
+            "attach Purview/eDiscovery export manifest, tenant/custodian scope, search query, export time, and original package hash",
+            "validate Graph API scopes, pagination, throttling, and selected workload coverage when API collection is used",
+            "reconcile Teams messages with Exchange compliance records, attachments, reactions, edits, and deletes",
+            "validate OneDrive/SharePoint permissions, file versions, retention holds, deleted state, and audit retention before report-grade claims",
+        ],
+    }
+
+
+def m365_workload_family(*, service: str, artifact_type: str, source_path: str) -> str:
+    lowered = f"{service} {artifact_type} {source_path}".lower()
+    if "teams" in lowered or artifact_type == "cloud-message":
+        return "teams"
+    if "onedrive" in lowered or "sharepoint" in lowered or artifact_type == "cloud-file":
+        return "onedrive-sharepoint"
+    if "audit" in lowered or artifact_type == "cloud-audit":
+        return "audit"
+    if "exchange" in lowered or "mail" in lowered or artifact_type == "cloud-mail":
+        return "exchange"
+    if artifact_type == "cloud-account":
+        return "tenant-account"
+    return "m365-export"
 
 
 def cloud_issue_matrix(family: str, artifact_type: str) -> list[dict[str, object]]:

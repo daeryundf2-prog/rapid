@@ -27,34 +27,34 @@
       "title": "Raw/source hex viewer",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Source preview emits bounded hex rows with offsets, ASCII, preview hash, byte-search citation support, trusted offset manifest gates, #53 core_accuracy_gates, and reportability blockers for missing jump-to-offset, byte selection hashing, and export-range citation package."
+        "Source preview emits bounded hex rows with offsets, ASCII, preview hash, byte-search citation support, bounded range citation package metadata, trusted offset manifest gates, #53 core_accuracy_gates, and reportability blockers for missing interactive jump-to-offset, byte selection hashing, and trusted offset validation."
       ],
-      "remaining_external_validation": ["Full-file jump/export-range UI, trusted offset manifest diff, and byte-level citation package validation."]
+      "remaining_external_validation": ["Interactive full-file jump UI, trusted offset manifest diff, and external byte-level citation package validation."]
     },
     {
       "item": 54,
       "title": "SQLite/table specialized viewer",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "SQLite source preview opens read-only, records table/schema/column/index metadata, bounded row previews, search hooks, trusted query/schema diff gates, #54 core_accuracy_gates, and reportability blockers for missing pagination, WHERE builder, WAL/journal replay, deleted-row validation, and large database corpus."
+        "SQLite source preview opens read-only, records table/schema/column/index metadata, bounded row previews, search hooks, API-backed table pagination, restricted contains filters, trusted query/schema diff gates, #54 core_accuracy_gates, and reportability blockers for missing browser E2E pagination validation, WAL/journal replay, deleted-row validation, and large database corpus."
       ],
-      "remaining_external_validation": ["WHERE-builder UI, deleted-row/WAL validation, trusted sqlite3 query/schema diff, and large database fixture corpus."]
+      "remaining_external_validation": ["Browser E2E pagination validation, deleted-row/WAL validation, trusted sqlite3 query/schema diff, and large database fixture corpus."]
     },
     {
       "item": 55,
       "title": "Email conversation viewer",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Email source preview emits conversation threads, message order, participants, headers, attachment inventory, trusted thread/export diff gates, #55 core_accuracy_gates, and reportability blockers for missing PST/OST/MSG decoding, deleted item recovery, attachment extraction, and mailbox corpus validation."
+        "Email source preview emits conversation threads, message order, participants, headers, attachment hash inventory, bounded attachment citation packages, trusted thread/export diff gates, #55 core_accuracy_gates, and reportability blockers for missing PST/OST/MSG decoding, deleted item recovery, native mailbox attachment extraction, and mailbox corpus validation."
       ],
-      "remaining_external_validation": ["Native PST/OST/MSG threading, deleted items, attachment extraction, trusted mail client thread export diff, and mailbox known-answer validation."]
+      "remaining_external_validation": ["Native PST/OST/MSG threading, deleted items, native mailbox attachment extraction, trusted mail client thread export diff, and mailbox known-answer validation."]
     },
     {
       "item": 56,
       "title": "Image gallery review mode",
       "test_files": ["tests/test_rapidtriage_media_image.py", "tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Image rows/previews preserve metadata, hashes, thumbnails, perceptual hash buckets, tag/report hints, visual limitations, trusted image gallery manifest gates, #56 core_accuracy_gates, and reportability blockers for missing virtualized gallery, persistent tags, ML similarity, sensitive/deepfake classifier validation, and trusted image manifest evidence."
+        "Image rows/previews preserve metadata, hashes, thumbnails, perceptual hash buckets, bounded folder gallery pages, bucket filters, tag/report hints, visual limitations, trusted image gallery manifest gates, #56 core_accuracy_gates, and reportability blockers for missing virtualized gallery, persistent tags, ML similarity, sensitive/deepfake classifier validation, and trusted image manifest evidence."
       ],
       "remaining_external_validation": ["Dedicated virtualized gallery, persistent tags, ML visual similarity corpus, sensitive/deepfake classifier validation, and trusted image gallery manifest diff."]
     },
@@ -63,7 +63,7 @@
       "title": "Video/audio preview and transcript",
       "test_files": ["tests/test_rapidtriage_api.py"],
       "assertions": [
-        "Media source preview preserves metadata, source hashes, transcript sidecars, cue timestamps, verification warnings, trusted transcript cue/alignment gates, #57 core_accuracy_gates, and reportability blockers for missing safe playback, ASR execution, waveform/thumb generation, and transcript alignment corpus."
+        "Media source preview preserves metadata, source hashes, transcript sidecars, cue timestamps, bounded cue citation packages, verification warnings, trusted transcript cue/alignment gates, #57 core_accuracy_gates, and reportability blockers for missing safe playback, ASR execution, waveform/thumb generation, and transcript alignment corpus."
       ],
       "remaining_external_validation": ["Safe playback sandbox, ASR engine execution, waveform/thumbnails, trusted transcript cue/alignment diff, and transcript alignment validation."]
     },
@@ -72,27 +72,27 @@
       "title": "OCR queue manager",
       "test_files": ["tests/test_rapidtriage_ocr_queue.py", "tests/test_rapidtriage_media_image.py"],
       "assertions": [
-        "OCR queue/manifests preserve queue items, sidecar hashes, retry state, metadata, native OCR warnings, trusted OCR engine/sidecar diff gates, #58 core_accuracy_gates, and reportability blockers for missing OCR engine logs, retry history, version capture, confidence calibration, Case DB queue persistence, and trusted OCR evidence."
+        "OCR queue/manifests and source preview queue pages preserve queue items, sidecar hashes, retry state, metadata, copy-safe queue citations, native OCR warnings, trusted OCR engine/sidecar diff gates, #58 core_accuracy_gates, and reportability blockers for missing OCR engine logs, retry history, version capture, confidence calibration, Case DB queue persistence, and trusted OCR evidence."
       ],
       "remaining_external_validation": ["Native OCR worker execution, engine/version logs, trusted engine/sidecar diff, and per-case web queue persistence."]
     },
     {
       "item": 59,
       "title": "Korean OCR/translation workflow hardening",
-      "test_files": ["tests/test_rapidtriage_ocr_queue.py", "tests/test_rapidtriage_media_image.py"],
+      "test_files": ["tests/test_rapidtriage_ocr_queue.py", "tests/test_rapidtriage_media_image.py", "tests/test_rapidtriage_api.py"],
       "assertions": [
-        "OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, human-review warnings, trusted Korean OCR/translation review gates, #59 core_accuracy_gates, and reportability blockers for missing Korean OCR calibration plus certified translation review."
+        "OCR/media flows preserve Korean hints, quality metrics, translation sidecars, confidence/engine metadata, source-viewer side-by-side OCR/translation review packages, human-review warnings, trusted Korean OCR/translation review gates, #59 core_accuracy_gates, and reportability blockers for missing Korean OCR calibration plus certified translation review."
       ],
-      "remaining_external_validation": ["Korean OCR calibration corpus, trusted Korean OCR/translation review diff, certified translation workflow, and side-by-side review UI."]
+      "remaining_external_validation": ["Korean OCR calibration corpus, trusted Korean OCR/translation review diff, certified translation workflow, and reviewer signoff persistence."]
     },
     {
       "item": 60,
       "title": "Search hit deduplication",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search analysis preserves duplicate fingerprints, duplicate group counts, representative hits, source/path refs, near-duplicate warnings, trusted duplicate manifest gates, #60 core_accuracy_gates, and reportability blockers for missing exact/fuzzy/perceptual/OCR duplicate corpora plus analyst suppression persistence."
+        "Search analysis preserves duplicate fingerprints, duplicate group counts, representative hits, hidden duplicate counts, source/path refs, collapse review profiles, web dedupe cards, near-duplicate warnings, trusted duplicate manifest gates, #60 core_accuracy_gates, and reportability blockers for missing exact/fuzzy/perceptual/OCR duplicate corpora plus analyst suppression persistence."
       ],
-      "remaining_external_validation": ["UI collapse/suppression workflow, fuzzy near-duplicate text grouping, trusted duplicate manifest diff, and media duplicate validation."]
+      "remaining_external_validation": ["Persistent Case DB suppression workflow, fuzzy near-duplicate text grouping, trusted duplicate manifest diff, and media duplicate validation."]
     }
   ]
 }

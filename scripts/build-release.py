@@ -11,6 +11,7 @@ import sys
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Mapping
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -56,6 +57,8 @@ ADMIN_DEPLOYMENT_GUIDE_GAP_ID = "#117"
 SECURITY_HARDENING_REVIEW_GAP_ID = "#118"
 MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID = "#119"
 DEPENDENCY_VULNERABILITY_MONITORING_GAP_ID = "#120"
+FUNCTIONAL_PACKAGING_BATCH_ID = "commercial-uplift-056-060"
+FUNCTIONAL_OPERATIONS_BATCH_ID = "commercial-uplift-066-070"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -88,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         add_if_exists(archive, repo / "docs" / "rapidtriage-user-guide.md", "docs/rapidtriage-user-guide.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-known-limitations.md", "docs/rapidtriage-known-limitations.md")
         add_if_exists(archive, repo / "docs" / "rapidtriage-parser-coverage.md", "docs/rapidtriage-parser-coverage.md")
+        add_if_exists(archive, repo / "docs" / "rapidtriage-sample-case.md", "docs/rapidtriage-sample-case.md")
         add_if_exists(
             archive,
             repo / "docs" / "rapidtriage-commercial-parity-backlog.md",
@@ -105,6 +109,10 @@ def main(argv: list[str] | None = None) -> int:
         add_if_exists(archive, repo / "scripts" / "summarize-smoke.py", "scripts/summarize-smoke.py")
         add_if_exists(archive, repo / "scripts" / "verify-release-evidence.py", "scripts/verify-release-evidence.py")
         add_if_exists(archive, repo / "scripts" / "check-dependencies.py", "scripts/check-dependencies.py")
+        add_if_exists(archive, repo / "scripts" / "crash-export-smoke.py", "scripts/crash-export-smoke.py")
+        add_if_exists(archive, repo / "scripts" / "crash-redaction-review.py", "scripts/crash-redaction-review.py")
+        add_if_exists(archive, repo / "scripts" / "parser-sandbox-smoke.py", "scripts/parser-sandbox-smoke.py")
+        add_if_exists(archive, repo / "scripts" / "security-hardening-review.py", "scripts/security-hardening-review.py")
         add_tree(archive, repo / "scripts" / "windows", "scripts/windows")
         archive.writestr("data/.gitkeep", "")
         archive.writestr("cases/.gitkeep", "")
@@ -166,7 +174,1061 @@ def write_sha256s(output_dir: Path) -> None:
     checksum_path.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
 
 
+def stable_release_sha256(payload: object) -> str:
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def build_release_evidence_slot_matrix(
+    *,
+    item_number: int,
+    slots: dict[str, object],
+    artifact_hashes: list[dict[str, object]],
+) -> dict[str, object]:
+    rows = []
+    for name, slot in sorted(slots.items()):
+        slot_payload = slot if isinstance(slot, dict) else {}
+        row_core = {
+            "slot_name": name,
+            "status": str(slot_payload.get("status") or ""),
+            "expected_material_hash": stable_release_sha256(str(slot_payload.get("expected_material") or "")),
+            "required_before_commercial_claim": bool(slot_payload.get("required_before_commercial_claim")),
+            "attached": str(slot_payload.get("status") or "") not in {"", "not-attached", "operator-owned"},
+        }
+        rows.append({**row_core, "row_hash": stable_release_sha256(row_core)})
+    matrix: dict[str, object] = {
+        "profile_version": "release-evidence-slot-matrix-v1",
+        "item_number": item_number,
+        "slot_count": len(rows),
+        "rows": rows,
+        "artifact_hash_count": len(artifact_hashes),
+        "artifact_hash_set_hash": stable_release_sha256(artifact_hashes),
+        "missing_required_slot_count": sum(
+            1 for row in rows if row["required_before_commercial_claim"] and not row["attached"]
+        ),
+        "commercial_claim_allowed": False,
+    }
+    matrix["matrix_hash"] = stable_release_sha256(matrix)
+    return matrix
+
+
+def build_auto_update_channel_evidence_manifest(
+    artifacts: list[dict[str, object]],
+    trusted_diff: dict[str, object],
+) -> dict[str, object]:
+    release_artifact_hashes = [
+        {
+            "name": artifact.get("name"),
+            "size_bytes": artifact.get("size_bytes"),
+            "sha256": artifact.get("sha256"),
+            "signature_required": artifact.get("signature_required"),
+        }
+        for artifact in artifacts
+        if artifact.get("name")
+    ]
+    update_evidence_slots = {
+        "signed_manifest": {
+            "status": "not-attached",
+            "expected_material": "Signed update manifest and signature verification transcript",
+            "required_before_commercial_claim": True,
+        },
+        "hosted_channel": {
+            "status": "not-attached",
+            "expected_material": "Hosted update channel URL, TLS policy, and access-control review",
+            "required_before_commercial_claim": True,
+        },
+        "rollback_test": {
+            "status": "not-attached",
+            "expected_material": "Rollback test transcript using previous and current release artifacts",
+            "required_before_commercial_claim": True,
+        },
+        "enterprise_disable_smoke": {
+            "status": "not-attached",
+            "expected_material": "Enterprise policy smoke proving auto-update can be disabled",
+            "required_before_commercial_claim": True,
+        },
+    }
+    evidence_slot_matrix = build_release_evidence_slot_matrix(
+        item_number=104,
+        slots=update_evidence_slots,
+        artifact_hashes=release_artifact_hashes,
+    )
+    manifest: dict[str, object] = {
+        "profile_version": "auto-update-channel-evidence-manifest-v1",
+        "item_number": 104,
+        "commercial_gap_ids": [AUTO_UPDATE_CHANNEL_GAP_ID],
+        "commercial_claim_allowed": False,
+        "channel": "manual",
+        "auto_update_enabled_by_default": False,
+        "enterprise_disable": True,
+        "release_artifact_hashes": release_artifact_hashes,
+        "update_evidence_slots": update_evidence_slots,
+        "evidence_slot_matrix": evidence_slot_matrix,
+        "evidence_slot_matrix_hash": evidence_slot_matrix["matrix_hash"],
+        "trusted_diff_status": trusted_diff.get("status"),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "blockers": [AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104],
+    }
+    manifest["manifest_hash"] = stable_release_sha256(manifest)
+    return manifest
+
+
+def build_windows_signing_evidence_manifest(
+    artifacts: list[dict[str, object]],
+    trusted_diff: dict[str, object],
+) -> dict[str, object]:
+    release_artifact_hashes = [
+        {
+            "name": artifact.get("name"),
+            "size_bytes": artifact.get("size_bytes"),
+            "sha256": artifact.get("sha256"),
+        }
+        for artifact in artifacts
+        if artifact.get("name")
+    ]
+    signing_slots = {
+        "signature_log": {
+            "status": "not-attached",
+            "expected_material": "Get-AuthenticodeSignature output for each Windows installer artifact",
+            "required_before_commercial_claim": True,
+        },
+        "timestamp_authority": {
+            "status": "not-attached",
+            "expected_material": "Trusted timestamp authority proof attached to the Authenticode signature",
+            "required_before_commercial_claim": True,
+        },
+        "fresh_windows_smoke": {
+            "status": "not-attached",
+            "expected_material": "Fresh Windows 11 install/run smoke output folder and summary log",
+            "required_before_commercial_claim": True,
+        },
+    }
+    evidence_slot_matrix = build_release_evidence_slot_matrix(
+        item_number=101,
+        slots=signing_slots,
+        artifact_hashes=release_artifact_hashes,
+    )
+    manifest: dict[str, object] = {
+        "profile_version": "windows-signing-evidence-manifest-v1",
+        "item_number": 101,
+        "commercial_gap_ids": [WINDOWS_SIGNED_INSTALLER_GAP_ID],
+        "commercial_claim_allowed": False,
+        "target_outputs": [
+            "rapidtriage-portable.zip",
+            "future rapidtriage-installer.msi",
+            "future rapidtriage-setup.exe",
+        ],
+        "release_artifact_hashes": release_artifact_hashes,
+        "signing_slots": signing_slots,
+        "evidence_slot_matrix": evidence_slot_matrix,
+        "evidence_slot_matrix_hash": evidence_slot_matrix["matrix_hash"],
+        "trusted_diff_status": trusted_diff.get("status"),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "blockers": [WINDOWS_SIGNING_TRUSTED_DIFF_BLOCKER_101],
+    }
+    manifest["manifest_hash"] = stable_release_sha256(manifest)
+    return manifest
+
+
+def build_windows_installer_workflow_manifest(
+    artifacts: list[dict[str, object]],
+    signing_manifest: dict[str, object],
+) -> dict[str, object]:
+    payload_hashes = [
+        {
+            "name": artifact.get("name"),
+            "size_bytes": artifact.get("size_bytes"),
+            "sha256": artifact.get("sha256"),
+        }
+        for artifact in artifacts
+        if artifact.get("name") in {"rapidtriage-portable.zip", "dependency-inventory.txt", "SHA256SUMS"}
+        or str(artifact.get("name") or "").endswith((".whl", ".tar.gz"))
+    ]
+    manifest: dict[str, object] = {
+        "profile_version": "windows-installer-workflow-manifest-v1",
+        "item_number": 57,
+        "commercial_gap_ids": [WINDOWS_SIGNED_INSTALLER_GAP_ID],
+        "commercial_claim_allowed": False,
+        "target_outputs": ["rapidtriage-installer.msi", "rapidtriage-setup.exe", "rapidtriage-portable.zip"],
+        "payload_hashes": payload_hashes,
+        "launcher_entries": [
+            "scripts/windows/start-rapidtriage.ps1",
+            "scripts/windows/smoke-test-rapidtriage.ps1",
+            "scripts/windows/smoke-test-rapidtriage.bat",
+        ],
+        "installer_workflow_steps": [
+            {"step": "assemble portable payload", "status": "implemented", "owner": "build-release.py"},
+            {"step": "verify SHA256SUMS", "status": "implemented", "owner": "build-release.py --verify"},
+            {"step": "wrap MSI/EXE", "status": "external-tool-required", "owner": "release engineer"},
+            {"step": "attach Authenticode signature", "status": "external-evidence-required", "owner": "release engineer"},
+            {"step": "attach trusted timestamp", "status": "external-evidence-required", "owner": "release engineer"},
+            {"step": "run fresh Windows 11 smoke", "status": "external-evidence-required", "owner": "release QA"},
+        ],
+        "evidence_slots": {
+            "installer_wrapper_log": {
+                "status": "not-attached",
+                "expected_material": "MSI/EXE wrapper build transcript and installer SHA256 values",
+                "required_before_commercial_claim": True,
+            },
+            "authenticode_signature": signing_manifest.get("signing_slots", {}).get("signature_log", {}),
+            "timestamp_authority": signing_manifest.get("signing_slots", {}).get("timestamp_authority", {}),
+            "fresh_windows_smoke": signing_manifest.get("signing_slots", {}).get("fresh_windows_smoke", {}),
+        },
+        "verification_commands": [
+            "python scripts/build-release.py --output-dir release --skip-build",
+            "python scripts/build-release.py --output-dir release --verify",
+            "powershell -ExecutionPolicy Bypass -File scripts/windows/smoke-test-rapidtriage.ps1",
+            "Get-AuthenticodeSignature .\\rapidtriage-setup.exe",
+        ],
+        "blockers": [
+            "actual-msi-exe-wrapper-not-attached",
+            "authenticode-signature-not-attached",
+            "timestamp-authority-not-attached",
+            "fresh-windows-11-smoke-not-attached",
+            WINDOWS_SIGNING_TRUSTED_DIFF_BLOCKER_101,
+        ],
+    }
+    manifest["manifest_hash"] = stable_release_sha256(manifest)
+    return manifest
+
+
+def build_windows_portable_mode_manifest(output_dir: Path) -> dict[str, object]:
+    portable_zip = output_dir / "rapidtriage-portable.zip"
+    required_zip_entries = [
+        "scripts/windows/start-rapidtriage.ps1",
+        "scripts/windows/smoke-test-rapidtriage.ps1",
+        "scripts/windows/smoke-test-rapidtriage.bat",
+        "scripts/check-dependencies.py",
+        "scripts/crash-export-smoke.py",
+        "scripts/crash-redaction-review.py",
+        "scripts/parser-sandbox-smoke.py",
+        "scripts/security-hardening-review.py",
+        "docs/rapidtriage-windows-quickstart.md",
+        "docs/rapidtriage-fresh-machine-smoke-test.md",
+    ]
+    zip_entries: list[str] = []
+    if portable_zip.is_file():
+        with zipfile.ZipFile(portable_zip) as archive:
+            zip_entries = sorted(archive.namelist())
+    missing_entries = [entry for entry in required_zip_entries if entry not in zip_entries]
+    manifest: dict[str, object] = {
+        "profile_version": "windows-portable-mode-manifest-v1",
+        "item_number": 58,
+        "batch_id": FUNCTIONAL_PACKAGING_BATCH_ID,
+        "target_output": "rapidtriage-portable.zip",
+        "portable_zip_present": portable_zip.is_file(),
+        "portable_zip_sha256": hashlib.sha256(portable_zip.read_bytes()).hexdigest() if portable_zip.is_file() else "",
+        "dependency_inventory_present": (output_dir / "dependency-inventory.txt").is_file(),
+        "sha256s_present": (output_dir / "SHA256SUMS").is_file(),
+        "release_manifest_present": (output_dir / "release-manifest.json").is_file(),
+        "required_zip_entries": required_zip_entries,
+        "missing_zip_entries": missing_entries,
+        "double_click_entrypoints": [
+            "scripts/windows/start-rapidtriage.ps1",
+            "scripts/windows/smoke-test-rapidtriage.bat",
+        ],
+        "preflight_commands": [
+            "python scripts/check-dependencies.py --json",
+            "python scripts/crash-export-smoke.py --output-dir logs/crash-export-smoke --json",
+            "python scripts/crash-redaction-review.py logs/crash-export-smoke/crash-export-smoke.json --json",
+            "python scripts/parser-sandbox-smoke.py --output logs/parser-sandbox-smoke.json --json",
+            "python scripts/security-hardening-review.py --output logs/security-hardening-review.json --json",
+            "python scripts/build-release.py --verify",
+            "powershell -ExecutionPolicy Bypass -File scripts/windows/smoke-test-rapidtriage.ps1",
+        ],
+        "large_data_controls": {
+            "evidence_storage_inside_zip": False,
+            "cases_directory_placeholder": "cases/.gitkeep" in zip_entries,
+            "logs_directory_placeholder": "logs/.gitkeep" in zip_entries,
+            "tools_directory_placeholder": "tools/.gitkeep" in zip_entries,
+            "optional_forensic_tools_preflighted": True,
+        },
+        "commercial_blockers": [
+            "fresh-windows-portable-smoke-not-attached",
+            "clean-windows-no-developer-tools-smoke-not-attached",
+        ],
+        "validation_status": "implemented-usable-external-smoke-required",
+    }
+    manifest["manifest_hash"] = stable_release_sha256(manifest)
+    return manifest
+
+
+def build_macos_notarization_evidence_manifest(
+    artifacts: list[dict[str, object]],
+    trusted_diff: dict[str, object],
+) -> dict[str, object]:
+    release_artifact_hashes = [
+        {
+            "name": artifact.get("name"),
+            "size_bytes": artifact.get("size_bytes"),
+            "sha256": artifact.get("sha256"),
+        }
+        for artifact in artifacts
+        if artifact.get("name")
+    ]
+    notarization_slots = {
+        "codesign_verification": {
+            "status": "not-attached",
+            "expected_material": "codesign --verify --deep --strict output for each macOS package/app artifact",
+            "required_before_commercial_claim": True,
+        },
+        "notarytool_submission": {
+            "status": "not-attached",
+            "expected_material": "Apple notarytool submission ID, status, and ticket proof",
+            "required_before_commercial_claim": True,
+        },
+        "gatekeeper_assessment": {
+            "status": "not-attached",
+            "expected_material": "spctl Gatekeeper assessment output on a clean macOS host",
+            "required_before_commercial_claim": True,
+        },
+        "fresh_macos_smoke": {
+            "status": "not-attached",
+            "expected_material": "Fresh macOS install/run smoke output folder and summary log",
+            "required_before_commercial_claim": True,
+        },
+    }
+    evidence_slot_matrix = build_release_evidence_slot_matrix(
+        item_number=102,
+        slots=notarization_slots,
+        artifact_hashes=release_artifact_hashes,
+    )
+    manifest: dict[str, object] = {
+        "profile_version": "macos-notarization-evidence-manifest-v1",
+        "item_number": 102,
+        "commercial_gap_ids": [MACOS_NOTARIZED_PACKAGE_GAP_ID],
+        "commercial_claim_allowed": False,
+        "target_outputs": [
+            "future rapidtriage.pkg",
+            "future rapidtriage.dmg",
+        ],
+        "release_artifact_hashes": release_artifact_hashes,
+        "notarization_slots": notarization_slots,
+        "evidence_slot_matrix": evidence_slot_matrix,
+        "evidence_slot_matrix_hash": evidence_slot_matrix["matrix_hash"],
+        "trusted_diff_status": trusted_diff.get("status"),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "blockers": [MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102],
+    }
+    manifest["manifest_hash"] = stable_release_sha256(manifest)
+    return manifest
+
+
+def build_macos_package_workflow_manifest(
+    artifacts: list[dict[str, object]],
+    notarization_manifest: dict[str, object],
+) -> dict[str, object]:
+    payload_hashes = [
+        {
+            "name": artifact.get("name"),
+            "size_bytes": artifact.get("size_bytes"),
+            "sha256": artifact.get("sha256"),
+        }
+        for artifact in artifacts
+        if artifact.get("name") == "rapidtriage-portable.zip"
+        or str(artifact.get("name") or "").endswith((".whl", ".tar.gz"))
+    ]
+    manifest: dict[str, object] = {
+        "profile_version": "macos-package-workflow-manifest-v1",
+        "item_number": 59,
+        "commercial_gap_ids": [MACOS_NOTARIZED_PACKAGE_GAP_ID],
+        "commercial_claim_allowed": False,
+        "target_outputs": ["rapidtriage.pkg", "rapidtriage.dmg", "rapidtriage-portable.zip"],
+        "payload_hashes": payload_hashes,
+        "launcher_entries": [
+            "scripts/start-rapidtriage.sh",
+            "scripts/smoke-test-rapidtriage.sh",
+        ],
+        "package_workflow_steps": [
+            {"step": "assemble portable payload", "status": "implemented", "owner": "build-release.py"},
+            {"step": "wrap pkg/dmg", "status": "external-tool-required", "owner": "release engineer"},
+            {"step": "codesign app/package", "status": "external-evidence-required", "owner": "release engineer"},
+            {"step": "submit notarization", "status": "external-evidence-required", "owner": "release engineer"},
+            {"step": "run Gatekeeper assessment", "status": "external-evidence-required", "owner": "release QA"},
+            {"step": "run fresh macOS smoke", "status": "external-evidence-required", "owner": "release QA"},
+        ],
+        "evidence_slots": {
+            "pkg_dmg_build_log": {
+                "status": "not-attached",
+                "expected_material": "pkg/dmg wrapper build transcript plus package SHA256 values",
+                "required_before_commercial_claim": True,
+            },
+            "codesign_verification": notarization_manifest.get("notarization_slots", {}).get("codesign_verification", {}),
+            "notarization_ticket": notarization_manifest.get("notarization_slots", {}).get("notarization_ticket", {}),
+            "gatekeeper_assessment": notarization_manifest.get("notarization_slots", {}).get("gatekeeper_assessment", {}),
+        },
+        "verification_commands": [
+            "python scripts/build-release.py --output-dir release --skip-build",
+            "pkgutil --check-signature rapidtriage.pkg",
+            "codesign --verify --deep --strict rapidtriage.app",
+            "spctl --assess --type open --verbose rapidtriage.dmg",
+            "xcrun notarytool history",
+        ],
+        "blockers": [
+            "actual-pkg-dmg-wrapper-not-attached",
+            "codesign-verification-not-attached",
+            "notarization-ticket-not-attached",
+            "gatekeeper-assessment-not-attached",
+            MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102,
+        ],
+    }
+    manifest["manifest_hash"] = stable_release_sha256(manifest)
+    return manifest
+
+
+def build_linux_package_evidence_manifest(
+    artifacts: list[dict[str, object]],
+    trusted_diff: dict[str, object],
+) -> dict[str, object]:
+    release_artifact_hashes = [
+        {
+            "name": artifact.get("name"),
+            "size_bytes": artifact.get("size_bytes"),
+            "sha256": artifact.get("sha256"),
+        }
+        for artifact in artifacts
+        if artifact.get("name")
+    ]
+    package_evidence_slots = {
+        "deb_build_log": {
+            "status": "not-attached",
+            "expected_material": "Clean-container deb build log and generated package SHA256",
+            "required_before_commercial_claim": True,
+        },
+        "rpm_build_log": {
+            "status": "not-attached",
+            "expected_material": "Clean-container rpm build log and generated package SHA256",
+            "required_before_commercial_claim": True,
+        },
+        "appimage_build_log": {
+            "status": "not-attached",
+            "expected_material": "Clean-container AppImage build log and generated package SHA256",
+            "required_before_commercial_claim": True,
+        },
+        "install_uninstall_smoke": {
+            "status": "not-attached",
+            "expected_material": "Fresh distro install, launch, smoke, and uninstall transcript",
+            "required_before_commercial_claim": True,
+        },
+        "dependency_resolution": {
+            "status": "not-attached",
+            "expected_material": "Package-manager dependency resolution transcript on target distributions",
+            "required_before_commercial_claim": True,
+        },
+    }
+    evidence_slot_matrix = build_release_evidence_slot_matrix(
+        item_number=103,
+        slots=package_evidence_slots,
+        artifact_hashes=release_artifact_hashes,
+    )
+    manifest: dict[str, object] = {
+        "profile_version": "linux-package-evidence-manifest-v1",
+        "item_number": 103,
+        "commercial_gap_ids": [LINUX_PACKAGE_GAP_ID],
+        "commercial_claim_allowed": False,
+        "supported_outputs": ["rapidtriage-portable.zip", "wheel", "sdist"],
+        "target_outputs": [
+            "future rapidtriage.deb",
+            "future rapidtriage.rpm",
+            "future rapidtriage.AppImage",
+        ],
+        "release_artifact_hashes": release_artifact_hashes,
+        "package_evidence_slots": package_evidence_slots,
+        "evidence_slot_matrix": evidence_slot_matrix,
+        "evidence_slot_matrix_hash": evidence_slot_matrix["matrix_hash"],
+        "trusted_diff_status": trusted_diff.get("status"),
+        "trusted_diff_blocker": trusted_diff.get("blocker"),
+        "blockers": [LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103],
+    }
+    manifest["manifest_hash"] = stable_release_sha256(manifest)
+    return manifest
+
+
+def build_linux_package_workflow_manifest(
+    artifacts: list[dict[str, object]],
+    package_manifest: dict[str, object],
+) -> dict[str, object]:
+    payload_hashes = [
+        {
+            "name": artifact.get("name"),
+            "size_bytes": artifact.get("size_bytes"),
+            "sha256": artifact.get("sha256"),
+        }
+        for artifact in artifacts
+        if artifact.get("name") == "rapidtriage-portable.zip"
+        or str(artifact.get("name") or "").endswith((".whl", ".tar.gz"))
+    ]
+    manifest: dict[str, object] = {
+        "profile_version": "linux-package-workflow-manifest-v1",
+        "item_number": 60,
+        "commercial_gap_ids": [LINUX_PACKAGE_GAP_ID],
+        "commercial_claim_allowed": False,
+        "target_outputs": ["rapidtriage.deb", "rapidtriage.rpm", "RapidTriage.AppImage", "rapidtriage-portable.zip"],
+        "payload_hashes": payload_hashes,
+        "launcher_entries": [
+            "scripts/start-rapidtriage.sh",
+            "scripts/smoke-test-rapidtriage.sh",
+        ],
+        "package_workflow_steps": [
+            {"step": "assemble portable payload", "status": "implemented", "owner": "build-release.py"},
+            {"step": "build wheel/sdist", "status": "implemented-when-build-enabled", "owner": "python -m build"},
+            {"step": "build deb", "status": "external-container-required", "owner": "release CI"},
+            {"step": "build rpm", "status": "external-container-required", "owner": "release CI"},
+            {"step": "build AppImage", "status": "external-container-required", "owner": "release CI"},
+            {"step": "run install/uninstall smoke", "status": "external-evidence-required", "owner": "release QA"},
+        ],
+        "evidence_slots": {
+            "deb_build_log": package_manifest.get("package_evidence_slots", {}).get("deb_build_log", {}),
+            "rpm_build_log": package_manifest.get("package_evidence_slots", {}).get("rpm_build_log", {}),
+            "appimage_build_log": package_manifest.get("package_evidence_slots", {}).get("appimage_build_log", {}),
+            "clean_container_smoke": package_manifest.get("package_evidence_slots", {}).get("clean_container_smoke", {}),
+            "install_uninstall_log": {
+                "status": "not-attached",
+                "expected_material": "Install, launch, smoke, and uninstall transcript for each target distribution",
+                "required_before_commercial_claim": True,
+            },
+        },
+        "verification_commands": [
+            "python scripts/build-release.py --output-dir release --skip-build",
+            "python scripts/build-release.py --output-dir release --verify",
+            "dpkg -i rapidtriage.deb && rapidtriage --version && dpkg -r rapidtriage",
+            "rpm -i rapidtriage.rpm && rapidtriage --version && rpm -e rapidtriage",
+            "chmod +x RapidTriage.AppImage && ./RapidTriage.AppImage --version",
+        ],
+        "blockers": [
+            "deb-build-log-not-attached",
+            "rpm-build-log-not-attached",
+            "appimage-build-log-not-attached",
+            "clean-container-install-uninstall-smoke-not-attached",
+            LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103,
+        ],
+    }
+    manifest["manifest_hash"] = stable_release_sha256(manifest)
+    return manifest
+
+
+def build_operations_document_evidence_manifests(repo: Path, output_dir: Path) -> dict[str, dict[str, object]]:
+    document_specs = {
+        112: {
+            "profile_version": "release-notes-discipline-evidence-manifest-v1",
+            "gap_id": RELEASE_NOTES_CHANGELOG_GAP_ID,
+            "documents": ["docs/rapidtriage-release-notes-template.md", "docs/rapidtriage-known-limitations.md"],
+            "slots": {
+                "ci_changelog_gate": "CI release-note gate proving changes, known limits, validation state, and migration notes are present",
+                "release_owner_review": "Release owner review/signoff for changelog completeness",
+            },
+        },
+        113: {
+            "profile_version": "lts-hotfix-policy-evidence-manifest-v1",
+            "gap_id": LTS_HOTFIX_POLICY_GAP_ID,
+            "documents": ["docs/rapidtriage-lts-hotfix-policy.md"],
+            "slots": {
+                "maintained_branch_proof": "Maintained LTS branch and backport policy proof",
+                "hotfix_backport_validation": "Hotfix backport validation transcript",
+            },
+        },
+        114: {
+            "profile_version": "support-sla-evidence-manifest-v1",
+            "gap_id": SUPPORT_SLA_GAP_ID,
+            "documents": ["docs/rapidtriage-support-sla.md"],
+            "slots": {
+                "staffed_support_attestation": "Staffed support desk attestation and escalation owner list",
+                "secure_intake_review": "Secure evidence intake process review",
+            },
+        },
+        115: {
+            "profile_version": "training-delivery-evidence-manifest-v1",
+            "gap_id": TRAINING_CURRICULUM_GAP_ID,
+            "documents": ["docs/rapidtriage-training-curriculum.md"],
+            "slots": {
+                "training_delivery_log": "Real training delivery log",
+                "scoring_rubric_results": "Analyst/admin lab scoring rubric results",
+            },
+        },
+        116: {
+            "profile_version": "quickstart-lab-evidence-manifest-v1",
+            "gap_id": ANALYST_QUICKSTART_LAB_GAP_ID,
+            "documents": [
+                "docs/rapidtriage-training-curriculum.md",
+                "docs/rapidtriage-windows-quickstart.md",
+                "docs/rapidtriage-sample-case.md",
+            ],
+            "slots": {
+                "quickstart_lab_run_log": "Analyst quickstart lab run log from ingest through report export",
+                "sample_case_expected_outputs": "Sample case expected-output manifest",
+            },
+        },
+        117: {
+            "profile_version": "admin-deployment-evidence-manifest-v1",
+            "gap_id": ADMIN_DEPLOYMENT_GUIDE_GAP_ID,
+            "documents": ["docs/rapidtriage-admin-deployment-guide.md"],
+            "slots": {
+                "fresh_deployment_proof": "Fresh admin deployment proof with install/update/auth/backup checks",
+                "operator_acceptance_signoff": "Operator acceptance signoff for deployment guide",
+            },
+        },
+        118: {
+            "profile_version": "security-hardening-evidence-manifest-v1",
+            "gap_id": SECURITY_HARDENING_REVIEW_GAP_ID,
+            "documents": ["docs/rapidtriage-security-policy.md", "docs/rapidtriage-admin-deployment-guide.md"],
+            "slots": {
+                "independent_appsec_review": "Independent AppSec review report",
+                "threat_model_review": "Threat model/path/auth/export/parser hardening review",
+            },
+        },
+        119: {
+            "profile_version": "malicious-evidence-sandbox-evidence-manifest-v1",
+            "gap_id": MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID,
+            "documents": ["docs/rapidtriage-admin-deployment-guide.md", "docs/rapidtriage-security-policy.md"],
+            "slots": {
+                "malicious_corpus_validation": "Trusted malicious evidence corpus validation",
+                "os_sandbox_proof": "OS-level parser/preview sandbox proof",
+            },
+        },
+        120: {
+            "profile_version": "dependency-monitoring-evidence-manifest-v1",
+            "gap_id": DEPENDENCY_VULNERABILITY_MONITORING_GAP_ID,
+            "documents": ["scripts/check-dependencies.py", "dependency-inventory.txt"],
+            "slots": {
+                "scheduled_ci_advisory_scan": "Scheduled CI advisory scan log",
+                "sbom_publication": "SBOM publication and release-blocking exception review",
+            },
+        },
+    }
+    manifests: dict[str, dict[str, object]] = {}
+    for number, spec in document_specs.items():
+        document_hashes = []
+        for rel_path in spec["documents"]:
+            path = repo / rel_path
+            if not path.is_file():
+                path = output_dir / rel_path
+            if path.is_file():
+                document_hashes.append({"path": rel_path, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "size_bytes": path.stat().st_size})
+            else:
+                document_hashes.append({"path": rel_path, "status": "missing"})
+        slots = {
+            slot: {
+                "status": "not-attached",
+                "expected_material": expected,
+                "required_before_commercial_claim": True,
+            }
+            for slot, expected in spec["slots"].items()
+        }
+        document_evidence_matrix = build_operations_document_evidence_matrix(
+            number=number,
+            document_hashes=document_hashes,
+            slots=slots,
+        )
+        manifest: dict[str, object] = {
+            "profile_version": spec["profile_version"],
+            "item_number": number,
+            "commercial_gap_ids": [spec["gap_id"]],
+            "commercial_claim_allowed": False,
+            "document_hashes": document_hashes,
+            "evidence_slots": slots,
+            "document_evidence_matrix": document_evidence_matrix,
+            "document_evidence_matrix_hash": document_evidence_matrix["matrix_hash"],
+            "blockers": [OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[number]] if number in OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS else [],
+        }
+        manifest["manifest_hash"] = stable_release_sha256(manifest)
+        manifests[str(number)] = manifest
+    return manifests
+
+
+def build_operations_document_evidence_matrix(
+    *,
+    number: int,
+    document_hashes: list[dict[str, object]],
+    slots: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+    slot_rows = []
+    for slot_name, slot in sorted(slots.items()):
+        row_core = {
+            "slot": slot_name,
+            "status": slot.get("status", ""),
+            "attached": slot.get("status") not in {"not-attached", "missing", ""},
+            "required_before_commercial_claim": bool(slot.get("required_before_commercial_claim")),
+            "expected_material_hash": stable_release_sha256(slot.get("expected_material", "")),
+        }
+        slot_rows.append({**row_core, "row_hash": stable_release_sha256(row_core)})
+    document_rows = []
+    for document in document_hashes:
+        row_core = {
+            "path": document.get("path", ""),
+            "present": bool(document.get("sha256")),
+            "sha256": document.get("sha256", ""),
+            "size_bytes": document.get("size_bytes", 0),
+        }
+        document_rows.append({**row_core, "row_hash": stable_release_sha256(row_core)})
+    matrix: dict[str, object] = {
+        "profile_version": "operations-document-evidence-matrix-v1",
+        "item_number": number,
+        "document_count": len(document_rows),
+        "present_document_count": sum(1 for row in document_rows if row["present"]),
+        "slot_count": len(slot_rows),
+        "required_slot_count": sum(1 for row in slot_rows if row["required_before_commercial_claim"]),
+        "attached_slot_count": sum(1 for row in slot_rows if row["attached"]),
+        "missing_required_slot_count": sum(
+            1 for row in slot_rows if row["required_before_commercial_claim"] and not row["attached"]
+        ),
+        "document_rows": document_rows,
+        "slot_rows": slot_rows,
+        "commercial_claim_allowed": False,
+    }
+    matrix["matrix_hash"] = stable_release_sha256(matrix)
+    return matrix
+
+
+def build_admin_guide_coverage_manifest(repo: Path, output_dir: Path) -> dict[str, object]:
+    document_paths = [
+        "docs/rapidtriage-admin-deployment-guide.md",
+        "docs/rapidtriage-security-policy.md",
+        "docs/rapidtriage-release-checklist.md",
+        "docs/rapidtriage-windows-quickstart.md",
+        "docs/rapidtriage-macos-linux-quickstart.md",
+    ]
+    documents: list[dict[str, object]] = []
+    corpus_parts: list[str] = []
+    for rel_path in document_paths:
+        path = repo / rel_path
+        if not path.is_file():
+            path = output_dir / rel_path
+        if path.is_file():
+            text = path.read_text(encoding="utf-8", errors="replace")
+            corpus_parts.append(text.lower())
+            documents.append(
+                {
+                    "path": rel_path,
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "size_bytes": path.stat().st_size,
+                }
+            )
+        else:
+            documents.append({"path": rel_path, "status": "missing"})
+    corpus = "\n".join(corpus_parts)
+    coverage_requirements = {
+        "install": ["install", "portable", "wheel"],
+        "update": ["update", "reinstall", "upgrade"],
+        "auth": ["auth-token", "token"],
+        "network": ["localhost", "127.0.0.1", "internet"],
+        "backup": ["case-backup", "backup"],
+        "restore": ["case-restore", "restore"],
+        "logging": ["logs", "crash-log-dir", "smoke-summary"],
+        "security": ["security", "telemetry", "hardening"],
+        "dependency": ["check-dependencies", "dependency", "sbom"],
+        "evidence_handling": ["evidence", "hash", "reviewer bundle"],
+    }
+    coverage = {
+        name: {
+            "present": all(keyword in corpus for keyword in keywords),
+            "required_keywords": keywords,
+        }
+        for name, keywords in coverage_requirements.items()
+    }
+    missing_coverage = sorted(name for name, result in coverage.items() if not result["present"])
+    manifest: dict[str, object] = {
+        "profile_version": "admin-guide-coverage-manifest-v1",
+        "item_number": 66,
+        "commercial_gap_ids": [ADMIN_DEPLOYMENT_GUIDE_GAP_ID],
+        "commercial_claim_allowed": False,
+        "documents": documents,
+        "coverage": coverage,
+        "missing_coverage": missing_coverage,
+        "coverage_passed": not missing_coverage and all("sha256" in document for document in documents),
+        "release_evidence_file": "admin-guide-coverage-manifest.json",
+        "operator_runbook_sections": [
+            "Deployment Checklist",
+            "Install And Update Runbook",
+            "Authentication And Network Boundary",
+            "Backup, Restore, And Logging",
+            "Security Hardening",
+            "Evidence Handling And Handoff",
+        ],
+        "verification_commands": [
+            "python scripts/build-release.py --output-dir release --skip-build",
+            "python scripts/build-release.py --output-dir release --verify",
+            "python -m unittest tests.test_rapidtriage_ops.RapidTriageOpsTests.test_build_release_script_can_assemble_portable_zip_without_building_wheel",
+        ],
+        "blockers": [
+            "fresh-admin-deployment-proof-not-attached",
+            "operator-acceptance-signoff-not-attached",
+            OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[117],
+        ],
+    }
+    manifest["manifest_hash"] = stable_release_sha256(manifest)
+    return manifest
+
+
+def build_support_process_readiness_manifest(repo: Path, output_dir: Path) -> dict[str, object]:
+    document_paths = [
+        "docs/rapidtriage-support-sla.md",
+        "docs/rapidtriage-lts-hotfix-policy.md",
+        "docs/rapidtriage-security-policy.md",
+        "docs/rapidtriage-release-checklist.md",
+    ]
+    documents: list[dict[str, object]] = []
+    corpus_parts: list[str] = []
+    for rel_path in document_paths:
+        path = repo / rel_path
+        if not path.is_file():
+            path = output_dir / rel_path
+        if path.is_file():
+            text = path.read_text(encoding="utf-8", errors="replace")
+            corpus_parts.append(text.lower())
+            documents.append(
+                {
+                    "path": rel_path,
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "size_bytes": path.stat().st_size,
+                }
+            )
+        else:
+            documents.append({"path": rel_path, "status": "missing"})
+    corpus = "\n".join(corpus_parts)
+    readiness_checks = {
+        "severity_levels": ["sev1", "sev2", "sev3", "sev4"],
+        "response_targets": ["4 business hours", "1 business day", "3 business days", "5 business days"],
+        "secure_intake": ["secure evidence handling", "written authorization", "encryption", "chain-of-custody"],
+        "escalation": ["forensic lead", "security issues", "emergency builds"],
+        "hotfix_gates": ["fixture", "known-answer", "rollback guidance", "validation gap"],
+        "release_attachments": ["release manifest", "sha256s", "validation package", "smoke test"],
+    }
+    checks = {
+        name: {
+            "present": all(keyword in corpus for keyword in keywords),
+            "required_keywords": keywords,
+        }
+        for name, keywords in readiness_checks.items()
+    }
+    missing_checks = sorted(name for name, result in checks.items() if not result["present"])
+    manifest: dict[str, object] = {
+        "profile_version": "support-process-readiness-manifest-v1",
+        "item_number": 68,
+        "commercial_gap_ids": [SUPPORT_SLA_GAP_ID],
+        "commercial_claim_allowed": False,
+        "documents": documents,
+        "readiness_checks": checks,
+        "missing_checks": missing_checks,
+        "coverage_passed": not missing_checks and all("sha256" in document for document in documents),
+        "release_evidence_file": "support-process-readiness-manifest.json",
+        "minimum_operator_evidence_before_claim": [
+            "staffed support desk owner list",
+            "contractual SLA or internal service commitment",
+            "secure evidence intake runbook signoff",
+            "emergency parser hotfix drill log",
+        ],
+        "blockers": [
+            "staffed-support-desk-not-attached",
+            "contractual-sla-evidence-not-attached",
+            "secure-intake-runbook-signoff-not-attached",
+            OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[114],
+        ],
+    }
+    manifest["manifest_hash"] = stable_release_sha256(manifest)
+    return manifest
+
+
+def build_release_discipline_manifest(repo: Path, output_dir: Path) -> dict[str, object]:
+    document_paths = [
+        "docs/rapidtriage-release-checklist.md",
+        "docs/rapidtriage-release-notes-template.md",
+        "docs/rapidtriage-known-limitations.md",
+        "docs/rapidtriage-parser-coverage.md",
+        "docs/rapidtriage-lts-hotfix-policy.md",
+    ]
+    documents: list[dict[str, object]] = []
+    corpus_parts: list[str] = []
+    for rel_path in document_paths:
+        path = repo / rel_path
+        if not path.is_file():
+            path = output_dir / rel_path
+        if path.is_file():
+            text = path.read_text(encoding="utf-8", errors="replace")
+            corpus_parts.append(text.lower())
+            documents.append(
+                {
+                    "path": rel_path,
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "size_bytes": path.stat().st_size,
+                }
+            )
+        else:
+            documents.append({"path": rel_path, "status": "missing"})
+    corpus = "\n".join(corpus_parts)
+    required_release_sections = {
+        "supported_inputs_and_limits": ["supported evidence inputs", "limitations"],
+        "validation_state": ["validation", "known-answer", "independent"],
+        "migration_notes": ["migration notes", "migration"],
+        "checksums": ["sha256s", "checksums"],
+        "smoke_logs": ["smoke-summary", "smoke test"],
+        "signing_status": ["signing", "notarization"],
+        "hotfix_policy": ["hotfix", "rollback guidance"],
+    }
+    section_checks = {
+        name: {
+            "present": all(keyword in corpus for keyword in keywords),
+            "required_keywords": keywords,
+        }
+        for name, keywords in required_release_sections.items()
+    }
+    required_files = [
+        "rapidtriage-portable.zip",
+        "dependency-inventory.txt",
+        "packaging-plan.json",
+        "packaging-plan.md",
+        "rapidtriage-commercial-readiness.json",
+        "rapidtriage-commercial-readiness.md",
+        "update-manifest.json",
+        "release-manifest.json",
+        "SHA256SUMS",
+    ]
+    file_statuses = []
+    for name in required_files:
+        path = output_dir / name
+        if path.is_file():
+            file_statuses.append(
+                {
+                    "name": name,
+                    "status": "present",
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "size_bytes": path.stat().st_size,
+                }
+            )
+        elif name in {"release-manifest.json", "SHA256SUMS"}:
+            file_statuses.append({"name": name, "status": "generated-after-discipline-manifest"})
+        else:
+            file_statuses.append({"name": name, "status": "missing"})
+    missing_sections = sorted(name for name, result in section_checks.items() if not result["present"])
+    missing_files = sorted(item["name"] for item in file_statuses if item["status"] == "missing")
+    manifest: dict[str, object] = {
+        "profile_version": "release-discipline-manifest-v1",
+        "item_number": 69,
+        "commercial_gap_ids": [RELEASE_NOTES_CHANGELOG_GAP_ID, LTS_HOTFIX_POLICY_GAP_ID],
+        "commercial_claim_allowed": False,
+        "documents": documents,
+        "section_checks": section_checks,
+        "required_file_statuses": file_statuses,
+        "missing_sections": missing_sections,
+        "missing_files": missing_files,
+        "coverage_passed": not missing_sections and not missing_files and all("sha256" in document for document in documents),
+        "release_evidence_file": "release-discipline-manifest.json",
+        "required_external_evidence_before_claim": [
+            "CI release-note gate proving migration, limits, validation state, and smoke logs are present",
+            "fresh Windows smoke log",
+            "fresh macOS/Linux smoke log",
+            "release owner signoff",
+        ],
+        "blockers": [
+            OPERATIONS_DOCUMENT_TRUSTED_DIFF_BLOCKERS[112],
+            "required-smoke-logs-not-attached",
+            "release-owner-signoff-not-attached",
+        ],
+    }
+    manifest["manifest_hash"] = stable_release_sha256(manifest)
+    return manifest
+
+
+def build_external_blocker_ledger_manifest(
+    admin_guide_coverage_manifest: dict[str, object],
+    support_process_readiness_manifest: dict[str, object],
+    release_discipline_manifest: dict[str, object],
+) -> dict[str, object]:
+    blockers = [
+        {
+            "blocker_id": "independent-validation-not-attached",
+            "category": "validation",
+            "required_evidence": "Independent parser validation package, reviewer identity, corpus scope, and signed report hash",
+            "owner": "validation lead",
+        },
+        {
+            "blocker_id": "large-hardware-test-evidence-not-attached",
+            "category": "performance",
+            "required_evidence": "1TB/5TB/10TB benchmark logs, hardware profile, memory/p95 latency, and failure threshold notes",
+            "owner": "performance QA",
+        },
+        {
+            "blocker_id": "code-signing-not-attached",
+            "category": "windows-release",
+            "required_evidence": "Authenticode signature verification, timestamp authority output, and fresh Windows smoke result",
+            "owner": "release engineer",
+        },
+        {
+            "blocker_id": "notarization-not-attached",
+            "category": "macos-release",
+            "required_evidence": "codesign verification, notarization ticket, Gatekeeper assessment, and fresh macOS smoke result",
+            "owner": "release engineer",
+        },
+        {
+            "blocker_id": "staffed-support-not-attached",
+            "category": "operations",
+            "required_evidence": "Staffed support desk owner list, contractual SLA/internal service commitment, and escalation rota",
+            "owner": "support lead",
+        },
+        {
+            "blocker_id": "fresh-admin-deployment-proof-not-attached",
+            "category": "deployment",
+            "required_evidence": "Fresh workstation deployment transcript covering install, update, auth, backup, restore, and smoke",
+            "owner": "admin",
+        },
+        {
+            "blocker_id": "required-smoke-logs-not-attached",
+            "category": "release-discipline",
+            "required_evidence": "Windows and macOS/Linux smoke summaries attached to release evidence",
+            "owner": "release QA",
+        },
+    ]
+    for blocker in blockers:
+        blocker["commercial_claim_blocker"] = True
+    manifest: dict[str, object] = {
+        "profile_version": "external-blocker-ledger-manifest-v1",
+        "item_number": 70,
+        "commercial_gap_ids": [
+            "#81-#100",
+            WINDOWS_SIGNED_INSTALLER_GAP_ID,
+            MACOS_NOTARIZED_PACKAGE_GAP_ID,
+            LINUX_PACKAGE_GAP_ID,
+            SUPPORT_SLA_GAP_ID,
+            ADMIN_DEPLOYMENT_GUIDE_GAP_ID,
+        ],
+        "commercial_claim_allowed": False,
+        "commercial_claim_guard": "Any blocker in this ledger prevents commercial-grade release claims.",
+        "source_manifest_hashes": {
+            "admin_guide_coverage": admin_guide_coverage_manifest.get("manifest_hash"),
+            "support_process_readiness": support_process_readiness_manifest.get("manifest_hash"),
+            "release_discipline": release_discipline_manifest.get("manifest_hash"),
+        },
+        "blocker_count": len(blockers),
+        "blockers": blockers,
+        "release_evidence_file": "external-blocker-ledger-manifest.json",
+    }
+    manifest["manifest_hash"] = stable_release_sha256(manifest)
+    return manifest
+
+
 def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: dict[str, object] | None = None) -> None:
+    admin_guide_coverage_manifest = build_admin_guide_coverage_manifest(repo, output_dir)
+    (output_dir / "admin-guide-coverage-manifest.json").write_text(
+        json.dumps(admin_guide_coverage_manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    support_process_readiness_manifest = build_support_process_readiness_manifest(repo, output_dir)
+    (output_dir / "support-process-readiness-manifest.json").write_text(
+        json.dumps(support_process_readiness_manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    release_discipline_manifest = build_release_discipline_manifest(repo, output_dir)
+    (output_dir / "release-discipline-manifest.json").write_text(
+        json.dumps(release_discipline_manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    external_blocker_ledger_manifest = build_external_blocker_ledger_manifest(
+        admin_guide_coverage_manifest,
+        support_process_readiness_manifest,
+        release_discipline_manifest,
+    )
+    (output_dir / "external-blocker-ledger-manifest.json").write_text(
+        json.dumps(external_blocker_ledger_manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
     artifacts: list[dict[str, object]] = []
     for path in sorted(output_dir.iterdir()):
         if not path.is_file() or path.name in {"SHA256SUMS", "release-manifest.json"}:
@@ -179,6 +1241,29 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
             }
         )
 
+    windows_trusted_diff = missing_release_packaging_trusted_diff(101)
+    windows_signing_evidence_manifest = build_windows_signing_evidence_manifest(artifacts, windows_trusted_diff)
+    windows_installer_workflow_manifest = build_windows_installer_workflow_manifest(
+        artifacts,
+        windows_signing_evidence_manifest,
+    )
+    macos_trusted_diff = missing_release_packaging_trusted_diff(102)
+    macos_notarization_evidence_manifest = build_macos_notarization_evidence_manifest(artifacts, macos_trusted_diff)
+    macos_package_workflow_manifest = build_macos_package_workflow_manifest(
+        artifacts,
+        macos_notarization_evidence_manifest,
+    )
+    linux_trusted_diff = missing_release_packaging_trusted_diff(103)
+    linux_package_evidence_manifest = build_linux_package_evidence_manifest(artifacts, linux_trusted_diff)
+    linux_package_workflow_manifest = build_linux_package_workflow_manifest(
+        artifacts,
+        linux_package_evidence_manifest,
+    )
+    operations_document_evidence_manifests = build_operations_document_evidence_manifests(repo, output_dir)
+    update_manifest_payload: dict[str, object] = {}
+    update_manifest_path = output_dir / "update-manifest.json"
+    if update_manifest_path.is_file():
+        update_manifest_payload = json.loads(update_manifest_path.read_text(encoding="utf-8"))
     manifest = {
         "name": "rapidtriage-release",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -220,36 +1305,75 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
             "windows_signed_installer": {
                 "status": "external-required",
                 "commercial_gap_ids": [WINDOWS_SIGNED_INSTALLER_GAP_ID],
-                "core_accuracy_gates": release_packaging_core_accuracy_gate(101),
+                "core_accuracy_gates": release_packaging_core_accuracy_gate(
+                    101,
+                    evidence_manifest=windows_signing_evidence_manifest,
+                ),
+                "functional_priority_profile": release_packaging_functional_priority_profile("windows"),
                 "required_evidence": ["Authenticode signature", "timestamp authority", "fresh Windows smoke test"],
-                "trusted_windows_signing_diff": missing_release_packaging_trusted_diff(101),
+                "windows_signing_evidence_manifest": windows_signing_evidence_manifest,
+                "windows_signing_evidence_manifest_hash": windows_signing_evidence_manifest["manifest_hash"],
+                "evidence_slot_matrix_hash": windows_signing_evidence_manifest["evidence_slot_matrix_hash"],
+                "windows_installer_workflow_manifest": windows_installer_workflow_manifest,
+                "windows_installer_workflow_manifest_hash": windows_installer_workflow_manifest["manifest_hash"],
+                "signing_slots": windows_signing_evidence_manifest["signing_slots"],
+                "trusted_windows_signing_diff": windows_trusted_diff,
                 "blockers": [WINDOWS_SIGNING_TRUSTED_DIFF_BLOCKER_101],
             },
             "macos_notarized_package": {
                 "status": "external-required",
                 "commercial_gap_ids": [MACOS_NOTARIZED_PACKAGE_GAP_ID],
-                "core_accuracy_gates": release_packaging_core_accuracy_gate(102),
+                "core_accuracy_gates": release_packaging_core_accuracy_gate(
+                    102,
+                    evidence_manifest=macos_notarization_evidence_manifest,
+                ),
+                "functional_priority_profile": release_packaging_functional_priority_profile("macos"),
                 "required_evidence": ["codesign verification", "notarization ticket", "Gatekeeper assessment"],
-                "trusted_macos_notarization_diff": missing_release_packaging_trusted_diff(102),
+                "macos_notarization_evidence_manifest": macos_notarization_evidence_manifest,
+                "macos_notarization_evidence_manifest_hash": macos_notarization_evidence_manifest["manifest_hash"],
+                "evidence_slot_matrix_hash": macos_notarization_evidence_manifest["evidence_slot_matrix_hash"],
+                "macos_package_workflow_manifest": macos_package_workflow_manifest,
+                "macos_package_workflow_manifest_hash": macos_package_workflow_manifest["manifest_hash"],
+                "notarization_slots": macos_notarization_evidence_manifest["notarization_slots"],
+                "trusted_macos_notarization_diff": macos_trusted_diff,
                 "blockers": [MACOS_NOTARIZATION_TRUSTED_DIFF_BLOCKER_102],
             },
             "linux_package": {
                 "status": "packaging-plan-ready",
                 "commercial_gap_ids": [LINUX_PACKAGE_GAP_ID],
-                "core_accuracy_gates": release_packaging_core_accuracy_gate(103),
+                "core_accuracy_gates": release_packaging_core_accuracy_gate(
+                    103,
+                    evidence_manifest=linux_package_evidence_manifest,
+                ),
+                "functional_priority_profile": release_packaging_functional_priority_profile("linux"),
                 "supported_outputs": ["portable zip", "wheel", "sdist"],
                 "future_outputs": ["deb", "rpm", "AppImage"],
                 "plan": "packaging-plan.json",
-                "trusted_linux_package_diff": missing_release_packaging_trusted_diff(103),
+                "linux_package_evidence_manifest": linux_package_evidence_manifest,
+                "linux_package_evidence_manifest_hash": linux_package_evidence_manifest["manifest_hash"],
+                "evidence_slot_matrix_hash": linux_package_evidence_manifest["evidence_slot_matrix_hash"],
+                "linux_package_workflow_manifest": linux_package_workflow_manifest,
+                "linux_package_workflow_manifest_hash": linux_package_workflow_manifest["manifest_hash"],
+                "package_evidence_slots": linux_package_evidence_manifest["package_evidence_slots"],
+                "trusted_linux_package_diff": linux_trusted_diff,
                 "blockers": [LINUX_PACKAGE_TRUSTED_DIFF_BLOCKER_103],
             },
             "auto_update_channel": {
                 "status": "manifest-generated",
                 "commercial_gap_ids": [AUTO_UPDATE_CHANNEL_GAP_ID],
-                "core_accuracy_gates": release_packaging_core_accuracy_gate(104),
+                "core_accuracy_gates": update_manifest_payload.get(
+                    "core_accuracy_gates",
+                    release_packaging_core_accuracy_gate(104),
+                ),
                 "manifest": "update-manifest.json",
                 "enterprise_disable_supported": True,
-                "trusted_auto_update_channel_diff": missing_release_packaging_trusted_diff(104),
+                "auto_update_evidence_manifest_hash": update_manifest_payload.get("auto_update_evidence_manifest_hash"),
+                "evidence_slot_matrix_hash": update_manifest_payload.get("evidence_slot_matrix_hash"),
+                "update_evidence_slots": update_manifest_payload.get("update_evidence_slots", {}),
+                "trusted_auto_update_channel_diff": update_manifest_payload.get(
+                    "trusted_auto_update_channel_diff",
+                    missing_release_packaging_trusted_diff(104),
+                ),
                 "blockers": [AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104],
             },
             "operations_documents": {
@@ -265,7 +1389,31 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
                     MALICIOUS_EVIDENCE_SANDBOXING_GAP_ID,
                     DEPENDENCY_VULNERABILITY_MONITORING_GAP_ID,
                 ],
-                "core_accuracy_gates": operations_documents_core_accuracy_gates(),
+                "core_accuracy_gates": operations_documents_core_accuracy_gates(
+                    evidence_manifests=operations_document_evidence_manifests,
+                ),
+                "functional_priority_profiles": release_operations_functional_priority_profiles(),
+                "document_evidence_manifests": operations_document_evidence_manifests,
+                "document_evidence_manifest_hashes": {
+                    number: manifest["manifest_hash"]
+                    for number, manifest in operations_document_evidence_manifests.items()
+                },
+                "document_evidence_matrix_hashes": {
+                    number: manifest["document_evidence_matrix_hash"]
+                    for number, manifest in operations_document_evidence_manifests.items()
+                },
+                "admin_guide_coverage_manifest": admin_guide_coverage_manifest,
+                "admin_guide_coverage_manifest_hash": admin_guide_coverage_manifest["manifest_hash"],
+                "support_process_readiness_manifest": support_process_readiness_manifest,
+                "support_process_readiness_manifest_hash": support_process_readiness_manifest["manifest_hash"],
+                "release_discipline_manifest": release_discipline_manifest,
+                "release_discipline_manifest_hash": release_discipline_manifest["manifest_hash"],
+                "external_blocker_ledger_manifest": external_blocker_ledger_manifest,
+                "external_blocker_ledger_manifest_hash": external_blocker_ledger_manifest["manifest_hash"],
+                "document_evidence_slots": {
+                    number: manifest["evidence_slots"]
+                    for number, manifest in operations_document_evidence_manifests.items()
+                },
                 "trusted_operations_document_diffs": {
                     str(number): missing_operations_document_trusted_diff(number) for number in range(112, 118)
                 },
@@ -292,6 +1440,7 @@ def write_release_manifest(output_dir: Path, repo: Path, commercial_readiness: d
 
 
 def write_packaging_plan(output_dir: Path) -> None:
+    windows_portable_mode_manifest = build_windows_portable_mode_manifest(output_dir)
     plan = {
         "name": "rapidtriage-packaging-plan",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -306,6 +1455,9 @@ def write_packaging_plan(output_dir: Path) -> None:
                 "path": "rapidtriage-portable.zip",
                 "status": "generated",
                 "verification": ["SHA256SUMS", "release-manifest.json", "fresh-machine smoke test"],
+                "functional_priority_profile": release_packaging_functional_priority_profile("portable"),
+                "windows_portable_mode_manifest": windows_portable_mode_manifest,
+                "windows_portable_mode_manifest_hash": windows_portable_mode_manifest["manifest_hash"],
             },
             "python_distribution": {
                 "status": "generated-when-build-enabled",
@@ -323,6 +1475,7 @@ def write_packaging_plan(output_dir: Path) -> None:
             "windows": {
                 "commercial_gap_ids": [WINDOWS_SIGNED_INSTALLER_GAP_ID],
                 "core_accuracy_gates": release_packaging_core_accuracy_gate(101),
+                "functional_priority_profile": release_packaging_functional_priority_profile("windows"),
                 "target_outputs": ["msi", "exe"],
                 "current_status": "external-signing-required",
                 "trusted_packaging_diff": missing_release_packaging_trusted_diff(101),
@@ -343,6 +1496,7 @@ def write_packaging_plan(output_dir: Path) -> None:
             "macos": {
                 "commercial_gap_ids": [MACOS_NOTARIZED_PACKAGE_GAP_ID],
                 "core_accuracy_gates": release_packaging_core_accuracy_gate(102),
+                "functional_priority_profile": release_packaging_functional_priority_profile("macos"),
                 "target_outputs": ["pkg", "dmg"],
                 "current_status": "external-codesign-notarization-required",
                 "trusted_packaging_diff": missing_release_packaging_trusted_diff(102),
@@ -363,6 +1517,7 @@ def write_packaging_plan(output_dir: Path) -> None:
             "linux": {
                 "commercial_gap_ids": [LINUX_PACKAGE_GAP_ID],
                 "core_accuracy_gates": release_packaging_core_accuracy_gate(103),
+                "functional_priority_profile": release_packaging_functional_priority_profile("linux"),
                 "target_outputs": ["deb", "rpm", "AppImage"],
                 "current_status": "portable-zip-wheel-ready-package-wrapper-pending",
                 "trusted_packaging_diff": missing_release_packaging_trusted_diff(103),
@@ -436,18 +1591,24 @@ def write_update_manifest(output_dir: Path) -> None:
                 "signature_required": path.suffix.lower() in {".exe", ".msi", ".pkg", ".dmg", ".appimage"},
             }
         )
+    trusted_diff = missing_release_packaging_trusted_diff(104)
+    update_evidence_manifest = build_auto_update_channel_evidence_manifest(artifacts, trusted_diff)
     manifest = {
         "name": "rapidtriage-update-manifest",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "commercial_gap_ids": [AUTO_UPDATE_CHANNEL_GAP_ID],
-        "core_accuracy_gates": release_packaging_core_accuracy_gate(104),
+        "core_accuracy_gates": release_packaging_core_accuracy_gate(104, evidence_manifest=update_evidence_manifest),
         "channel": "manual",
         "auto_update_enabled_by_default": False,
         "enterprise_disable": True,
         "rollback_guidance": "Keep the previous portable ZIP and SHA256SUMS until the new release smoke tests pass.",
         "artifacts": artifacts,
         "signature_policy": "Public distribution requires signed Windows/macOS artifacts; portable ZIP distribution must verify SHA256SUMS.",
-        "trusted_auto_update_channel_diff": missing_release_packaging_trusted_diff(104),
+        "auto_update_evidence_manifest": update_evidence_manifest,
+        "auto_update_evidence_manifest_hash": update_evidence_manifest["manifest_hash"],
+        "evidence_slot_matrix_hash": update_evidence_manifest["evidence_slot_matrix_hash"],
+        "update_evidence_slots": update_evidence_manifest["update_evidence_slots"],
+        "trusted_auto_update_channel_diff": trusted_diff,
         "blockers": [AUTO_UPDATE_TRUSTED_DIFF_BLOCKER_104],
     }
     (output_dir / "update-manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -501,6 +1662,14 @@ def build_release_packaging_trusted_diff(
         104: AUTO_UPDATE_CHANNEL_GAP_ID,
     }
     compared_fields = ["status", "required_evidence", "target_outputs", "artifacts", "signature_policy"]
+    if number == 101:
+        compared_fields.extend(["windows_signing_evidence_manifest_hash", "signing_slots", "evidence_slot_matrix_hash"])
+    if number == 102:
+        compared_fields.extend(["macos_notarization_evidence_manifest_hash", "notarization_slots", "evidence_slot_matrix_hash"])
+    if number == 103:
+        compared_fields.extend(["linux_package_evidence_manifest_hash", "package_evidence_slots", "evidence_slot_matrix_hash"])
+    if number == 104:
+        compared_fields.extend(["auto_update_evidence_manifest_hash", "update_evidence_slots", "evidence_slot_matrix_hash"])
     mismatches = []
     for field in compared_fields:
         rapid_value = normalize_release_packaging_value(rapid_payload.get(field))
@@ -526,10 +1695,99 @@ def normalize_release_packaging_value(value: object) -> object:
     return value
 
 
+def release_packaging_functional_priority_profile(target: str) -> dict[str, object]:
+    profiles = {
+        "windows": {
+            "item_number": 57,
+            "implementation_track": "windows-installer",
+            "status": "installer-plan-ready-external-signing-required",
+            "target_outputs": ["msi", "exe"],
+            "implemented_controls": {
+                "portable_payload_generated": True,
+                "windows_launcher_packaged": True,
+                "fresh_windows_smoke_script_packaged": True,
+                "installer_workflow_manifest_declared": True,
+                "installer_evidence_slots_declared": True,
+                "authenticode_signature_attached": False,
+                "timestamp_authority_attached": False,
+            },
+            "failed_validation_check_ids": [
+                "actual-msi-exe-build-not-attached",
+                "authenticode-signature-not-attached",
+                "fresh-windows-11-smoke-not-attached",
+            ],
+        },
+        "portable": {
+            "item_number": 58,
+            "implementation_track": "windows-portable-mode",
+            "status": "portable-zip-generated-smoke-required",
+            "target_outputs": ["rapidtriage-portable.zip"],
+            "implemented_controls": {
+                "double_click_windows_launcher_packaged": True,
+                "shell_launcher_packaged": True,
+                "dependency_inventory_packaged": True,
+                "optional_forensic_tool_preflight_documented": True,
+                "windows_portable_mode_manifest_emitted": True,
+                "fresh_windows_smoke_attached": False,
+            },
+            "failed_validation_check_ids": ["fresh-windows-portable-smoke-not-attached"],
+        },
+        "macos": {
+            "item_number": 59,
+            "implementation_track": "macos-package",
+            "status": "package-plan-ready-external-notarization-required",
+            "target_outputs": ["pkg", "dmg"],
+            "implemented_controls": {
+                "portable_payload_generated": True,
+                "macos_linux_launcher_packaged": True,
+                "macos_smoke_script_packaged": True,
+                "package_workflow_manifest_declared": True,
+                "notarization_evidence_slots_declared": True,
+                "codesign_attached": False,
+                "notarization_ticket_attached": False,
+                "gatekeeper_assessment_attached": False,
+            },
+            "failed_validation_check_ids": [
+                "actual-pkg-dmg-build-not-attached",
+                "codesign-not-attached",
+                "notarization-not-attached",
+                "gatekeeper-smoke-not-attached",
+            ],
+        },
+        "linux": {
+            "item_number": 60,
+            "implementation_track": "linux-packages",
+            "status": "portable-wheel-ready-distro-packages-pending",
+            "target_outputs": ["deb", "rpm", "AppImage"],
+            "implemented_controls": {
+                "portable_payload_generated": True,
+                "wheel_sdist_supported": True,
+                "dependency_inventory_packaged": True,
+                "linux_smoke_script_packaged": True,
+                "linux_package_workflow_manifest_declared": True,
+                "package_evidence_slots_declared": True,
+                "deb_build_attached": False,
+                "rpm_build_attached": False,
+                "appimage_build_attached": False,
+            },
+            "failed_validation_check_ids": [
+                "deb-rpm-appimage-builds-not-attached",
+                "clean-container-install-smoke-not-attached",
+                "package-manager-uninstall-smoke-not-attached",
+            ],
+        },
+    }
+    profile = dict(profiles[target])
+    profile["batch_id"] = FUNCTIONAL_PACKAGING_BATCH_ID
+    profile["ready_for_commercial_release"] = False
+    return profile
+
+
 def release_packaging_core_accuracy_gate(
     number: int,
     *,
     trusted_diff: dict[str, object] | None = None,
+    evidence_manifest: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
     checks = {
         101: [
@@ -562,6 +1820,42 @@ def release_packaging_core_accuracy_gate(
         ],
     }
     satisfied_checks = list(checks[number])
+    if number == 101 and evidence_manifest:
+        if evidence_manifest.get("release_artifact_hashes"):
+            satisfied_checks.append("release artifact hashes captured")
+        if evidence_manifest.get("manifest_hash"):
+            satisfied_checks.append("windows signing evidence manifest hash emitted")
+        if evidence_manifest.get("signing_slots"):
+            satisfied_checks.append("windows signing evidence slots emitted")
+        if evidence_manifest.get("evidence_slot_matrix_hash"):
+            satisfied_checks.append("windows evidence slot matrix hash emitted")
+    if number == 102 and evidence_manifest:
+        if evidence_manifest.get("release_artifact_hashes"):
+            satisfied_checks.append("release artifact hashes captured")
+        if evidence_manifest.get("manifest_hash"):
+            satisfied_checks.append("macos notarization evidence manifest hash emitted")
+        if evidence_manifest.get("notarization_slots"):
+            satisfied_checks.append("macos notarization evidence slots emitted")
+        if evidence_manifest.get("evidence_slot_matrix_hash"):
+            satisfied_checks.append("macos evidence slot matrix hash emitted")
+    if number == 103 and evidence_manifest:
+        if evidence_manifest.get("release_artifact_hashes"):
+            satisfied_checks.append("release artifact hashes captured")
+        if evidence_manifest.get("manifest_hash"):
+            satisfied_checks.append("linux package evidence manifest hash emitted")
+        if evidence_manifest.get("package_evidence_slots"):
+            satisfied_checks.append("linux package evidence slots emitted")
+        if evidence_manifest.get("evidence_slot_matrix_hash"):
+            satisfied_checks.append("linux evidence slot matrix hash emitted")
+    if number == 104 and evidence_manifest:
+        if evidence_manifest.get("release_artifact_hashes"):
+            satisfied_checks.append("release artifact hashes captured")
+        if evidence_manifest.get("manifest_hash"):
+            satisfied_checks.append("auto-update evidence manifest hash emitted")
+        if evidence_manifest.get("update_evidence_slots"):
+            satisfied_checks.append("auto-update evidence slots emitted")
+        if evidence_manifest.get("evidence_slot_matrix_hash"):
+            satisfied_checks.append("auto-update evidence slot matrix hash emitted")
     if trusted_diff and trusted_diff.get("status") == "pass":
         trusted_checks = {
             101: "trusted Windows Authenticode evidence diff pass",
@@ -620,7 +1914,14 @@ def build_operations_document_trusted_diff(
         116: ANALYST_QUICKSTART_LAB_GAP_ID,
         117: ADMIN_DEPLOYMENT_GUIDE_GAP_ID,
     }
-    compared_fields = ["status", "documents", "commercial_gap_ids"]
+    compared_fields = [
+        "status",
+        "documents",
+        "commercial_gap_ids",
+        "document_evidence_manifest_hashes",
+        "document_evidence_matrix_hashes",
+        "document_evidence_slots",
+    ]
     mismatches = []
     for field in compared_fields:
         rapid_value = normalize_release_packaging_value(rapid_payload.get(field))
@@ -640,6 +1941,7 @@ def build_operations_document_trusted_diff(
 
 def operations_documents_core_accuracy_gates(
     trusted_diffs: dict[int, dict[str, object]] | None = None,
+    evidence_manifests: dict[str, dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     checks_by_item = {
         112: ["release notes template packaged", "known limits section required", "validation state section required", "migration notes section required", "CI changelog blocker disclosed"],
@@ -647,7 +1949,7 @@ def operations_documents_core_accuracy_gates(
         114: ["support SLA document packaged", "severity levels emitted", "response targets emitted", "secure intake requirement emitted", "staffed support blocker disclosed"],
         115: ["training curriculum packaged", "analyst curriculum documented", "admin curriculum documented", "validation exercise documented", "training delivery blocker disclosed"],
         116: ["quickstart lab documented", "sample workflow command recorded", "ingest/search/review/report steps documented", "bundle verification documented", "real training run blocker disclosed"],
-        117: ["admin guide packaged", "install/update guidance documented", "auth/network guidance documented", "backup/restore guidance documented", "deployment proof blocker disclosed"],
+        117: ["admin guide packaged", "install/update guidance documented", "auth/network guidance documented", "backup/restore guidance documented", "admin coverage manifest emitted", "deployment proof blocker disclosed"],
         118: ["security baseline emitted", "auth/network hardening documented", "export rendering safety documented", "crash redaction documented", "independent AppSec blocker disclosed"],
         119: ["preview sandboxing documented", "active content blocking documented", "parser crash isolation documented", "hostile evidence guidance documented", "OS sandbox blocker disclosed"],
         120: ["dependency inventory emitted", "vulnerability scan attempted", "release blocking policy recorded", "dependency monitoring script packaged", "CI scheduled scan blocker disclosed"],
@@ -663,6 +1965,13 @@ def operations_documents_core_accuracy_gates(
     gates = []
     for number, checks in checks_by_item.items():
         satisfied = list(checks)
+        evidence_manifest = (evidence_manifests or {}).get(str(number), {})
+        if evidence_manifest.get("manifest_hash"):
+            satisfied.append("operations evidence manifest hash emitted")
+        if evidence_manifest.get("evidence_slots"):
+            satisfied.append("operations evidence slots emitted")
+        if evidence_manifest.get("document_evidence_matrix_hash"):
+            satisfied.append("operations document evidence matrix hash emitted")
         if trusted_diffs and trusted_diffs.get(number, {}).get("status") == "pass" and number in trusted_checks:
             satisfied.append(trusted_checks[number])
         gates.append(
@@ -673,6 +1982,131 @@ def operations_documents_core_accuracy_gates(
             )
         )
     return gates
+
+
+def release_operations_functional_priority_profiles() -> list[dict[str, object]]:
+    return [
+        {
+            "batch_id": FUNCTIONAL_OPERATIONS_BATCH_ID,
+            "item_number": 66,
+            "implementation_track": "admin-guide",
+            "status": "packaged-admin-guide-deployment-proof-required",
+            "documents": ["docs/rapidtriage-admin-deployment-guide.md"],
+            "implemented_controls": {
+                "install_guidance_documented": True,
+                "update_guidance_documented": True,
+                "auth_network_guidance_documented": True,
+                "backup_restore_guidance_documented": True,
+                "logging_security_dependency_guidance_documented": True,
+                "evidence_handling_guidance_documented": True,
+                "admin_guide_coverage_manifest_declared": True,
+            },
+            "failed_validation_check_ids": [
+                "fresh-admin-deployment-proof-not-attached",
+                "operator-acceptance-signoff-not-attached",
+            ],
+            "ready_for_commercial_release": False,
+        },
+        {
+            "batch_id": FUNCTIONAL_OPERATIONS_BATCH_ID,
+            "item_number": 67,
+            "implementation_track": "training-lab",
+            "status": "curriculum-packaged-real-lab-run-required",
+            "documents": [
+                "docs/rapidtriage-training-curriculum.md",
+                "docs/rapidtriage-windows-quickstart.md",
+                "docs/rapidtriage-macos-linux-quickstart.md",
+            ],
+            "implemented_controls": {
+                "sample_case_workflow_documented": True,
+                "ingest_search_viewer_review_report_steps_documented": True,
+                "manifest_verification_documented": True,
+                "training_lab_workflow_manifest_emitted_by_sample_run": True,
+                "analyst_curriculum_documented": True,
+                "admin_curriculum_documented": True,
+            },
+            "failed_validation_check_ids": [
+                "real-training-run-log-not-attached",
+                "analyst-scoring-rubric-results-not-attached",
+            ],
+            "ready_for_commercial_release": False,
+        },
+        {
+            "batch_id": FUNCTIONAL_OPERATIONS_BATCH_ID,
+            "item_number": 68,
+            "implementation_track": "support-process",
+            "status": "sla-template-packaged-staffed-desk-required",
+            "documents": ["docs/rapidtriage-support-sla.md"],
+            "implemented_controls": {
+                "support_sla_documented": True,
+                "severity_levels_documented": True,
+                "response_targets_documented": True,
+                "secure_evidence_intake_required": True,
+                "emergency_patch_policy_documented": True,
+                "support_process_readiness_manifest_declared": True,
+            },
+            "failed_validation_check_ids": [
+                "staffed-support-desk-not-attached",
+                "contractual-sla-evidence-not-attached",
+                "secure-intake-runbook-signoff-not-attached",
+            ],
+            "ready_for_commercial_release": False,
+        },
+        {
+            "batch_id": FUNCTIONAL_OPERATIONS_BATCH_ID,
+            "item_number": 69,
+            "implementation_track": "release-discipline",
+            "status": "release-templates-packaged-ci-gates-required",
+            "documents": [
+                "docs/rapidtriage-release-notes-template.md",
+                "docs/rapidtriage-known-limitations.md",
+                "docs/rapidtriage-lts-hotfix-policy.md",
+            ],
+            "implemented_controls": {
+                "release_notes_template_packaged": True,
+                "known_limits_document_packaged": True,
+                "migration_notes_required": True,
+                "validation_state_required": True,
+                "checksums_generated": True,
+                "smoke_logs_required": True,
+                "release_discipline_manifest_declared": True,
+            },
+            "failed_validation_check_ids": [
+                "release-notes-ci-gate-not-attached",
+                "required-smoke-logs-not-attached",
+                "migration-note-review-not-attached",
+            ],
+            "ready_for_commercial_release": False,
+        },
+        {
+            "batch_id": FUNCTIONAL_OPERATIONS_BATCH_ID,
+            "item_number": 70,
+            "implementation_track": "external-blocker-ledger",
+            "status": "blockers-explicit-not-complete",
+            "documents": [
+                "release-manifest.json",
+                "packaging-plan.json",
+                "rapidtriage-commercial-readiness.json",
+            ],
+            "implemented_controls": {
+                "independent_validation_blocker_tracked": True,
+                "large_hardware_test_blocker_tracked": True,
+                "code_signing_blocker_tracked": True,
+                "notarization_blocker_tracked": True,
+                "staffed_support_blocker_tracked": True,
+                "commercial_claim_guard_present": True,
+                "external_blocker_ledger_manifest_declared": True,
+            },
+            "failed_validation_check_ids": [
+                "independent-validation-not-attached",
+                "large-hardware-test-evidence-not-attached",
+                "code-signing-not-attached",
+                "notarization-not-attached",
+                "staffed-support-not-attached",
+            ],
+            "ready_for_commercial_release": False,
+        },
+    ]
 
 
 def verify_sha256s(output_dir: Path) -> int:

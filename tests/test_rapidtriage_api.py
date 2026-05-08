@@ -8,6 +8,7 @@ import unittest
 import wave
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -16,10 +17,12 @@ from rapidtriage.api.app import (
     build_hex_viewer_trusted_diff,
     build_large_sqlite_fts_trusted_diff,
     build_media_transcript_trusted_diff,
+    build_pagination_cursor_manifest,
     build_pagination_trusted_diff,
     build_preview_sandbox_trusted_diff,
     build_sqlite_viewer_trusted_diff,
     build_ui_virtualization_trusted_diff,
+    build_ui_virtualization_manifest,
     email_viewer_core_accuracy_gates,
     create_app,
     hex_viewer_core_accuracy_gates,
@@ -31,6 +34,7 @@ from rapidtriage.api.app import (
     ui_virtualization_core_accuracy_gates,
 )
 from rapidtriage.cli import build_web_parser
+from rapidtriage.core.crash import write_crash_report
 from rapidtriage.core.jobs import RunJobStore
 from rapidtriage.core.keyword_packs import build_keyword_pack_trusted_diff, keyword_pack_core_accuracy_gates
 from tests.schema_validation import validate
@@ -92,6 +96,217 @@ class RapidTriageApiTests(unittest.TestCase):
         self.assertEqual(index_response.status_code, 200)
         self.assertIn("rapidtriage", index_response.text)
 
+    def test_web_console_exposes_maestro_style_artifact_workbench(self) -> None:
+        app_js = (REPO_ROOT / "rapidtriage" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+        index_html = (REPO_ROOT / "rapidtriage" / "web" / "static" / "index.html").read_text(encoding="utf-8")
+        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn("FORENSIC_RIBBON_GROUPS", app_js)
+        self.assertIn("FORENSIC_ARTIFACT_TAXONOMY", app_js)
+        self.assertIn("renderForensicRibbon(run)", app_js)
+        self.assertIn("renderCaseHero(run)", app_js)
+        self.assertIn("renderCaseReadinessDashboard(payload)", app_js)
+        self.assertIn("case-readiness-dashboard", app_js)
+        self.assertIn("globalCaseSearchForm", app_js)
+        self.assertIn("runGlobalCommandSearch", app_js)
+        self.assertIn("renderE01IngestWorkflow", app_js)
+        self.assertIn("renderE01RunWorkflowStatus", app_js)
+        self.assertIn("renderRunPlanE01Readiness", app_js)
+        self.assertIn("applyEvidenceCheckRecommendation", app_js)
+        self.assertIn("E01_PRE_RUN_STEPS", app_js)
+        self.assertIn("updateRunSubmissionCta", app_js)
+        self.assertIn("Starting E01 workflow", app_js)
+        self.assertIn("e01-workflow-panel", app_js)
+        self.assertIn("renderViewerEvidenceTrail", app_js)
+        self.assertIn("source-verification", app_js)
+        self.assertIn("renderCompareCitationBundle", app_js)
+        self.assertIn("report-citation-bundle", app_js)
+        self.assertIn("renderEvtxReadinessArtifactCard", app_js)
+        self.assertIn("evtx_commercial_readiness_profile", app_js)
+        self.assertIn("renderNtfsDepthArtifactCard", app_js)
+        self.assertIn("ntfs_native_depth_readiness_profile", app_js)
+        self.assertIn("renderRegistryDepthArtifactCard", app_js)
+        self.assertIn("registryArtifactPreviewText", app_js)
+        self.assertIn("registry_native_depth_readiness_profile", app_js)
+        self.assertIn("renderWindowsCoreReadinessArtifactCard", app_js)
+        self.assertIn("windowsCoreReadinessProfile", app_js)
+        self.assertIn("account_privilege_deep_parse_profile", app_js)
+        self.assertIn("execution_artifact_validation_profile", app_js)
+        self.assertIn("srum_ese_validation_profile", app_js)
+        self.assertIn("renderCoreAccuracyGateCard", app_js)
+        self.assertIn("core_accuracy_gates", app_js)
+        self.assertIn("missing_required_checks", app_js)
+        self.assertIn("renderArtifactValidationBadges", app_js)
+        self.assertIn("artifact-validation-badges", app_js)
+        self.assertIn("renderArtifactValidationSummary", app_js)
+        self.assertIn("summarizeArtifactValidation", app_js)
+        self.assertIn("artifactCommercialBlockers", app_js)
+        self.assertIn("renderVirtualWindowJumpControl", app_js)
+        self.assertIn("VIRTUAL_WINDOW_STORAGE_PREFIX", app_js)
+        self.assertIn("renderForensicArtifactNavigator(payload)", app_js)
+        self.assertIn("virtualWindowOffsets", app_js)
+        self.assertIn("data-virtual-window-key", app_js)
+        self.assertIn("bindVirtualWindowButtons()", app_js)
+        self.assertIn("WORKBENCH_SMOKE_CHECKPOINTS", app_js)
+        self.assertIn("renderWorkbenchSmokePanel(run)", app_js)
+        self.assertIn("renderCrashReportsPanel", app_js)
+        self.assertIn("crash-dashboard", app_js)
+        self.assertIn("data-testid=\"case-hero\"", app_js)
+        self.assertIn("data-testid=\"global-case-search\"", app_js)
+        self.assertIn("data-testid=\"source-viewer\"", app_js)
+        self.assertIn("data-testid=\"source-verification-trail\"", app_js)
+        self.assertIn("data-testid=\"viewer-review-form\"", app_js)
+        self.assertIn("data-testid=\"artifact-validation-summary\"", app_js)
+        self.assertIn("/api/workbench/smoke-contract", app_js)
+        self.assertIn("/api/workbench/large-result-evidence?record_count=100000", app_js)
+        self.assertIn("e2e performance contract", app_js)
+        self.assertIn("/validation-package", app_js)
+        self.assertIn("Crash reports", index_html)
+        self.assertIn("forensic-ribbon", styles)
+        self.assertIn("case-hero", styles)
+        self.assertIn("crash-dashboard", styles)
+        self.assertIn("workbench-smoke-panel", styles)
+        self.assertIn("smoke-checkpoint-row", styles)
+        self.assertIn("smoke-link-row", styles)
+        self.assertIn("case-readiness-dashboard", styles)
+        self.assertIn("readiness-grid", styles)
+        self.assertIn("case-command-search", styles)
+        self.assertIn("e01-workflow-panel", styles)
+        self.assertIn("e01-stage-grid", styles)
+        self.assertIn("run-plan-e01-readiness", styles)
+        self.assertIn("e01-pre-run-grid", styles)
+
+    def test_crash_report_api_lists_details_and_exports_local_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch.dict("os.environ", {"RAPIDTRIAGE_CRASH_LOG_DIR": tmp_dir}, clear=False):
+                report = write_crash_report(
+                    RuntimeError("api boom"),
+                    context={
+                        "component": "unit-test",
+                        "path": "/api/example",
+                        "auth_token": "secret-token",
+                    },
+                )
+                client = TestClient(create_app(RunJobStore()))
+
+                listing_response = client.get("/api/crash-reports")
+                self.assertEqual(listing_response.status_code, 200)
+                listing = listing_response.json()
+                self.assertEqual(listing["command"], "crash-reports")
+                self.assertIn("#105", listing["commercial_gap_ids"])
+                self.assertTrue(listing["local_only"])
+                self.assertFalse(listing["upload_enabled"])
+                self.assertEqual(listing["summary"]["report_count"], 1)
+                self.assertEqual(listing["crash_trend_dashboard"]["report_count"], 1)
+                self.assertTrue(listing["crash_trend_dashboard"]["export_ui_available"])
+                self.assertEqual(listing["reports"][0]["crash_id"], report["crash_id"])
+                self.assertGreaterEqual(listing["reports"][0]["redacted_key_count"], 1)
+                self.assertGreaterEqual(listing["crash_trend_dashboard"]["redacted_key_total"], 1)
+
+                detail_response = client.get(f"/api/crash-reports/{report['crash_id']}")
+                self.assertEqual(detail_response.status_code, 200)
+                detail = detail_response.json()
+                self.assertEqual(detail["summary"]["crash_id"], report["crash_id"])
+                self.assertEqual(detail["payload"]["crash_id"], report["crash_id"])
+                self.assertNotIn("secret-token", json.dumps(detail, ensure_ascii=False))
+
+                export_response = client.post(f"/api/crash-reports/{report['crash_id']}/export")
+                self.assertEqual(export_response.status_code, 200)
+                exported = export_response.json()
+                self.assertEqual(exported["profile_version"], "crash-export-ui-bundle-manifest-v1")
+                self.assertTrue(exported["local_only"])
+                self.assertFalse(exported["automatic_upload_enabled"])
+                bundle_path = Path(exported["bundle_path"])
+                self.assertTrue(bundle_path.exists())
+                self.assertEqual(hash_file(bundle_path, "sha256"), exported["bundle_sha256"])
+                with zipfile.ZipFile(bundle_path) as bundle:
+                    names = set(bundle.namelist())
+                    self.assertIn("crash-export-manifest.json", names)
+                    self.assertIn(f"{report['crash_id']}.json", names)
+
+    def test_workbench_smoke_contract_exposes_browser_test_flow(self) -> None:
+        client = TestClient(create_app(RunJobStore()))
+        styles = (REPO_ROOT / "rapidtriage" / "web" / "static" / "styles.css").read_text(encoding="utf-8")
+
+        response = client.get("/api/workbench/smoke-contract")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["profile_version"], "single-case-workbench-smoke-v1")
+        self.assertEqual(payload["immediate_queue_item"], 7)
+        self.assertTrue(payload["browser_test_ready"])
+        self.assertFalse(payload["commercial_grade_ready"])
+        self.assertEqual(payload["functional_priority_profile"]["queue_item_number"], 7)
+        self.assertIn("playwright-browser-smoke-log-not-attached", payload["functional_priority_profile"]["failed_validation_check_ids"])
+        self.assertIn("source_viewer", payload["selectors"])
+        self.assertIn("viewer_review", payload["selectors"])
+        self.assertIn("case_report", payload["api_routes"])
+        step_ids = {step["id"] for step in payload["required_steps"]}
+        self.assertEqual(
+            step_ids,
+            {
+                "open-workbench",
+                "create-or-import-run",
+                "select-run",
+                "search-case",
+                "open-source-viewer",
+                "mark-evidence",
+                "export-report",
+            },
+        )
+        self.assertIn("viewer-evidence-trail", styles)
+        self.assertIn("viewer-evidence-card", styles)
+        self.assertIn("compare-citation-bundle", styles)
+        self.assertIn("evtx-readiness-card", styles)
+        self.assertIn("ntfs-depth-card", styles)
+        self.assertIn("registry-depth-card", styles)
+        self.assertIn("windows-core-readiness-card", styles)
+        self.assertIn("core-accuracy-card", styles)
+        self.assertIn("accuracy-gate-row", styles)
+        self.assertIn("artifact-validation-badges", styles)
+        self.assertIn("artifact-validation-summary", styles)
+        self.assertIn("artifact-validation-summary-grid", styles)
+        self.assertIn("forensic-artifact-navigator", styles)
+        self.assertIn("virtual-window-card", styles)
+        self.assertIn("virtual-window-jump", styles)
+
+    def test_workbench_large_result_evidence_profiles_100k_ui_windowing(self) -> None:
+        client = TestClient(create_app(RunJobStore()))
+
+        response = client.get("/api/workbench/large-result-evidence", params={"record_count": 100_000})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["profile_version"], "large-result-ui-evidence-v1")
+        self.assertEqual(payload["immediate_queue_item"], 8)
+        self.assertEqual(payload["record_count"], 100_000)
+        self.assertLessEqual(payload["visible_rows"], 300)
+        self.assertTrue(payload["dom_budget"]["dom_budget_pass"])
+        self.assertGreaterEqual(payload["window_count"], 2)
+        self.assertTrue(all(len(item["manifest"]["manifest_hash"]) == 64 for item in payload["window_manifests"]))
+        self.assertEqual(payload["performance_contract"]["profile_version"], "browser-e2e-performance-contract-v1")
+        self.assertEqual(payload["performance_contract"]["item_number"], 25)
+        self.assertEqual(len(payload["performance_contract"]["contract_hash"]), 64)
+        self.assertIn("virtual_window_card", payload["performance_contract"]["selectors"])
+        self.assertGreaterEqual(len(payload["performance_contract"]["required_steps"]), 6)
+        self.assertIn("playwright-trace.zip", payload["performance_contract"]["required_artifacts"])
+        self.assertEqual(payload["performance_contract"]["performance_budgets"]["dom_node_budget"], payload["dom_budget"]["dom_node_budget"])
+        self.assertEqual(payload["evidence_manifest"]["profile_version"], "large-result-ui-evidence-manifest-v1")
+        self.assertEqual(payload["evidence_manifest"]["performance_contract_hash"], payload["performance_contract"]["contract_hash"])
+        self.assertEqual(len(payload["evidence_manifest_hash"]), 64)
+        self.assertEqual(payload["evidence_manifest_hash"], payload["evidence_manifest"]["manifest_hash"])
+        self.assertEqual(payload["functional_priority_profile"]["queue_item_number"], 8)
+        self.assertEqual(
+            payload["functional_priority_profile"]["controls"]["performance_contract_hash"],
+            payload["performance_contract"]["contract_hash"],
+        )
+        self.assertEqual(
+            payload["functional_priority_profile"]["controls"]["evidence_manifest_hash"],
+            payload["evidence_manifest_hash"],
+        )
+        self.assertIn("playwright-100k-browser-trace-not-attached", payload["functional_priority_profile"]["failed_validation_check_ids"])
+        self.assertFalse(payload["commercial_grade_ready"])
+
     def test_sample_case_api_creates_and_imports_practice_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             client = TestClient(create_app(RunJobStore()))
@@ -111,6 +326,60 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(payload["run"]["status"], "completed")
             self.assertEqual(payload["run"]["origin"], "imported")
             self.assertTrue((Path(tmp_dir) / "sample" / "run-output" / "rapidtriage-run-summary.json").is_file())
+
+    def test_run_validation_package_exports_hashes_review_status_and_blockers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            client = TestClient(create_app(RunJobStore()))
+            response = client.post(
+                "/api/sample-case/run",
+                json={
+                    "output_dir": str(Path(tmp_dir) / "sample"),
+                    "mode": "fraud",
+                    "overwrite": True,
+                    "read_only": True,
+                },
+            )
+            self.assertEqual(response.status_code, 201, response.text)
+            run_payload = response.json()["run"]
+            run_id = run_payload["run_id"]
+            output_dir = Path(run_payload["summary"]["output_dir"])
+
+            bookmark_response = client.post(
+                f"/api/runs/{run_id}/bookmarks",
+                json={
+                    "source": "files",
+                    "pointer": "/candidates/0",
+                    "tag": "validation",
+                    "note": "Include this source in validation-package review status.",
+                    "review_status": "relevant",
+                    "include_in_report": True,
+                },
+            )
+            self.assertEqual(bookmark_response.status_code, 200, bookmark_response.text)
+
+            package_response = client.get(f"/api/runs/{run_id}/validation-package")
+
+            self.assertEqual(package_response.status_code, 200, package_response.text)
+            package = package_response.json()
+            self.assertEqual(package["command"], "run.validation-package")
+            self.assertEqual(package["profile_version"], "run-validation-package-v1")
+            self.assertEqual(package["immediate_queue_item"], 9)
+            self.assertEqual(package["functional_priority_profile"]["queue_item_number"], 9)
+            self.assertFalse(package["commercial_grade_ready"])
+            self.assertIn("trusted-tool-diffs-not-attached", package["commercial_grade_blockers"])
+            self.assertEqual(package["review_status"]["bookmark_count"], 1)
+            self.assertEqual(package["review_status"]["report_item_count"], 1)
+            self.assertEqual(package["review_status"]["review_status_counts"]["relevant"], 1)
+            self.assertGreater(package["output_hashes"]["item_count"], 0)
+            self.assertTrue(all(len(item["hashes"]["sha256"]) == 64 for item in package["output_hashes"]["items"]))
+            self.assertEqual(len(package["package_manifest_hash"]), 64)
+            self.assertTrue((output_dir / "rapidforensic-run-validation-package.json").is_file())
+            self.assertTrue((output_dir / "rapidforensic-run-validation-package.audit.json").is_file())
+            self.assertTrue(any(item["area"] == "trusted-diff" for item in package["limitation_inventory"]))
+
+            file_response = client.get(f"/api/runs/{run_id}/validation-package/file")
+            self.assertEqual(file_response.status_code, 200)
+            self.assertIn("run.validation-package", file_response.text)
 
     def test_evidence_identify_api_reports_extended_container_support(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -174,8 +443,19 @@ class RapidTriageApiTests(unittest.TestCase):
                 "To: bob@example.com\n"
                 "Subject: Password review\n"
                 "Date: Mon, 27 Apr 2026 12:00:00 +0900\n"
+                "MIME-Version: 1.0\n"
+                "Content-Type: multipart/mixed; boundary=\"rapid-boundary\"\n"
                 "\n"
-                "password email body\n",
+                "--rapid-boundary\n"
+                "Content-Type: text/plain; charset=\"utf-8\"\n"
+                "\n"
+                "password email body\n"
+                "--rapid-boundary\n"
+                "Content-Type: text/plain; name=\"note.txt\"\n"
+                "Content-Disposition: attachment; filename=\"note.txt\"\n"
+                "\n"
+                "attached password note\n"
+                "--rapid-boundary--\n",
                 encoding="utf-8",
             )
             binary_path = root / "binary.bin"
@@ -184,7 +464,9 @@ class RapidTriageApiTests(unittest.TestCase):
             from PIL import Image
 
             Image.new("RGB", (16, 12), "white").save(image_path)
-            image_path.with_name("screen.ocr.txt").write_text("image OCR password", encoding="utf-8")
+            similar_image_path = root / "screen-copy.png"
+            Image.new("RGB", (16, 12), "white").save(similar_image_path)
+            image_path.with_name("screen.ocr.txt").write_text("이미지 OCR password", encoding="utf-8")
             image_path.with_name("screen.translation.txt").write_text("translated OCR password", encoding="utf-8")
             media_path = root / "call.wav"
             with wave.open(str(media_path), "wb") as wav_file:
@@ -216,7 +498,10 @@ class RapidTriageApiTests(unittest.TestCase):
             files_response = client.get(f"/api/runs/{run_id}/files")
             timeline_response = client.get(f"/api/runs/{run_id}/timeline")
             indicators_response = client.get(f"/api/runs/{run_id}/indicators", params={"offset": 0, "limit": 5})
-            search_response = client.get(f"/api/runs/{run_id}/search", params={"keyword": "password", "ocr": "false"})
+            search_response = client.get(
+                f"/api/runs/{run_id}/search",
+                params={"keyword": "password", "ocr": "false", "keyword_pack": "credentials"},
+            )
 
             self.assertEqual(summary_response.status_code, 200)
             self.assertEqual(files_response.status_code, 200)
@@ -228,6 +513,46 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(indicators_response.json()["command"], "indicators")
             self.assertEqual(indicators_response.json()["pagination"]["collection"], "indicators")
             self.assertGreaterEqual(indicators_response.json()["summary"]["indicator_count"], 1)
+            ti_feed_path = Path(tmp_dir) / "local-ti-feed.json"
+            ti_feed_path.write_text(
+                json.dumps(
+                    {
+                        "plugin": {"name": "api-local-feed", "version": "2026.05"},
+                        "indicators": [
+                            {
+                                "type": "domain",
+                                "value": "download.example",
+                                "severity": "medium",
+                                "source": "api-fixture",
+                                "note": "Known download pivot for API review.",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            ti_response = client.get(
+                f"/api/runs/{run_id}/indicators/ti-enrichment",
+                params={"ti_feed": str(ti_feed_path), "limit": 10},
+            )
+            self.assertEqual(ti_response.status_code, 200, ti_response.text)
+            ti_payload = ti_response.json()
+            self.assertEqual(ti_payload["command"], "indicator-ti-enrichment")
+            self.assertEqual(ti_payload["profile_version"], "ioc-ti-enrichment-review-package-v1")
+            self.assertTrue(ti_payload["local_only"])
+            self.assertTrue(ti_payload["no_external_calls"])
+            self.assertEqual(ti_payload["summary"]["ti_feed_count"], 1)
+            self.assertGreaterEqual(ti_payload["summary"]["matched_indicator_count"], 1)
+            self.assertEqual(ti_payload["ti_feed_sources"][0]["name"], "api-local-feed")
+            self.assertEqual(ti_payload["ti_feed_sources"][0]["version"], "2026.05")
+            self.assertEqual(len(ti_payload["ti_feed_sources"][0]["sha256"]), 64)
+            self.assertEqual(ti_payload["core_accuracy_gates"][0]["gap_id"], "#63")
+            self.assertIn("offline feed provenance", ti_payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(
+                ti_payload["reportability_decision"]["allowed_use"],
+                "offline-ioc-ti-triage-pivot",
+            )
+            self.assertTrue(any(item.get("ti_review_status") == "feed-match-review-required" for item in ti_payload["indicators"]))
             indicator_bookmark_response = client.post(
                 f"/api/runs/{run_id}/bookmarks",
                 json={
@@ -244,12 +569,34 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertEqual(search_response.json()["command"], "search")
             self.assertGreaterEqual(search_response.json()["summary"]["match_count"], 1)
+            self.assertEqual(
+                search_response.json()["keyword_pack_selection_profile"]["profile_version"],
+                "keyword-pack-selection-profile-v1",
+            )
+            self.assertIn("credentials", search_response.json()["keyword_pack_selection_profile"]["selected_pack_names"])
+            self.assertIn("#62", search_response.json()["keyword_pack_selection_profile"]["commercial_gap_ids"])
+            self.assertEqual(
+                search_response.json()["keyword_pack_selection_profile"]["commercial_uplift_evidence"]["item_numbers"],
+                [62],
+            )
+            self.assertEqual(search_response.json()["workbench_search_profile"]["item_number"], 16)
+            self.assertIn("documents", search_response.json()["workbench_search_profile"]["target_sources"])
+            self.assertEqual(
+                search_response.json()["workbench_search_profile"]["reportability_decision"]["allowed_use"],
+                "case-wide-triage-and-review-routing",
+            )
             document_match = next(
                 item
                 for item in search_response.json()["matches"]
                 if item["source"] == "documents" and item["path"].endswith(".txt")
             )
             self.assertIn("metadata", document_match)
+            self.assertEqual(document_match["source_verification_profile"]["profile_version"], "unified-search-source-verification-v1")
+            self.assertTrue(document_match["source_verification_profile"]["viewer_supported"])
+            self.assertEqual(
+                search_response.json()["workbench_search_profile"]["source_verification_summary"]["profile_version"],
+                "unified-search-source-verification-summary-v1",
+            )
             source_response = client.get(f"/api/runs/{run_id}/source-file", params={"path": document_match["path"]})
             self.assertEqual(source_response.status_code, 200)
             self.assertIn("password", source_response.text)
@@ -261,10 +608,53 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(preview_payload["viewer_metadata"]["parser_version"], "2")
             self.assertIn("source-search", preview_payload["search_url"])
             self.assertIn("Preview is read-only", preview_payload["viewer_limitations"][0])
+            self.assertEqual(
+                preview_payload["source_viewer_specialization_profile"]["profile_version"],
+                "source-viewer-specialization-v1",
+            )
+            self.assertEqual(preview_payload["source_viewer_specialization_profile"]["item_number"], 18)
+            self.assertEqual(
+                preview_payload["source_viewer_specialization_profile"]["viewer_family"],
+                "document-text-preview",
+            )
+            self.assertTrue(
+                preview_payload["source_viewer_specialization_profile"]["default_layout"]["metadata_collapsed_by_default"]
+            )
+            self.assertTrue(
+                preview_payload["source_viewer_specialization_profile"]["supported_viewer_features"]["text_preview"]
+            )
+            self.assertIn(
+                "source-search",
+                preview_payload["source_viewer_specialization_profile"]["citation_contract"]["search_inside_file_url"],
+            )
+            self.assertEqual(
+                preview_payload["review_evidence_tray_profile"]["profile_version"],
+                "review-evidence-tray-profile-v1",
+            )
+            self.assertEqual(preview_payload["review_evidence_tray_profile"]["item_number"], 19)
+            self.assertTrue(preview_payload["review_evidence_tray_profile"]["tray_item_contract"]["include_in_report"])
+            self.assertIn("relevant", preview_payload["review_evidence_tray_profile"]["default_review_states"])
+            self.assertIn(
+                "hash=true",
+                preview_payload["review_evidence_tray_profile"]["source_actions"]["hash_source"],
+            )
             self.assertIn("#73", preview_payload["viewer_sandbox"]["commercial_gap_ids"])
             self.assertFalse(preview_payload["viewer_sandbox"]["executes_content"])
+            self.assertEqual(
+                preview_payload["viewer_sandbox"]["preview_sandbox_policy_profile"]["profile_version"],
+                "preview-sandbox-policy-profile-v1",
+            )
+            self.assertEqual(
+                preview_payload["viewer_sandbox"]["preview_sandbox_policy_profile"]["renderer_strategy"],
+                "escaped-bounded-data-rendering",
+            )
+            self.assertFalse(preview_payload["viewer_sandbox"]["preview_sandbox_policy_profile"]["external_network_access"])
             self.assertEqual(preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["gap_id"], "#73")
             self.assertIn("read-only bounded preview", preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn(
+                "preview sandbox policy profile emitted",
+                preview_payload["viewer_sandbox"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(preview_payload["viewer_sandbox"]["trusted_preview_sandbox_diff"]["status"], "missing")
             sandbox_diff = build_preview_sandbox_trusted_diff(
                 preview_payload["viewer_sandbox"],
@@ -274,12 +664,27 @@ class RapidTriageApiTests(unittest.TestCase):
                 source_path=Path(document_match["path"]),
                 active_content_blocked=preview_payload["viewer_sandbox"]["active_content_blocked"],
                 max_chars=preview_payload["viewer_sandbox"]["max_inline_text_chars"],
+                policy_profile=preview_payload["viewer_sandbox"]["preview_sandbox_policy_profile"],
                 trusted_diff=sandbox_diff,
             )
             self.assertEqual(sandbox_diff["status"], "pass")
             self.assertIn("trusted preview sandbox/no-exec diff pass", sandbox_gates[0]["satisfied_checks"])
             self.assertIn("#51", preview_payload["review_workflow"]["commercial_gap_ids"])
             self.assertIn("#52", preview_payload["compare_workflow"]["commercial_gap_ids"])
+            self.assertEqual(preview_payload["analyst_workbench_profile"]["item_numbers"], [17, 18, 19, 20])
+            self.assertTrue(
+                preview_payload["analyst_workbench_profile"]["workflow_contract"]["current_file_search"]["implemented"]
+            )
+            self.assertEqual(
+                preview_payload["analyst_workbench_profile"]["workflow_contract"]["specialized_viewer"]["viewer_family"],
+                "document-text-preview",
+            )
+            self.assertEqual(
+                preview_payload["analyst_workbench_profile"]["workflow_contract"]["specialized_viewer"][
+                    "specialization_profile"
+                ],
+                "source-viewer-specialization-v1",
+            )
             self.assertEqual(preview_payload["review_workflow"]["core_accuracy_gates"][0]["gap_id"], "#51")
             self.assertEqual(preview_payload["compare_workflow"]["core_accuracy_gates"][0]["gap_id"], "#52")
             self.assertEqual(preview_payload["review_workflow"]["commercial_uplift_evidence"]["item_numbers"], [51])
@@ -295,6 +700,14 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(
                 preview_payload["compare_workflow"]["commercial_uplift_evidence"]["reportability_decision"]["decision"],
                 "do-not-report-compare-output-as-semantic-diff-complete",
+            )
+            self.assertEqual(preview_payload["compare_pin_profile"]["profile_version"], "source-compare-pin-profile-v1")
+            self.assertEqual(preview_payload["compare_pin_profile"]["item_number"], 20)
+            self.assertEqual(preview_payload["compare_pin_profile"]["max_pinned_items"], 3)
+            self.assertIn("bounded-text-diff", preview_payload["compare_pin_profile"]["supported_comparison_modes"])
+            self.assertIn(
+                "persistent-compare-notes-not-yet-implemented",
+                preview_payload["compare_pin_profile"]["commercial_grade_blockers"],
             )
             self.assertEqual(
                 {action["id"] for action in preview_payload["viewer_actions"]},
@@ -323,7 +736,18 @@ class RapidTriageApiTests(unittest.TestCase):
             file_search_payload = file_search_response.json()
             self.assertEqual(file_search_payload["command"], "source-search")
             self.assertEqual(file_search_payload["summary"]["match_count"], 1)
+            self.assertEqual(file_search_payload["source_search_profile"]["item_number"], 17)
+            self.assertEqual(
+                file_search_payload["source_search_profile"]["reportability_decision"]["allowed_use"],
+                "current-file-verification-pivot",
+            )
             self.assertEqual(file_search_payload["matches"][0]["keyword"], "password")
+            self.assertEqual(
+                file_search_payload["matches"][0]["citation_profile"]["profile_version"],
+                "current-file-search-citation-v1",
+            )
+            self.assertEqual(file_search_payload["matches"][0]["citation_profile"]["locator_type"], "text-line-offset")
+            self.assertTrue(file_search_payload["matches"][0]["citation_profile"]["ready_for_review_note"])
             self.assertIn("password", file_search_payload["matches"][0]["snippet"].lower())
             self.assertEqual(len(file_search_payload["matches"][0]["match_id"]), 16)
             self.assertEqual(file_search_payload["matches"][0]["pointer"], "source-search:/matches/0")
@@ -348,6 +772,12 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(sqlite_uplift["item_numbers"], [54])
             self.assertIn("read-only SQLite open", sqlite_uplift["passed_validation_check_ids"])
             self.assertFalse(sqlite_uplift["large_data_controls"]["deleted_row_recovery"])
+            self.assertTrue(sqlite_uplift["large_data_controls"]["table_pagination_api"])
+            self.assertTrue(sqlite_uplift["large_data_controls"]["where_builder_api"])
+            self.assertEqual(sqlite_preview["sqlite"]["table_page_profile"]["profile_version"], "sqlite-table-page-profile-v1")
+            self.assertTrue(sqlite_preview["sqlite"]["table_page_profile"]["supports_offset_pagination"])
+            self.assertFalse(sqlite_preview["sqlite"]["table_page_profile"]["executes_arbitrary_sql"])
+            self.assertIn("source-sqlite-table", sqlite_preview["sqlite"]["table_page_profile"]["table_links"][0]["first_page_url"])
             self.assertEqual(
                 sqlite_uplift["reportability_decision"]["allowed_use"],
                 "read-only-sqlite-preview-triage-pivot",
@@ -364,8 +794,55 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("read-only SQLite open", sqlite_preview["sqlite"]["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("#74", sqlite_preview["sqlite"]["sqlite_fts_optimization_assessment"]["commercial_gap_ids"])
             self.assertIn("#74", sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["commercial_gap_ids"])
+            self.assertEqual(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["functional_priority_profile"]["item_number"],
+                32,
+            )
+            self.assertTrue(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["functional_priority_profile"]["controls"]["bounded_row_preview"]
+            )
             self.assertEqual(sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["gap_id"], "#74")
             self.assertGreaterEqual(sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["searchable_text_column_count"], 1)
+            self.assertEqual(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["query_plan_profile"]["profile_version"],
+                "sqlite-preview-query-plan-profile-v1",
+            )
+            self.assertEqual(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["sqlite_fts_optimization_manifest"]["profile_version"],
+                "sqlite-fts-optimization-manifest-v1",
+            )
+            self.assertEqual(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["sqlite_fts_optimization_manifest"]["item_number"],
+                32,
+            )
+            self.assertEqual(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["sqlite_fts_optimization_manifest"]["gap_id"],
+                "#32",
+            )
+            self.assertRegex(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["query_plan_profile"]["plan_hash"],
+                r"^[0-9a-f]{64}$",
+            )
+            self.assertRegex(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["sqlite_fts_optimization_manifest"]["manifest_hash"],
+                r"^[0-9a-f]{64}$",
+            )
+            self.assertEqual(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["sqlite_fts_optimization_manifest_hash"],
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["sqlite_fts_optimization_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["functional_priority_profile"]["controls"]["optimization_manifest_hash"],
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["sqlite_fts_optimization_manifest"]["manifest_hash"],
+            )
+            self.assertIn(
+                "bounded query plan profile emitted",
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "SQLite/FTS optimization manifest hash emitted",
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(
                 sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["trusted_large_sqlite_fts_diff"]["status"],
                 "missing",
@@ -379,6 +856,7 @@ class RapidTriageApiTests(unittest.TestCase):
                 previews=sqlite_preview["sqlite"]["tables"],
                 searchable_text_column_count=sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["searchable_text_column_count"],
                 preview_row_count=sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["preview_row_count"],
+                query_plan_profile=sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["query_plan_profile"],
                 trusted_diff=fts_diff,
             )
             self.assertEqual(fts_diff["status"], "pass")
@@ -396,6 +874,28 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(sqlite_search["matches"][0]["table"], "notes")
             self.assertEqual(sqlite_search["matches"][0]["locator"]["table"], "notes")
             self.assertIn("table notes", sqlite_search["matches"][0]["citation"])
+            sqlite_page_response = client.get(
+                f"/api/runs/{run_id}/source-sqlite-table",
+                params={
+                    "path": str(sqlite_path),
+                    "table": "notes",
+                    "offset": 0,
+                    "limit": 2,
+                    "where_column": "body",
+                    "where_contains": "password",
+                    "order_by": "id",
+                },
+            )
+            self.assertEqual(sqlite_page_response.status_code, 200, sqlite_page_response.text)
+            sqlite_page = sqlite_page_response.json()
+            self.assertEqual(sqlite_page["command"], "source-sqlite-table")
+            self.assertEqual(sqlite_page["profile_version"], "sqlite-table-page-v1")
+            self.assertEqual(sqlite_page["table"], "notes")
+            self.assertEqual(sqlite_page["pagination"]["returned"], 1)
+            self.assertEqual(sqlite_page["where"]["mode"], "contains")
+            self.assertFalse(sqlite_page["where"]["arbitrary_sql_allowed"])
+            self.assertIn("password", sqlite_page["rows"][0]["values"]["body"])
+            self.assertIn("sqlite_table=notes", sqlite_page["copy_safe_citation"]["text"])
             json_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(json_path)})
             self.assertEqual(json_preview_response.status_code, 200, json_preview_response.text)
             json_preview = json_preview_response.json()
@@ -416,12 +916,25 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("password email body", eml_preview["email"]["messages"][0]["body_preview"])
             self.assertEqual(eml_preview["email"]["thread_count"], 1)
             self.assertEqual(eml_preview["email"]["threads"][0]["message_count"], 1)
+            self.assertEqual(eml_preview["email"]["messages"][0]["attachment_count"], 1)
+            self.assertEqual(eml_preview["email"]["messages"][0]["attachments"][0]["filename"], "note.txt")
+            self.assertEqual(len(eml_preview["email"]["messages"][0]["attachments"][0]["sha256"]), 64)
+            self.assertEqual(
+                eml_preview["email"]["attachment_package_profile"]["profile_version"],
+                "email-attachment-package-profile-v1",
+            )
+            self.assertEqual(eml_preview["email"]["attachment_package_profile"]["attachment_count"], 1)
+            self.assertIn(
+                "source-email-attachment",
+                eml_preview["email"]["attachment_package_profile"]["links"][0]["package_url"],
+            )
             self.assertIn("#55", eml_preview["email"]["email_conversation_viewer_assessment"]["commercial_gap_ids"])
             self.assertEqual(eml_preview["email"]["core_accuracy_gates"][0]["gap_id"], "#55")
             eml_uplift = eml_preview["email"]["commercial_uplift_evidence"]
             self.assertEqual(eml_uplift["item_numbers"], [55])
             self.assertIn("thread grouping", eml_uplift["passed_validation_check_ids"])
             self.assertFalse(eml_uplift["large_data_controls"]["native_pst_ost_msg"])
+            self.assertTrue(eml_uplift["large_data_controls"]["attachment_package_endpoint"])
             self.assertEqual(
                 eml_uplift["reportability_decision"]["decision"],
                 "do-not-report-email-preview-as-native-mailbox-thread-complete",
@@ -440,6 +953,17 @@ class RapidTriageApiTests(unittest.TestCase):
                 eml_preview["email"]["conversation_view"]["threads"][0]["message_order"][0]["subject"],
                 "Password review",
             )
+            attachment_response = client.get(
+                f"/api/runs/{run_id}/source-email-attachment",
+                params={"path": str(eml_path), "message_index": 1, "attachment_index": 1, "include_content": "true"},
+            )
+            self.assertEqual(attachment_response.status_code, 200, attachment_response.text)
+            attachment_payload = attachment_response.json()
+            self.assertEqual(attachment_payload["command"], "source-email-attachment")
+            self.assertEqual(attachment_payload["filename"], "note.txt")
+            self.assertEqual(attachment_payload["content_status"], "included-base64")
+            self.assertIn("sha256", attachment_payload["copy_safe_citation"]["text"])
+            self.assertEqual(attachment_payload["reportability_decision"]["allowed_use"], "bounded-email-conversation-triage-pivot")
             binary_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(binary_path)})
             self.assertEqual(binary_preview_response.status_code, 200, binary_preview_response.text)
             binary_preview = binary_preview_response.json()
@@ -453,13 +977,13 @@ class RapidTriageApiTests(unittest.TestCase):
             hex_uplift = binary_preview["hex"]["commercial_uplift_evidence"]
             self.assertEqual(hex_uplift["item_numbers"], [53])
             self.assertIn("bounded hex rows", hex_uplift["passed_validation_check_ids"])
-            self.assertFalse(hex_uplift["large_data_controls"]["export_range_citation"])
+            self.assertTrue(hex_uplift["large_data_controls"]["export_range_citation"])
             self.assertEqual(
                 hex_uplift["reportability_decision"]["allowed_use"],
                 "bounded-hex-preview-triage-pivot",
             )
             self.assertIn(
-                "exported-hex-range-citation-package-not-implemented",
+                "export-range-citation-package-needs-trusted-offset-validation",
                 hex_uplift["reportability_decision"]["blockers"],
             )
             self.assertEqual(binary_preview["hex"]["trusted_hex_viewer_diff"]["status"], "missing")
@@ -468,6 +992,26 @@ class RapidTriageApiTests(unittest.TestCase):
                 hex_uplift["reportability_decision"]["blockers"],
             )
             self.assertTrue(binary_preview["hex"]["offset_navigation"]["supports_keyword_byte_hits"])
+            self.assertTrue(binary_preview["hex"]["offset_navigation"]["supports_range_citation_export"])
+            self.assertEqual(binary_preview["hex"]["range_citation_profile"]["profile_version"], "hex-range-citation-v1")
+            self.assertEqual(binary_preview["hex"]["range_citation_profile"]["default_offset_hex"], "0x00000000")
+            self.assertIn("source-hex-range", binary_preview["hex"]["range_citation_profile"]["default_export_url"])
+            hex_range_response = client.get(
+                f"/api/runs/{run_id}/source-hex-range",
+                params={"path": str(binary_path), "offset": 2, "length": 12, "include_hashes": "true"},
+            )
+            self.assertEqual(hex_range_response.status_code, 200, hex_range_response.text)
+            hex_range = hex_range_response.json()
+            self.assertEqual(hex_range["command"], "source-hex-range")
+            self.assertEqual(hex_range["profile_version"], "hex-range-citation-package-v1")
+            self.assertEqual(hex_range["offset_hex"], "0x00000002")
+            self.assertEqual(hex_range["length_returned"], 12)
+            self.assertEqual(len(hex_range["range_hashes"]["sha256"]), 64)
+            self.assertEqual(hex_range["source_hash_status"], "computed")
+            self.assertIn("RapidTriage", hex_range["rows"][0]["ascii"])
+            self.assertIn("range_sha256", hex_range["copy_safe_citation"]["text"])
+            self.assertEqual(hex_range["core_accuracy_gates"][0]["gap_id"], "#53")
+            self.assertIn("bounded hex rows", hex_range["core_accuracy_gates"][0]["satisfied_checks"])
             binary_search_response = client.get(
                 f"/api/runs/{run_id}/source-search",
                 params={"path": str(binary_path), "keyword": "RapidTriage"},
@@ -497,9 +1041,76 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertIn("#58", image_preview["image"]["ocr_queue_assessment"]["commercial_gap_ids"])
             self.assertIn("#59", image_preview["image"]["korean_ocr_translation_workflow"]["commercial_gap_ids"])
             self.assertIn("similarity-bucketed", image_preview["image"]["gallery_review"]["tag_suggestions"])
+            self.assertEqual(image_preview["image"]["ocr_queue_profile"]["profile_version"], "source-ocr-queue-profile-v1")
+            self.assertIn("source-ocr-queue", image_preview["image"]["ocr_queue_profile"]["default_queue_url"])
+            self.assertFalse(image_preview["image"]["ocr_queue_profile"]["native_ocr_execution"])
+            self.assertEqual(
+                image_preview["image"]["korean_ocr_translation_profile"]["profile_version"],
+                "source-ocr-translation-profile-v1",
+            )
+            self.assertIn(
+                "source-ocr-translation",
+                image_preview["image"]["korean_ocr_translation_profile"]["default_review_url"],
+            )
+            self.assertTrue(image_preview["image"]["korean_ocr_translation_profile"]["supports_side_by_side_review"])
+            self.assertFalse(image_preview["image"]["korean_ocr_translation_profile"]["certified_translation"])
+            self.assertEqual(image_preview["image"]["gallery_page_profile"]["profile_version"], "image-gallery-page-profile-v1")
+            self.assertTrue(image_preview["image"]["gallery_page_profile"]["supports_folder_gallery_page"])
+            self.assertIn("source-image-gallery", image_preview["image"]["gallery_page_profile"]["default_page_url"])
+            self.assertTrue(image_uplift["large_data_controls"]["bounded_gallery_page"])
             self.assertEqual(image_preview["image"]["ocr_plan"]["status"], "sidecar-imported")
             self.assertEqual(image_preview["image"]["translation_plan"]["status"], "sidecar-imported")
+            self.assertTrue(image_preview["image"]["korean_ocr_translation_workflow"]["korean_detected_or_expected"])
             self.assertIn("translated OCR", image_preview["image"]["translation_sidecar"]["text"])
+            image_gallery_response = client.get(
+                f"/api/runs/{run_id}/source-image-gallery",
+                params={"path": str(image_path), "limit": 10},
+            )
+            self.assertEqual(image_gallery_response.status_code, 200, image_gallery_response.text)
+            image_gallery = image_gallery_response.json()
+            self.assertEqual(image_gallery["command"], "source-image-gallery")
+            self.assertEqual(image_gallery["profile_version"], "image-gallery-page-v1")
+            self.assertGreaterEqual(image_gallery["total"], 2)
+            self.assertTrue(any(item["is_anchor"] for item in image_gallery["items"]))
+            self.assertTrue(all(len(item["sha256"]) == 64 for item in image_gallery["items"]))
+            self.assertIn("keyboard_triage", image_gallery)
+            self.assertFalse(image_gallery["large_data_controls"]["persistent_tags"])
+            self.assertEqual(image_gallery["reportability_decision"]["allowed_use"], "image-gallery-metadata-triage-pivot")
+            ocr_queue_response = client.get(
+                f"/api/runs/{run_id}/source-ocr-queue",
+                params={"path": str(image_path), "max_items": 10},
+            )
+            self.assertEqual(ocr_queue_response.status_code, 200, ocr_queue_response.text)
+            ocr_queue = ocr_queue_response.json()
+            self.assertEqual(ocr_queue["command"], "ocr-queue")
+            self.assertEqual(ocr_queue["profile_version"], "source-ocr-queue-page-v1")
+            self.assertEqual(ocr_queue["anchor_name"], "screen.png")
+            self.assertIn("viewer_context", ocr_queue)
+            self.assertFalse(ocr_queue["viewer_context"]["native_ocr_execution"])
+            self.assertGreaterEqual(ocr_queue["summary"]["candidate_count"], 2)
+            self.assertIn("#58", ocr_queue["summary"]["commercial_gap_ids"])
+            self.assertIn("sidecar_imported", json.dumps(ocr_queue, ensure_ascii=False).replace("-", "_"))
+            self.assertIn("anchor_queue_id", ocr_queue["copy_safe_citation"]["text"])
+            translation_response = client.get(
+                f"/api/runs/{run_id}/source-ocr-translation",
+                params={"path": str(image_path), "include_text": "true"},
+            )
+            self.assertEqual(translation_response.status_code, 200, translation_response.text)
+            translation_review = translation_response.json()
+            self.assertEqual(translation_review["command"], "source-ocr-translation")
+            self.assertEqual(translation_review["profile_version"], "source-ocr-translation-review-v1")
+            self.assertTrue(translation_review["summary"]["ocr_sidecar_present"])
+            self.assertTrue(translation_review["summary"]["translation_sidecar_present"])
+            self.assertTrue(translation_review["summary"]["korean_detected_or_expected"])
+            self.assertEqual(translation_review["side_by_side_review"][0]["role"], "ocr-source")
+            self.assertIn("이미지 OCR", translation_review["side_by_side_review"][0]["text"])
+            self.assertEqual(translation_review["side_by_side_review"][1]["role"], "translation-target")
+            self.assertIn("translated OCR", translation_review["side_by_side_review"][1]["text"])
+            self.assertEqual(translation_review["core_accuracy_gates"][0]["gap_id"], "#59")
+            self.assertIn("translation sidecar import", translation_review["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertTrue(translation_review["review_profile"]["supports_side_by_side_review"])
+            self.assertFalse(translation_review["review_profile"]["certified_translation"])
+            self.assertIn("ocr_sha256", translation_review["copy_safe_citation"]["text"])
             media_preview_response = client.get(f"/api/runs/{run_id}/source-preview", params={"path": str(media_path)})
             self.assertEqual(media_preview_response.status_code, 200, media_preview_response.text)
             media_preview = media_preview_response.json()
@@ -523,6 +1134,10 @@ class RapidTriageApiTests(unittest.TestCase):
                 media_uplift["reportability_decision"]["decision"],
                 "do-not-report-media-preview-as-playback-or-asr-validated",
             )
+            self.assertEqual(media_preview["media"]["cue_package_profile"]["profile_version"], "media-cue-package-profile-v1")
+            self.assertEqual(media_preview["media"]["cue_package_profile"]["cue_count"], 1)
+            self.assertIn("source-media-cue", media_preview["media"]["cue_package_profile"]["links"][0]["package_url"])
+            self.assertTrue(media_uplift["large_data_controls"]["selected_cue_export"])
             self.assertEqual(media_preview["media"]["media_transcript_assessment"]["cue_count"], 1)
             self.assertEqual(media_preview["media"]["transcript_sidecars"][0]["cues"][0]["start"], "00:00:00,000")
             self.assertIn("#57", media_preview["media"]["transcript_sidecars"][0]["commercial_gap_ids"])
@@ -531,6 +1146,19 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(media_preview["media"]["metadata"]["duration_seconds"], 1.0)
             self.assertEqual(media_preview["media"]["transcript_sidecar_count"], 1)
             self.assertIn("password spoken", media_preview["media"]["transcript_sidecars"][0]["preview"])
+            media_cue_response = client.get(
+                f"/api/runs/{run_id}/source-media-cue",
+                params={"path": str(media_path), "sidecar_index": 1, "cue_index": 1, "include_source_hashes": "true"},
+            )
+            self.assertEqual(media_cue_response.status_code, 200, media_cue_response.text)
+            media_cue = media_cue_response.json()
+            self.assertEqual(media_cue["command"], "source-media-cue")
+            self.assertEqual(media_cue["profile_version"], "media-cue-citation-package-v1")
+            self.assertEqual(media_cue["start"], "00:00:00,000")
+            self.assertIn("password spoken", media_cue["text"])
+            self.assertEqual(len(media_cue["text_sha256"]), 64)
+            self.assertEqual(len(media_cue["source_hashes"]["sha256"]), 64)
+            self.assertIn("text_sha256", media_cue["copy_safe_citation"]["text"])
             filtered_search_response = client.get(
                 f"/api/runs/{run_id}/search",
                 params={
@@ -557,11 +1185,110 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertEqual(len(paged_files["candidates"]), 2)
             self.assertGreaterEqual(paged_files["pagination"]["total"], 2)
             self.assertIn("next_cursor", paged_files["pagination"])
+            self.assertEqual(paged_files["pagination"]["pagination_manifest"]["profile"], "pagination-cursor-manifest-v1")
+            self.assertEqual(
+                paged_files["pagination"]["pagination_manifest"]["profile_version"],
+                "pagination-cursor-manifest-v1",
+            )
+            self.assertEqual(paged_files["pagination"]["pagination_manifest"]["item_number"], 78)
+            self.assertRegex(paged_files["pagination"]["pagination_manifest"]["endpoint_id"], r"^[0-9a-f]{64}$")
+            self.assertRegex(
+                paged_files["pagination"]["pagination_manifest"]["cursor_token_hashes"]["cursor"],
+                r"^[0-9a-f]{64}$",
+            )
+            self.assertEqual(
+                paged_files["pagination"]["cursor_endpoint_coverage_manifest"]["profile"],
+                "cursor-api-coverage-manifest-v1",
+            )
+            self.assertEqual(paged_files["pagination"]["cursor_endpoint_coverage_manifest"]["item_number"], 31)
+            self.assertEqual(paged_files["pagination"]["cursor_endpoint_coverage_manifest"]["gap_id"], "#31")
+            self.assertEqual(
+                paged_files["pagination"]["cursor_endpoint_coverage_manifest"]["pagination_manifest_hash"],
+                paged_files["pagination"]["pagination_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(len(paged_files["pagination"]["cursor_endpoint_coverage_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                paged_files["pagination"]["page_window_id"],
+                paged_files["pagination"]["pagination_manifest"]["page_window_id"],
+            )
+            self.assertEqual(len(paged_files["pagination"]["pagination_manifest"]["manifest_hash"]), 64)
+            self.assertFalse(paged_files["pagination"]["snapshot_policy"]["snapshot_isolated"])
             self.assertIn("#78", paged_files["pagination"]["commercial_gap_ids"])
+            self.assertEqual(paged_files["pagination"]["functional_priority_profile"]["item_number"], 31)
+            self.assertEqual(paged_files["pagination"]["functional_priority_profile"]["batch_id"], "commercial-uplift-031-035")
+            self.assertTrue(paged_files["pagination"]["functional_priority_profile"]["controls"]["cursor_tokens"])
+            self.assertFalse(paged_files["pagination"]["functional_priority_profile"]["controls"]["snapshot_isolation"])
+            self.assertEqual(
+                paged_files["pagination"]["functional_priority_profile"]["controls"]["coverage_manifest_hash"],
+                paged_files["pagination"]["cursor_endpoint_coverage_manifest"]["manifest_hash"],
+            )
+            self.assertIn(
+                "case-db-review-candidates",
+                paged_files["pagination"]["functional_priority_profile"]["controls"]["missing_endpoint_families"],
+            )
             self.assertIn("#78", paged_files["pagination"]["pagination_assessment"]["commercial_gap_ids"])
+            self.assertEqual(
+                paged_files["pagination"]["pagination_assessment"]["pagination_manifest"]["manifest_hash"],
+                paged_files["pagination"]["pagination_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                paged_files["pagination"]["pagination_assessment"]["has_more"],
+                paged_files["pagination"]["has_more"],
+            )
             self.assertEqual(paged_files["pagination"]["core_accuracy_gates"][0]["gap_id"], "#78")
+            self.assertIn(
+                "pagination cursor manifest hash emitted",
+                paged_files["pagination"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(paged_files["pagination"]["core_accuracy_gates"][1]["gap_id"], "#79")
             self.assertEqual(paged_files["pagination"]["ui_virtualization"]["core_accuracy_gates"][0]["gap_id"], "#79")
+            self.assertEqual(
+                paged_files["pagination"]["ui_virtualization"]["row_window_manifest"]["profile"],
+                "ui-virtualization-manifest-v1",
+            )
+            self.assertEqual(
+                paged_files["pagination"]["ui_virtualization"]["row_window_manifest"]["profile_version"],
+                "ui-virtualization-manifest-v1",
+            )
+            self.assertEqual(paged_files["pagination"]["ui_virtualization"]["row_window_manifest"]["item_number"], 79)
+            self.assertTrue(
+                paged_files["pagination"]["ui_virtualization"]["row_window_manifest"]["viewport_state_policy"][
+                    "keyboard_navigation"
+                ]
+            )
+            self.assertFalse(
+                paged_files["pagination"]["ui_virtualization"]["row_window_manifest"]["viewport_state_policy"][
+                    "persisted_viewport_restoration"
+                ]
+            )
+            self.assertEqual(
+                paged_files["pagination"]["ui_virtualization"]["row_window_id"],
+                paged_files["pagination"]["ui_virtualization"]["row_window_manifest"]["row_window_id"],
+            )
+            self.assertEqual(
+                paged_files["pagination"]["ui_virtualization"]["manifest_hash"],
+                paged_files["pagination"]["ui_virtualization"]["row_window_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(len(paged_files["pagination"]["ui_virtualization"]["row_window_manifest"]["manifest_hash"]), 64)
+            self.assertIn(
+                "UI row-window manifest hash emitted",
+                paged_files["pagination"]["ui_virtualization"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertEqual(
+                paged_files["pagination"]["ui_virtualization"]["functional_priority_profile"]["item_number"],
+                25,
+            )
+            self.assertEqual(
+                paged_files["pagination"]["ui_virtualization"]["functional_priority_profile"]["batch_id"],
+                "commercial-uplift-021-025",
+            )
+            self.assertTrue(
+                paged_files["pagination"]["ui_virtualization"]["functional_priority_profile"]["controls"]["api_pagination"]
+            )
+            self.assertIn(
+                "browser-e2e-100k-record-run-not-attached",
+                paged_files["pagination"]["ui_virtualization"]["functional_priority_profile"]["blockers"],
+            )
             self.assertEqual(
                 paged_files["pagination"]["pagination_assessment"]["trusted_pagination_diff"]["status"],
                 "missing",
@@ -587,7 +1314,18 @@ class RapidTriageApiTests(unittest.TestCase):
                 total=paged_files["pagination"]["ui_virtualization"]["total_rows"],
                 visible=paged_files["pagination"]["ui_virtualization"]["visible_rows"],
                 api_pagination=True,
+                row_window_manifest=paged_files["pagination"]["ui_virtualization"]["row_window_manifest"],
                 trusted_diff=ui_diff,
+            )
+            manual_ui_manifest = build_ui_virtualization_manifest(
+                label="candidates",
+                total=paged_files["pagination"]["ui_virtualization"]["total_rows"],
+                visible=paged_files["pagination"]["ui_virtualization"]["visible_rows"],
+                api_pagination=True,
+            )
+            self.assertEqual(
+                manual_ui_manifest["manifest_hash"],
+                paged_files["pagination"]["ui_virtualization"]["row_window_manifest"]["manifest_hash"],
             )
             self.assertEqual(pagination_diff["status"], "pass")
             self.assertIn("trusted pagination cursor manifest diff pass", pagination_gates[0]["satisfied_checks"])
@@ -599,6 +1337,27 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertEqual(cursor_files_response.status_code, 200)
             self.assertEqual(cursor_files_response.json()["pagination"]["offset"], 1)
+            last_page_offset = max(0, paged_files["pagination"]["total"] - 1)
+            last_page_response = client.get(
+                f"/api/runs/{run_id}/files",
+                params={"offset": last_page_offset, "limit": 1},
+            )
+            self.assertEqual(last_page_response.status_code, 200)
+            last_page = last_page_response.json()
+            self.assertFalse(last_page["pagination"]["has_more"])
+            self.assertFalse(last_page["pagination"]["pagination_assessment"]["has_more"])
+            manual_manifest = build_pagination_cursor_manifest(
+                collection_name="candidates",
+                offset=last_page_offset,
+                limit=1,
+                returned=last_page["pagination"]["returned"],
+                total=last_page["pagination"]["total"],
+                cursor=last_page["pagination"]["cursor"],
+                next_cursor=last_page["pagination"]["next_cursor"],
+                previous_cursor=last_page["pagination"]["previous_cursor"],
+                has_more=False,
+            )
+            self.assertEqual(manual_manifest["manifest_hash"], last_page["pagination"]["pagination_manifest"]["manifest_hash"])
             paged_docs_response = client.get(f"/api/runs/{run_id}/docs", params={"offset": 0, "limit": 1})
             self.assertEqual(paged_docs_response.status_code, 200)
             paged_docs = paged_docs_response.json()
@@ -923,6 +1682,15 @@ class RapidTriageApiTests(unittest.TestCase):
 
             self.assertEqual(restored_response.status_code, 200)
             self.assertEqual(restored_response.json()["status"], "completed")
+            job_profile = restored_response.json()["job_queue_assessment"]["functional_priority_profile"]
+            self.assertEqual(job_profile["batch_id"], "commercial-uplift-026-030")
+            self.assertEqual(job_profile["item_number"], 27)
+            self.assertEqual(job_profile["component"], "persistent-job-queue")
+            self.assertTrue(job_profile["controls"]["state_file_persistence"])
+            self.assertEqual(len(job_profile["controls"]["persistence_manifest_hash"]), 64)
+            self.assertGreaterEqual(job_profile["controls"]["progress_percent"], 0)
+            self.assertGreaterEqual(job_profile["controls"]["completed_step_count"], 1)
+            self.assertFalse(job_profile["ready_for_commercial_claim"])
 
             import_response = restored_client.post("/api/runs/import", json={"output_dir": str(output_dir)})
             self.assertEqual(import_response.status_code, 201, import_response.text)
@@ -990,6 +1758,16 @@ class RapidTriageApiTests(unittest.TestCase):
             search_payload = search_response.json()
             self.assertGreaterEqual(search_payload["summary"]["match_count"], 1)
             self.assertEqual(search_payload["saved_search"]["name"], "Password review")
+            self.assertIn("#51", search_payload["review_workflow_summary"]["commercial_gap_ids"])
+            self.assertEqual(
+                search_payload["review_workflow_summary"]["profile_version"],
+                "case-search-review-workflow-summary-v1",
+            )
+            self.assertGreaterEqual(search_payload["review_workflow_summary"]["review_queue_count"], 1)
+            self.assertIn(
+                "assignment queue metadata emitted",
+                search_payload["review_workflow_summary"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             target = search_payload["matches"][0]
 
             review_response = client.post(
@@ -1067,6 +1845,23 @@ class RapidTriageApiTests(unittest.TestCase):
             self.assertGreaterEqual(export_payload["summary"]["exported_item_count"], 1)
             self.assertEqual(export_payload["items"][0]["review"]["include_in_report"], True)
             self.assertIn("target_citation_id", export_payload["items"][0])
+            self.assertTrue(all(item.get("copy_safe_citation") for item in export_payload["citation_index"]))
+            self.assertEqual(
+                export_payload["report_citation_manager"]["coverage_profile"]["profile_version"],
+                "report-citation-coverage-profile-v1",
+            )
+            self.assertGreaterEqual(
+                export_payload["report_citation_manager"]["coverage_profile"]["citation_count"],
+                1,
+            )
+            self.assertEqual(
+                export_payload["evidence_selection_version_history"]["integrity_profile"]["profile_version"],
+                "evidence-selection-history-integrity-profile-v1",
+            )
+            self.assertEqual(
+                len(export_payload["evidence_selection_version_history"]["integrity_profile"]["head_hash"]),
+                64,
+            )
 
             filtered_response = client.post(
                 "/api/case-db/search",

@@ -129,6 +129,66 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertIn("#105", payload["commercial_gap_ids"])
         self.assertIn("#106", payload["telemetry"]["commercial_gap_ids"])
         self.assertEqual(payload["telemetry"]["core_accuracy_gates"][0]["gap_id"], "#106")
+        self.assertEqual(payload["telemetry"]["local_only_evidence_manifest"]["profile_version"], "local-only-enterprise-evidence-manifest-v1")
+        self.assertEqual(len(payload["telemetry"]["local_only_evidence_manifest_hash"]), 64)
+        self.assertEqual(
+            payload["telemetry"]["local_only_evidence_manifest"]["control_evidence_matrix"]["profile_version"],
+            "enterprise-control-evidence-matrix-v1",
+        )
+        self.assertEqual(len(payload["telemetry"]["control_evidence_matrix_hash"]), 64)
+        self.assertEqual(
+            payload["telemetry"]["control_evidence_matrix_hash"],
+            payload["telemetry"]["local_only_evidence_manifest"]["control_evidence_matrix_hash"],
+        )
+        self.assertIn("network_egress_smoke", payload["telemetry"]["local_only_evidence_slots"])
+        self.assertIn("local-only evidence manifest hash emitted", payload["telemetry"]["core_accuracy_gates"][0]["satisfied_checks"])
+        self.assertIn(
+            "local-only control evidence matrix hash emitted",
+            payload["telemetry"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        local_deployment_manifest = payload["telemetry"]["local_only_deployment_manifest"]
+        self.assertEqual(local_deployment_manifest["profile_version"], "local-only-deployment-manifest-v1")
+        self.assertEqual(local_deployment_manifest["item_number"], 61)
+        self.assertEqual(len(local_deployment_manifest["manifest_hash"]), 64)
+        self.assertEqual(
+            payload["telemetry"]["local_only_deployment_manifest_hash"],
+            local_deployment_manifest["manifest_hash"],
+        )
+        self.assertEqual(local_deployment_manifest["enabled_upload_surface_count"], 0)
+        self.assertEqual(local_deployment_manifest["known_outbound_endpoint_count"], 0)
+        self.assertEqual(local_deployment_manifest["network_boundary"]["default_bind"], "127.0.0.1")
+        self.assertTrue(local_deployment_manifest["network_boundary"]["remote_requires_auth_token"])
+        self.assertIn("telemetry", {surface["surface"] for surface in local_deployment_manifest["upload_surfaces"]})
+        self.assertIn(
+            "local-only deployment manifest hash emitted",
+            payload["telemetry"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn(
+            "local-only upload surface inventory emitted",
+            payload["telemetry"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertEqual(payload["telemetry"]["functional_priority_profile"]["item_number"], 61)
+        self.assertEqual(payload["telemetry"]["functional_priority_profile"]["batch_id"], "commercial-uplift-061-065")
+        self.assertTrue(payload["telemetry"]["functional_priority_profile"]["implemented_controls"]["telemetry_disabled"])
+        self.assertTrue(
+            payload["telemetry"]["functional_priority_profile"]["implemented_controls"][
+                "upload_surface_inventory_emitted"
+            ]
+        )
+        self.assertEqual(
+            payload["telemetry"]["functional_priority_profile"]["implemented_controls"][
+                "local_only_deployment_manifest_hash"
+            ],
+            local_deployment_manifest["manifest_hash"],
+        )
+        self.assertIn(
+            "local-only-deployment-manifest-emitted",
+            payload["telemetry"]["functional_priority_profile"]["passed_validation_check_ids"],
+        )
+        self.assertIn(
+            "network-egress-test-not-attached",
+            payload["telemetry"]["functional_priority_profile"]["failed_validation_check_ids"],
+        )
         self.assertFalse(payload["telemetry"]["enabled"])
         self.assertEqual(payload["telemetry"]["trusted_local_only_diff"]["status"], "missing")
         self.assertIn("trusted-local-only-deployment-policy-diff-missing", payload["telemetry"]["blockers"])
@@ -140,9 +200,23 @@ class RapidTriageOpsTests(unittest.TestCase):
         )
         local_gates = telemetry_core_accuracy_gates(trusted_diff=local_diff)
         self.assertEqual(local_diff["status"], "pass")
+        self.assertIn("control_evidence_matrix_hash", local_diff["compared_fields"])
         self.assertIn("trusted local-only deployment policy diff pass", local_gates[0]["satisfied_checks"])
         self.assertIn("#107", payload["license_activation"]["commercial_gap_ids"])
         self.assertEqual(payload["license_activation"]["core_accuracy_gates"][0]["gap_id"], "#107")
+        self.assertEqual(payload["license_activation"]["license_evidence_manifest"]["profile_version"], "license-activation-evidence-manifest-v1")
+        self.assertEqual(len(payload["license_activation"]["license_evidence_manifest_hash"]), 64)
+        self.assertEqual(
+            payload["license_activation"]["license_evidence_manifest"]["control_evidence_matrix"]["profile_version"],
+            "enterprise-control-evidence-matrix-v1",
+        )
+        self.assertEqual(len(payload["license_activation"]["control_evidence_matrix_hash"]), 64)
+        self.assertIn("offline_activation_smoke", payload["license_activation"]["license_evidence_slots"])
+        self.assertIn("license evidence manifest hash emitted", payload["license_activation"]["core_accuracy_gates"][0]["satisfied_checks"])
+        self.assertIn(
+            "license control evidence matrix hash emitted",
+            payload["license_activation"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
         self.assertFalse(payload["license_activation"]["required"])
         self.assertEqual(payload["license_activation"]["status"], "operator-provided-file")
         self.assertEqual(len(payload["license_activation"]["license_sha256"]), 64)
@@ -160,9 +234,23 @@ class RapidTriageOpsTests(unittest.TestCase):
             trusted_diff=license_diff,
         )
         self.assertEqual(license_diff["status"], "pass")
+        self.assertIn("control_evidence_matrix_hash", license_diff["compared_fields"])
         self.assertIn("trusted license authority diff pass", license_gates[0]["satisfied_checks"])
         self.assertIn("#108", payload["rbac"]["commercial_gap_ids"])
         self.assertEqual(payload["rbac"]["core_accuracy_gates"][0]["gap_id"], "#108")
+        self.assertEqual(payload["rbac"]["rbac_evidence_manifest"]["profile_version"], "rbac-enforcement-evidence-manifest-v1")
+        self.assertEqual(len(payload["rbac"]["rbac_evidence_manifest_hash"]), 64)
+        self.assertEqual(
+            payload["rbac"]["rbac_evidence_manifest"]["control_evidence_matrix"]["profile_version"],
+            "enterprise-control-evidence-matrix-v1",
+        )
+        self.assertEqual(len(payload["rbac"]["control_evidence_matrix_hash"]), 64)
+        self.assertIn("per_action_enforcement_test", payload["rbac"]["rbac_evidence_slots"])
+        self.assertIn("rbac evidence manifest hash emitted", payload["rbac"]["core_accuracy_gates"][0]["satisfied_checks"])
+        self.assertIn(
+            "rbac control evidence matrix hash emitted",
+            payload["rbac"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
         self.assertEqual(payload["rbac"]["active_role"], "viewer")
         self.assertTrue(payload["rbac"]["active_role_supported"])
         self.assertNotIn("backup_restore", payload["rbac"]["active_permissions"])
@@ -180,9 +268,31 @@ class RapidTriageOpsTests(unittest.TestCase):
             trusted_diff=rbac_diff,
         )
         self.assertEqual(rbac_diff["status"], "pass")
+        self.assertIn("control_evidence_matrix_hash", rbac_diff["compared_fields"])
         self.assertIn("trusted RBAC enforcement diff pass", rbac_gates[0]["satisfied_checks"])
         self.assertIn("#109", payload["multi_user_case_server"]["commercial_gap_ids"])
         self.assertEqual(payload["multi_user_case_server"]["core_accuracy_gates"][0]["gap_id"], "#109")
+        self.assertEqual(
+            payload["multi_user_case_server"]["multi_user_evidence_manifest"]["profile_version"],
+            "multi-user-server-evidence-manifest-v1",
+        )
+        self.assertEqual(len(payload["multi_user_case_server"]["multi_user_evidence_manifest_hash"]), 64)
+        self.assertEqual(
+            payload["multi_user_case_server"]["multi_user_evidence_manifest"]["control_evidence_matrix"][
+                "profile_version"
+            ],
+            "enterprise-control-evidence-matrix-v1",
+        )
+        self.assertEqual(len(payload["multi_user_case_server"]["control_evidence_matrix_hash"]), 64)
+        self.assertIn("locking_conflict_test", payload["multi_user_case_server"]["multi_user_evidence_slots"])
+        self.assertIn(
+            "multi-user evidence manifest hash emitted",
+            payload["multi_user_case_server"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn(
+            "multi-user control evidence matrix hash emitted",
+            payload["multi_user_case_server"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
         self.assertTrue(payload["multi_user_case_server"]["required_before_enablement"])
         self.assertEqual(payload["multi_user_case_server"]["trusted_multi_user_diff"]["status"], "missing")
         self.assertIn("trusted-multi-user-server-review-diff-missing", payload["multi_user_case_server"]["blockers"])
@@ -194,9 +304,31 @@ class RapidTriageOpsTests(unittest.TestCase):
         )
         multi_user_gates = multi_user_case_server_core_accuracy_gates(trusted_diff=multi_user_diff)
         self.assertEqual(multi_user_diff["status"], "pass")
+        self.assertIn("control_evidence_matrix_hash", multi_user_diff["compared_fields"])
         self.assertIn("trusted multi-user server review diff pass", multi_user_gates[0]["satisfied_checks"])
         self.assertIn("#110", payload["collaboration_audit_trail"]["commercial_gap_ids"])
         self.assertEqual(payload["collaboration_audit_trail"]["core_accuracy_gates"][0]["gap_id"], "#110")
+        self.assertEqual(
+            payload["collaboration_audit_trail"]["collaboration_audit_evidence_manifest"]["profile_version"],
+            "collaboration-audit-evidence-manifest-v1",
+        )
+        self.assertEqual(len(payload["collaboration_audit_trail"]["collaboration_audit_evidence_manifest_hash"]), 64)
+        self.assertEqual(
+            payload["collaboration_audit_trail"]["collaboration_audit_evidence_manifest"]["control_evidence_matrix"][
+                "profile_version"
+            ],
+            "enterprise-control-evidence-matrix-v1",
+        )
+        self.assertEqual(len(payload["collaboration_audit_trail"]["control_evidence_matrix_hash"]), 64)
+        self.assertIn("audit_append_only_review", payload["collaboration_audit_trail"]["collaboration_audit_evidence_slots"])
+        self.assertIn(
+            "collaboration audit evidence manifest hash emitted",
+            payload["collaboration_audit_trail"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn(
+            "collaboration audit control evidence matrix hash emitted",
+            payload["collaboration_audit_trail"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
         self.assertEqual(payload["collaboration_audit_trail"]["status"], "case-db-audit-events-with-export-hash-chain")
         self.assertEqual(payload["multi_user_case_server"]["status"], "not-enabled")
         self.assertEqual(payload["collaboration_audit_trail"]["trusted_collaboration_audit_diff"]["status"], "missing")
@@ -209,11 +341,84 @@ class RapidTriageOpsTests(unittest.TestCase):
         )
         collaboration_gates = collaboration_audit_core_accuracy_gates(trusted_diff=collaboration_diff)
         self.assertEqual(collaboration_diff["status"], "pass")
+        self.assertIn("control_evidence_matrix_hash", collaboration_diff["compared_fields"])
         self.assertIn("trusted collaboration audit diff pass", collaboration_gates[0]["satisfied_checks"])
         self.assertIn("#118", payload["security_hardening"]["commercial_gap_ids"])
         self.assertIn("#119", payload["security_hardening"]["commercial_gap_ids"])
         self.assertEqual(payload["security_hardening"]["core_accuracy_gates"][0]["gap_id"], "#118")
         self.assertEqual(payload["security_hardening"]["core_accuracy_gates"][1]["gap_id"], "#119")
+        self.assertEqual(
+            payload["security_hardening"]["security_hardening_evidence_manifest"]["profile_version"],
+            "security-hardening-evidence-manifest-v1",
+        )
+        self.assertEqual(len(payload["security_hardening"]["security_hardening_evidence_manifest_hash"]), 64)
+        self.assertEqual(
+            payload["security_hardening"]["security_hardening_evidence_manifest"]["control_evidence_matrix"][
+                "profile_version"
+            ],
+            "enterprise-control-evidence-matrix-v1",
+        )
+        self.assertEqual(len(payload["security_hardening"]["control_evidence_matrix_hash"]), 64)
+        baseline_manifest = payload["security_hardening"]["security_hardening_baseline_manifest"]
+        self.assertEqual(baseline_manifest["profile_version"], "security-hardening-baseline-manifest-v1")
+        self.assertEqual(baseline_manifest["item_number"], 63)
+        self.assertEqual(len(baseline_manifest["manifest_hash"]), 64)
+        self.assertEqual(
+            payload["security_hardening"]["security_hardening_baseline_manifest_hash"],
+            baseline_manifest["manifest_hash"],
+        )
+        self.assertGreaterEqual(baseline_manifest["control_count"], 7)
+        self.assertIn("path_traversal_guardrails", {control["control"] for control in baseline_manifest["controls"]})
+        self.assertIn("independent_appsec_review", payload["security_hardening"]["security_hardening_evidence_slots"])
+        self.assertIn(
+            "security hardening evidence manifest hash emitted",
+            payload["security_hardening"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn(
+            "security hardening baseline manifest hash emitted",
+            payload["security_hardening"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertIn(
+            "security hardening control evidence matrix hash emitted",
+            payload["security_hardening"]["core_accuracy_gates"][0]["satisfied_checks"],
+        )
+        self.assertEqual(
+            payload["security_hardening"]["malicious_sandbox_evidence_manifest"]["profile_version"],
+            "malicious-evidence-sandbox-evidence-manifest-v1",
+        )
+        self.assertEqual(len(payload["security_hardening"]["malicious_sandbox_evidence_manifest_hash"]), 64)
+        self.assertEqual(
+            payload["security_hardening"]["malicious_sandbox_evidence_manifest"]["control_evidence_matrix"][
+                "profile_version"
+            ],
+            "enterprise-control-evidence-matrix-v1",
+        )
+        self.assertIn("malicious_corpus_validation", payload["security_hardening"]["malicious_sandbox_evidence_slots"])
+        self.assertIn(
+            "malicious sandbox evidence manifest hash emitted",
+            payload["security_hardening"]["core_accuracy_gates"][1]["satisfied_checks"],
+        )
+        self.assertIn(
+            "malicious sandbox control evidence matrix hash emitted",
+            payload["security_hardening"]["core_accuracy_gates"][1]["satisfied_checks"],
+        )
+        self.assertEqual(payload["security_hardening"]["functional_priority_profile"]["item_number"], 63)
+        self.assertTrue(
+            payload["security_hardening"]["functional_priority_profile"]["implemented_controls"][
+                "security_hardening_baseline_manifest_emitted"
+            ]
+        )
+        self.assertIn(
+            "security-hardening-baseline-manifest-emitted",
+            payload["security_hardening"]["functional_priority_profile"]["passed_validation_check_ids"],
+        )
+        self.assertFalse(
+            payload["security_hardening"]["functional_priority_profile"]["implemented_controls"]["os_level_parser_sandbox"]
+        )
+        self.assertIn(
+            "independent-appsec-review-not-attached",
+            payload["security_hardening"]["functional_priority_profile"]["failed_validation_check_ids"],
+        )
         self.assertEqual(payload["security_hardening"]["trusted_security_hardening_diff"]["status"], "missing")
         self.assertEqual(payload["security_hardening"]["trusted_malicious_sandbox_diff"]["status"], "missing")
         self.assertIn("trusted-security-hardening-review-diff-missing", payload["security_hardening"]["blockers"])
@@ -234,6 +439,8 @@ class RapidTriageOpsTests(unittest.TestCase):
         sandbox_gate = malicious_evidence_sandbox_core_accuracy_gates(trusted_diff=sandbox_diff)
         self.assertEqual(hardening_diff["status"], "pass")
         self.assertEqual(sandbox_diff["status"], "pass")
+        self.assertIn("control_evidence_matrix_hash", hardening_diff["compared_fields"])
+        self.assertIn("control_evidence_matrix_hash", sandbox_diff["compared_fields"])
         self.assertIn("trusted independent AppSec review diff pass", hardening_gate[0]["satisfied_checks"])
         self.assertIn("trusted malicious evidence sandbox corpus diff pass", sandbox_gate[0]["satisfied_checks"])
 
@@ -264,10 +471,49 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue((output_dir / "rapidtriage-benchmark.md").is_file())
             self.assertGreaterEqual(payload["metrics"]["ingest_seconds"], 0)
             self.assertIn("search_p50_seconds", payload["metrics"])
+            self.assertEqual(len(payload["metrics"]["search_latency_samples_seconds"]), 1)
+            self.assertEqual(payload["environment"]["profile_version"], "benchmark-environment-profile-v1")
+            self.assertIn("python_version", payload["environment"])
+            self.assertEqual(
+                payload["release_threshold_profile"]["profile_version"],
+                "benchmark-release-threshold-profile-v1",
+            )
+            self.assertEqual(payload["benchmark_command_manifest"]["profile_version"], "benchmark-command-manifest-v1")
+            self.assertEqual(payload["benchmark_command_manifest"]["item_number"], 34)
+            self.assertEqual(payload["benchmark_command_manifest"]["gap_id"], "#34")
+            self.assertEqual(len(payload["benchmark_command_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                payload["benchmark_command_manifest_hash"],
+                payload["benchmark_command_manifest"]["manifest_hash"],
+            )
+            self.assertIn(payload["release_threshold_profile"]["status"], {"pass", "needs-review"})
+            self.assertEqual(len(payload["release_threshold_profile"]["checks"]), 3)
+            self.assertFalse(payload["release_threshold_profile"]["trusted_threshold_manifest_attached"])
+            self.assertEqual(
+                payload["release_threshold_profile"]["trusted_diff_blocker"],
+                "trusted-benchmark-hardware-threshold-diff-missing",
+            )
             self.assertIn("#66", payload["summary"]["commercial_gap_ids"])
             self.assertIn("#66", payload["benchmark_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(payload["core_accuracy_gates"][0]["gap_id"], "#66")
             self.assertIn("ingest/search metrics captured", payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("release threshold profile emitted", payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("benchmark command manifest hash emitted", payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(payload["functional_priority_profile"]["item_number"], 34)
+            self.assertEqual(payload["functional_priority_profile"]["batch_id"], "commercial-uplift-031-035")
+            self.assertTrue(payload["functional_priority_profile"]["controls"]["synthetic_or_existing_root_supported"])
+            self.assertEqual(
+                payload["functional_priority_profile"]["controls"]["benchmark_manifest_hash"],
+                payload["benchmark_command_manifest"]["manifest_hash"],
+            )
+            self.assertIn(
+                payload["functional_priority_profile"]["controls"]["release_threshold_status"],
+                {"pass", "needs-review"},
+            )
+            self.assertIn(
+                "published-100k-1m-10m-hardware-and-os-matrix-required",
+                payload["functional_priority_profile"]["blockers"],
+            )
             self.assertFalse(payload["benchmark_native_capabilities"]["continuous_10m_record_gate"])
             self.assertEqual([row["label"] for row in payload["benchmark_scale_matrix"]], ["100k", "1M", "10M"])
             uplift = payload["commercial_uplift_evidence"]
@@ -328,7 +574,43 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#67", payload["stress_test_assessment"]["commercial_gap_ids"])
             self.assertEqual(payload["core_accuracy_gates"][0]["gap_id"], "#67")
             self.assertIn("TB-scale scenarios emitted", payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("hardware-scale evidence manifest hash emitted", payload["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(
+                payload["hardware_scale_evidence_manifest"]["profile_version"],
+                "hardware-scale-evidence-manifest-v1",
+            )
+            self.assertEqual(payload["hardware_scale_evidence_manifest"]["item_number"], 35)
+            self.assertEqual(payload["hardware_scale_evidence_manifest"]["gap_id"], "#35")
+            self.assertEqual(payload["hardware_scale_evidence_manifest"]["largest_size_tb"], 10)
+            self.assertEqual(len(payload["hardware_scale_evidence_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                payload["hardware_scale_evidence_manifest_hash"],
+                payload["hardware_scale_evidence_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(payload["functional_priority_profile"]["item_number"], 35)
+            self.assertEqual(payload["functional_priority_profile"]["batch_id"], "commercial-uplift-031-035")
+            self.assertEqual(payload["functional_priority_profile"]["controls"]["largest_size_tb"], 10)
+            self.assertEqual(
+                payload["functional_priority_profile"]["controls"]["hardware_scale_manifest_hash"],
+                payload["hardware_scale_evidence_manifest"]["manifest_hash"],
+            )
+            self.assertFalse(payload["functional_priority_profile"]["controls"]["actual_hardware_run_attached"])
+            self.assertEqual(
+                payload["evidence_capture_profile"]["profile_version"],
+                "stress-evidence-capture-profile-v1",
+            )
+            self.assertEqual(payload["evidence_capture_profile"]["scenario_count"], 2)
+            self.assertIn("rapidtriage-run-summary.json", payload["evidence_capture_profile"]["required_artifacts"])
+            self.assertIn("rss_bytes", payload["evidence_capture_profile"]["telemetry_fields"])
+            self.assertEqual(
+                payload["evidence_capture_profile"]["trusted_diff_blocker"],
+                "trusted-stress-run-log-diff-missing",
+            )
+            self.assertFalse(payload["evidence_capture_profile"]["trusted_run_log_manifest_attached"])
             self.assertIn("#67", payload["scenarios"][0]["commercial_gap_ids"])
+            self.assertEqual(payload["scenarios"][0]["run_log_template"]["profile_version"], "stress-run-log-template-v1")
+            self.assertIn("peak_memory_bytes", payload["scenarios"][0]["run_log_template"]["required_fields"])
+            self.assertIn("checkpoint-manifest.json", payload["scenarios"][0]["run_log_template"]["required_artifacts"])
             self.assertFalse(payload["stress_native_capabilities"]["actual_1tb_10tb_execution"])
             uplift = payload["commercial_uplift_evidence"]
             self.assertEqual(uplift["batch_id"], "commercial-uplift-066-070")
@@ -346,6 +628,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             stress_gates = stress_core_accuracy_gates(scenarios=payload["scenarios"], trusted_diff=stress_diff)
             self.assertEqual(stress_diff["status"], "pass")
             self.assertIn("trusted stress run-log diff pass", stress_gates[0]["satisfied_checks"])
+            self.assertIn("run-log template emitted", stress_gates[0]["satisfied_checks"])
 
     def test_validation_command_writes_release_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -373,7 +656,27 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["validation_package_assessment"]["trusted_validation_package_diff"]["status"], "missing")
             self.assertIn("trusted-validation-package-manifest-diff-missing", payload["validation_package_assessment"]["blockers"])
             self.assertIn("#81", payload["known_answer_validation"]["commercial_gap_ids"])
+            self.assertEqual(payload["known_answer_validation"]["functional_priority_profile"]["item_number"], 36)
+            self.assertEqual(
+                payload["known_answer_validation"]["known_answer_pipeline_manifest"]["profile_version"],
+                "known-answer-pipeline-manifest-v1",
+            )
+            self.assertEqual(payload["known_answer_validation"]["known_answer_pipeline_manifest"]["item_number"], 36)
+            self.assertEqual(payload["known_answer_validation"]["known_answer_pipeline_manifest"]["gap_id"], "#36")
+            self.assertEqual(len(payload["known_answer_validation"]["known_answer_pipeline_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                payload["known_answer_validation"]["functional_priority_profile"]["implemented_controls"]["pipeline_manifest_hash"],
+                payload["known_answer_validation"]["known_answer_pipeline_manifest"]["manifest_hash"],
+            )
+            self.assertIn(
+                "known-answer-manifest-not-attached",
+                payload["known_answer_validation"]["functional_priority_profile"]["failed_validation_check_ids"],
+            )
             self.assertEqual(payload["known_answer_validation"]["core_accuracy_gates"][0]["gap_id"], "#81")
+            self.assertIn(
+                "known-answer pipeline manifest hash emitted",
+                payload["known_answer_validation"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(payload["known_answer_validation"]["trusted_known_answer_diff"]["status"], "missing")
             self.assertIn("trusted-known-answer-manifest-diff-missing", payload["known_answer_validation"]["blockers"])
             self.assertIn("#82", payload["parser_fixture_corpus"]["commercial_gap_ids"])
@@ -381,10 +684,67 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["parser_fixture_corpus"]["trusted_fixture_corpus_diff"]["status"], "missing")
             self.assertIn("trusted-fixture-corpus-manifest-diff-missing", payload["parser_fixture_corpus"]["blockers"])
             self.assertIn("#83", payload["parser_false_positive_false_negative_notes"][0]["commercial_gap_ids"])
+            self.assertEqual(len(payload["parser_false_positive_false_negative_notes"][0]["risk_note_hash"]), 64)
+            self.assertEqual(payload["parser_fp_fn_risk_register_profile"]["profile_version"], "parser-fp-fn-risk-register-v1")
+            self.assertEqual(len(payload["parser_fp_fn_risk_register_profile"]["register_digest"]), 64)
+            self.assertEqual(
+                payload["parser_fp_fn_risk_register_manifest"]["profile_version"],
+                "parser-fp-fn-risk-register-manifest-v1",
+            )
+            self.assertEqual(payload["parser_fp_fn_risk_register_manifest"]["item_number"], 38)
+            self.assertEqual(payload["parser_fp_fn_risk_register_manifest"]["gap_id"], "#38")
+            self.assertEqual(payload["parser_fp_fn_risk_register_manifest"]["commercial_gap_ids"], ["#83"])
+            self.assertEqual(len(payload["parser_fp_fn_risk_register_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                payload["parser_fp_fn_risk_register_profile"]["risk_register_manifest_hash"],
+                payload["parser_fp_fn_risk_register_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                payload["parser_fp_fn_risk_register_manifest"]["unquantified_parser_count"],
+                payload["parser_fp_fn_risk_register_manifest"]["parser_count"],
+            )
+            self.assertFalse(payload["parser_fp_fn_risk_register_manifest"]["commercial_claim_allowed"])
+            self.assertEqual(
+                payload["parser_false_positive_false_negative_notes"][0]["functional_priority_profile"]["item_number"],
+                38,
+            )
+            self.assertIn(
+                "trusted-fp-fn-risk-register-diff-missing",
+                payload["parser_false_positive_false_negative_notes"][0]["functional_priority_profile"]["failed_validation_check_ids"],
+            )
             self.assertEqual(payload["parser_false_positive_false_negative_notes"][0]["core_accuracy_gates"][0]["gap_id"], "#83")
             self.assertEqual(payload["parser_false_positive_false_negative_notes"][0]["trusted_fp_fn_diff"]["status"], "missing")
             self.assertIn("trusted-fp-fn-risk-register-diff-missing", payload["parser_false_positive_false_negative_notes"][0]["blockers"])
             self.assertIn("#84", payload["independent_validation_report"]["commercial_gap_ids"])
+            self.assertEqual(
+                payload["independent_validation_report"]["independent_validation_manifest"]["profile_version"],
+                "independent-validation-report-manifest-v1",
+            )
+            self.assertEqual(len(payload["independent_validation_report"]["independent_validation_manifest"]["report_manifest_hash"]), 64)
+            self.assertEqual(
+                payload["independent_validation_report"]["independent_validation_package_manifest"]["profile_version"],
+                "independent-validation-package-manifest-v1",
+            )
+            self.assertEqual(payload["independent_validation_report"]["independent_validation_package_manifest"]["item_number"], 39)
+            self.assertEqual(payload["independent_validation_report"]["independent_validation_package_manifest"]["gap_id"], "#39")
+            self.assertEqual(len(payload["independent_validation_report"]["independent_validation_package_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                payload["independent_validation_report"]["independent_validation_package_manifest_hash"],
+                payload["independent_validation_report"]["independent_validation_package_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                payload["independent_validation_report"]["functional_priority_profile"]["implemented_controls"]["package_manifest_hash"],
+                payload["independent_validation_report"]["independent_validation_package_manifest"]["manifest_hash"],
+            )
+            self.assertIn(
+                "release-owner",
+                payload["independent_validation_report"]["independent_validation_package_manifest"]["missing_signoff_roles"],
+            )
+            self.assertEqual(payload["independent_validation_report"]["functional_priority_profile"]["item_number"], 39)
+            self.assertIn(
+                "independent-validation-report-not-attached",
+                payload["independent_validation_report"]["functional_priority_profile"]["failed_validation_check_ids"],
+            )
             self.assertEqual(payload["independent_validation_report"]["core_accuracy_gates"][0]["gap_id"], "#84")
             self.assertEqual(payload["independent_validation_report"]["trusted_independent_validation_diff"]["status"], "missing")
             self.assertIn("trusted-independent-validation-signoff-diff-missing", payload["independent_validation_report"]["blockers"])
@@ -395,6 +755,24 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "trusted-external-tool-version-transcript-diff-missing",
                 payload["external_tool_version_assessment"]["blockers"],
             )
+            self.assertEqual(
+                payload["external_tool_version_assessment"]["external_tool_version_manifest"]["profile_version"],
+                "external-tool-version-manifest-v1",
+            )
+            self.assertEqual(len(payload["external_tool_version_assessment"]["external_tool_version_manifest_hash"]), 64)
+            self.assertEqual(
+                payload["external_tool_version_assessment"]["external_tool_capture_matrix"]["profile_version"],
+                "external-tool-capture-matrix-v1",
+            )
+            self.assertEqual(len(payload["external_tool_version_assessment"]["external_tool_capture_matrix_hash"]), 64)
+            self.assertEqual(
+                payload["external_tool_version_assessment"]["external_tool_capture_matrix_hash"],
+                payload["external_tool_version_assessment"]["external_tool_version_manifest"]["capture_matrix_hash"],
+            )
+            self.assertTrue(all(len(item["tool_version_row_hash"]) == 64 for item in payload["external_tool_versions"]))
+            self.assertTrue(all(len(item["command_argv_hash"]) == 64 for item in payload["external_tool_versions"]))
+            self.assertTrue(all(len(item["capture_state_hash"]) == 64 for item in payload["external_tool_versions"]))
+            self.assertTrue(all(item["tool_version_row_manifest"]["profile_version"] == "external-tool-version-row-v1" for item in payload["external_tool_versions"]))
             self.assertTrue(all("#95" in item["commercial_gap_ids"] for item in payload["external_tool_versions"]))
             self.assertTrue(all(item["core_accuracy_gates"][0]["gap_id"] == "#95" for item in payload["external_tool_versions"]))
             tool_diff = build_external_tool_version_trusted_diff(
@@ -403,6 +781,17 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             promoted_tools = build_external_tool_version_assessment(trusted_diff=tool_diff)
             self.assertEqual(tool_diff["status"], "pass")
+            self.assertIn("tool_version_row_hash", tool_diff["compared_fields"])
+            self.assertIn("command_argv_hash", tool_diff["compared_fields"])
+            self.assertIn("capture_state_hash", tool_diff["compared_fields"])
+            self.assertIn(
+                "external tool version manifest hash emitted",
+                promoted_tools["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "external tool capture matrix hash emitted",
+                promoted_tools["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertIn(
                 "trusted external tool transcript diff pass",
                 promoted_tools["core_accuracy_gates"][0]["satisfied_checks"],
@@ -418,6 +807,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             artifact_manifest = json.loads((output_dir / "rapidtriage-validation-artifacts.json").read_text(encoding="utf-8"))
             self.assertIn("#85", artifact_manifest["commercial_gap_ids"])
             self.assertEqual(artifact_manifest["core_accuracy_gates"][0]["gap_id"], "#85")
+            self.assertEqual(artifact_manifest["validation_package_manifest"]["profile_version"], "validation-package-manifest-v1")
+            self.assertEqual(len(artifact_manifest["validation_package_manifest"]["package_manifest_hash"]), 64)
+            self.assertEqual(artifact_manifest["package_manifest_hash"], artifact_manifest["validation_package_manifest"]["package_manifest_hash"])
+            self.assertGreaterEqual(len(artifact_manifest["validation_package_manifest"]["reproduction_commands"]), 2)
             self.assertEqual(artifact_manifest["trusted_validation_package_diff"]["status"], "missing")
             self.assertIn("trusted-validation-package-manifest-diff-missing", artifact_manifest["blockers"])
             check_ids = {item["id"] for item in payload["checks"]}
@@ -463,6 +856,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                                 "name": "Dataset 1",
                                 "status": "pass",
                                 "backlog_items": [81],
+                                "expected": {"required_assertions": ["known-answer fixture status is pass"]},
                                 "evidence_paths": [str(evidence)],
                             }
                         ]
@@ -475,29 +869,91 @@ class RapidTriageOpsTests(unittest.TestCase):
             promoted_known = build_known_answer_validation(manifest, trusted_diff=known_diff)
 
             self.assertEqual(known_diff["status"], "pass")
+            self.assertIn("dataset_hash", known_diff["compared_fields"])
+            self.assertEqual(promoted_known["manifest_digest"], known_answer["manifest_digest"])
+            self.assertEqual(promoted_known["datasets"][0]["expected_assertion_count"], 1)
+            self.assertEqual(promoted_known["datasets"][0]["evidence_hash_count"], 1)
+            self.assertEqual(len(promoted_known["datasets"][0]["dataset_hash"]), 64)
+            self.assertEqual(
+                promoted_known["known_answer_pipeline_manifest"]["profile_version"],
+                "known-answer-pipeline-manifest-v1",
+            )
+            self.assertEqual(promoted_known["known_answer_pipeline_manifest"]["dataset_count"], 1)
+            self.assertEqual(promoted_known["known_answer_pipeline_manifest"]["expected_assertion_count"], 1)
+            self.assertEqual(promoted_known["known_answer_pipeline_manifest"]["evidence_hash_count"], 1)
+            self.assertEqual(promoted_known["known_answer_pipeline_manifest"]["trusted_diff_status"], "pass")
+            self.assertEqual(len(promoted_known["known_answer_pipeline_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                promoted_known["functional_priority_profile"]["implemented_controls"]["pipeline_manifest_hash"],
+                promoted_known["known_answer_pipeline_manifest"]["manifest_hash"],
+            )
             self.assertIn("trusted known-answer manifest diff pass", promoted_known["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("known-answer pipeline manifest hash emitted", promoted_known["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("evidence file hashes recorded", promoted_known["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(promoted_known["functional_priority_profile"]["status"], "complete")
 
             fixture_corpus = build_parser_fixture_corpus(Path.cwd())
             fixture_diff = build_fixture_corpus_trusted_diff(fixture_corpus, fixture_corpus)
             promoted_fixture = build_parser_fixture_corpus(Path.cwd(), trusted_diff=fixture_diff)
             self.assertEqual(fixture_diff["status"], "pass")
+            self.assertIn("area_manifest_hash", fixture_diff["compared_fields"])
+            self.assertEqual(len(promoted_fixture["fixture_corpus_digest"]), 64)
+            self.assertTrue(all(len(area["area_manifest_hash"]) == 64 for area in promoted_fixture["areas"]))
             self.assertIn("trusted fixture corpus manifest diff pass", promoted_fixture["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("fixture/test file hashes recorded", promoted_fixture["core_accuracy_gates"][0]["satisfied_checks"])
 
             fp_fn_notes = build_parser_false_positive_false_negative_notes()
             fp_fn_diff = build_fp_fn_trusted_diff(fp_fn_notes, fp_fn_notes)
             promoted_fp_fn = build_parser_false_positive_false_negative_notes(trusted_diff=fp_fn_diff)
             self.assertEqual(fp_fn_diff["status"], "pass")
+            self.assertIn("risk_note_hash", fp_fn_diff["compared_fields"])
+            self.assertEqual(len(promoted_fp_fn[0]["risk_note_hash"]), 64)
+            self.assertEqual(len(promoted_fp_fn[0]["minimum_quantification_fields"]), 6)
+            self.assertTrue(promoted_fp_fn[0]["quantification_required"])
+            self.assertIn("reportability_boundary", promoted_fp_fn[0])
             self.assertIn("trusted FP/FN risk register diff pass", promoted_fp_fn[0]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("risk note hash emitted", promoted_fp_fn[0]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(promoted_fp_fn[0]["functional_priority_profile"]["status"], "complete")
 
             report = root / "independent-report.md"
-            report.write_text("signed independent validation report", encoding="utf-8")
+            report.write_text(
+                "\n".join(
+                    [
+                        "# Independent Validation Report",
+                        "scope and datasets",
+                        "tool version and commit",
+                        "known-answer pass/fail table",
+                        "false positive/false negative notes",
+                        "legal/report wording review",
+                    ]
+                ),
+                encoding="utf-8",
+            )
             independent_report = build_independent_validation_report(report)
             independent_diff = build_independent_validation_trusted_diff(independent_report, independent_report)
             promoted_independent = build_independent_validation_report(report, trusted_diff=independent_diff)
             self.assertEqual(independent_diff["status"], "pass")
+            self.assertIn("report_manifest_hash", independent_diff["compared_fields"])
+            self.assertEqual(len(promoted_independent["independent_validation_manifest"]["report_manifest_hash"]), 64)
+            self.assertEqual(len(promoted_independent["independent_validation_package_manifest"]["manifest_hash"]), 64)
+            self.assertEqual(
+                promoted_independent["functional_priority_profile"]["implemented_controls"]["package_manifest_hash"],
+                promoted_independent["independent_validation_package_manifest"]["manifest_hash"],
+            )
+            self.assertTrue(promoted_independent["independent_validation_package_manifest"]["minimum_sections_complete"])
+            self.assertEqual(
+                promoted_independent["independent_validation_manifest"]["minimum_sections_present_count"],
+                promoted_independent["independent_validation_manifest"]["minimum_sections_required_count"],
+            )
+            self.assertTrue(all(promoted_independent["minimum_section_presence"].values()))
             self.assertTrue(promoted_independent["ready_for_court_report"])
+            self.assertEqual(promoted_independent["functional_priority_profile"]["status"], "complete")
             self.assertIn(
                 "trusted independent validation signoff diff pass",
+                promoted_independent["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "report manifest hash emitted",
                 promoted_independent["core_accuracy_gates"][0]["satisfied_checks"],
             )
 
@@ -510,8 +966,15 @@ class RapidTriageOpsTests(unittest.TestCase):
             promoted_manifest = build_validation_artifact_manifest(root, (package_file, markdown_file), trusted_diff=package_diff)
             promoted_assessment = build_validation_package_assessment(root, trusted_diff=package_diff)
             self.assertEqual(package_diff["status"], "pass")
+            self.assertIn("package_manifest_hash", package_diff["compared_fields"])
+            self.assertEqual(len(promoted_manifest["validation_package_manifest"]["package_manifest_hash"]), 64)
+            self.assertEqual(len(promoted_assessment["validation_package_manifest"]["package_manifest_hash"]), 64)
             self.assertIn(
                 "trusted validation package manifest diff pass",
+                promoted_manifest["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "package manifest hash emitted",
                 promoted_manifest["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertIn(
@@ -531,15 +994,244 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(payload["item_count"], 120)
             self.assertEqual(payload["status"], "commercial-gaps-present")
             self.assertFalse(payload["commercial_claim_allowed"])
+            self.assertEqual(payload["claim_discipline_profile"]["item_number"], 45)
+            self.assertEqual(payload["claim_discipline_manifest"]["profile_version"], "claim-discipline-manifest-v1")
+            self.assertEqual(payload["claim_discipline_manifest"]["item_number"], 45)
+            self.assertEqual(payload["claim_discipline_manifest"]["gap_id"], "#45")
+            self.assertEqual(len(payload["claim_discipline_manifest_hash"]), 64)
+            self.assertEqual(
+                payload["claim_discipline_profile"]["implemented_controls"]["claim_discipline_manifest_hash"],
+                payload["claim_discipline_manifest"]["manifest_hash"],
+            )
+            self.assertIn("commercial-grade", payload["claim_discipline_manifest"]["blocked_wording"])
+            self.assertTrue(payload["claim_discipline_manifest"]["ui_guardrails"]["disable_commercial_report_template"])
+            self.assertEqual(
+                payload["claim_discipline_profile"]["implemented_controls"]["release_claim_guard"],
+                "block-commercial-parity-wording",
+            )
+            self.assertIn(
+                "commercial-claim-blocked",
+                payload["claim_discipline_profile"]["failed_validation_check_ids"],
+            )
             self.assertGreater(payload["non_commercial_count"], 0)
             self.assertIn("maturity_gate_summary", payload)
             self.assertEqual(payload["maturity_gate_summary"]["item_count"], 120)
             self.assertIn("implemented", payload["maturity_gate_summary"]["gate_counts"])
             self.assertIn("next_gate_samples", payload["maturity_gate_summary"])
             self.assertIn("next_gate_blocker_counts", payload["maturity_gate_summary"])
+            blocker_matrix = payload["commercial_blocker_matrix"]
+            self.assertEqual(blocker_matrix["version"], "commercial-blocker-matrix-v1")
+            self.assertEqual(blocker_matrix["item_count"], payload["non_commercial_count"])
+            self.assertFalse(blocker_matrix["commercial_claim_allowed"])
+            self.assertGreater(blocker_matrix["internally_actionable_count"], 0)
+            self.assertGreater(blocker_matrix["external_or_trusted_evidence_count"], 0)
+            self.assertIn("native-parser-depth", blocker_matrix["lane_counts"])
+            self.assertIn("top_internal_items", blocker_matrix)
+            self.assertIn("top_external_evidence_items", blocker_matrix)
+            self.assertEqual(blocker_matrix["rows"][0]["number"], 1)
+            self.assertIn("native-parser-depth", blocker_matrix["rows"][0]["blocker_lanes"])
+            self.assertTrue(blocker_matrix["rows"][0]["external_or_trusted_evidence_required"])
+            self.assertIn("next_internal_or_evidence_action", blocker_matrix["rows"][0])
+            separation = payload["blocker_separation_profile"]
+            self.assertEqual(separation["version"], "blocker-separation-profile-v1")
+            self.assertEqual(separation["immediate_queue_item"], 10)
+            self.assertGreater(separation["summary"]["internal_work_available"], 0)
+            self.assertGreater(separation["summary"]["external_or_trusted_evidence_required"], 0)
+            self.assertIn("known-answer-validation", separation["lane_action_map"])
+            self.assertLessEqual(len(separation["next_internal_batch"]), 5)
+            self.assertLessEqual(len(separation["next_external_evidence_batch"]), 5)
+            self.assertFalse(separation["next_internal_batch"][0]["commercial_claim_allowed_after_this_action"])
             self.assertIn("priority_work_plan", payload)
             self.assertGreater(len(payload["priority_work_plan"]), 0)
             self.assertIn("required_action", payload["priority_work_plan"][0])
+            progress = payload["functional_defensibility_progress"]
+            self.assertEqual(progress["version"], "functional-defensibility-progress-v1")
+            self.assertEqual(progress["target_range"], {"start": 42, "end": 70})
+            self.assertEqual(progress["item_count"], 29)
+            self.assertEqual(progress["batch_size"], 5)
+            self.assertEqual(progress["batch_count"], 6)
+            self.assertFalse(progress["commercial_claim_allowed"])
+            self.assertIn("commercial-grade claims still require", progress["commercial_claim_rule"])
+            self.assertEqual(progress["batches"][0]["item_numbers"], [42, 43, 44, 45, 46])
+            self.assertEqual(progress["batches"][-1]["item_numbers"], [67, 68, 69, 70])
+            self.assertIn("usable", progress["gate_counts"])
+            self.assertIn("validated", progress["next_gate_counts"])
+            self.assertIn("required_outputs_before_commercial_claim", progress["batches"][0])
+            review_scale = payload["review_scale_resilience_progress"]
+            self.assertEqual(review_scale["version"], "review-scale-resilience-progress-v1")
+            self.assertEqual(review_scale["target_range"], {"start": 76, "end": 80})
+            self.assertEqual(review_scale["item_numbers"], [76, 77, 78, 79, 80])
+            self.assertFalse(review_scale["commercial_claim_allowed"])
+            self.assertIn("trusted-hash-cache-manifest", review_scale["required_outputs_before_commercial_claim"])
+            self.assertEqual(review_scale["surface_map"]["76"]["component"], "hash-cache")
+            self.assertEqual(review_scale["surface_map"]["80"]["component"], "cancel-retry")
+            item_by_number = {item["number"]: item for item in review_scale["items"]}
+            self.assertEqual(item_by_number[78]["trusted_manifest_required"], "pagination-cursor-manifest")
+            self.assertIn("api pagination.cursor", item_by_number[78]["primary_outputs"])
+            self.assertEqual(item_by_number[79]["component"], "ui-virtualization")
+            self.assertIn("cancellation-retry-manifest-v1", item_by_number[80]["primary_outputs"])
+            self.assertIn("retry_lineage_profile", item_by_number[80]["primary_outputs"])
+            validation_spine = payload["validation_spine_progress"]
+            self.assertEqual(validation_spine["version"], "validation-spine-progress-v1")
+            self.assertEqual(validation_spine["target_range"], {"start": 81, "end": 85})
+            self.assertEqual(validation_spine["item_numbers"], [81, 82, 83, 84, 85])
+            self.assertFalse(validation_spine["commercial_claim_allowed"])
+            self.assertFalse(validation_spine["validation_package_attached"])
+            self.assertEqual(validation_spine["mapped_item_numbers_in_range"], [])
+            self.assertIn("known-answer-manifest-with-existing-evidence-paths", validation_spine["required_outputs_before_commercial_claim"])
+            self.assertEqual(validation_spine["evidence_chain"][0]["component"], "known-answer-validation")
+            spine_by_number = {item["number"]: item for item in validation_spine["items"]}
+            self.assertEqual(spine_by_number[81]["produces"], "known_answer_validation.datasets")
+            self.assertIn("known_answer_validation.manifest_digest", spine_by_number[81]["primary_outputs"])
+            self.assertIn("datasets[].evidence_files[].sha256", spine_by_number[81]["primary_outputs"])
+            self.assertIn("parser_fixture_corpus.fixture_corpus_digest", spine_by_number[82]["primary_outputs"])
+            self.assertIn("areas[].area_manifest_hash", spine_by_number[82]["primary_outputs"])
+            self.assertIn("parser_false_positive_false_negative_notes[].risk_note_hash", spine_by_number[83]["primary_outputs"])
+            self.assertIn("parser_fp_fn_risk_register_profile.register_digest", spine_by_number[83]["primary_outputs"])
+            self.assertIn(
+                "independent_validation_report.independent_validation_manifest.report_manifest_hash",
+                spine_by_number[84]["primary_outputs"],
+            )
+            self.assertIn("validation_package_manifest.package_manifest_hash", spine_by_number[85]["primary_outputs"])
+            self.assertEqual(spine_by_number[85]["trusted_diff_required"], "trusted-validation-package-manifest-diff")
+            forensic_integrity = payload["forensic_integrity_progress"]
+            self.assertEqual(forensic_integrity["version"], "forensic-integrity-progress-v1")
+            self.assertEqual(forensic_integrity["target_range"], {"start": 86, "end": 90})
+            self.assertEqual(forensic_integrity["item_numbers"], [86, 87, 88, 89, 90])
+            self.assertFalse(forensic_integrity["commercial_claim_allowed"])
+            self.assertIn("trusted-custody-event-manifest", forensic_integrity["required_outputs_before_commercial_claim"])
+            self.assertEqual(forensic_integrity["evidence_chain"][0]["component"], "chain-of-custody")
+            integrity_by_number = {item["number"]: item for item in forensic_integrity["items"]}
+            self.assertEqual(integrity_by_number[86]["produces"], "case-db-report-export.custody_workflow")
+            self.assertIn("custody_workflow.custody_event_manifest.manifest_hash", integrity_by_number[86]["primary_outputs"])
+            self.assertIn("custody_workflow.evidence_sources[].custody_row_hash", integrity_by_number[86]["primary_outputs"])
+            self.assertEqual(integrity_by_number[90]["trusted_diff_required"], "trusted-report-provenance-manifest-diff")
+            report_quality = payload["report_quality_progress"]
+            self.assertEqual(report_quality["version"], "report-quality-progress-v1")
+            self.assertEqual(report_quality["target_range"], {"start": 91, "end": 95})
+            self.assertEqual(report_quality["item_numbers"], [91, 92, 93, 94, 95])
+            self.assertFalse(report_quality["commercial_claim_allowed"])
+            self.assertIn("trusted-parser-confidence-calibration-manifest", report_quality["required_outputs_before_commercial_claim"])
+            self.assertEqual(report_quality["evidence_chain"][0]["component"], "parser-confidence-scoring")
+            quality_by_number = {item["number"]: item for item in report_quality["items"]}
+            self.assertEqual(quality_by_number[91]["produces"], "case-db-report-export.items[].validation_assessment.parser_confidence")
+            self.assertEqual(quality_by_number[95]["trusted_diff_required"], "trusted-external-tool-transcript-diff")
+            acquisition_quality = payload["acquisition_quality_progress"]
+            self.assertEqual(acquisition_quality["version"], "acquisition-quality-progress-v1")
+            self.assertEqual(acquisition_quality["target_range"], {"start": 96, "end": 100})
+            self.assertEqual(acquisition_quality["item_numbers"], [96, 97, 98, 99, 100])
+            self.assertFalse(acquisition_quality["commercial_claim_allowed"])
+            self.assertIn("signed-acquisition-handoff-with-write-blocker-metadata", acquisition_quality["required_outputs_before_commercial_claim"])
+            self.assertEqual(acquisition_quality["evidence_chain"][0]["component"], "write-blocker-acquisition-metadata")
+            acquisition_by_number = {item["number"]: item for item in acquisition_quality["items"]}
+            self.assertEqual(acquisition_by_number[96]["produces"], "case-db-report-export.acquisition_metadata")
+            self.assertEqual(acquisition_by_number[100]["trusted_diff_required"], "trusted-tamper-signature-attestation-diff")
+            release_operations = payload["release_operations_progress"]
+            self.assertEqual(release_operations["version"], "release-operations-progress-v1")
+            self.assertEqual(release_operations["target_range"], {"start": 101, "end": 105})
+            self.assertEqual(release_operations["item_numbers"], [101, 102, 103, 104, 105])
+            self.assertFalse(release_operations["commercial_claim_allowed"])
+            self.assertIn("signed-windows-msi-or-exe-with-authenticode-timestamp-log", release_operations["required_outputs_before_commercial_claim"])
+            self.assertEqual(release_operations["evidence_chain"][0]["component"], "windows-signed-installer")
+            release_by_number = {item["number"]: item for item in release_operations["items"]}
+            self.assertEqual(release_by_number[101]["produces"], "release-manifest.package_readiness.windows_signed_installer")
+            self.assertIn(
+                "windows_signed_installer.windows_signing_evidence_manifest.manifest_hash",
+                release_by_number[101]["primary_outputs"],
+            )
+            self.assertIn(
+                "macos_notarized_package.macos_notarization_evidence_manifest.manifest_hash",
+                release_by_number[102]["primary_outputs"],
+            )
+            self.assertIn(
+                "linux_package.linux_package_evidence_manifest.manifest_hash",
+                release_by_number[103]["primary_outputs"],
+            )
+            self.assertIn(
+                "update-manifest.auto_update_evidence_manifest.manifest_hash",
+                release_by_number[104]["primary_outputs"],
+            )
+            self.assertIn(
+                "crash-report.crash_export_evidence_manifest.manifest_hash",
+                release_by_number[105]["primary_outputs"],
+            )
+            self.assertEqual(release_by_number[105]["trusted_diff_required"], "trusted-crash-redaction-export-diff")
+            enterprise_governance = payload["enterprise_governance_progress"]
+            self.assertEqual(enterprise_governance["version"], "enterprise-governance-progress-v1")
+            self.assertEqual(enterprise_governance["target_range"], {"start": 106, "end": 110})
+            self.assertEqual(enterprise_governance["item_numbers"], [106, 107, 108, 109, 110])
+            self.assertFalse(enterprise_governance["commercial_claim_allowed"])
+            self.assertIn(
+                "trusted-local-only-deployment-policy-and-network-egress-smoke",
+                enterprise_governance["required_outputs_before_commercial_claim"],
+            )
+            self.assertEqual(enterprise_governance["evidence_chain"][0]["component"], "telemetry-free-local-only-mode")
+            enterprise_by_number = {item["number"]: item for item in enterprise_governance["items"]}
+            self.assertEqual(enterprise_by_number[106]["produces"], "enterprise-policy.telemetry")
+            self.assertIn(
+                "enterprise-policy.telemetry.local_only_evidence_manifest.manifest_hash",
+                enterprise_by_number[106]["primary_outputs"],
+            )
+            self.assertIn(
+                "enterprise-policy.license_activation.license_evidence_manifest.manifest_hash",
+                enterprise_by_number[107]["primary_outputs"],
+            )
+            self.assertIn(
+                "enterprise-policy.rbac.rbac_evidence_manifest.manifest_hash",
+                enterprise_by_number[108]["primary_outputs"],
+            )
+            self.assertIn(
+                "enterprise-policy.multi_user_case_server.multi_user_evidence_manifest.manifest_hash",
+                enterprise_by_number[109]["primary_outputs"],
+            )
+            self.assertIn(
+                "enterprise-policy.collaboration_audit_trail.collaboration_audit_evidence_manifest.manifest_hash",
+                enterprise_by_number[110]["primary_outputs"],
+            )
+            self.assertEqual(enterprise_by_number[110]["trusted_diff_required"], "trusted-collaboration-audit-diff")
+            operations_continuity = payload["operations_continuity_progress"]
+            self.assertEqual(operations_continuity["version"], "operations-continuity-progress-v1")
+            self.assertEqual(operations_continuity["target_range"], {"start": 111, "end": 115})
+            self.assertEqual(operations_continuity["item_numbers"], [111, 112, 113, 114, 115])
+            self.assertFalse(operations_continuity["commercial_claim_allowed"])
+            self.assertIn(
+                "trusted-backup-restore-rehearsal-log-and-migration-corpus",
+                operations_continuity["required_outputs_before_commercial_claim"],
+            )
+            self.assertEqual(operations_continuity["evidence_chain"][0]["component"], "backup-restore-migration")
+            continuity_by_number = {item["number"]: item for item in operations_continuity["items"]}
+            self.assertEqual(continuity_by_number[111]["produces"], "case-backup/case-restore payloads")
+            self.assertIn(
+                "case-backup.backup_restore_evidence_manifest.manifest_hash",
+                continuity_by_number[111]["primary_outputs"],
+            )
+            self.assertIn(
+                "operations_documents.document_evidence_manifests.112.manifest_hash",
+                continuity_by_number[112]["primary_outputs"],
+            )
+            self.assertIn(
+                "operations_documents.document_evidence_manifests.115.manifest_hash",
+                continuity_by_number[115]["primary_outputs"],
+            )
+            self.assertEqual(continuity_by_number[115]["trusted_diff_required"], "trusted-training-delivery-diff")
+            final_delivery = payload["final_delivery_progress"]
+            self.assertEqual(final_delivery["version"], "final-delivery-progress-v1")
+            self.assertEqual(final_delivery["target_range"], {"start": 116, "end": 120})
+            self.assertEqual(final_delivery["item_numbers"], [116, 117, 118, 119, 120])
+            self.assertFalse(final_delivery["commercial_claim_allowed"])
+            self.assertIn("trusted-quickstart-lab-run-log", final_delivery["required_outputs_before_commercial_claim"])
+            self.assertEqual(final_delivery["evidence_chain"][0]["component"], "analyst-quickstart-lab")
+            final_by_number = {item["number"]: item for item in final_delivery["items"]}
+            self.assertEqual(final_by_number[116]["produces"], "docs/rapidtriage-training-curriculum.md quickstart lab section")
+            self.assertIn(
+                "operations_documents.document_evidence_manifests.116.manifest_hash",
+                final_by_number[116]["primary_outputs"],
+            )
+            self.assertIn(
+                "operations_documents.document_evidence_manifests.120.manifest_hash",
+                final_by_number[120]["primary_outputs"],
+            )
+            self.assertEqual(final_by_number[120]["trusted_diff_required"], "trusted-dependency-advisory-sbom-diff")
             self.assertIn("all_items", payload)
             first_item = next(item for item in payload["all_items"] if item["number"] == 1)
             self.assertIn("maturity_gates", first_item)
@@ -547,6 +1239,8 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertFalse(first_item["maturity_gates"]["commercial_grade"]["passed"])
             self.assertTrue((Path(tmp_dir) / "rapidtriage-commercial-readiness.json").is_file())
             self.assertTrue((Path(tmp_dir) / "rapidtriage-commercial-readiness.md").is_file())
+            markdown = (Path(tmp_dir) / "rapidtriage-commercial-readiness.md").read_text(encoding="utf-8")
+            self.assertIn("Internal vs External Blockers", markdown)
             critical_numbers = {item["number"] for item in payload["critical_non_commercial_items"]}
             self.assertIn(1, critical_numbers)
             self.assertIn(25, critical_numbers)
@@ -703,6 +1397,11 @@ class RapidTriageOpsTests(unittest.TestCase):
         self.assertTrue(all(item["maturity_gates"]["validated"]["passed"] for item in validated_items))
         self.assertTrue(all(item["next_required_gate"] == "commercial_grade" for item in validated_items))
         self.assertFalse(payload["commercial_claim_allowed"])
+        self.assertEqual(payload["claim_discipline_profile"]["item_number"], 45)
+        self.assertIn(
+            "all-items-validation-evidence-not-attached",
+            payload["claim_discipline_profile"]["failed_validation_check_ids"],
+        )
 
     def test_commercial_readiness_writes_known_answer_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -895,6 +1594,29 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(tool_rows["evtxecmd"]["version"], "EvtxECmd 1.5.0")
             self.assertEqual(tool_rows["evtxecmd"]["command"], "EvtxECmd.exe -f Security.evtx --csv reference")
             readiness_checks = payload["cross_tool_validation_assessment"]["commercial_grade_readiness_checks"]
+            functional_profile = payload["cross_tool_validation_assessment"]["functional_priority_profile"]
+            trusted_manifest = payload["cross_tool_validation_assessment"]["trusted_tool_diff_manifest"]
+            self.assertEqual(functional_profile["item_number"], 37)
+            self.assertEqual(functional_profile["status"], "complete")
+            self.assertEqual(functional_profile["implemented_controls"]["mapped_backlog_items"], [1, 2])
+            self.assertEqual(trusted_manifest["profile_version"], "trusted-tool-diff-manifest-v1")
+            self.assertEqual(trusted_manifest["item_number"], 37)
+            self.assertEqual(trusted_manifest["gap_id"], "#37")
+            self.assertEqual(trusted_manifest["mapped_backlog_items"], [1, 2])
+            self.assertEqual(trusted_manifest["configured_min_overlap"], 0.5)
+            self.assertEqual(trusted_manifest["external_reference_hash_count"], 1)
+            self.assertEqual(trusted_manifest["source_evidence_hash_count"], 1)
+            self.assertEqual(trusted_manifest["independent_review_hash_count"], 1)
+            self.assertEqual(trusted_manifest["comparison_summaries"][0]["reference_name"], "evtxecmd")
+            self.assertEqual(len(trusted_manifest["manifest_hash"]), 64)
+            self.assertEqual(
+                payload["cross_tool_validation_assessment"]["trusted_tool_diff_manifest_hash"],
+                trusted_manifest["manifest_hash"],
+            )
+            self.assertEqual(
+                functional_profile["implemented_controls"]["trusted_tool_diff_manifest_hash"],
+                trusted_manifest["manifest_hash"],
+            )
             self.assertTrue(readiness_checks["source_evidence_hashes_attached"])
             self.assertTrue(readiness_checks["corpus_scope_attached"])
             self.assertTrue(readiness_checks["external_tool_versions_attached"])
@@ -973,6 +1695,599 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(field_comparison["mismatch_count"], 1)
             self.assertEqual(field_comparison["mismatch_samples"][0]["field"], "event_id")
             self.assertFalse(payload["cross_tool_validation_assessment"]["ready_for_validated_gate"])
+
+    def test_cross_tool_validate_compares_evtx_message_and_event_data_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-eventlog.json"
+            reference = root / "evtxecmd.csv"
+            output = root / "evtx-cross-tool.json"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "details": {
+                                    "event_record_id": 1001,
+                                    "event_id": 4688,
+                                    "provider_name": "Microsoft-Windows-Security-Auditing",
+                                    "channel": "Security",
+                                    "event_message": "A new process has been created.",
+                                    "binxml_event_data_fields": {
+                                        "NewProcessName": r"C:\\Windows\\System32\\cmd.exe",
+                                        "SubjectUserName": "alice",
+                                    },
+                                }
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "EventRecordID,EventID,Provider,Channel,Message,EventData.NewProcessName,EventData.SubjectUserName\n"
+                "1001,4688,Microsoft-Windows-Security-Auditing,Security,A new process has been created.,"
+                r"C:\\Windows\\System32\\cmd.exe,alice"
+                "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"evtxecmd={reference}",
+                        "--backlog-item",
+                        "1",
+                        "--backlog-item",
+                        "2",
+                        "--min-overlap",
+                        "1.0",
+                        "--output",
+                        str(output),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            comparison = payload["comparisons"][0]
+            field_comparison = comparison["record_field_comparison"]
+            self.assertGreaterEqual(field_comparison["common_record_count"], 1)
+            self.assertEqual(field_comparison["mismatch_count"], 0)
+            self.assertIn("event_message", field_comparison["compared_canonical_fields"])
+            self.assertIn("event_data:newprocessname", field_comparison["compared_canonical_fields"])
+            self.assertIn("event_data:subjectusername", field_comparison["compared_canonical_fields"])
+            profile = payload["cross_tool_validation_assessment"]["functional_priority_profile"]
+            self.assertIn("evtx-rendered-message-field-diff-supported", profile["passed_validation_check_ids"])
+            self.assertIn("evtx-event-data-field-diff-supported", profile["passed_validation_check_ids"])
+
+    def test_cross_tool_validate_compares_registry_values_deleted_cells_and_transaction_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-registry.json"
+            reference = root / "recmd.csv"
+            output = root / "registry-cross-tool.json"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "registry-key-tree-node",
+                                "details": {
+                                    "key_path": r"HKEY_CURRENT_USER\Software\Run",
+                                    "value_name": "SecurityUpdater",
+                                    "value_type": "REG_SZ",
+                                    "decoded_data_preview": r"C:\Users\alice\AppData\updater.exe",
+                                    "last_written_at": "2024-04-01T04:05:06+00:00",
+                                    "transaction_replay_status": "not-replayed",
+                                },
+                            },
+                            {
+                                "artifact_type": "registry-value-recovery-candidate",
+                                "details": {
+                                    "cell_offset": "0x3000",
+                                    "candidate_class": "deleted-value-cell",
+                                    "value_name": "SecurityUpdater",
+                                    "decoded_data_preview": r"C:\Users\alice\AppData\updater.exe",
+                                    "parent_key_path_candidate": r"HKEY_CURRENT_USER\Software\Run",
+                                    "allocation_status": "free-or-deleted-candidate",
+                                    "transaction_replay_status": "not-replayed",
+                                },
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "KeyPath,ValueName,ValueType,ValueData,LastWriteTime,TransactionReplayStatus,CellOffset,"
+                "CandidateClass,AllocationStatus,ParentKeyPath\n"
+                r"HKCU\Software\Run,SecurityUpdater,REG_SZ,C:\Users\alice\AppData\updater.exe,"
+                "2024-04-01T04:05:06+00:00,not-replayed,0x3000,deleted-value-cell,"
+                r"free-or-deleted-candidate,HKCU\Software\Run"
+                "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"recmd={reference}",
+                        "--backlog-item",
+                        "4",
+                        "--backlog-item",
+                        "5",
+                        "--min-overlap",
+                        "0.5",
+                        "--output",
+                        str(output),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            registry_comparison = payload["comparisons"][0]["registry_field_comparison"]
+            self.assertGreaterEqual(registry_comparison["common_registry_count"], 1)
+            self.assertEqual(registry_comparison["mismatch_count"], 0)
+            self.assertIn("value_data", registry_comparison["compared_canonical_fields"])
+            self.assertIn("cell_offset", registry_comparison["compared_canonical_fields"])
+            self.assertIn("transaction_replay_status", registry_comparison["compared_canonical_fields"])
+            profile = payload["cross_tool_validation_assessment"]["functional_priority_profile"]
+            self.assertIn("registry-key-value-field-diff-supported", profile["passed_validation_check_ids"])
+            self.assertIn("registry-deleted-cell-offset-field-diff-supported", profile["passed_validation_check_ids"])
+            self.assertIn("registry-transaction-replay-status-diff-supported", profile["passed_validation_check_ids"])
+
+    def test_cross_tool_validate_fails_on_registry_value_data_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-registry.json"
+            reference = root / "registry-explorer.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "details": {
+                                    "key_path": r"HKEY_CURRENT_USER\Software\Run",
+                                    "value_name": "SecurityUpdater",
+                                    "value_type": "REG_SZ",
+                                    "decoded_data_preview": r"C:\Users\alice\AppData\updater.exe",
+                                }
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "KeyPath,ValueName,ValueType,ValueData\n"
+                r"HKCU\Software\Run,SecurityUpdater,REG_SZ,C:\Users\alice\AppData\other.exe"
+                "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"registryexplorer={reference}",
+                        "--backlog-item",
+                        "4",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "failed")
+            registry_comparison = payload["comparisons"][0]["registry_field_comparison"]
+            self.assertEqual(registry_comparison["mismatch_count"], 1)
+            self.assertEqual(registry_comparison["mismatch_samples"][0]["field"], "value_data")
+            self.assertFalse(payload["cross_tool_validation_assessment"]["ready_for_validated_gate"])
+
+    def test_cross_tool_validate_compares_mft_records_against_mftecmd_export(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-mft.json"
+            reference = root / "mftecmd.csv"
+            output = root / "mft-cross-tool.json"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "mft-record",
+                                "details": {
+                                    "record_number": 42,
+                                    "sequence_number": 7,
+                                    "parent_reference": 5,
+                                    "file_path": r"C:\Users\alice\Documents\case.txt",
+                                    "deleted_hint": False,
+                                    "timestamp": "2024-01-02T03:04:05+00:00",
+                                    "record_offset": "0xa800",
+                                    "attribute_types": [
+                                        "$STANDARD_INFORMATION",
+                                        "$FILE_NAME",
+                                        "$DATA",
+                                    ],
+                                    "runlist_decode_status": "decoded-preview",
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "EntryNumber,SequenceNumber,ParentEntryNumber,FullPath,Deleted,Created0x10,Offset,"
+                "Attributes,DataRunStatus\n"
+                r"42,7,5,C:\Users\alice\Documents\case.txt,false,2024-01-02T03:04:05+00:00,"
+                "0xa800,$DATA|$FILE_NAME|$STANDARD_INFORMATION,decoded-preview\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"mftecmd={reference}",
+                        "--backlog-item",
+                        "12",
+                        "--min-overlap",
+                        "1.0",
+                        "--output",
+                        str(output),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            comparison = payload["comparisons"][0]["mft_field_comparison"]
+            self.assertEqual(comparison["mode"], "mft-record-field-diff")
+            self.assertGreaterEqual(comparison["common_record_count"], 1)
+            self.assertEqual(comparison["mismatch_count"], 0)
+            self.assertIn("record_number", comparison["compared_canonical_fields"])
+            self.assertIn("parent_reference", comparison["compared_canonical_fields"])
+            self.assertIn("file_path", comparison["compared_canonical_fields"])
+            self.assertIn("attribute_types", comparison["compared_canonical_fields"])
+            profile = payload["cross_tool_validation_assessment"]["functional_priority_profile"]
+            self.assertIn("mft-record-field-diff-supported", profile["passed_validation_check_ids"])
+            self.assertIn("mft-parent-path-attribute-diff-supported", profile["passed_validation_check_ids"])
+
+    def test_cross_tool_validate_compares_usn_records_against_usnjrnl_export(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-usn.json"
+            reference = root / "usnjrnl.csv"
+            output = root / "usn-cross-tool.json"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "usn-record",
+                                "details": {
+                                    "usn": 9001,
+                                    "file_reference_number": 42,
+                                    "parent_file_reference_number": 5,
+                                    "file_name": "case.txt",
+                                    "reason_flags": ["FILE_CREATE", "CLOSE"],
+                                    "timestamp": "2024-01-02T03:05:06+00:00",
+                                    "major_version": 3,
+                                    "source_info_flags": ["DATA_MANAGEMENT"],
+                                    "file_attribute_names": ["ARCHIVE"],
+                                    "record_cursor": 128,
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "USN,FRN,ParentFRN,FileName,Reason,Timestamp,MajorVersion,SourceInfo,FileAttributes,RecordOffset\n"
+                "9001,42,5,case.txt,CLOSE|FILE_CREATE,2024-01-02T03:05:06+00:00,3,"
+                "DATA_MANAGEMENT,ARCHIVE,128\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"usnjrnl2csv={reference}",
+                        "--backlog-item",
+                        "13",
+                        "--min-overlap",
+                        "1.0",
+                        "--output",
+                        str(output),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            comparison = payload["comparisons"][0]["usn_field_comparison"]
+            self.assertEqual(comparison["mode"], "usn-journal-field-diff")
+            self.assertGreaterEqual(comparison["common_record_count"], 1)
+            self.assertEqual(comparison["mismatch_count"], 0)
+            self.assertIn("usn", comparison["compared_canonical_fields"])
+            self.assertIn("file_reference_number", comparison["compared_canonical_fields"])
+            self.assertIn("reason", comparison["compared_canonical_fields"])
+            self.assertIn("timestamp", comparison["compared_canonical_fields"])
+            profile = payload["cross_tool_validation_assessment"]["functional_priority_profile"]
+            self.assertIn("usn-frn-reason-timestamp-field-diff-supported", profile["passed_validation_check_ids"])
+
+    def test_cross_tool_validate_fails_on_usn_reason_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-usn.json"
+            reference = root / "usnjrnl.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "details": {
+                                    "usn": 9001,
+                                    "file_reference_number": 42,
+                                    "file_name": "case.txt",
+                                    "reason_flags": ["FILE_CREATE"],
+                                }
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "USN,FRN,FileName,Reason\n"
+                "9001,42,case.txt,FILE_DELETE\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"usnjrnl2csv={reference}",
+                        "--backlog-item",
+                        "13",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "failed")
+            comparison = payload["comparisons"][0]["usn_field_comparison"]
+            self.assertEqual(comparison["mismatch_count"], 1)
+            self.assertEqual(comparison["mismatch_samples"][0]["field"], "reason")
+            self.assertFalse(payload["cross_tool_validation_assessment"]["ready_for_validated_gate"])
+
+    def test_cross_tool_validate_compares_srum_rows_against_srumecmd_export(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-srum.json"
+            reference = root / "srumecmd.csv"
+            output = root / "srum-cross-tool.json"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "srum-network-usage",
+                                "details": {
+                                    "srum_table_family": "network-usage",
+                                    "row_id": 77,
+                                    "app_id": r"C:\Program Files\App\agent.exe",
+                                    "user_sid": "S-1-5-21-1-2-3-1001",
+                                    "timestamp": "2024-04-05T06:07:08+00:00",
+                                    "bytes_sent": 1200,
+                                    "bytes_received": 3400,
+                                    "source_offset": "0x4000",
+                                    "decode_status": "export-row-imported",
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "ESEFamily,TableName,RowId,AppId,UserSid,Timestamp,BytesSent,BytesReceived,SourceOffset,DecodeStatus\n"
+                r"srum,network-usage,77,C:\Program Files\App\agent.exe,S-1-5-21-1-2-3-1001,"
+                "2024-04-05T06:07:08+00:00,1200,3400,0x4000,export-row-imported\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"srumecmd={reference}",
+                        "--backlog-item",
+                        "10",
+                        "--min-overlap",
+                        "1.0",
+                        "--output",
+                        str(output),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            comparison = payload["comparisons"][0]["ese_field_comparison"]
+            self.assertEqual(comparison["mode"], "ese-srum-windows-edb-field-diff")
+            self.assertGreaterEqual(comparison["common_record_count"], 1)
+            self.assertEqual(comparison["mismatch_count"], 0)
+            self.assertIn("table_name", comparison["compared_canonical_fields"])
+            self.assertIn("bytes_sent", comparison["compared_canonical_fields"])
+            self.assertIn("bytes_received", comparison["compared_canonical_fields"])
+            profile = payload["cross_tool_validation_assessment"]["functional_priority_profile"]
+            self.assertIn("ese-srum-row-field-diff-supported", profile["passed_validation_check_ids"])
+
+    def test_cross_tool_validate_compares_windows_edb_rows_against_search_export(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-windows-edb.json"
+            reference = root / "winsearch.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "windows-search-edb-row-candidate",
+                                "details": {
+                                    "table_name": "SystemIndex_Gthr",
+                                    "row_id": 501,
+                                    "item_path": r"C:\Users\alice\Documents\report.docx",
+                                    "timestamp": "2024-06-01T01:02:03+00:00",
+                                    "deleted_state": False,
+                                    "page_number": 88,
+                                    "source_offset": "0x58000",
+                                    "content_hash": "a" * 64,
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "ESEFamily,TableName,RowId,ItemPath,Timestamp,Deleted,PageNumber,SourceOffset,ContentSHA256\n"
+                r"windows-edb,SystemIndex_Gthr,501,C:\Users\alice\Documents\report.docx,"
+                "2024-06-01T01:02:03+00:00,false,88,0x58000,"
+                + "a" * 64
+                + "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"winsearchdbanalyzer={reference}",
+                        "--backlog-item",
+                        "11",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "pass")
+            comparison = payload["comparisons"][0]["ese_field_comparison"]
+            self.assertEqual(comparison["mismatch_count"], 0)
+            self.assertIn("item_path", comparison["compared_canonical_fields"])
+            self.assertIn("deleted_state", comparison["compared_canonical_fields"])
+            self.assertIn("content_hash", comparison["compared_canonical_fields"])
+            profile = payload["cross_tool_validation_assessment"]["functional_priority_profile"]
+            self.assertIn("ese-windows-edb-row-field-diff-supported", profile["passed_validation_check_ids"])
+            self.assertIn("ese-page-offset-deleted-state-diff-supported", profile["passed_validation_check_ids"])
+
+    def test_cross_tool_validate_fails_on_windows_edb_deleted_state_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            rapid = root / "rapid-windows-edb.json"
+            reference = root / "winsearch.csv"
+            rapid.write_text(
+                json.dumps(
+                    {
+                        "artifacts": [
+                            {
+                                "artifact_type": "windows-search-edb-row-candidate",
+                                "details": {
+                                    "table_name": "SystemIndex_Gthr",
+                                    "row_id": 501,
+                                    "item_path": r"C:\Users\alice\Documents\report.docx",
+                                    "deleted_state": False,
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reference.write_text(
+                "ESEFamily,TableName,RowId,ItemPath,Deleted\n"
+                r"windows-edb,SystemIndex_Gthr,501,C:\Users\alice\Documents\report.docx,true"
+                "\n",
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "cross-tool-validate",
+                        "--rapid-output",
+                        str(rapid),
+                        "--reference-output",
+                        f"winsearchdbanalyzer={reference}",
+                        "--backlog-item",
+                        "11",
+                        "--min-overlap",
+                        "1.0",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "failed")
+            comparison = payload["comparisons"][0]["ese_field_comparison"]
+            self.assertEqual(comparison["mismatch_count"], 1)
+            self.assertEqual(comparison["mismatch_samples"][0]["field"], "deleted_state")
 
     def test_confidence_explainability_and_reproducibility_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1079,6 +2394,19 @@ class RapidTriageOpsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             sample = run_sample_workflow(root / "sample", overwrite=True, read_only=True)
+            training_manifest_path = Path(sample["run"]["training_lab_manifest"])
+            self.assertTrue(training_manifest_path.is_file())
+            training_manifest = json.loads(training_manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(training_manifest["profile_version"], "training-lab-workflow-manifest-v1")
+            self.assertEqual(training_manifest["commercial_item_number"], 67)
+            self.assertEqual(training_manifest["missing_required_outputs"], [])
+            self.assertEqual(len(training_manifest["manifest_hash"]), 64)
+            self.assertIn("password", training_manifest["expected_keywords"])
+            self.assertIn("source preview", training_manifest["viewer_exercise"]["required_viewers"])
+            self.assertIn(
+                "analyst-scoring-rubric-results-not-attached",
+                training_manifest["external_training_blockers"],
+            )
             catalog_path = root / "catalog.json"
             archive_path = root / "CASE-CATALOG.zip"
             stdout = io.StringIO()
@@ -1181,17 +2509,75 @@ class RapidTriageOpsTests(unittest.TestCase):
 
             retry = store.retry(failed.run_id)
             canceled = store.cancel(retry.run_id)
+            store._executor.shutdown(wait=True)
 
             self.assertEqual(failed.status, "failed")
+            self.assertEqual(retry.retry_of_run_id, failed.run_id)
+            self.assertEqual(retry.retry_attempt, 1)
             self.assertIn(canceled.status, {"queued", "running", "canceled", "failed"})
             self.assertTrue(canceled.cancellation_requested)
             self.assertIn("#69", canceled.to_dict()["job_queue_assessment"]["commercial_gap_ids"])
             self.assertEqual(canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["gap_id"], "#69")
             self.assertIn("step progress recorded", canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("transition log recorded", canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("job persistence manifest hash emitted", canceled.to_dict()["job_queue_assessment"]["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertEqual(canceled.to_dict()["transition_log_profile"]["profile_version"], "job-transition-log-profile-v1")
+            self.assertGreater(canceled.to_dict()["transition_log_profile"]["transition_count"], 0)
+            self.assertEqual(canceled.to_dict()["job_persistence_manifest"]["profile_version"], "job-persistence-manifest-v1")
+            self.assertEqual(canceled.to_dict()["job_persistence_manifest"]["item_number"], 27)
+            self.assertEqual(len(canceled.to_dict()["job_persistence_manifest"]["manifest_hash"]), 64)
+            self.assertTrue(canceled.to_dict()["job_persistence_manifest"]["state_file_persisted"])
+            self.assertGreaterEqual(canceled.to_dict()["job_persistence_manifest"]["progress_percent"], 0)
+            self.assertEqual(
+                canceled.to_dict()["job_queue_assessment"]["persistence_manifest"]["manifest_hash"],
+                canceled.to_dict()["job_persistence_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                canceled.to_dict()["job_queue_assessment"]["transition_log_profile"]["head_hash"],
+                canceled.to_dict()["transition_log_profile"]["head_hash"],
+            )
+            event_types = {entry["event_type"] for entry in canceled.to_dict()["transition_log"]}
+            self.assertIn("job-retry-queued", event_types)
+            self.assertIn("cancel-requested", event_types)
             self.assertIn("#80", canceled.to_dict()["cancellation_retry_assessment"]["commercial_gap_ids"])
             self.assertEqual(canceled.to_dict()["cancellation_retry_assessment"]["core_accuracy_gates"][0]["gap_id"], "#80")
             self.assertIn(
                 "failed/canceled retry support",
+                canceled.to_dict()["cancellation_retry_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertEqual(canceled.to_dict()["retry_lineage_profile"]["profile_version"], "job-retry-lineage-profile-v1")
+            self.assertEqual(canceled.to_dict()["retry_lineage_profile"]["retry_of_run_id"], failed.run_id)
+            self.assertEqual(canceled.to_dict()["partial_output_policy"]["profile_version"], "job-partial-output-policy-v1")
+            self.assertEqual(canceled.to_dict()["partial_output_policy"]["partial_output_cleanup_status"], "preserved-not-cleaned")
+            self.assertFalse(canceled.to_dict()["partial_output_policy"]["safe_to_auto_delete_partial_outputs"])
+            self.assertTrue(canceled.to_dict()["partial_output_policy"]["review_required_before_cleanup"])
+            self.assertTrue(canceled.to_dict()["partial_output_policy"]["cleanup_validation_required"])
+            self.assertRegex(canceled.to_dict()["partial_output_policy"]["known_output_head_hash"], r"^[0-9a-f]{64}$")
+            cancel_manifest = canceled.to_dict()["cancellation_retry_assessment"]["cancellation_retry_manifest"]
+            self.assertEqual(cancel_manifest["profile"], "cancellation-retry-manifest-v1")
+            self.assertEqual(cancel_manifest["profile_version"], "cancellation-retry-manifest-v1")
+            self.assertEqual(cancel_manifest["retry_of_run_id"], failed.run_id)
+            self.assertEqual(cancel_manifest["retry_attempt"], 1)
+            self.assertEqual(len(cancel_manifest["manifest_hash"]), 64)
+            self.assertEqual(cancel_manifest["partial_output_cleanup_status"], "preserved-not-cleaned")
+            self.assertTrue(cancel_manifest["partial_output_review_required"])
+            self.assertTrue(cancel_manifest["cleanup_validation_required"])
+            self.assertFalse(cancel_manifest["safe_to_auto_delete_partial_outputs"])
+            self.assertEqual(
+                cancel_manifest["retry_lineage_hash"],
+                canceled.to_dict()["retry_lineage_profile"]["lineage_hash"],
+            )
+            self.assertEqual(
+                cancel_manifest["transition_evidence"]["transition_head_hash"],
+                canceled.to_dict()["transition_log_profile"]["head_hash"],
+            )
+            self.assertRegex(cancel_manifest["step_status_head_hash"], r"^[0-9a-f]{64}$")
+            self.assertIn(
+                "retry lineage manifest emitted",
+                canceled.to_dict()["cancellation_retry_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "cancellation/retry manifest hash emitted",
                 canceled.to_dict()["cancellation_retry_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertEqual(
@@ -1208,7 +2594,9 @@ class RapidTriageOpsTests(unittest.TestCase):
             queue_uplift = canceled.to_dict()["job_queue_assessment"]["commercial_uplift_evidence"]
             self.assertEqual(queue_uplift["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(queue_uplift["item_numbers"], [69])
+            self.assertIn("transition log recorded", queue_uplift["passed_validation_check_ids"])
             self.assertIn("local-threadpool limitation", " ".join(queue_uplift["large_data_controls"]))
+            self.assertIn("progress percent", " ".join(queue_uplift["large_data_controls"]))
             self.assertIn("trusted-job-transition-log-diff-missing", queue_uplift["remaining_external_validation"])
             self.assertEqual(
                 queue_uplift["reportability_decision"]["decision"],
@@ -1221,6 +2609,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                 steps=job_payload["steps"],
                 state_persisted=True,
                 cancellation_requested=job_payload["cancellation_requested"],
+                persistence_manifest=job_payload["job_persistence_manifest"],
                 trusted_diff=job_diff,
             )
             self.assertEqual(job_diff["status"], "pass")
@@ -1228,6 +2617,9 @@ class RapidTriageOpsTests(unittest.TestCase):
             cancel_diff = build_cancellation_retry_trusted_diff(job_payload, job_payload)
             cancel_assessment = cancellation_retry_assessment(canceled, trusted_diff=cancel_diff)
             self.assertEqual(cancel_diff["status"], "pass")
+            self.assertIn("manifest_hash", cancel_diff["compared_fields"])
+            self.assertIn("step_status_head_hash", cancel_diff["compared_fields"])
+            self.assertIn("partial_output_cleanup_status", cancel_diff["compared_fields"])
             self.assertIn(
                 "trusted cancellation/retry transition diff pass",
                 cancel_assessment["core_accuracy_gates"][0]["satisfied_checks"],
@@ -1235,8 +2627,6 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertTrue(
                 all(step["commercial_uplift_evidence"]["batch_id"] == "commercial-uplift-066-070" for step in canceled.to_dict()["steps"])
             )
-            store._executor.shutdown(wait=True)
-
     def test_build_release_script_can_assemble_portable_zip_without_building_wheel(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_dir = Path(tmp_dir) / "release"
@@ -1271,11 +2661,16 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("scripts/summarize-smoke.py", names)
             self.assertIn("scripts/verify-release-evidence.py", names)
             self.assertIn("scripts/check-dependencies.py", names)
+            self.assertIn("scripts/crash-export-smoke.py", names)
+            self.assertIn("scripts/crash-redaction-review.py", names)
+            self.assertIn("scripts/parser-sandbox-smoke.py", names)
+            self.assertIn("scripts/security-hardening-review.py", names)
             self.assertIn("scripts/windows/start-rapidtriage.ps1", names)
             self.assertIn("scripts/windows/smoke-test-rapidtriage.ps1", names)
             self.assertIn("scripts/windows/smoke-test-rapidtriage.bat", names)
             self.assertIn("docs/rapidtriage-macos-linux-quickstart.md", names)
             self.assertIn("docs/rapidtriage-fresh-machine-smoke-test.md", names)
+            self.assertIn("docs/rapidtriage-sample-case.md", names)
             self.assertIn("docs/rapidtriage-support-sla.md", names)
             self.assertIn("docs/rapidtriage-lts-hotfix-policy.md", names)
             self.assertIn("docs/rapidtriage-training-curriculum.md", names)
@@ -1297,6 +2692,63 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#120", manifest["commercialization_gap_ids"])
             self.assertIn("#101", manifest["package_readiness"]["windows_signed_installer"]["commercial_gap_ids"])
             self.assertEqual(manifest["package_readiness"]["windows_signed_installer"]["core_accuracy_gates"][0]["gap_id"], "#101")
+            windows_signing_manifest = manifest["package_readiness"]["windows_signed_installer"][
+                "windows_signing_evidence_manifest"
+            ]
+            self.assertEqual(windows_signing_manifest["profile_version"], "windows-signing-evidence-manifest-v1")
+            self.assertEqual(len(windows_signing_manifest["manifest_hash"]), 64)
+            self.assertEqual(len(windows_signing_manifest["evidence_slot_matrix_hash"]), 64)
+            self.assertEqual(
+                manifest["package_readiness"]["windows_signed_installer"]["evidence_slot_matrix_hash"],
+                windows_signing_manifest["evidence_slot_matrix_hash"],
+            )
+            self.assertEqual(windows_signing_manifest["evidence_slot_matrix"]["profile_version"], "release-evidence-slot-matrix-v1")
+            self.assertEqual(
+                manifest["package_readiness"]["windows_signed_installer"]["windows_signing_evidence_manifest_hash"],
+                windows_signing_manifest["manifest_hash"],
+            )
+            windows_workflow_manifest = manifest["package_readiness"]["windows_signed_installer"][
+                "windows_installer_workflow_manifest"
+            ]
+            self.assertEqual(
+                windows_workflow_manifest["profile_version"],
+                "windows-installer-workflow-manifest-v1",
+            )
+            self.assertEqual(windows_workflow_manifest["item_number"], 57)
+            self.assertEqual(len(windows_workflow_manifest["manifest_hash"]), 64)
+            self.assertEqual(
+                manifest["package_readiness"]["windows_signed_installer"][
+                    "windows_installer_workflow_manifest_hash"
+                ],
+                windows_workflow_manifest["manifest_hash"],
+            )
+            self.assertIn("rapidtriage-setup.exe", windows_workflow_manifest["target_outputs"])
+            self.assertIn("installer_wrapper_log", windows_workflow_manifest["evidence_slots"])
+            self.assertIn("authenticode-signature-not-attached", windows_workflow_manifest["blockers"])
+            self.assertTrue(windows_signing_manifest["release_artifact_hashes"])
+            self.assertIn("signature_log", manifest["package_readiness"]["windows_signed_installer"]["signing_slots"])
+            self.assertIn(
+                "windows signing evidence manifest hash emitted",
+                manifest["package_readiness"]["windows_signed_installer"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "windows evidence slot matrix hash emitted",
+                manifest["package_readiness"]["windows_signed_installer"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["windows_signed_installer"]["functional_priority_profile"]["item_number"],
+                57,
+            )
+            self.assertFalse(
+                manifest["package_readiness"]["windows_signed_installer"]["functional_priority_profile"][
+                    "implemented_controls"
+                ]["authenticode_signature_attached"]
+            )
+            self.assertTrue(
+                manifest["package_readiness"]["windows_signed_installer"]["functional_priority_profile"][
+                    "implemented_controls"
+                ]["installer_workflow_manifest_declared"]
+            )
             self.assertEqual(manifest["package_readiness"]["windows_signed_installer"]["trusted_windows_signing_diff"]["status"], "missing")
             self.assertIn(
                 "trusted-windows-signing-evidence-diff-missing",
@@ -1304,6 +2756,57 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             self.assertIn("#102", manifest["package_readiness"]["macos_notarized_package"]["commercial_gap_ids"])
             self.assertEqual(manifest["package_readiness"]["macos_notarized_package"]["core_accuracy_gates"][0]["gap_id"], "#102")
+            macos_notarization_manifest = manifest["package_readiness"]["macos_notarized_package"][
+                "macos_notarization_evidence_manifest"
+            ]
+            self.assertEqual(
+                macos_notarization_manifest["profile_version"],
+                "macos-notarization-evidence-manifest-v1",
+            )
+            self.assertEqual(len(macos_notarization_manifest["manifest_hash"]), 64)
+            self.assertEqual(len(macos_notarization_manifest["evidence_slot_matrix_hash"]), 64)
+            self.assertEqual(
+                manifest["package_readiness"]["macos_notarized_package"]["evidence_slot_matrix_hash"],
+                macos_notarization_manifest["evidence_slot_matrix_hash"],
+            )
+            macos_workflow_manifest = manifest["package_readiness"]["macos_notarized_package"][
+                "macos_package_workflow_manifest"
+            ]
+            self.assertEqual(
+                macos_workflow_manifest["profile_version"],
+                "macos-package-workflow-manifest-v1",
+            )
+            self.assertEqual(macos_workflow_manifest["item_number"], 59)
+            self.assertEqual(len(macos_workflow_manifest["manifest_hash"]), 64)
+            self.assertEqual(
+                manifest["package_readiness"]["macos_notarized_package"]["macos_package_workflow_manifest_hash"],
+                macos_workflow_manifest["manifest_hash"],
+            )
+            self.assertIn("rapidtriage.dmg", macos_workflow_manifest["target_outputs"])
+            self.assertIn("pkg_dmg_build_log", macos_workflow_manifest["evidence_slots"])
+            self.assertIn("notarization-ticket-not-attached", macos_workflow_manifest["blockers"])
+            self.assertEqual(
+                manifest["package_readiness"]["macos_notarized_package"]["macos_notarization_evidence_manifest_hash"],
+                macos_notarization_manifest["manifest_hash"],
+            )
+            self.assertIn("codesign_verification", manifest["package_readiness"]["macos_notarized_package"]["notarization_slots"])
+            self.assertIn(
+                "macos notarization evidence manifest hash emitted",
+                manifest["package_readiness"]["macos_notarized_package"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "macos evidence slot matrix hash emitted",
+                manifest["package_readiness"]["macos_notarized_package"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["macos_notarized_package"]["functional_priority_profile"]["item_number"],
+                59,
+            )
+            self.assertTrue(
+                manifest["package_readiness"]["macos_notarized_package"]["functional_priority_profile"][
+                    "implemented_controls"
+                ]["package_workflow_manifest_declared"]
+            )
             self.assertEqual(manifest["package_readiness"]["macos_notarized_package"]["trusted_macos_notarization_diff"]["status"], "missing")
             self.assertIn(
                 "trusted-macos-notarization-evidence-diff-missing",
@@ -1312,15 +2815,193 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#103", manifest["package_readiness"]["linux_package"]["commercial_gap_ids"])
             self.assertEqual(manifest["package_readiness"]["linux_package"]["core_accuracy_gates"][0]["gap_id"], "#103")
             self.assertEqual(manifest["package_readiness"]["linux_package"]["status"], "packaging-plan-ready")
+            linux_package_manifest = manifest["package_readiness"]["linux_package"]["linux_package_evidence_manifest"]
+            self.assertEqual(linux_package_manifest["profile_version"], "linux-package-evidence-manifest-v1")
+            self.assertEqual(len(linux_package_manifest["manifest_hash"]), 64)
+            self.assertEqual(len(linux_package_manifest["evidence_slot_matrix_hash"]), 64)
+            self.assertEqual(
+                manifest["package_readiness"]["linux_package"]["evidence_slot_matrix_hash"],
+                linux_package_manifest["evidence_slot_matrix_hash"],
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["linux_package"]["linux_package_evidence_manifest_hash"],
+                linux_package_manifest["manifest_hash"],
+            )
+            linux_workflow_manifest = manifest["package_readiness"]["linux_package"]["linux_package_workflow_manifest"]
+            self.assertEqual(
+                linux_workflow_manifest["profile_version"],
+                "linux-package-workflow-manifest-v1",
+            )
+            self.assertEqual(linux_workflow_manifest["item_number"], 60)
+            self.assertEqual(len(linux_workflow_manifest["manifest_hash"]), 64)
+            self.assertEqual(
+                manifest["package_readiness"]["linux_package"]["linux_package_workflow_manifest_hash"],
+                linux_workflow_manifest["manifest_hash"],
+            )
+            self.assertIn("RapidTriage.AppImage", linux_workflow_manifest["target_outputs"])
+            self.assertIn("install_uninstall_log", linux_workflow_manifest["evidence_slots"])
+            self.assertIn("clean-container-install-uninstall-smoke-not-attached", linux_workflow_manifest["blockers"])
+            self.assertIn("deb_build_log", manifest["package_readiness"]["linux_package"]["package_evidence_slots"])
+            self.assertIn(
+                "linux package evidence manifest hash emitted",
+                manifest["package_readiness"]["linux_package"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "linux evidence slot matrix hash emitted",
+                manifest["package_readiness"]["linux_package"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertEqual(manifest["package_readiness"]["linux_package"]["functional_priority_profile"]["item_number"], 60)
+            self.assertTrue(
+                manifest["package_readiness"]["linux_package"]["functional_priority_profile"]["implemented_controls"][
+                    "linux_package_workflow_manifest_declared"
+                ]
+            )
             self.assertEqual(manifest["package_readiness"]["linux_package"]["trusted_linux_package_diff"]["status"], "missing")
             self.assertIn("trusted-linux-package-smoke-diff-missing", manifest["package_readiness"]["linux_package"]["blockers"])
             self.assertIn("#104", manifest["package_readiness"]["auto_update_channel"]["commercial_gap_ids"])
             self.assertEqual(manifest["package_readiness"]["auto_update_channel"]["core_accuracy_gates"][0]["gap_id"], "#104")
             self.assertEqual(manifest["package_readiness"]["auto_update_channel"]["status"], "manifest-generated")
+            self.assertEqual(
+                len(manifest["package_readiness"]["auto_update_channel"]["auto_update_evidence_manifest_hash"]),
+                64,
+            )
+            self.assertEqual(len(manifest["package_readiness"]["auto_update_channel"]["evidence_slot_matrix_hash"]), 64)
+            self.assertIn("signed_manifest", manifest["package_readiness"]["auto_update_channel"]["update_evidence_slots"])
+            self.assertIn(
+                "auto-update evidence manifest hash emitted",
+                manifest["package_readiness"]["auto_update_channel"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "auto-update evidence slot matrix hash emitted",
+                manifest["package_readiness"]["auto_update_channel"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(manifest["package_readiness"]["auto_update_channel"]["trusted_auto_update_channel_diff"]["status"], "missing")
             self.assertIn("trusted-auto-update-channel-diff-missing", manifest["package_readiness"]["auto_update_channel"]["blockers"])
             self.assertIn("#112", manifest["package_readiness"]["operations_documents"]["commercial_gap_ids"])
             self.assertIn("#120", manifest["package_readiness"]["operations_documents"]["commercial_gap_ids"])
+            self.assertEqual(
+                manifest["package_readiness"]["operations_documents"]["document_evidence_manifests"]["112"][
+                    "profile_version"
+                ],
+                "release-notes-discipline-evidence-manifest-v1",
+            )
+            self.assertEqual(
+                len(manifest["package_readiness"]["operations_documents"]["document_evidence_manifest_hashes"]["112"]),
+                64,
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["operations_documents"]["document_evidence_manifests"]["112"][
+                    "document_evidence_matrix"
+                ]["profile_version"],
+                "operations-document-evidence-matrix-v1",
+            )
+            self.assertEqual(
+                len(manifest["package_readiness"]["operations_documents"]["document_evidence_matrix_hashes"]["112"]),
+                64,
+            )
+            self.assertIn(
+                "ci_changelog_gate",
+                manifest["package_readiness"]["operations_documents"]["document_evidence_slots"]["112"],
+            )
+            self.assertIn(
+                "operations evidence manifest hash emitted",
+                manifest["package_readiness"]["operations_documents"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "operations document evidence matrix hash emitted",
+                manifest["package_readiness"]["operations_documents"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            admin_guide_coverage_manifest = manifest["package_readiness"]["operations_documents"][
+                "admin_guide_coverage_manifest"
+            ]
+            self.assertEqual(
+                admin_guide_coverage_manifest["profile_version"],
+                "admin-guide-coverage-manifest-v1",
+            )
+            self.assertEqual(admin_guide_coverage_manifest["item_number"], 66)
+            self.assertEqual(len(admin_guide_coverage_manifest["manifest_hash"]), 64)
+            self.assertEqual(admin_guide_coverage_manifest["missing_coverage"], [])
+            self.assertTrue(admin_guide_coverage_manifest["coverage_passed"])
+            self.assertTrue(admin_guide_coverage_manifest["coverage"]["install"]["present"])
+            self.assertTrue(admin_guide_coverage_manifest["coverage"]["evidence_handling"]["present"])
+            self.assertEqual(
+                manifest["package_readiness"]["operations_documents"]["admin_guide_coverage_manifest_hash"],
+                admin_guide_coverage_manifest["manifest_hash"],
+            )
+            self.assertIn(
+                "admin-guide-coverage-manifest.json",
+                {artifact["name"] for artifact in manifest["artifacts"]},
+            )
+            support_process_manifest = manifest["package_readiness"]["operations_documents"][
+                "support_process_readiness_manifest"
+            ]
+            self.assertEqual(
+                support_process_manifest["profile_version"],
+                "support-process-readiness-manifest-v1",
+            )
+            self.assertEqual(support_process_manifest["item_number"], 68)
+            self.assertEqual(support_process_manifest["missing_checks"], [])
+            self.assertTrue(support_process_manifest["coverage_passed"])
+            self.assertTrue(support_process_manifest["readiness_checks"]["severity_levels"]["present"])
+            self.assertTrue(support_process_manifest["readiness_checks"]["secure_intake"]["present"])
+            self.assertEqual(
+                manifest["package_readiness"]["operations_documents"]["support_process_readiness_manifest_hash"],
+                support_process_manifest["manifest_hash"],
+            )
+            self.assertIn(
+                "support-process-readiness-manifest.json",
+                {artifact["name"] for artifact in manifest["artifacts"]},
+            )
+            release_discipline_manifest = manifest["package_readiness"]["operations_documents"][
+                "release_discipline_manifest"
+            ]
+            self.assertEqual(
+                release_discipline_manifest["profile_version"],
+                "release-discipline-manifest-v1",
+            )
+            self.assertEqual(release_discipline_manifest["item_number"], 69)
+            self.assertEqual(release_discipline_manifest["missing_sections"], [])
+            self.assertEqual(release_discipline_manifest["missing_files"], [])
+            self.assertTrue(release_discipline_manifest["coverage_passed"])
+            self.assertTrue(release_discipline_manifest["section_checks"]["validation_state"]["present"])
+            self.assertTrue(release_discipline_manifest["section_checks"]["smoke_logs"]["present"])
+            self.assertEqual(
+                manifest["package_readiness"]["operations_documents"]["release_discipline_manifest_hash"],
+                release_discipline_manifest["manifest_hash"],
+            )
+            self.assertIn(
+                "release-discipline-manifest.json",
+                {artifact["name"] for artifact in manifest["artifacts"]},
+            )
+            blocker_ledger_manifest = manifest["package_readiness"]["operations_documents"][
+                "external_blocker_ledger_manifest"
+            ]
+            self.assertEqual(
+                blocker_ledger_manifest["profile_version"],
+                "external-blocker-ledger-manifest-v1",
+            )
+            self.assertEqual(blocker_ledger_manifest["item_number"], 70)
+            self.assertFalse(blocker_ledger_manifest["commercial_claim_allowed"])
+            self.assertGreaterEqual(blocker_ledger_manifest["blocker_count"], 7)
+            blocker_ids = {blocker["blocker_id"] for blocker in blocker_ledger_manifest["blockers"]}
+            self.assertIn("independent-validation-not-attached", blocker_ids)
+            self.assertIn("large-hardware-test-evidence-not-attached", blocker_ids)
+            self.assertIn("code-signing-not-attached", blocker_ids)
+            self.assertIn("staffed-support-not-attached", blocker_ids)
+            self.assertEqual(
+                manifest["package_readiness"]["operations_documents"]["external_blocker_ledger_manifest_hash"],
+                blocker_ledger_manifest["manifest_hash"],
+            )
+            self.assertIn(
+                "external-blocker-ledger-manifest.json",
+                {artifact["name"] for artifact in manifest["artifacts"]},
+            )
+            self.assertEqual(
+                manifest["package_readiness"]["operations_documents"]["document_evidence_manifests"]["120"][
+                    "profile_version"
+                ],
+                "dependency-monitoring-evidence-manifest-v1",
+            )
             self.assertEqual(
                 manifest["package_readiness"]["operations_documents"]["trusted_operations_document_diffs"]["112"]["status"],
                 "missing",
@@ -1337,6 +3018,34 @@ class RapidTriageOpsTests(unittest.TestCase):
                 "trusted-admin-deployment-proof-diff-missing",
                 manifest["package_readiness"]["operations_documents"]["blockers"],
             )
+            operation_profiles = {
+                profile["item_number"]: profile
+                for profile in manifest["package_readiness"]["operations_documents"]["functional_priority_profiles"]
+            }
+            self.assertEqual(sorted(operation_profiles), [66, 67, 68, 69, 70])
+            self.assertEqual(operation_profiles[66]["batch_id"], "commercial-uplift-066-070")
+            self.assertTrue(operation_profiles[66]["implemented_controls"]["backup_restore_guidance_documented"])
+            self.assertTrue(operation_profiles[66]["implemented_controls"]["admin_guide_coverage_manifest_declared"])
+            self.assertTrue(operation_profiles[67]["implemented_controls"]["sample_case_workflow_documented"])
+            self.assertTrue(
+                operation_profiles[67]["implemented_controls"][
+                    "training_lab_workflow_manifest_emitted_by_sample_run"
+                ]
+            )
+            self.assertIn("staffed-support-desk-not-attached", operation_profiles[68]["failed_validation_check_ids"])
+            self.assertTrue(
+                operation_profiles[68]["implemented_controls"][
+                    "support_process_readiness_manifest_declared"
+                ]
+            )
+            self.assertTrue(operation_profiles[69]["implemented_controls"]["checksums_generated"])
+            self.assertTrue(operation_profiles[69]["implemented_controls"]["release_discipline_manifest_declared"])
+            self.assertTrue(operation_profiles[70]["implemented_controls"]["commercial_claim_guard_present"])
+            self.assertTrue(
+                operation_profiles[70]["implemented_controls"][
+                    "external_blocker_ledger_manifest_declared"
+                ]
+            )
             self.assertEqual(
                 [gate["gap_id"] for gate in manifest["package_readiness"]["operations_documents"]["core_accuracy_gates"]],
                 [f"#{number}" for number in range(112, 121)],
@@ -1345,19 +3054,55 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("#104", update_manifest["commercial_gap_ids"])
             self.assertEqual(update_manifest["core_accuracy_gates"][0]["gap_id"], "#104")
             self.assertFalse(update_manifest["auto_update_enabled_by_default"])
+            self.assertEqual(update_manifest["auto_update_evidence_manifest"]["profile_version"], "auto-update-channel-evidence-manifest-v1")
+            self.assertEqual(len(update_manifest["auto_update_evidence_manifest_hash"]), 64)
+            self.assertEqual(len(update_manifest["evidence_slot_matrix_hash"]), 64)
+            self.assertEqual(
+                update_manifest["evidence_slot_matrix_hash"],
+                update_manifest["auto_update_evidence_manifest"]["evidence_slot_matrix_hash"],
+            )
+            self.assertIn("rollback_test", update_manifest["update_evidence_slots"])
             self.assertEqual(update_manifest["trusted_auto_update_channel_diff"]["status"], "missing")
             self.assertIn("trusted-auto-update-channel-diff-missing", update_manifest["blockers"])
             packaging_plan = json.loads((output_dir / "packaging-plan.json").read_text(encoding="utf-8"))
             self.assertIn("#101", packaging_plan["commercial_gap_ids"])
+            self.assertEqual(
+                packaging_plan["local_outputs"]["portable_zip"]["functional_priority_profile"]["item_number"],
+                58,
+            )
+            self.assertTrue(
+                packaging_plan["local_outputs"]["portable_zip"]["functional_priority_profile"]["implemented_controls"][
+                    "double_click_windows_launcher_packaged"
+                ]
+            )
+            self.assertTrue(
+                packaging_plan["local_outputs"]["portable_zip"]["functional_priority_profile"]["implemented_controls"][
+                    "windows_portable_mode_manifest_emitted"
+                ]
+            )
+            portable_manifest = packaging_plan["local_outputs"]["portable_zip"]["windows_portable_mode_manifest"]
+            self.assertEqual(portable_manifest["profile_version"], "windows-portable-mode-manifest-v1")
+            self.assertEqual(portable_manifest["item_number"], 58)
+            self.assertEqual(len(portable_manifest["manifest_hash"]), 64)
+            self.assertEqual(
+                packaging_plan["local_outputs"]["portable_zip"]["windows_portable_mode_manifest_hash"],
+                portable_manifest["manifest_hash"],
+            )
+            self.assertTrue(portable_manifest["portable_zip_present"])
+            self.assertFalse(portable_manifest["missing_zip_entries"])
+            self.assertIn("scripts/windows/start-rapidtriage.ps1", portable_manifest["double_click_entrypoints"])
             self.assertEqual(packaging_plan["platform_packages"]["windows"]["current_status"], "external-signing-required")
             self.assertIn("#101", packaging_plan["platform_packages"]["windows"]["commercial_gap_ids"])
             self.assertEqual(packaging_plan["platform_packages"]["windows"]["core_accuracy_gates"][0]["gap_id"], "#101")
+            self.assertEqual(packaging_plan["platform_packages"]["windows"]["functional_priority_profile"]["item_number"], 57)
             self.assertEqual(packaging_plan["platform_packages"]["windows"]["trusted_packaging_diff"]["status"], "missing")
             self.assertIn("#102", packaging_plan["platform_packages"]["macos"]["commercial_gap_ids"])
             self.assertEqual(packaging_plan["platform_packages"]["macos"]["core_accuracy_gates"][0]["gap_id"], "#102")
+            self.assertEqual(packaging_plan["platform_packages"]["macos"]["functional_priority_profile"]["item_number"], 59)
             self.assertEqual(packaging_plan["platform_packages"]["macos"]["trusted_packaging_diff"]["status"], "missing")
             self.assertIn("#103", packaging_plan["platform_packages"]["linux"]["commercial_gap_ids"])
             self.assertEqual(packaging_plan["platform_packages"]["linux"]["core_accuracy_gates"][0]["gap_id"], "#103")
+            self.assertEqual(packaging_plan["platform_packages"]["linux"]["functional_priority_profile"]["item_number"], 60)
             self.assertIn("AppImage", packaging_plan["platform_packages"]["linux"]["target_outputs"])
             self.assertEqual(packaging_plan["platform_packages"]["linux"]["trusted_packaging_diff"]["status"], "missing")
 
@@ -1370,6 +3115,7 @@ class RapidTriageOpsTests(unittest.TestCase):
             )
             windows_gates = build_release.release_packaging_core_accuracy_gate(101, trusted_diff=windows_diff)
             self.assertEqual(windows_diff["status"], "pass")
+            self.assertIn("evidence_slot_matrix_hash", windows_diff["compared_fields"])
             self.assertIn("trusted Windows Authenticode evidence diff pass", windows_gates[0]["satisfied_checks"])
             release_notes_diff = build_release.build_operations_document_trusted_diff(
                 112,
@@ -1416,7 +3162,46 @@ class RapidTriageOpsTests(unittest.TestCase):
 
             payload = json.loads(Path(report["path"]).read_text(encoding="utf-8"))
             self.assertIn("#105", payload["commercial_gap_ids"])
+            self.assertEqual(payload["functional_priority_profile"]["item_number"], 65)
+            self.assertEqual(payload["functional_priority_profile"]["batch_id"], "commercial-uplift-061-065")
+            self.assertTrue(payload["functional_priority_profile"]["implemented_controls"]["automatic_upload_disabled"])
+            self.assertEqual(payload["functional_priority_profile"]["evidence_counts"]["sensitive_context_key_count"], 1)
             self.assertEqual(payload["core_accuracy_gates"][0]["gap_id"], "#105")
+            self.assertEqual(payload["crash_export_evidence_manifest"]["profile_version"], "crash-export-evidence-manifest-v1")
+            self.assertEqual(len(payload["crash_export_evidence_manifest_hash"]), 64)
+            self.assertEqual(payload["crash_redaction_matrix"]["profile_version"], "crash-redaction-matrix-v1")
+            self.assertEqual(len(payload["crash_redaction_matrix_hash"]), 64)
+            self.assertEqual(
+                payload["crash_redaction_matrix_hash"],
+                payload["crash_export_evidence_manifest"]["redaction_matrix_hash"],
+            )
+            self.assertEqual(payload["crash_no_upload_manifest"]["profile_version"], "crash-no-upload-manifest-v1")
+            self.assertEqual(payload["crash_no_upload_manifest"]["item_number"], 65)
+            self.assertEqual(len(payload["crash_no_upload_manifest_hash"]), 64)
+            self.assertEqual(payload["crash_no_upload_manifest_hash"], payload["crash_no_upload_manifest"]["manifest_hash"])
+            self.assertFalse(payload["crash_no_upload_manifest"]["automatic_upload_enabled"])
+            self.assertEqual(payload["crash_no_upload_manifest"]["known_upload_endpoint_count"], 0)
+            self.assertTrue(
+                payload["functional_priority_profile"]["implemented_controls"]["crash_no_upload_manifest_emitted"]
+            )
+            self.assertIn(
+                "crash-no-upload-manifest-emitted",
+                payload["functional_priority_profile"]["passed_validation_check_ids"],
+            )
+            self.assertIn("auth_token", payload["crash_export_evidence_manifest"]["redacted_context_keys"])
+            self.assertIn("operator_export_ui_smoke", payload["export_evidence_slots"])
+            self.assertIn(
+                "crash export evidence manifest hash emitted",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "crash no-upload manifest hash emitted",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "crash redaction matrix hash emitted",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertTrue(payload["local_only"])
             self.assertEqual(payload["context"]["auth_token"], "<redacted>")
             self.assertEqual(payload["exception"]["type"], "RuntimeError")
@@ -1429,7 +3214,146 @@ class RapidTriageOpsTests(unittest.TestCase):
                 trusted_diff=crash_diff,
             )
             self.assertEqual(crash_diff["status"], "pass")
+            self.assertIn("crash_redaction_matrix_hash", crash_diff["compared_fields"])
             self.assertIn("trusted crash redaction/export diff pass", crash_gates[0]["satisfied_checks"])
+
+    def test_crash_export_smoke_script_writes_release_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "crash-smoke"
+            result = subprocess.run(
+                [
+                    "python",
+                    "scripts/crash-export-smoke.py",
+                    "--output-dir",
+                    str(output_dir),
+                    "--json",
+                ],
+                cwd=Path(__file__).resolve().parent.parent,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["profile_version"], "crash-export-release-smoke-v1")
+            self.assertIn("#105", payload["commercial_gap_ids"])
+            self.assertEqual(payload["failed_check_ids"], [])
+            self.assertTrue(payload["checks"]["secret_redacted"])
+            self.assertTrue(payload["checks"]["dashboard_lists_report"])
+            self.assertTrue(payload["checks"]["export_bundle_written"])
+            self.assertTrue(payload["checks"]["bundle_hash_verified"])
+            self.assertEqual(len(payload["smoke_hash"]), 64)
+            self.assertTrue(Path(payload["export_bundle_path"]).is_file())
+            self.assertTrue((output_dir / "crash-export-smoke.json").is_file())
+            with zipfile.ZipFile(payload["export_bundle_path"]) as bundle:
+                names = set(bundle.namelist())
+                self.assertIn("crash-export-manifest.json", names)
+                self.assertIn(f"{payload['crash_id']}.json", names)
+                self.assertNotIn("release-secret-token", bundle.read(f"{payload['crash_id']}.json").decode("utf-8"))
+
+    def test_crash_redaction_review_script_verifies_smoke_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "crash-smoke"
+            smoke_result = subprocess.run(
+                [
+                    "python",
+                    "scripts/crash-export-smoke.py",
+                    "--output-dir",
+                    str(output_dir),
+                    "--json",
+                ],
+                cwd=Path(__file__).resolve().parent.parent,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(smoke_result.returncode, 0, smoke_result.stderr)
+
+            review_result = subprocess.run(
+                [
+                    "python",
+                    "scripts/crash-redaction-review.py",
+                    str(output_dir / "crash-export-smoke.json"),
+                    "--json",
+                ],
+                cwd=Path(__file__).resolve().parent.parent,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(review_result.returncode, 0, review_result.stderr)
+            review = json.loads(review_result.stdout)
+            self.assertEqual(review["profile_version"], "crash-redaction-export-review-v1")
+            self.assertEqual(review["failed_check_ids"], [])
+            self.assertEqual(review["trusted_crash_report_diff"]["status"], "pass")
+            self.assertEqual(review["review_tool"], "local-crash-export-log")
+            self.assertTrue(review["checks"]["sensitive_tokens_absent"])
+            self.assertTrue(review["checks"]["manifest_no_automatic_upload"])
+            self.assertTrue(review["checks"]["trusted_diff_passes"])
+            self.assertEqual(len(review["review_hash"]), 64)
+            self.assertTrue((output_dir / "crash-redaction-review.json").is_file())
+
+    def test_parser_sandbox_smoke_script_captures_crash_and_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "parser-sandbox-smoke.json"
+            result = subprocess.run(
+                [
+                    "python",
+                    "scripts/parser-sandbox-smoke.py",
+                    "--output",
+                    str(output_path),
+                    "--json",
+                ],
+                cwd=Path(__file__).resolve().parent.parent,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["profile_version"], "parser-subprocess-isolation-smoke-v1")
+            self.assertIn("#119", payload["commercial_gap_ids"])
+            self.assertEqual(payload["failed_check_ids"], [])
+            self.assertTrue(payload["checks"]["benign_subprocess_completes"])
+            self.assertTrue(payload["checks"]["crashing_subprocess_is_captured"])
+            self.assertTrue(payload["checks"]["timeout_subprocess_is_captured"])
+            self.assertTrue(payload["checks"]["active_content_fixture_not_executed"])
+            self.assertFalse(payload["sandbox_boundary"]["os_level_sandbox_enabled"])
+            self.assertFalse(payload["commercial_claim_allowed"])
+            self.assertEqual(len(payload["smoke_hash"]), 64)
+            self.assertTrue(output_path.is_file())
+
+    def test_security_hardening_review_script_writes_release_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "security-hardening-review.json"
+            result = subprocess.run(
+                [
+                    "python",
+                    "scripts/security-hardening-review.py",
+                    "--output",
+                    str(output_path),
+                    "--json",
+                ],
+                cwd=Path(__file__).resolve().parent.parent,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["command"], "security-hardening-review")
+            self.assertEqual(payload["profile_version"], "security-hardening-release-review-v1")
+            self.assertIn("#118", payload["commercial_gap_ids"])
+            self.assertEqual(payload["failed_check_ids"], [])
+            self.assertEqual(len(payload["review_hash"]), 64)
+            self.assertTrue(payload["checks"]["remote_bind_requires_auth"])
+            self.assertTrue(payload["checks"]["appsec_blocker_preserved"])
+            self.assertTrue(payload["checks"]["os_sandbox_limitation_preserved"])
+            self.assertFalse(payload["commercial_claim_allowed"])
 
     def test_case_backup_and_restore_commands_copy_database_with_hashes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1446,7 +3370,52 @@ class RapidTriageOpsTests(unittest.TestCase):
             backup_payload = json.loads(backup_stdout.getvalue())
             self.assertEqual(backup_payload["command"], "case-backup")
             self.assertIn("#111", backup_payload["commercial_gap_ids"])
+            self.assertEqual(backup_payload["functional_priority_profile"]["item_number"], 62)
+            self.assertEqual(backup_payload["functional_priority_profile"]["batch_id"], "commercial-uplift-061-065")
+            self.assertTrue(backup_payload["functional_priority_profile"]["implemented_controls"]["case_database_backup_manifest"])
             self.assertEqual(backup_payload["core_accuracy_gates"][0]["gap_id"], "#111")
+            self.assertEqual(
+                backup_payload["backup_restore_evidence_manifest"]["profile_version"],
+                "backup-restore-rehearsal-manifest-v1",
+            )
+            self.assertEqual(len(backup_payload["backup_restore_evidence_manifest_hash"]), 64)
+            self.assertEqual(
+                backup_payload["backup_restore_continuity_manifest"]["profile_version"],
+                "backup-restore-continuity-manifest-v1",
+            )
+            self.assertEqual(backup_payload["backup_restore_continuity_manifest"]["item_number"], 62)
+            self.assertEqual(len(backup_payload["backup_restore_continuity_manifest_hash"]), 64)
+            self.assertEqual(
+                backup_payload["backup_restore_continuity_manifest_hash"],
+                backup_payload["backup_restore_continuity_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                backup_payload["backup_restore_evidence_manifest"]["rehearsal_evidence_matrix"]["profile_version"],
+                "backup-restore-rehearsal-evidence-matrix-v1",
+            )
+            self.assertEqual(len(backup_payload["backup_restore_evidence_matrix_hash"]), 64)
+            self.assertEqual(
+                backup_payload["backup_restore_evidence_matrix_hash"],
+                backup_payload["backup_restore_evidence_manifest"]["rehearsal_evidence_matrix_hash"],
+            )
+            self.assertTrue(
+                backup_payload["functional_priority_profile"]["implemented_controls"][
+                    "backup_restore_continuity_manifest_emitted"
+                ]
+            )
+            self.assertIn("restore_drill_log", backup_payload["rehearsal_evidence_slots"])
+            self.assertIn(
+                "backup restore evidence manifest hash emitted",
+                backup_payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "backup restore continuity manifest hash emitted",
+                backup_payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "backup restore rehearsal evidence matrix hash emitted",
+                backup_payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(backup_payload["trusted_backup_restore_diff"]["status"], "missing")
             self.assertIn("trusted-backup-restore-rehearsal-diff-missing", backup_payload["blockers"])
             self.assertTrue((backup_dir / "rapidtriage-case-backup-manifest.json").is_file())
@@ -1470,7 +3439,30 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertEqual(restore_exit, 0)
             restore_payload = json.loads(restore_stdout.getvalue())
             self.assertIn("#111", restore_payload["commercial_gap_ids"])
+            self.assertEqual(restore_payload["functional_priority_profile"]["item_number"], 62)
+            self.assertTrue(restore_payload["functional_priority_profile"]["implemented_controls"]["restore_hash_verified"])
             self.assertEqual(restore_payload["core_accuracy_gates"][0]["gap_id"], "#111")
+            self.assertEqual(len(restore_payload["backup_restore_evidence_manifest_hash"]), 64)
+            self.assertEqual(len(restore_payload["backup_restore_evidence_matrix_hash"]), 64)
+            self.assertEqual(
+                restore_payload["backup_restore_continuity_manifest"]["profile_version"],
+                "backup-restore-continuity-manifest-v1",
+            )
+            self.assertTrue(restore_payload["backup_restore_continuity_manifest"]["hash_verified"])
+            self.assertEqual(len(restore_payload["backup_restore_continuity_manifest_hash"]), 64)
+            self.assertIn("migration_corpus_run", restore_payload["rehearsal_evidence_slots"])
+            self.assertIn(
+                "backup restore evidence manifest hash emitted",
+                restore_payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "backup restore rehearsal evidence matrix hash emitted",
+                restore_payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "continuity hash verification recorded",
+                restore_payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(restore_payload["trusted_backup_restore_diff"]["status"], "missing")
             self.assertIn("trusted-backup-restore-rehearsal-diff-missing", restore_payload["blockers"])
             self.assertTrue(restore_payload["hash_verified"])
@@ -1486,6 +3478,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                 trusted_diff=backup_diff,
             )
             self.assertEqual(backup_diff["status"], "pass")
+            self.assertIn("backup_restore_evidence_matrix_hash", backup_diff["compared_fields"])
             self.assertIn("trusted backup/restore rehearsal diff pass", backup_gates[0]["satisfied_checks"])
 
     def test_dependency_monitoring_script_writes_vulnerability_policy_baseline(self) -> None:
@@ -1508,7 +3501,87 @@ class RapidTriageOpsTests(unittest.TestCase):
             payload = json.loads(output_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["command"], "dependency-monitoring")
             self.assertIn("#120", payload["commercial_gap_ids"])
+            self.assertEqual(payload["functional_priority_profile"]["item_number"], 64)
+            self.assertEqual(payload["functional_priority_profile"]["batch_id"], "commercial-uplift-061-065")
+            self.assertTrue(payload["functional_priority_profile"]["implemented_controls"]["dependency_inventory_emitted"])
+            self.assertTrue(
+                payload["functional_priority_profile"]["implemented_controls"]["dependency_sbom_manifest_emitted"]
+            )
+            self.assertTrue(
+                payload["functional_priority_profile"]["implemented_controls"]["scheduled_ci_scan_configured"]
+            )
+            self.assertTrue(
+                payload["functional_priority_profile"]["implemented_controls"]["sbom_archival_configured"]
+            )
+            self.assertEqual(len(payload["dependency_ci_workflow_evidence_hash"]), 64)
+            self.assertTrue(payload["dependency_ci_workflow_evidence"]["configured"])
+            self.assertIn("scheduled_trigger", payload["dependency_ci_workflow_evidence"]["passed_checks"])
+            self.assertIn("artifact_upload_configured", payload["dependency_ci_workflow_evidence"]["passed_checks"])
+            self.assertIn("sbom_archived_in_dependency_artifact", payload["dependency_ci_workflow_evidence"]["passed_checks"])
+            self.assertIn(
+                "CI scheduled advisory scan workflow configured",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "sbom-publication-not-attached",
+                payload["functional_priority_profile"]["failed_validation_check_ids"],
+            )
+            self.assertNotIn(
+                "ci-scheduled-advisory-scan-not-attached",
+                payload["functional_priority_profile"]["failed_validation_check_ids"],
+            )
             self.assertEqual(payload["core_accuracy_gates"][0]["gap_id"], "#120")
+            self.assertEqual(payload["dependency_sbom_manifest"]["profile_version"], "dependency-sbom-manifest-v1")
+            self.assertEqual(payload["dependency_sbom_manifest"]["item_number"], 64)
+            self.assertEqual(len(payload["dependency_sbom_manifest_hash"]), 64)
+            self.assertEqual(payload["dependency_sbom_manifest_hash"], payload["dependency_sbom_manifest"]["manifest_hash"])
+            self.assertEqual(
+                payload["functional_priority_profile"]["implemented_controls"]["dependency_sbom_manifest_hash"],
+                payload["dependency_sbom_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
+                payload["dependency_monitoring_evidence_manifest"]["profile_version"],
+                "dependency-monitoring-evidence-manifest-v1",
+            )
+            self.assertEqual(
+                payload["dependency_monitoring_evidence_manifest"]["sbom_manifest_hash"],
+                payload["dependency_sbom_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(len(payload["dependency_monitoring_evidence_manifest_hash"]), 64)
+            self.assertEqual(
+                payload["dependency_monitoring_evidence_manifest"]["dependency_evidence_matrix"]["profile_version"],
+                "dependency-evidence-matrix-v1",
+            )
+            self.assertEqual(len(payload["dependency_evidence_matrix_hash"]), 64)
+            self.assertEqual(
+                payload["dependency_evidence_matrix_hash"],
+                payload["dependency_monitoring_evidence_manifest"]["dependency_evidence_matrix_hash"],
+            )
+            self.assertIn("scheduled_ci_advisory_scan", payload["dependency_evidence_slots"])
+            self.assertEqual(
+                payload["dependency_evidence_slots"]["scheduled_ci_advisory_scan"]["status"],
+                "configured-no-run-attached",
+            )
+            self.assertEqual(
+                payload["dependency_evidence_slots"]["sbom_publication"]["status"],
+                "configured-in-ci-artifact-no-run-attached",
+            )
+            self.assertEqual(
+                payload["dependency_monitoring_evidence_manifest"]["dependency_ci_workflow_evidence_hash"],
+                payload["dependency_ci_workflow_evidence_hash"],
+            )
+            self.assertIn(
+                "dependency monitoring evidence manifest hash emitted",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "dependency SBOM manifest hash emitted",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "dependency evidence matrix hash emitted",
+                payload["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertIn("#120", payload["vulnerability_scan"]["commercial_gap_ids"])
             self.assertEqual(payload["vulnerability_scan"]["core_accuracy_gates"][0]["gap_id"], "#120")
             self.assertIn("Block release", payload["vulnerability_scan"]["release_policy"])
@@ -1523,6 +3596,7 @@ class RapidTriageOpsTests(unittest.TestCase):
                 trusted_diff=dependency_diff,
             )
             self.assertEqual(dependency_diff["status"], "pass")
+            self.assertIn("dependency_evidence_matrix_hash", dependency_diff["compared_fields"])
             self.assertIn("trusted dependency advisory/SBOM diff pass", dependency_gates[0]["satisfied_checks"])
 
     def test_case_acquisition_command_records_and_lists_metadata(self) -> None:
@@ -1615,6 +3689,10 @@ class RapidTriageOpsTests(unittest.TestCase):
             benchmark_dir = root / "benchmark"
             columnar_benchmark_dir = root / "columnar-benchmark"
             smoke_dir = root / "smoke-windows"
+            crash_smoke_dir = root / "crash-export-smoke"
+            parser_sandbox_path = root / "parser-sandbox-smoke.json"
+            dependency_monitoring_path = root / "dependency-monitoring.json"
+            security_hardening_path = root / "security-hardening-review.json"
             evidence_dir = root / "release-evidence"
 
             release = subprocess.run(
@@ -1661,6 +3739,75 @@ class RapidTriageOpsTests(unittest.TestCase):
             (smoke_dir / "smoke-summary.json").write_text(json.dumps({"passed": True, "checks": []}), encoding="utf-8")
             (smoke_dir / "smoke-summary.md").write_text("# PASS\n", encoding="utf-8")
 
+            crash_smoke = subprocess.run(
+                [
+                    "python",
+                    "scripts/crash-export-smoke.py",
+                    "--output-dir",
+                    str(crash_smoke_dir),
+                    "--json",
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(crash_smoke.returncode, 0, crash_smoke.stderr)
+            crash_review = subprocess.run(
+                [
+                    "python",
+                    "scripts/crash-redaction-review.py",
+                    str(crash_smoke_dir / "crash-export-smoke.json"),
+                    "--json",
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(crash_review.returncode, 0, crash_review.stderr)
+            parser_sandbox = subprocess.run(
+                [
+                    "python",
+                    "scripts/parser-sandbox-smoke.py",
+                    "--output",
+                    str(parser_sandbox_path),
+                    "--json",
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(parser_sandbox.returncode, 0, parser_sandbox.stderr)
+            dependency_monitoring = subprocess.run(
+                [
+                    "python",
+                    "scripts/check-dependencies.py",
+                    "--output",
+                    str(dependency_monitoring_path),
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(dependency_monitoring.returncode, 0, dependency_monitoring.stderr)
+            security_hardening = subprocess.run(
+                [
+                    "python",
+                    "scripts/security-hardening-review.py",
+                    "--output",
+                    str(security_hardening_path),
+                    "--json",
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(security_hardening.returncode, 0, security_hardening.stderr)
+
             result = subprocess.run(
                 [
                     "python",
@@ -1677,6 +3824,16 @@ class RapidTriageOpsTests(unittest.TestCase):
                     str(smoke_dir),
                     "--require-smoke-platform",
                     "windows",
+                    "--crash-smoke-json",
+                    str(crash_smoke_dir / "crash-export-smoke.json"),
+                    "--crash-redaction-review-json",
+                    str(crash_smoke_dir / "crash-redaction-review.json"),
+                    "--parser-sandbox-smoke-json",
+                    str(parser_sandbox_path),
+                    "--dependency-monitoring-json",
+                    str(dependency_monitoring_path),
+                    "--security-hardening-review-json",
+                    str(security_hardening_path),
                     "--output-dir",
                     str(evidence_dir),
                 ],
@@ -1696,6 +3853,21 @@ class RapidTriageOpsTests(unittest.TestCase):
             self.assertIn("smoke-platform-windows", check_ids)
             self.assertIn("columnar-benchmark-jsonl-metrics", check_ids)
             self.assertIn("columnar-benchmark-commercial-disclosure", check_ids)
+            self.assertIn("crash-export-smoke-bundle-hash", check_ids)
+            self.assertIn("crash-redaction-review-checks", check_ids)
+            self.assertIn("parser-sandbox-smoke-limitation-preserved", check_ids)
+            self.assertIn("dependency-monitoring-ci-workflow", check_ids)
+            self.assertIn("dependency-monitoring-limitation-preserved", check_ids)
+            self.assertIn("security-hardening-review-boundaries", check_ids)
+            self.assertIn("security-hardening-review-hashes", check_ids)
+            self.assertEqual(report["inputs"]["crash_smoke_json"], str((crash_smoke_dir / "crash-export-smoke.json").resolve()))
+            self.assertEqual(
+                report["inputs"]["crash_redaction_review_json"],
+                str((crash_smoke_dir / "crash-redaction-review.json").resolve()),
+            )
+            self.assertEqual(report["inputs"]["parser_sandbox_smoke_json"], str(parser_sandbox_path.resolve()))
+            self.assertEqual(report["inputs"]["dependency_monitoring_json"], str(dependency_monitoring_path.resolve()))
+            self.assertEqual(report["inputs"]["security_hardening_review_json"], str(security_hardening_path.resolve()))
             self.assertTrue((evidence_dir / "release-evidence-report.md").is_file())
 
     def test_release_evidence_script_reports_missing_required_smoke_platform(self) -> None:

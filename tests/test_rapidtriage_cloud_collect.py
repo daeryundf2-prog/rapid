@@ -36,12 +36,23 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                     manifest.write_text(
                         json.dumps(
                             {
+                                "provider": "google",
+                                "account": "alice@example.com",
+                                "scopes": ["https://www.googleapis.com/auth/userinfo.profile"],
+                                "legal_authority": "unit-test-authority",
                                 "requests": [
                                     {
                                         "name": "google-activity",
                                         "service": "google",
                                         "url": f"{server.url}/activity",
                                         "bearer_token_env": "RAPIDTRIAGE_TEST_TOKEN",
+                                        "retry": {"max_attempts": 2, "backoff_seconds": 0},
+                                        "pagination": {
+                                            "mode": "next_link_field",
+                                            "max_pages": 2,
+                                            "next_link_field": "nextPageToken",
+                                            "delta_token_field": "syncToken",
+                                        },
                                     }
                                 ]
                             }
@@ -57,8 +68,15 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 payload_path = output_dir / "rapidtriage-cloud-collect.json"
                 payload = json.loads(payload_path.read_text(encoding="utf-8"))
                 self.assertEqual(payload["summary"]["collected_count"], 1)
+                self.assertTrue(payload["summary"]["provider_scope_profile_present"])
+                self.assertTrue(payload["summary"]["provider_scope_inventory_captured"])
                 self.assertIn("#40", payload["cloud_api_report_grade_assessment"]["commercial_gap_ids"])
                 self.assertEqual(payload["forensic_review"]["gap_id"], "#40")
+                scope_profile = payload["cloud_api_provider_scope_profile"]
+                self.assertEqual(scope_profile["profile_version"], "cloud-api-provider-scope-v1")
+                self.assertEqual(scope_profile["provider"], "google")
+                self.assertTrue(scope_profile["scope_inventory_captured"])
+                self.assertTrue(scope_profile["legal_authority_record_present"])
                 api_uplift = payload["commercial_uplift_evidence"]
                 self.assertEqual(api_uplift["batch_id"], "commercial-uplift-036-040")
                 self.assertEqual(api_uplift["item_numbers"], [40])
@@ -80,11 +98,55 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                     "cloud-api-provider-response-diff-required",
                     api_uplift["reportability_decision"]["blockers"],
                 )
+                functional_profile = payload["functional_priority_profile"]
+                self.assertEqual(functional_profile["item_number"], 56)
+                self.assertEqual(functional_profile["batch_id"], "commercial-uplift-056-060")
+                self.assertTrue(functional_profile["implemented_controls"]["manifest_driven_https_requests"])
+                self.assertTrue(functional_profile["implemented_controls"]["credential_redaction"])
+                self.assertTrue(functional_profile["implemented_controls"]["cloud_api_acquisition_manifest_emitted"])
+                self.assertIn("cloud-api-acquisition-manifest-emitted", functional_profile["passed_validation_check_ids"])
+                acquisition_manifest = payload["cloud_api_acquisition_manifest"]
+                self.assertEqual(acquisition_manifest["manifest_version"], "cloud-api-acquisition-manifest-v1")
+                self.assertEqual(acquisition_manifest["item_number"], 56)
+                self.assertEqual(acquisition_manifest["request_count"], 1)
+                self.assertEqual(acquisition_manifest["collected_count"], 1)
+                self.assertEqual(acquisition_manifest["credential_boundary"]["credential_storage"], "environment-variable-only")
+                self.assertTrue(acquisition_manifest["credential_boundary"]["headers_redacted"])
+                self.assertFalse(acquisition_manifest["credential_boundary"]["tokens_written_to_output"])
+                self.assertEqual(acquisition_manifest["request_locators"][0]["service"], "google")
+                self.assertEqual(len(acquisition_manifest["manifest_sha256"]), 64)
+                self.assertEqual(
+                    payload["summary"]["cloud_api_acquisition_manifest_hash"],
+                    acquisition_manifest["manifest_sha256"],
+                )
+                self.assertEqual(
+                    functional_profile["implemented_controls"]["cloud_api_acquisition_manifest_hash"],
+                    acquisition_manifest["manifest_sha256"],
+                )
+                self.assertEqual(
+                    payload["cloud_api_collection_strategy_profile"]["selected_track"],
+                    "manifest-driven-bounded-api-collection",
+                )
+                self.assertEqual(payload["cloud_api_collection_strategy_profile"]["services"], ["google"])
+                self.assertTrue(payload["cloud_api_collection_strategy_profile"]["request_retry_policy_declared"])
+                self.assertTrue(payload["cloud_api_collection_strategy_profile"]["pagination_policy_declared"])
+                self.assertTrue(
+                    payload["cloud_api_collection_strategy_profile"]["provider_scope_profile"]["scope_inventory_captured"]
+                )
+                self.assertIn(
+                    "provider-oauth-device-flow-not-implemented",
+                    functional_profile["failed_validation_check_ids"],
+                )
+                self.assertTrue(functional_profile["implemented_controls"]["provider_scope_manifest_profile"])
+                self.assertTrue(functional_profile["implemented_controls"]["provider_scope_inventory_captured"])
                 api_gate = payload["core_accuracy_gates"][0]
                 self.assertEqual(api_gate["gap_id"], "#40")
                 self.assertIn("manifest request validation", api_gate["satisfied_checks"])
                 self.assertIn("credential redaction", api_gate["satisfied_checks"])
+                self.assertIn("credential strategy profile", api_gate["satisfied_checks"])
+                self.assertIn("request acquisition profile", api_gate["satisfied_checks"])
                 self.assertIn("response hash/provenance", api_gate["satisfied_checks"])
+                self.assertIn("cloud API acquisition manifest", api_gate["satisfied_checks"])
                 self.assertIn("pagination/backoff limitation warning", api_gate["satisfied_checks"])
                 self.assertIn("provider OAuth/scope/legal warning", api_gate["satisfied_checks"])
                 self.assertNotIn("trusted cloud API/provider response diff pass", api_gate["satisfied_checks"])
@@ -95,6 +157,17 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertEqual(credential_uplift["item_numbers"], [41])
                 self.assertIn("tokens_not_written", credential_uplift["passed_validation_check_ids"])
                 self.assertIn("secure_token_vault", credential_uplift["failed_validation_check_ids"])
+                self.assertIn("controlled_reveal_disabled", credential_uplift["passed_validation_check_ids"])
+                self.assertIn(
+                    "credential_authority_profile_present",
+                    credential_uplift["passed_validation_check_ids"],
+                )
+                self.assertTrue(credential_uplift["large_data_controls"]["credential_authority_profile_present"])
+                self.assertTrue(
+                    credential_uplift["large_data_controls"][
+                        "credential_authority_profile_linked_to_provider_scope"
+                    ]
+                )
                 self.assertEqual(
                     credential_uplift["reportability_decision"]["decision"],
                     "do-not-report-cloud-credential-handling-as-enterprise-vaulted",
@@ -112,21 +185,53 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertEqual(credential_gate["gap_id"], "#41")
                 self.assertIn("token value redaction", credential_gate["satisfied_checks"])
                 self.assertIn("environment or vault storage boundary", credential_gate["satisfied_checks"])
+                self.assertIn("credential strategy profile", credential_gate["satisfied_checks"])
                 self.assertIn("scope and consent capture warning", credential_gate["satisfied_checks"])
                 self.assertIn("rotation and revocation audit warning", credential_gate["satisfied_checks"])
                 self.assertIn("legal authority warning", credential_gate["satisfied_checks"])
                 self.assertNotIn("trusted credential authority/audit diff pass", credential_gate["satisfied_checks"])
+                self.assertIn("credential authority profile", credential_gate["satisfied_checks"])
+                self.assertIn("controlled reveal disabled by default", credential_gate["satisfied_checks"])
                 self.assertFalse(payload["cloud_api_native_capabilities"]["provider_specific_oauth_flow"])
                 self.assertFalse(payload["credential_handling"]["tokens_written_to_output"])
                 self.assertFalse(payload["credential_handling"]["secure_token_vault_integrated"])
+                self.assertFalse(payload["credential_handling"]["raw_secret_reveal_allowed"])
+                self.assertEqual(payload["credential_handling"]["controlled_reveal_policy"], "disabled-by-default")
                 self.assertEqual(payload["credential_handling"]["scope_capture_status"], "not-captured")
                 self.assertEqual(payload["credential_handling"]["credential_storage"], "environment-variable-only")
+                self.assertEqual(
+                    payload["credential_handling"]["credential_strategy_profile"]["selected_track"],
+                    "environment-token-redaction-with-external-authority-audit",
+                )
+                self.assertEqual(
+                    credential_uplift["credential_strategy_profile"]["selected_track"],
+                    "environment-token-redaction-with-external-authority-audit",
+                )
+                authority_profile = payload["credential_handling"]["credential_authority_profile"]
+                self.assertEqual(authority_profile["profile_version"], "cloud-credential-authority-v1")
+                self.assertEqual(authority_profile["provider"], "google")
+                self.assertTrue(authority_profile["provider_scope_profile_linked"])
+                self.assertTrue(authority_profile["scope_inventory_captured"])
+                self.assertTrue(authority_profile["legal_authority_record_present"])
+                self.assertEqual(authority_profile["controlled_reveal_policy"], "disabled-by-default")
+                self.assertFalse(authority_profile["raw_secret_reveal_allowed"])
+                self.assertFalse(authority_profile["tokens_written_to_output"])
+                self.assertEqual(authority_profile["request_sensitive_header_names"], ["Authorization"])
+                self.assertEqual(authority_profile["vault_integration_status"], "not-integrated")
+                self.assertEqual(authority_profile["token_rotation_audit_status"], "not-captured")
                 self.assertEqual(payload["requests"][0]["request_headers"]["Authorization"], "<REDACTED>")
+                request_profile = payload["requests"][0]["request_acquisition_profile"]
+                self.assertEqual(request_profile["profile_version"], "cloud-api-request-acquisition-v1")
+                self.assertEqual(request_profile["retry_max_attempts"], 2)
+                self.assertEqual(request_profile["pagination_mode"], "next_link_field")
+                self.assertEqual(request_profile["pagination_execution_status"], "declared-not-executed")
+                self.assertEqual(payload["requests"][0]["attempt_count"], 1)
                 self.assertEqual(payload["requests"][0]["credential_handling"]["sensitive_header_names"], ["Authorization"])
                 self.assertTrue(payload["requests"][0]["credential_handling"]["sensitive_values_redacted"])
                 self.assertFalse(payload["requests"][0]["credential_handling"]["tokens_written_to_output"])
                 self.assertIn("#41", payload["requests"][0]["credential_handling"]["commercial_gap_ids"])
                 self.assertFalse(payload["requests"][0]["credential_handling"]["secure_token_vault_integrated"])
+                self.assertFalse(payload["requests"][0]["credential_handling"]["raw_secret_reveal_allowed"])
                 self.assertNotIn("secret-token", payload_path.read_text(encoding="utf-8"))
                 response_path = Path(payload["requests"][0]["response_path"])
                 self.assertTrue(response_path.exists())
@@ -165,6 +270,8 @@ class RapidTriageCloudCollectTests(unittest.TestCase):
                 self.assertTrue(payload["credential_handling"]["headers_redacted"])
                 self.assertTrue(payload["requests"][0]["credential_handling"]["sensitive_values_redacted"])
                 self.assertEqual(server.handler_class.request_count, 0)
+                self.assertEqual(payload["cloud_api_acquisition_manifest"]["dry_run"], True)
+                self.assertEqual(payload["cloud_api_acquisition_manifest"]["request_locator_count"], 1)
 
     def test_cloud_credential_trusted_diff_controls_authority_gate(self) -> None:
         rapid = [

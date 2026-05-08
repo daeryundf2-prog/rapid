@@ -1,0 +1,43 @@
+name: RapidTriage dependency monitoring
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "requirements*.txt"
+      - "scripts/check-dependencies.py"
+      - ".github/workflows/dependency-monitoring.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-monitoring:
+    name: Dependency advisory and SBOM baseline
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package and advisory scanner
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[test]"
+          python -m pip install pip-audit
+
+      - name: Build dependency monitoring evidence
+        run: python scripts/check-dependencies.py --output dependency-monitoring-ci.json
+
+      - name: Upload dependency monitoring evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapidtriage-dependency-monitoring
+          path: dependency-monitoring-ci.json

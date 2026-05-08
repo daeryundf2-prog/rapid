@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import sqlite3
 import tempfile
 import unittest
 import zipfile
@@ -26,7 +28,13 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             write_apk_fixture(apk_path)
             app_data_path = root / "Android" / "data" / "com.example.spy" / "files" / "browser_messages_media.db"
             app_data_path.parent.mkdir(parents=True)
-            app_data_path.write_bytes(b"SQLite format 3\x00message-store")
+            with contextlib.closing(sqlite3.connect(app_data_path)) as connection:
+                connection.execute("CREATE TABLE sms_messages (id INTEGER PRIMARY KEY, address TEXT, body TEXT, media_url TEXT)")
+                connection.execute(
+                    "INSERT INTO sms_messages (address, body, media_url) VALUES (?, ?, ?)",
+                    ("01000000000", "redacted", "content://media/external/images/1"),
+                )
+                connection.commit()
             output = root / "apk-artifacts.json"
 
             exit_code = main(["artifacts", str(root), "--kind", "android-apk", "--output", str(output)])
@@ -52,6 +60,14 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertEqual(details["native_architectures"], ["arm64-v8a"])
             self.assertEqual(details["component_counts"]["service"], 1)
             self.assertEqual(details["component_counts"]["receiver"], 1)
+            self.assertEqual(details["apk_analysis_profile"]["dangerous_permission_count"], 2)
+            self.assertEqual(details["apk_analysis_profile"]["signature_chain_validation_status"], "signature-entry-inventory-only")
+            self.assertEqual(details["apk_analysis_profile"]["signing_block_entry_count"], 3)
+            self.assertEqual(details["apk_signing_inventory"]["entry_count"], 3)
+            self.assertTrue(details["apk_signing_inventory"]["signature_block_present"])
+            self.assertTrue(details["apk_signing_inventory"]["signature_file_present"])
+            self.assertTrue(details["apk_signing_inventory"]["jar_manifest_present"])
+            self.assertFalse(details["apk_signing_inventory"]["certificate_chain_parsed"])
             self.assertTrue(details["entry_hashes"])
             self.assertFalse(details["commercial_grade_ready"])
             self.assertIn("#30", details["android_report_grade_assessment"]["commercial_gap_ids"])
@@ -69,13 +85,31 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertIn("permission/component normalization", apk_gate["satisfied_checks"])
             self.assertIn("signature chain validation", apk_gate["satisfied_checks"])
             self.assertIn("DEX/native string pivot bounds", apk_gate["satisfied_checks"])
+            self.assertIn("APK analysis profile", apk_gate["satisfied_checks"])
+            self.assertIn("APK signing entry inventory", apk_gate["satisfied_checks"])
             self.assertIn("app-data schema and secret-handling warnings", apk_gate["satisfied_checks"])
+            self.assertIn("Android parser manifest", apk_gate["satisfied_checks"])
+            self.assertIn("Android source locator", apk_gate["satisfied_checks"])
+            android_manifest = details["android_parser_manifest"]
+            self.assertEqual(android_manifest["manifest_version"], "android-backup-app-data-parser-manifest-v1")
+            self.assertEqual(android_manifest["item_number"], 54)
+            self.assertEqual(android_manifest["source_viewer_locator"]["viewer"], "android-apk-inventory")
+            self.assertEqual(android_manifest["apk_inventory"]["dex_count"], 2)
+            self.assertEqual(android_manifest["apk_inventory"]["dangerous_permission_count"], 2)
+            self.assertEqual(len(android_manifest["manifest_sha256"]), 64)
+            self.assertEqual(details["android_parser_manifest_hash"], android_manifest["manifest_sha256"])
             apk_uplift = details["commercial_uplift_evidence"]
             self.assertEqual(apk_uplift["batch_id"], "commercial-uplift-026-030")
             self.assertEqual(apk_uplift["item_numbers"], [30])
             self.assertIn("source-readable", apk_uplift["passed_validation_matrix_ids"])
             self.assertIn("signature-and-binary-manifest", apk_uplift["failed_validation_matrix_ids"])
             self.assertEqual(apk_uplift["large_data_controls"]["apk_string_scan_limit"], 1024 * 1024)
+            self.assertTrue(apk_uplift["large_data_controls"]["apk_profile_present"])
+            self.assertEqual(
+                apk_uplift["large_data_controls"]["android_parser_manifest_hash"],
+                android_manifest["manifest_sha256"],
+            )
+            self.assertTrue(apk_uplift["large_data_controls"]["android_source_locator_present"])
             self.assertEqual(
                 apk_uplift["reportability_decision"]["decision"],
                 "do-not-report-android-apk-as-malware-or-signature-validated",
@@ -96,6 +130,22 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertIn("browser-store-candidate", app_data["details"]["risk_flags"])
             self.assertIn("media-store-candidate", app_data["details"]["risk_flags"])
             self.assertFalse(app_data["details"]["validation_checks"]["secret_values_extracted"])
+            self.assertTrue(app_data["details"]["validation_checks"]["sqlite_schema_inventory_present"])
+            self.assertTrue(app_data["details"]["validation_checks"]["sample_values_redacted"])
+            self.assertTrue(app_data["details"]["validation_checks"]["android_artifact_matrix_present"])
+            self.assertTrue(app_data["details"]["android_app_data_profile"]["sqlite_header_present"])
+            self.assertEqual(app_data["details"]["android_app_data_profile"]["candidate_store_family"], "communication")
+            app_data_profile = app_data["details"]["android_app_data_profile"]
+            sqlite_inventory = app_data_profile["sqlite_schema_inventory"]
+            self.assertTrue(sqlite_inventory["opened_readonly"])
+            self.assertEqual(sqlite_inventory["table_count"], 1)
+            self.assertEqual(sqlite_inventory["tables"][0]["table"], "sms_messages")
+            self.assertEqual(sqlite_inventory["tables"][0]["row_count"], 1)
+            self.assertEqual(sqlite_inventory["tables"][0]["artifact_family"], "message-or-chat")
+            self.assertTrue(sqlite_inventory["values_redacted"])
+            self.assertIn("sms", app_data_profile["artifact_family_matrix"]["positive_families"])
+            self.assertIn("media", app_data_profile["artifact_family_matrix"]["positive_families"])
+            self.assertEqual(app_data_profile["source_layout_profile"]["layout"], "external-app-data")
             self.assertIn("#29", app_data["details"]["android_report_grade_assessment"]["commercial_gap_ids"])
             self.assertIn("#30", app_data["details"]["android_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(app_data["details"]["forensic_review"]["gap_id"], "#29")
@@ -106,12 +156,37 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertIn("browser/media source linkage", app_data_gates["#29"]["satisfied_checks"])
             self.assertIn("encrypted-store limitation", app_data_gates["#29"]["satisfied_checks"])
             self.assertIn("app-specific schema version tracking", app_data_gates["#29"]["satisfied_checks"])
+            self.assertIn("android app-data profile", app_data_gates["#29"]["satisfied_checks"])
+            self.assertIn("SQLite schema inventory without value extraction", app_data_gates["#29"]["satisfied_checks"])
+            self.assertIn("Android artifact family matrix", app_data_gates["#29"]["satisfied_checks"])
+            self.assertIn("backup/filesystem layout classification", app_data_gates["#29"]["satisfied_checks"])
+            self.assertIn("Android parser manifest", app_data_gates["#29"]["satisfied_checks"])
+            self.assertIn("Android source locator", app_data_gates["#29"]["satisfied_checks"])
             self.assertIn("app-data schema and secret-handling warnings", app_data_gates["#30"]["satisfied_checks"])
+            app_data_manifest = app_data["details"]["android_parser_manifest"]
+            self.assertEqual(app_data_manifest["source_viewer_locator"]["viewer"], "android-app-data-inventory")
+            self.assertEqual(app_data_manifest["app_data_inventory"]["sqlite_table_count"], 1)
+            self.assertTrue(app_data_manifest["app_data_inventory"]["values_redacted"])
+            self.assertFalse(app_data_manifest["secret_and_schema_boundary"]["secret_values_extracted"])
             app_data_uplift = app_data["details"]["commercial_uplift_evidence"]
             self.assertEqual(app_data_uplift["item_numbers"], [29, 30])
+            app_data_profiles = {
+                profile["item_number"]: profile for profile in app_data_uplift["functional_priority_profiles"]
+            }
+            self.assertIn(52, app_data_profiles)
+            self.assertIn(54, app_data_profiles)
+            self.assertEqual(app_data_profiles[54]["batch_id"], "commercial-uplift-051-055")
+            self.assertFalse(app_data_profiles[54]["implemented_controls"]["secret_values_extracted"])
+            self.assertEqual(
+                app_data_profiles[54]["implemented_controls"]["android_parser_manifest_hash"],
+                app_data_manifest["manifest_sha256"],
+            )
+            self.assertIn("android-parser-manifest-emitted", app_data_profiles[54]["passed_validation_check_ids"])
+            self.assertIn("android-source-locator-emitted", app_data_profiles[54]["passed_validation_check_ids"])
             self.assertIn("manifest-or-package-context", app_data_uplift["passed_validation_matrix_ids"])
             self.assertIn("app-data-report-grade", app_data_uplift["failed_validation_matrix_ids"])
             self.assertFalse(app_data_uplift["large_data_controls"]["secret_values_extracted"])
+            self.assertTrue(app_data_uplift["large_data_controls"]["android_app_data_profile_present"])
             self.assertEqual(
                 app_data_uplift["reportability_decision"]["decision"],
                 "do-not-report-android-app-data-as-decoded-content",
@@ -217,6 +292,8 @@ def write_apk_fixture(path: Path) -> None:
         )
         archive.writestr("classes2.dex", b"dex\n035\x00")
         archive.writestr("lib/arm64-v8a/libpayload.so", b"\x7fELF")
+        archive.writestr("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\n")
+        archive.writestr("META-INF/CERT.SF", b"Signature-Version: 1.0\n")
         archive.writestr("META-INF/CERT.RSA", b"certificate")
 
 

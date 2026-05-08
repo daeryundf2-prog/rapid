@@ -182,6 +182,47 @@ def keyword_pack_library_assessment() -> dict[str, object]:
     }
 
 
+def keyword_pack_selection_profile(
+    *,
+    pack_names: Sequence[str],
+    keyword_count: int,
+    custom_file_count: int = 0,
+    trusted_diff: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    normalized_pack_names = [name.strip() for name in pack_names if name.strip()]
+    provenance_refs = [f"builtin_pack:{name}" for name in normalized_pack_names] or ["manual_keywords_only"]
+    gates = keyword_pack_core_accuracy_gates(
+        pack_count=len(normalized_pack_names),
+        keyword_count=keyword_count,
+        custom_file_count=custom_file_count,
+        provenance_refs=provenance_refs,
+        trusted_diff=trusted_diff,
+    )
+    return {
+        "profile_version": "keyword-pack-selection-profile-v1",
+        "commercial_gap_ids": [KEYWORD_PACK_GAP_ID],
+        "selected_pack_names": normalized_pack_names,
+        "selected_pack_count": len(normalized_pack_names),
+        "expanded_keyword_count": keyword_count,
+        "custom_file_count": custom_file_count,
+        "provenance_refs": provenance_refs,
+        "deduplicated_expansion": True,
+        "case_specific_terms_allowed": True,
+        "signed_pack_library": False,
+        "case_pack_editor": False,
+        "ready_for_court_report": False,
+        "core_accuracy_gates": gates,
+        "commercial_uplift_evidence": keyword_pack_commercial_uplift_evidence(
+            pack_count=len(normalized_pack_names),
+            keyword_count=keyword_count,
+            custom_file_count=custom_file_count,
+            provenance_refs=provenance_refs,
+            core_accuracy_gates=gates,
+        ),
+        "report_use_warning": "Record selected pack names, added case-specific terms, and false-positive review before citing keyword-pack hits.",
+    }
+
+
 def keyword_pack_core_accuracy_gates(
     *,
     pack_count: int,

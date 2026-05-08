@@ -8,70 +8,70 @@
       "item": 91,
       "title": "Parser confidence scoring",
       "test_files": ["tests/test_rapidtriage_case_db.py", "tests/test_rapidtriage_core_forensics_accuracy.py"],
-      "assertions": ["Case DB report items preserve parser confidence, reportability, coverage status, validation warning derivation, evidence strength, trusted parser confidence calibration diff helpers/gates, and #91 core_accuracy_gates."],
+      "assertions": ["Case DB report items preserve parser confidence, confidence band, reportability score, reportability, coverage status, validation warning derivation, evidence strength, parser-confidence-calibration-manifest-v1 manifest hash, trusted parser confidence calibration diff helpers/gates, and #91 core_accuracy_gates."],
       "remaining_external_validation": ["Parser-specific confidence calibration tables, trusted calibration manifests, and cross-tool confidence validation."]
     },
     {
       "item": 92,
       "title": "Validation-required warning UX",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report exports preserve warning reasons, summary warning counts, guidance, validation-required state, warning UX limitation, trusted validation warning checklist diff helpers/gates, and #92 core_accuracy_gates."],
+      "assertions": ["Report exports preserve warning reasons, summary warning counts, warning detail metadata, severity/category counts, UX badges, validation-warning-checklist-manifest-v1 manifest hash, guidance, validation-required state, warning UX limitation, trusted validation warning checklist diff helpers/gates, and #92 core_accuracy_gates."],
       "remaining_external_validation": ["End-to-end web badge checks and trusted warning checklists across every large result table."]
     },
     {
       "item": 93,
       "title": "Legal limitation statement per artifact",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report items preserve artifact limitation text, parser-provided limitations, jurisdiction caveat, analyst-review blockers, limitation counts, trusted legal limitation wording diff helpers/gates, and #93 core_accuracy_gates."],
+      "assertions": ["Report items preserve artifact limitation text, parser-provided limitations, limitation detail metadata, category/scope counts, legal-limitation-wording-manifest-v1 manifest hash, jurisdiction caveat, analyst-review blockers, limitation counts, trusted legal limitation wording diff helpers/gates, and #93 core_accuracy_gates."],
       "remaining_external_validation": ["Jurisdiction-approved legal wording, trusted wording manifests, and formal signoff."]
     },
     {
       "item": 94,
       "title": "Court exhibit export package",
       "test_files": ["tests/test_rapidtriage_final_roadmap.py"],
-      "assertions": ["Reviewer bundles preserve exhibit IDs, selected evidence hashes, generated output hashes, source references, verification steps, trusted court exhibit manifest diff helpers/gates, and #94 core_accuracy_gates."],
+      "assertions": ["Reviewer bundles preserve exhibit IDs, exhibit row hashes, selected evidence hashes, selected-evidence manifest hashes, generated output hashes, source references, signing slots, court-exhibit-package-manifest-v1 manifest hashes, verification steps, trusted court exhibit manifest diff helpers/gates, and #94 core_accuracy_gates."],
       "remaining_external_validation": ["Signed/notarized exhibit manifests and court-specific forms."]
     },
     {
       "item": 95,
       "title": "External tool version capture",
       "test_files": ["tests/test_rapidtriage_ops.py"],
-      "assertions": ["Validation packages preserve external tool inventory, availability/path/command/version/capture errors, limitation warnings, trusted external tool transcript diff helpers/gates, and #95 core_accuracy_gates."],
+      "assertions": ["Validation packages preserve external tool inventory, availability/path/command/version/capture errors, version-output hashes, per-tool row hashes, external-tool-version-manifest-v1 manifest hashes, limitation warnings, trusted external tool transcript diff helpers/gates, and #95 core_accuracy_gates."],
       "remaining_external_validation": ["Per-run external parser/import command transcripts, trusted transcript manifests, and original tool logs."]
     },
     {
       "item": 96,
       "title": "Write-blocker/acquisition metadata recording",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Case DB report exports preserve operator/source metadata, write-blocker fields, whole-source hash fields, missing-field checks, readiness flag, trusted acquisition-handoff diff helpers/gates, and #96 core_accuracy_gates."],
+      "assertions": ["Case DB report exports preserve operator/source metadata, write-blocker fields, whole-source hash fields, acquisition metadata row hashes, evidence-source row hashes, acquisition-metadata-handoff-manifest-v1 manifest hashes, missing-field checks, readiness flag, trusted acquisition-handoff diff helpers/gates, and #96 core_accuracy_gates."],
       "remaining_external_validation": ["Integrated write-blocker device metadata, trusted handoff manifests, and signed handoff forms."]
     },
     {
       "item": 97,
       "title": "Timezone normalization validation",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report exports preserve timezone inventory, missing timezone counts, timestamp samples, UTC assumption, review-required flag, trusted timezone-matrix diff helpers/gates, and #97 core_accuracy_gates."],
+      "assertions": ["Report exports preserve timezone inventory, missing timezone counts, timestamp samples, timezone sample row hashes, timezone-normalization-manifest-v1 manifest hashes, UTC assumption, review-required flag, trusted timezone-matrix diff helpers/gates, and #97 core_accuracy_gates."],
       "remaining_external_validation": ["Parser-specific timezone assumption matrix, trusted normalization manifests, and multi-source reconciliation."]
     },
     {
       "item": 98,
       "title": "Clock skew analysis",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report exports preserve parsed timestamp ranges, skew warnings, warning counts, baseline requirement, heuristic caveat, trusted clock-skew baseline diff helpers/gates, and #98 core_accuracy_gates."],
+      "assertions": ["Report exports preserve parsed timestamp ranges, skew warnings, clock-skew warning row hashes, warning counts, baseline requirement, clock-skew-baseline-manifest-v1 manifest hashes, heuristic caveat, trusted clock-skew baseline diff helpers/gates, and #98 core_accuracy_gates."],
       "remaining_external_validation": ["Host/device baseline model, trusted baseline manifests, and multi-device skew validation."]
     },
     {
       "item": 99,
       "title": "Evidence contamination warning",
       "test_files": ["tests/test_rapidtriage_case_db.py"],
-      "assertions": ["Report exports preserve contamination warning records, warning counts, output-under-evidence checks, write-blocker limitation, review-required flag, trusted contamination-checklist diff helpers/gates, and #99 core_accuracy_gates."],
+      "assertions": ["Report exports preserve contamination warning records, contamination warning row hashes, warning counts, output-under-evidence checks, contamination-checklist-manifest-v1 manifest hashes, write-blocker limitation, review-required flag, trusted contamination-checklist diff helpers/gates, and #99 core_accuracy_gates."],
       "remaining_external_validation": ["Persistent acquisition-time mtime comparison, trusted contamination checklist, and write-blocker integration."]
     },
     {
       "item": 100,
       "title": "Tamper-evident audit bundle",
       "test_files": ["tests/test_rapidtriage_final_roadmap.py"],
-      "assertions": ["Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, external signing limitation, trusted signature-attestation diff helpers/gates, and #100 core_accuracy_gates."],
+      "assertions": ["Reviewer bundles preserve generated output hashes, previous-entry hash chain, entry hashes, head hash, tamper-evident-audit-manifest-v1 manifest hashes, external signing slots, external signing limitation, trusted signature-attestation diff helpers/gates, and #100 core_accuracy_gates."],
       "remaining_external_validation": ["External signing/notarization and trusted signature attestations."]
     }
   ]

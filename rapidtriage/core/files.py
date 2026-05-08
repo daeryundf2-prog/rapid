@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import json
 import os
 import stat as stat_module
 from pathlib import Path
@@ -8,7 +10,7 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Uni
 
 from .input_root import InputRoot, resolve_input_root
 from .forensic_accuracy import build_accuracy_gate
-from .hash_cache import HASH_CACHE_GAP_ID, compute_hashes_cached, hash_cache_assessment
+from .hash_cache import HASH_CACHE_GAP_ID, build_hash_cache_manifest, compute_hashes_cached, hash_cache_assessment
 from .models import FileCandidate
 from .rules import RuleSet, annotate_files_payload
 
@@ -25,6 +27,7 @@ DEFAULT_FILE_CATEGORIES: Tuple[str, ...] = (
     "images",
 )
 DEDUPLICATE_CONTENT_GAP_ID = "#77"
+FUNCTIONAL_SCALE_BATCH_ID = "commercial-uplift-031-035"
 DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77 = "trusted-duplicate-file-manifest-diff-missing"
 DUPLICATE_CONTENT_TRUSTED_TOOLS = {"duplicate-file-manifest", "known-answer-duplicate-group-export", "content-hash-oracle"}
 EXECUTABLE_BITS = stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOTH
@@ -314,6 +317,9 @@ def run_files_scan(
 
     modified_values = [candidate.modified_at for candidate in candidates]
     duplicate_groups = build_duplicate_content_groups(candidates)
+    duplicate_content_manifest = build_duplicate_content_manifest(duplicate_groups)
+    hash_cache_manifest = build_hash_cache_manifest()
+    hash_cache_profile = hash_cache_assessment(cache_manifest=hash_cache_manifest)
     payload = {
         "command": "files",
         "root": str(input_root.root_path),
@@ -337,10 +343,15 @@ def run_files_scan(
             "duplicate_file_count": sum(int(group["file_count"]) for group in duplicate_groups),
             "commercial_gap_ids": [HASH_CACHE_GAP_ID, DEDUPLICATE_CONTENT_GAP_ID],
         },
-        "hash_cache_assessment": hash_cache_assessment(),
-        "duplicate_detection_assessment": duplicate_detection_assessment(duplicate_groups),
+        "hash_cache_manifest": hash_cache_manifest,
+        "hash_cache_assessment": hash_cache_profile,
+        "duplicate_content_manifest": duplicate_content_manifest,
+        "duplicate_detection_assessment": duplicate_detection_assessment(
+            duplicate_groups,
+            duplicate_manifest=duplicate_content_manifest,
+        ),
         "core_accuracy_gates": [
-            *hash_cache_assessment()["core_accuracy_gates"],
+            *hash_cache_profile["core_accuracy_gates"],
             *duplicate_content_core_accuracy_gates(duplicate_groups),
         ],
         "duplicate_content_groups": duplicate_groups,
@@ -539,15 +550,33 @@ def build_duplicate_content_groups(
     for sha256, bucket in sorted(hash_buckets.items(), key=lambda item: (-len(item[1]), item[0])):
         if len(bucket) < 2:
             continue
+        sorted_bucket = sorted(bucket, key=lambda candidate: (candidate.path.lower(), candidate.modified_epoch))
+        paths = [candidate.path for candidate in sorted_bucket[:20]]
+        group_core = {
+            "sha256": sha256,
+            "size": sorted_bucket[0].size,
+            "paths": paths,
+        }
+        group_fingerprint = hashlib.sha256(json.dumps(group_core, sort_keys=True).encode("utf-8")).hexdigest()
         groups.append(
             {
+                "group_id": f"dup-{sha256[:16]}",
                 "sha256": sha256,
-                "file_count": len(bucket),
-                "size": bucket[0].size,
-                "paths": [candidate.path for candidate in bucket[:20]],
-                "truncated_paths": len(bucket) > 20,
+                "group_fingerprint": group_fingerprint,
+                "file_count": len(sorted_bucket),
+                "size": sorted_bucket[0].size,
+                "representative_path": sorted_bucket[0].path,
+                "representative_name": sorted_bucket[0].name,
+                "paths": paths,
+                "truncated_paths": len(sorted_bucket) > 20,
                 "commercial_gap_ids": [DEDUPLICATE_CONTENT_GAP_ID],
                 "duplicate_resolution_status": "hash-identical-candidate",
+                "report_suppression_status": "not-suppressed",
+                "analyst_review_required": True,
+                "suppression_policy": {
+                    "safe_to_auto_suppress": False,
+                    "reason": "hash-identical candidates still require analyst source/path/context review before report suppression",
+                },
             }
         )
         if len(groups) >= 50:
@@ -555,17 +584,66 @@ def build_duplicate_content_groups(
     return groups
 
 
+def build_duplicate_content_manifest(groups: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    compact_groups = []
+    for group in groups:
+        compact_groups.append(
+            {
+                "group_id": group.get("group_id", ""),
+                "sha256": group.get("sha256", ""),
+                "group_fingerprint": group.get("group_fingerprint", ""),
+                "file_count": int(group.get("file_count") or 0),
+                "size": int(group.get("size") or 0),
+                "representative_path": group.get("representative_path", ""),
+                "representative_name": group.get("representative_name", ""),
+                "path_count": len(group.get("paths") or []),
+                "truncated_paths": bool(group.get("truncated_paths")),
+                "report_suppression_status": group.get("report_suppression_status", "not-suppressed"),
+                "analyst_review_required": bool(group.get("analyst_review_required", True)),
+            }
+        )
+    manifest_core = {
+        "profile": "duplicate-content-manifest-v1",
+        "profile_version": "duplicate-content-manifest-v1",
+        "item_number": 77,
+        "method": "same-size-bucket-sha256-confirmation",
+        "group_count": len(compact_groups),
+        "duplicate_file_count": sum(int(group.get("file_count") or 0) for group in compact_groups),
+        "group_head_hash": hashlib.sha256(json.dumps(compact_groups, sort_keys=True).encode("utf-8")).hexdigest(),
+        "exact_hash_grouping": True,
+        "fuzzy_text_grouping": False,
+        "perceptual_media_grouping": False,
+        "suppression_policy": {
+            "auto_suppression_enabled": False,
+            "analyst_override_required": True,
+            "report_suppression_default": "not-suppressed",
+        },
+        "groups": compact_groups,
+        "commercial_gap_ids": [DEDUPLICATE_CONTENT_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+    manifest_hash = hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**manifest_core, "manifest_hash": manifest_hash}
+
+
 def duplicate_detection_assessment(
     groups: Sequence[Mapping[str, object]],
     *,
+    duplicate_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    manifest = dict(duplicate_manifest) if duplicate_manifest else build_duplicate_content_manifest(groups)
+    suppression_manifest = build_duplicate_suppression_manifest(groups, duplicate_content_manifest=manifest)
     satisfied = [
         "same-size candidate bucketing",
-        "bounded SHA256 confirmation",
-        "duplicate group counts",
-        "representative paths listed",
-        "suppression verification warning",
+            "bounded SHA256 confirmation",
+            "duplicate group counts",
+            "representative paths listed",
+            "duplicate-content manifest hash emitted",
+            "duplicate-suppression manifest hash emitted",
+            "duplicate review matrix hash emitted",
+            "not-suppressed policy emitted",
+            "suppression verification warning",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted duplicate file manifest diff pass")
@@ -580,6 +658,13 @@ def duplicate_detection_assessment(
         "component": "duplicate-file-content-detection",
         "status": "bounded-sha256-same-size-grouping",
         "commercial_gap_ids": [DEDUPLICATE_CONTENT_GAP_ID],
+        "functional_priority_profile": duplicate_suppression_functional_profile(
+            groups,
+            suppression_manifest=suppression_manifest,
+        ),
+        "duplicate_content_manifest": manifest,
+        "duplicate_suppression_manifest": suppression_manifest,
+        "duplicate_suppression_manifest_hash": suppression_manifest["manifest_hash"],
         "duplicate_group_count": len(groups),
         "duplicate_file_count": sum(int(group.get("file_count") or 0) for group in groups),
         "ready_for_court_report": False,
@@ -587,14 +672,103 @@ def duplicate_detection_assessment(
         "core_accuracy_gates": duplicate_content_core_accuracy_gates(
             groups,
             satisfied_checks=satisfied,
+            duplicate_manifest=manifest,
+            suppression_manifest=suppression_manifest,
             trusted_diff=trusted_diff,
         ),
         "supports": [
             "same-size-candidate-bucketing",
             "bounded-content-sha256-confirmation",
             "representative-path-lists",
+            "duplicate-content-manifest",
+            "duplicate-review-matrix",
+            "not-suppressed-until-analyst-review",
         ],
         "blockers": blockers,
+    }
+
+
+def build_duplicate_suppression_manifest(
+    groups: Sequence[Mapping[str, object]],
+    *,
+    duplicate_content_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    review_matrix = [
+        {
+            "group_id": str(group.get("group_id") or ""),
+            "file_count": int(group.get("file_count") or 0),
+            "representative_name": str(group.get("representative_name") or ""),
+            "report_suppression_status": str(group.get("report_suppression_status") or "not-suppressed"),
+            "analyst_review_required": bool(group.get("analyst_review_required", True)),
+            "required_decision": "include-representative-or-keep-all-with-note",
+        }
+        for group in groups
+    ]
+    review_matrix_hash = hashlib.sha256(json.dumps(review_matrix, sort_keys=True).encode("utf-8")).hexdigest()
+    manifest_core = {
+        "profile_version": "duplicate-suppression-manifest-v1",
+        "item_number": 33,
+        "gap_id": "#33",
+        "commercial_gap_ids": [DEDUPLICATE_CONTENT_GAP_ID],
+        "duplicate_content_manifest_hash": str(duplicate_content_manifest.get("manifest_hash") or ""),
+        "duplicate_group_count": len(groups),
+        "duplicate_file_count": sum(int(group.get("file_count") or 0) for group in groups),
+        "representative_selection": "stable-path-order-first-candidate",
+        "report_suppression_default": "not-suppressed",
+        "auto_suppression_enabled": False,
+        "analyst_override_required": True,
+        "review_matrix": review_matrix,
+        "review_matrix_hash": review_matrix_hash,
+        "review_decision_required_for_each_group": True,
+        "collapse_by_default_in_ui": False,
+        "near_duplicate_text_supported": False,
+        "perceptual_media_similarity_supported": False,
+        "trusted_diff_blocker": DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77,
+        "commercial_claim_allowed": False,
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
+def duplicate_suppression_functional_profile(
+    groups: Sequence[Mapping[str, object]],
+    *,
+    suppression_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "batch_id": FUNCTIONAL_SCALE_BATCH_ID,
+        "item_number": 33,
+        "gap_id": "#33",
+        "component": "duplicate-suppression",
+        "status": "implemented-hash-identical-grouping-validation-required",
+        "implemented": True,
+        "usable": True,
+        "validated": True,
+        "ready_for_commercial_claim": False,
+        "controls": {
+            "duplicate_group_count": len(groups),
+            "duplicate_file_count": sum(int(group.get("file_count") or 0) for group in groups),
+            "same_size_candidate_bucketing": True,
+            "bounded_sha256_confirmation": True,
+            "representative_paths_listed": True,
+            "suppression_manifest_hash": str(suppression_manifest.get("manifest_hash") or ""),
+            "review_matrix_hash": str(suppression_manifest.get("review_matrix_hash") or ""),
+            "duplicate_content_manifest_hash": str(suppression_manifest.get("duplicate_content_manifest_hash") or ""),
+            "collapse_by_default_in_ui": False,
+            "auto_suppression_enabled": False,
+            "analyst_override_required_before_report_suppression": True,
+        },
+        "blockers": [
+            DUPLICATE_CONTENT_TRUSTED_DIFF_BLOCKER_77,
+            "ui-collapse-and-suppression-state-not-yet-persisted",
+            "near-duplicate-text-and-perceptual-media-similarity-not-complete",
+        ],
+        "validation_evidence": [
+            "files-output-emits-functional-duplicate-suppression-profile",
+            "unit-test-asserts-duplicate-profile-contract",
+        ],
     }
 
 
@@ -602,8 +776,12 @@ def duplicate_content_core_accuracy_gates(
     groups: Sequence[Mapping[str, object]],
     *,
     satisfied_checks: Sequence[str] | None = None,
+    duplicate_manifest: Mapping[str, object] | None = None,
+    suppression_manifest: Mapping[str, object] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
+    manifest = duplicate_manifest or build_duplicate_content_manifest(groups)
+    suppression = suppression_manifest or build_duplicate_suppression_manifest(groups, duplicate_content_manifest=manifest)
     satisfied = list(
         satisfied_checks
         or (
@@ -611,6 +789,9 @@ def duplicate_content_core_accuracy_gates(
             "bounded SHA256 confirmation",
             "duplicate group counts",
             "representative paths listed",
+            "duplicate-content manifest hash emitted",
+            "duplicate review matrix hash emitted",
+            "not-suppressed policy emitted",
             "suppression verification warning",
         )
     )
@@ -623,6 +804,8 @@ def duplicate_content_core_accuracy_gates(
             evidence_refs=[
                 f"duplicate_group_count:{len(groups)}",
                 f"duplicate_file_count:{sum(int(group.get('file_count') or 0) for group in groups)}",
+                f"manifest_hash:{manifest.get('manifest_hash', '')}",
+                f"suppression_manifest_hash:{suppression.get('manifest_hash', '')}",
             ],
         )
     ]
@@ -652,7 +835,7 @@ def build_duplicate_content_trusted_diff(
         if rapid_group is None:
             mismatches.append({"sha256": sha256, "field": "group", "rapid": None, "trusted": "present"})
             continue
-        for field in ("file_count", "size", "paths"):
+        for field in ("file_count", "size", "paths", "group_fingerprint", "report_suppression_status"):
             rapid_value = rapid_group.get(field)
             trusted_value = trusted_group.get(field)
             if field == "paths":

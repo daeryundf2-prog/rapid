@@ -39,6 +39,9 @@ Expected outputs include:
 - `rapidtriage-sample/run-output/rapidtriage-timeline.json`
 - `rapidtriage-sample/run-output/artifacts/rapidtriage-artifacts-browser.json`
 - `rapidtriage-sample/run-output/artifacts/rapidtriage-artifacts-recent-files.json`
+- `rapidtriage-sample/rapidtriage-training-lab-manifest.json`
+
+The training lab manifest records the synthetic evidence root, mode, read-only setting, workflow stages, expected search keywords, required viewer/review exercises, output hashes, missing required outputs, and remaining external training blockers. Keep it with smoke and training records when onboarding analysts.
 
 ## Useful Smoke Searches
 
@@ -49,6 +52,16 @@ rapidtriage search rapidtriage-sample/run-output -k password --no-ocr
 rapidtriage search rapidtriage-sample/run-output -k powershell --no-ocr
 rapidtriage search rapidtriage-sample/run-output -k download --no-ocr
 ```
+
+## Review And Viewer Exercise
+
+Use the sample run to practice the analyst loop:
+
+1. Search for at least three terms from `rapidtriage-training-lab-manifest.json`.
+2. Open the hit in source preview, timeline, file table, browser artifacts, and report draft views where available.
+3. Mark at least three candidates as relevant or include-in-report.
+4. Add a note explaining the source path checked, why the item matters, and any limitation.
+5. Verify the output hashes in the training lab manifest before treating the exercise as complete.
 
 ## Windows
 

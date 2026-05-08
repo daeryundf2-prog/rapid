@@ -12,13 +12,16 @@ from ...core.forensic_accuracy import build_accuracy_gate
 from ...core.models import ArtifactRecord
 from .common import build_forensic_review
 
-PARSER_VERSION = "windows-filesystem-v5"
+PARSER_VERSION = "windows-filesystem-v7"
 SUPPORTED_SUFFIXES = {".csv", ".json", ".jsonl", ".ndjson"}
 MFT_HINTS = ("mft", "mftexcmd", "$mft")
 USN_HINTS = ("usn", "usnjrnl", "$j")
 NATIVE_SCAN_LIMIT = 16 * 1024 * 1024
 USN_RECORD_SCAN_LIMIT = 5000
 USN_LARGE_RECORD_THRESHOLD = 512
+USN_V4_EXTENT_PREVIEW_LIMIT = 64
+MFT_RUNLIST_PREVIEW_BYTE_LIMIT = 256
+MFT_RUNLIST_PREVIEW_RUN_LIMIT = 64
 WINDOWS_PATH_RE = re.compile(r"(?i)(?:[a-z]:\\|\\\\|\\device\\)[^\x00\r\n\t\"'<>|]{4,260}")
 USN_REASON_FLAGS = {
     0x00000001: "DATA_OVERWRITE",
@@ -90,6 +93,7 @@ NTFS_FILESYSTEM_CAPABILITIES = {
     "mft_nonresident_runlist_preview": True,
     "usn_export_import": True,
     "usn_native_v2_v3_record_decode": True,
+    "usn_native_v4_extent_record_decode": True,
     "usn_reason_flag_decode": True,
     "usn_large_record_detection": True,
     "mft_attribute_list_resolution": False,
@@ -234,6 +238,20 @@ def build_mft_inventory_record(path: Path) -> ArtifactRecord:
             "ntfs_validation_matrix": ntfs_validation_matrix(validation_checks),
             "ntfs_report_grade_assessment": report_grade,
             "ntfs_native_capabilities": NTFS_FILESYSTEM_CAPABILITIES,
+            "mft_full_parser_profile": mft_full_parser_profile(
+                artifact_scope="inventory",
+                details={
+                    "source_path": str(path.resolve()),
+                    "source_hashes": file_hashes(path),
+                    "native_record_count": len(mft_records),
+                    "scan_bytes": len(blob),
+                    "record_validation_counts": count_values(record.get("validation_status") for record in mft_records),
+                    "native_attribute_type_counts": count_many(record.get("attribute_types") for record in mft_records),
+                    "path_candidates": path_candidates[:50],
+                    "validation_checks": validation_checks,
+                    "ntfs_report_grade_assessment": report_grade,
+                },
+            ),
             "commercial_uplift_evidence": ntfs_commercial_uplift_evidence(
                 "mft",
                 {
@@ -291,6 +309,7 @@ def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
             "modified_at": dt.datetime.fromtimestamp(stat_result.st_mtime, dt.timezone.utc).isoformat(),
             "scan_bytes": len(blob),
             "scan_metadata": scan_metadata,
+            "usn_replay_inventory_profile": usn_replay_inventory_profile(records, scan_metadata),
             "record_limit": USN_RECORD_SCAN_LIMIT,
             "record_limit_reached": scan_metadata["record_limit_reached"],
             "next_cursor_offset": scan_metadata["next_cursor_offset"],
@@ -324,6 +343,22 @@ def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
             "ntfs_validation_matrix": ntfs_validation_matrix(validation_checks),
             "ntfs_report_grade_assessment": report_grade,
             "ntfs_native_capabilities": NTFS_FILESYSTEM_CAPABILITIES,
+            "usn_journal_replay_profile": usn_journal_replay_profile(
+                artifact_scope="inventory",
+                details={
+                    "source_path": str(path.resolve()),
+                    "source_hashes": file_hashes(path),
+                    "scan_metadata": scan_metadata,
+                    "native_record_count": len(records),
+                    "reason_flag_counts": count_many(record.get("reason_flags") for record in records),
+                    "usn_replay_inventory_profile": usn_replay_inventory_profile(records, scan_metadata),
+                    "timestamp_range": scan_metadata["timestamp_range"],
+                    "record_limit_reached": scan_metadata["record_limit_reached"],
+                    "next_cursor_available": scan_metadata["next_cursor_available"],
+                    "validation_checks": validation_checks,
+                    "ntfs_report_grade_assessment": report_grade,
+                },
+            ),
             "commercial_uplift_evidence": ntfs_commercial_uplift_evidence(
                 "usn",
                 {
@@ -339,7 +374,7 @@ def build_usn_journal_inventory_record(path: Path) -> ArtifactRecord:
             ),
             "commercial_grade_ready": False,
             "commercial_grade_blockers": report_grade["blockers"],
-            "note": "Native USN records are decoded when bounded v2/v3 record structures are recoverable; validation counts summarize structural, cursor, size, and timestamp confidence. Validate critical timelines with a dedicated parser.",
+            "note": "Native USN records are decoded when bounded v2/v3 filename records or v4 extent records are recoverable; validation counts summarize structural, cursor, size, and timestamp confidence where the format provides it. Validate critical timelines with a dedicated parser.",
         },
     )
 
@@ -390,6 +425,7 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
         "attribute_types": list(record.get("attribute_types") or []),
         "attribute_type_counts": count_values(record.get("attribute_types") or []),
         "attributes": list(record.get("attributes") or [])[:25],
+        "attribute_list_entries": list(record.get("attribute_list_entries") or [])[:25],
         "standard_information": dict(standard_information),
         "file_name_entries": file_name_entries[:10],
         "data_attributes": list(record.get("data_attributes") or [])[:10],
@@ -409,6 +445,7 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
                 "timestamp_source": timestamp_source,
                 "sequence_validation": dict(record.get("sequence_validation") or {}),
                 "attribute_types": list(record.get("attribute_types") or []),
+                "attribute_list_entries": list(record.get("attribute_list_entries") or [])[:25],
                 "data_attributes": list(record.get("data_attributes") or [])[:10],
                 "file_name_entries": file_name_entries[:10],
                 "validation_checks": dict(record.get("validation_checks") or {}),
@@ -416,6 +453,9 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
         ),
         "parser_confidence": record.get("parser_confidence", 0.0),
         "mft_record_evidence": mft_record_evidence(record, file_path),
+        "mft_path_reconstruction_profile": mft_path_reconstruction_profile(record, file_path),
+        "mft_attribute_list_profile": mft_attribute_list_profile(record),
+        "mft_data_run_summary": mft_data_run_summary(record),
         "evidence_strength": "ntfs-mft-native-attribute-metadata",
         "validation_required": True,
         "commercial_grade_ready": False,
@@ -436,6 +476,8 @@ def build_native_mft_record(path: Path, record: Mapping[str, object], index: int
         blockers=MFT_REPORT_GRADE_BLOCKERS,
     )
     details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
+    details["mft_full_parser_profile"] = mft_full_parser_profile("record", details)
+    details["ntfs_native_depth_readiness_profile"] = ntfs_native_depth_readiness_profile("mft", "record", details)
     details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
     details["commercial_uplift_evidence"] = ntfs_commercial_uplift_evidence("mft", details)
     details["forensic_review"] = build_forensic_review(
@@ -533,6 +575,8 @@ def build_native_usn_record(path: Path, record: Mapping[str, object], index: int
         ),
         "parser_confidence": record.get("parser_confidence", 0.0),
         "usn_record_evidence": usn_record_evidence(record),
+        "usn_replay_transition_profile": usn_replay_transition_profile(record),
+        "usn_cursor_pagination_profile": usn_cursor_pagination_profile(record),
         "evidence_strength": "ntfs-usn-native-record",
         "validation_required": True,
         "commercial_grade_ready": False,
@@ -541,7 +585,7 @@ def build_native_usn_record(path: Path, record: Mapping[str, object], index: int
             "full-usn-replay-correlation-not-implemented",
             "large-corpus-pagination-validation-required",
         ],
-        "validation_guidance": "Native USN rows validate record layout, length, cursor bounds, name bounds/UTF-16 decoding, version, and FILETIME plausibility, but critical timelines should still be cross-checked with MFTECmd/UsnJrnl2Csv or another dedicated parser.",
+        "validation_guidance": "Native USN rows validate record layout, length, cursor bounds, name bounds/UTF-16 decoding for v2/v3, v4 extent bounds/counts where present, version, and FILETIME plausibility where the format provides it. Critical timelines should still be cross-checked with MFTECmd/UsnJrnl2Csv or another dedicated parser.",
         "raw": dict(record),
         "raw_preview": json.dumps(record, ensure_ascii=False, sort_keys=True)[:2000],
     }
@@ -553,6 +597,8 @@ def build_native_usn_record(path: Path, record: Mapping[str, object], index: int
         blockers=USN_REPORT_GRADE_BLOCKERS,
     )
     details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
+    details["usn_journal_replay_profile"] = usn_journal_replay_profile("record", details)
+    details["ntfs_native_depth_readiness_profile"] = ntfs_native_depth_readiness_profile("usn", "record", details)
     details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
     details["commercial_uplift_evidence"] = ntfs_commercial_uplift_evidence("usn", details)
     details["forensic_review"] = build_forensic_review(
@@ -585,6 +631,7 @@ def mft_record_evidence(record: Mapping[str, object], file_path: str) -> dict[st
     attributes = list(record.get("attributes") or [])
     standard_information = record.get("standard_information") if isinstance(record.get("standard_information"), Mapping) else {}
     file_name_entries = list(record.get("file_name_entries") or [])
+    attribute_list_entries = list(record.get("attribute_list_entries") or [])
     data_attributes = list(record.get("data_attributes") or [])
     resident_hashes = [
         dict(item.get("resident_data_hashes") or {})
@@ -593,6 +640,19 @@ def mft_record_evidence(record: Mapping[str, object], file_path: str) -> dict[st
     ]
     nonresident_previews = [
         list(item.get("runlist_preview") or [])
+        for item in data_attributes
+        if isinstance(item, Mapping) and not bool(item.get("resident"))
+    ]
+    nonresident_runlist_evidence = [
+        {
+            "runlist_decode_status": str(item.get("runlist_decode_status") or ""),
+            "runlist_warning_count": int(item.get("runlist_warning_count") or 0),
+            "run_count": len(list(item.get("runlist_preview") or [])),
+            "runs": list(item.get("runlist_preview") or [])[:10],
+            "preview_bytes": int(item.get("runlist_preview_bytes") or 0),
+            "consumed_bytes": int(item.get("runlist_consumed_bytes") or 0),
+            "terminator_offset": item.get("runlist_terminator_offset"),
+        }
         for item in data_attributes
         if isinstance(item, Mapping) and not bool(item.get("resident"))
     ]
@@ -624,9 +684,12 @@ def mft_record_evidence(record: Mapping[str, object], file_path: str) -> dict[st
             "attribute_types": list(record.get("attribute_types") or []),
             "standard_information_present": bool(standard_information),
             "file_name_attribute_count": len(file_name_entries),
+            "attribute_list_entry_count": len(attribute_list_entries),
+            "attribute_list_evidence": attribute_list_entries[:10],
             "data_attribute_count": len(data_attributes),
             "resident_data_hashes": resident_hashes,
             "nonresident_runlist_preview_count": sum(1 for item in nonresident_previews if item),
+            "nonresident_runlist_evidence": nonresident_runlist_evidence,
         },
         "validation_evidence": {
             "record_validation_status": record.get("validation_status", "unknown"),
@@ -653,6 +716,93 @@ def mft_record_evidence(record: Mapping[str, object], file_path: str) -> dict[st
     }
 
 
+def mft_path_reconstruction_profile(record: Mapping[str, object], file_path: str) -> dict[str, object]:
+    file_name_entries = [item for item in record.get("file_name_entries") or [] if isinstance(item, Mapping)]
+    primary = file_name_entries[0] if file_name_entries else {}
+    parent_reference = primary.get("parent_reference") if isinstance(primary.get("parent_reference"), Mapping) else {}
+    path_candidates = [str(item) for item in record.get("path_candidates") or [] if item]
+    best_name = str(primary.get("file_name") or file_path or "")
+    has_full_path_string = any(("\\" in item or "/" in item) and best_name and best_name.lower() in item.lower() for item in path_candidates)
+    confidence = "full-path-string-candidate" if has_full_path_string else "filename-plus-parent-reference-only"
+    return {
+        "profile_version": "mft-path-reconstruction-v1",
+        "record_number": record.get("record_number_candidate", ""),
+        "sequence_number": record.get("sequence_number", 0),
+        "best_available_path": file_path or best_name,
+        "best_file_name": best_name,
+        "path_candidates": path_candidates[:10],
+        "file_name_entry_count": len(file_name_entries),
+        "parent_reference_decoded": dict(parent_reference),
+        "parent_record_number": parent_reference.get("record_number", ""),
+        "parent_sequence_number": parent_reference.get("sequence_number", ""),
+        "source_mode": confidence,
+        "full_volume_path_cache_used": False,
+        "commercial_grade_ready": False,
+        "blockers": [
+            "mft-full-volume-parent-cache-required",
+            "mft-hardlink-and-namespace-selection-validation-required",
+            "mft-trusted-path-diff-required",
+        ],
+        "safe_report_wording": (
+            "Full path candidate recovered from record-local strings; validate with full-volume MFT path cache."
+            if has_full_path_string
+            else "Filename and parent FRN decoded from $FILE_NAME; full path not reconstructed from a volume-wide cache."
+        ),
+    }
+
+
+def mft_attribute_list_profile(record: Mapping[str, object]) -> dict[str, object]:
+    attribute_types = list(record.get("attribute_types") or [])
+    entries = [item for item in record.get("attribute_list_entries") or [] if isinstance(item, Mapping)]
+    present = "$ATTRIBUTE_LIST" in attribute_types or bool(entries)
+    return {
+        "profile_version": "mft-attribute-list-v1",
+        "present": present,
+        "entry_count": len(entries),
+        "entries": entries[:25],
+        "resolved": False,
+        "resolution_status": (
+            "extension-record-resolution-not-implemented"
+            if present
+            else "not-present-in-record"
+        ),
+        "extension_record_references": [
+            dict(item.get("extension_reference_decoded") or {})
+            for item in entries
+            if item.get("extension_reference_decoded")
+        ][:25],
+        "commercial_grade_ready": False,
+        "blockers": ["mft-attribute-list-extension-record-resolution-required"] if present else [],
+    }
+
+
+def mft_data_run_summary(record: Mapping[str, object]) -> dict[str, object]:
+    data_attributes = [item for item in record.get("data_attributes") or [] if isinstance(item, Mapping)]
+    nonresident = [item for item in data_attributes if item.get("resident") is False]
+    decoded_runs: list[Mapping[str, object]] = []
+    warning_count = 0
+    for item in nonresident:
+        runs = [run for run in item.get("runlist_preview") or [] if isinstance(run, Mapping)]
+        decoded_runs.extend(runs)
+        warning_count += int(item.get("runlist_warning_count") or 0)
+    first_lcn = next((run.get("absolute_lcn") for run in decoded_runs if run.get("absolute_lcn") is not None), None)
+    return {
+        "profile_version": "mft-data-run-summary-v1",
+        "data_attribute_count": len(data_attributes),
+        "nonresident_data_attribute_count": len(nonresident),
+        "resident_data_attribute_count": len(data_attributes) - len(nonresident),
+        "preview_run_count": len(decoded_runs),
+        "sparse_preview_run_count": sum(1 for run in decoded_runs if bool(run.get("sparse"))),
+        "preview_cluster_count": sum(int(run.get("cluster_count") or 0) for run in decoded_runs),
+        "first_preview_lcn": first_lcn,
+        "decode_statuses": count_values(str(item.get("runlist_decode_status") or "") for item in nonresident),
+        "warning_count": warning_count,
+        "preview_limited": bool(nonresident),
+        "commercial_grade_ready": False,
+        "blockers": ["mft-full-nonresident-runlist-validation-required"] if nonresident else [],
+    }
+
+
 def usn_record_evidence(record: Mapping[str, object]) -> dict[str, object]:
     validation_checks = record.get("validation_checks") if isinstance(record.get("validation_checks"), Mapping) else {}
     return {
@@ -674,6 +824,14 @@ def usn_record_evidence(record: Mapping[str, object]) -> dict[str, object]:
             "deleted_hint": bool(record.get("deleted_hint")),
             "file_attribute_names": list(record.get("file_attribute_names") or []),
             "timestamp": str(record.get("timestamp") or ""),
+            "v4_extent_evidence": {
+                "extent_count": int(record.get("v4_extent_count") or 0),
+                "remaining_extents": int(record.get("v4_remaining_extents") or 0),
+                "extent_size": int(record.get("v4_extent_size") or 0),
+                "extents": list(record.get("v4_extents") or [])[:10],
+            }
+            if int(record.get("major_version") or 0) == 4
+            else {},
         },
         "validation_evidence": {
             "record_validation_status": record.get("validation_status", "unknown"),
@@ -696,6 +854,101 @@ def usn_record_evidence(record: Mapping[str, object]) -> dict[str, object]:
         "report_limitations": [
             "full journal replay and path cache correlation are not complete",
             "large-corpus cursor pagination requires separate validation",
+        ],
+    }
+
+
+def usn_replay_transition_profile(record: Mapping[str, object]) -> dict[str, object]:
+    reason_flags = set(str(item) for item in record.get("reason_flags") or [])
+    transition = "metadata-change"
+    if "RENAME_OLD_NAME" in reason_flags:
+        transition = "rename-old-name"
+    elif "RENAME_NEW_NAME" in reason_flags:
+        transition = "rename-new-name"
+    elif "FILE_DELETE" in reason_flags:
+        transition = "delete"
+    elif "FILE_CREATE" in reason_flags:
+        transition = "create"
+    return {
+        "profile_version": "usn-replay-transition-v1",
+        "transition_class": transition,
+        "replay_order_key": {
+            "usn": record.get("usn", 0),
+            "timestamp": str(record.get("timestamp") or ""),
+            "record_cursor": record.get("record_cursor", record.get("record_offset", 0)),
+        },
+        "file_reference_number_decoded": dict(record.get("file_reference_number_decoded") or {}),
+        "parent_file_reference_number_decoded": dict(record.get("parent_file_reference_number_decoded") or {}),
+        "file_name": str(record.get("file_name") or ""),
+        "path_cache_effect": (
+            "remove-current-name-after-delete"
+            if transition == "delete"
+            else "pending-rename-pair-required"
+            if transition.startswith("rename-")
+            else "add-or-update-current-name"
+            if transition == "create"
+            else "no-path-cache-mutation-by-itself"
+        ),
+        "requires_previous_state": transition in {"delete", "rename-old-name", "rename-new-name"},
+        "full_journal_context_required": True,
+        "commercial_grade_ready": False,
+        "blockers": [
+            "usn-full-frn-path-cache-required",
+            "usn-complete-journal-ordering-required",
+            "usn-rename-pair-validation-required",
+        ],
+    }
+
+
+def usn_cursor_pagination_profile(record: Mapping[str, object]) -> dict[str, object]:
+    cursor = int(record.get("record_cursor", record.get("record_offset", 0)) or 0)
+    next_cursor = int(record.get("next_record_cursor", 0) or 0)
+    length = int(record.get("record_length", 0) or 0)
+    return {
+        "profile_version": "usn-cursor-pagination-v1",
+        "record_cursor": cursor,
+        "next_record_cursor": next_cursor,
+        "record_length": length,
+        "cursor_progresses": next_cursor > cursor,
+        "expected_next_cursor": cursor + length if length else None,
+        "cursor_matches_record_length": bool(length and next_cursor == cursor + length),
+        "safe_for_cursor_api": next_cursor > cursor and bool(length),
+        "commercial_grade_ready": False,
+        "blockers": ["usn-large-journal-cursor-determinism-required"],
+    }
+
+
+def usn_replay_inventory_profile(
+    records: Sequence[Mapping[str, object]],
+    scan_metadata: Mapping[str, object],
+) -> dict[str, object]:
+    transition_counts = count_values(
+        usn_replay_transition_profile(record)["transition_class"] for record in records
+    )
+    rename_old = sum(1 for record in records if "RENAME_OLD_NAME" in set(record.get("reason_flags") or []))
+    rename_new = sum(1 for record in records if "RENAME_NEW_NAME" in set(record.get("reason_flags") or []))
+    return {
+        "profile_version": "usn-replay-inventory-v1",
+        "native_record_count": len(records),
+        "transition_counts": transition_counts,
+        "rename_old_count": rename_old,
+        "rename_new_count": rename_new,
+        "rename_pair_balance": "balanced-in-scan" if rename_old == rename_new else "requires-full-journal-context",
+        "delete_count": sum(1 for record in records if "FILE_DELETE" in set(record.get("reason_flags") or [])),
+        "create_count": sum(1 for record in records if "FILE_CREATE" in set(record.get("reason_flags") or [])),
+        "cursor_window": {
+            "first_record_offset": scan_metadata.get("first_record_offset"),
+            "last_record_offset": scan_metadata.get("last_record_offset"),
+            "next_cursor_offset": scan_metadata.get("next_cursor_offset"),
+            "next_cursor_available": bool(scan_metadata.get("next_cursor_available")),
+            "record_limit_reached": bool(scan_metadata.get("record_limit_reached")),
+        },
+        "full_frn_path_cache_replay_done": False,
+        "commercial_grade_ready": False,
+        "blockers": [
+            "usn-full-frn-path-cache-required",
+            "usn-complete-journal-ordering-required",
+            "usn-large-journal-pagination-proof-required",
         ],
     }
 
@@ -728,6 +981,10 @@ def ntfs_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, objec
         "has_standard_information_attribute": ("$STANDARD_INFORMATION", "high"),
         "has_file_name_attribute": ("$FILE_NAME", "high"),
         "has_data_attribute": ("$DATA", "medium"),
+        "has_attribute_list_attribute": ("$ATTRIBUTE_LIST detected", "medium"),
+        "has_nonresident_data_attribute": ("Nonresident $DATA attribute", "medium"),
+        "has_nonresident_runlist_preview": ("Nonresident runlist preview", "medium"),
+        "has_decoded_nonresident_runlist": ("Decoded nonresident runlist preview", "high"),
         "attribute_end_marker_seen": ("Attribute end marker", "medium"),
         "timestamp_fields_present": ("Timestamp fields", "high"),
         "record_length_aligned": ("USN record length aligned", "high"),
@@ -736,6 +993,9 @@ def ntfs_validation_matrix(checks: Mapping[str, object]) -> list[dict[str, objec
         "filename_utf16_valid": ("USN filename UTF-16", "high"),
         "filetime_plausible": ("USN FILETIME plausible", "high"),
         "version_supported": ("USN version supported", "high"),
+        "v4_extent_bounds_valid": ("USN v4 extent bounds", "high"),
+        "v4_extent_count_matches": ("USN v4 extent count", "medium"),
+        "v4_no_filename_by_design": ("USN v4 has no filename by design", "medium"),
         "known_reason_bits_only": ("Known USN reason bits", "medium"),
         "has_record_number": ("Record number", "medium"),
         "has_file_path": ("File path", "high"),
@@ -870,6 +1130,312 @@ def ntfs_reportability_decision(
     }
 
 
+def ntfs_native_depth_readiness_profile(
+    family: str,
+    artifact_scope: str,
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    """Summarize native NTFS parser depth without overstating report-grade readiness."""
+
+    report_grade = (
+        details.get("ntfs_report_grade_assessment")
+        if isinstance(details.get("ntfs_report_grade_assessment"), Mapping)
+        else {}
+    )
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    matrix = details.get("ntfs_validation_matrix") if isinstance(details.get("ntfs_validation_matrix"), list) else []
+    passed_ids = [str(item.get("id")) for item in matrix if isinstance(item, Mapping) and item.get("passed")]
+    failed_ids = [str(item.get("id")) for item in matrix if isinstance(item, Mapping) and not item.get("passed")]
+    source_hashes = details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}
+    decoded_components = (
+        mft_depth_components(details, validation_checks)
+        if family == "mft"
+        else usn_depth_components(details, validation_checks)
+    )
+    component_count = len(decoded_components)
+    decoded_count = sum(1 for value in decoded_components.values() if value)
+    depth_score = round(decoded_count / component_count, 3) if component_count else 0.0
+    blockers = sorted(
+        set(str(item) for item in report_grade.get("blockers") or [])
+        | (set(MFT_REPORT_GRADE_BLOCKERS) if family == "mft" else set(USN_REPORT_GRADE_BLOCKERS))
+    )
+    return {
+        "profile_version": "ntfs-native-depth-readiness-v1",
+        "parser_version": PARSER_VERSION,
+        "family": family,
+        "artifact_scope": artifact_scope,
+        "commercial_grade_ready": False,
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "status": "triage-depth-improved-report-grade-blocked",
+        "depth_score": depth_score,
+        "decoded_component_count": decoded_count,
+        "total_component_count": component_count,
+        "decoded_components": decoded_components,
+        "validation_summary": {
+            "passed_ids": passed_ids,
+            "failed_ids": failed_ids,
+            "validation_required": bool(details.get("validation_required", True)),
+            "trusted_diff_status": trusted_ntfs_diff_status(family, details),
+        },
+        "large_data_controls": {
+            "bounded_native_scan": str(details.get("source_format") or "").startswith("ntfs-"),
+            "scan_limit_bytes": NATIVE_SCAN_LIMIT,
+            "record_limit": USN_RECORD_SCAN_LIMIT if family == "usn" else None,
+            "source_index": details.get("source_index", ""),
+            "record_cursor": details.get("record_cursor", details.get("record_offset", "")),
+            "next_cursor_available": bool(details.get("next_cursor_available")),
+            "case_db_indexable": True,
+        },
+        "source_citation_requirements": [
+            "source_path",
+            "source_sha256",
+            "parser_version",
+            "record_offset_or_cursor",
+            "record_number_or_usn",
+            "validation_status",
+        ],
+        "source_provenance": {
+            "source_path": str(details.get("source_path") or ""),
+            "source_sha256": str(source_hashes.get("sha256") or ""),
+            "record_offset": details.get("record_offset", ""),
+            "record_cursor": details.get("record_cursor", ""),
+            "record_number": details.get("record_number", ""),
+            "usn": details.get("usn", ""),
+        },
+        "blockers": blockers,
+        "next_internal_actions": (
+            [
+                "Resolve ATTRIBUTE_LIST base/extension records.",
+                "Validate nonresident data runs against cluster-level known-answer fixtures.",
+                "Build full-volume parent path cache and diff paths against MFTECmd/analyzeMFT.",
+            ]
+            if family == "mft"
+            else [
+                "Replay USN with FRN path cache from MFT rows.",
+                "Validate rename/delete ordering over the complete journal.",
+                "Prove cursor pagination determinism on multi-million-record journals.",
+            ]
+        ),
+        "analyst_warning": (
+            "Use this MFT row as a native structure/timestamp pivot only until attribute-list, runlist, "
+            "and full parent-path validation are attached."
+            if family == "mft"
+            else "Use this USN row as a native change-record pivot only until full-journal replay and "
+            "trusted timeline diff evidence are attached."
+        ),
+    }
+
+
+def mft_depth_components(details: Mapping[str, object], validation_checks: Mapping[str, object]) -> dict[str, bool]:
+    data_attributes = [item for item in details.get("data_attributes") or [] if isinstance(item, Mapping)]
+    path_profile = details.get("mft_path_reconstruction_profile") if isinstance(details.get("mft_path_reconstruction_profile"), Mapping) else {}
+    return {
+        "file_record_header": bool(validation_checks.get("magic_valid") or details.get("record_number")),
+        "usa_sequence_fixup": bool(validation_checks.get("sequence_fixup_valid") or details.get("sequence_validation")),
+        "standard_information": "$STANDARD_INFORMATION" in list(details.get("attribute_types") or []),
+        "file_name_attribute": "$FILE_NAME" in list(details.get("attribute_types") or []),
+        "parent_reference_decode": bool(path_profile.get("parent_record_number") not in (None, "")),
+        "data_attribute": "$DATA" in list(details.get("attribute_types") or []),
+        "resident_data_hash": any(item.get("resident_data_hashes") for item in data_attributes),
+        "nonresident_runlist_preview": any(item.get("runlist_preview") for item in data_attributes),
+        "attribute_list_detect": "$ATTRIBUTE_LIST" in list(details.get("attribute_types") or []),
+        "attribute_list_resolution": bool(NTFS_FILESYSTEM_CAPABILITIES["mft_attribute_list_resolution"]),
+        "full_parent_path_reconstruction": bool(NTFS_FILESYSTEM_CAPABILITIES["full_volume_path_reconstruction"]),
+    }
+
+
+def usn_depth_components(details: Mapping[str, object], validation_checks: Mapping[str, object]) -> dict[str, bool]:
+    return {
+        "record_header": bool(validation_checks.get("record_length_aligned") or details.get("record_length")),
+        "cursor_progression": bool(validation_checks.get("record_cursor_progresses") or details.get("record_cursor") not in (None, "")),
+        "v2_v3_filename_decode": bool(validation_checks.get("filename_utf16_valid") or details.get("file_path")),
+        "v4_extent_preview": bool((details.get("usn_record_evidence") or {}).get("change_evidence", {}).get("v4_extent_evidence"))
+        if isinstance(details.get("usn_record_evidence"), Mapping)
+        else False,
+        "reason_flags": bool(details.get("reason_flags")),
+        "file_attribute_flags": bool(details.get("file_attribute_names")),
+        "frn_parent_refs": bool(details.get("file_reference_number_decoded") or details.get("parent_file_reference_number_decoded")),
+        "rename_delete_hints": bool(details.get("rename_hint") or details.get("deleted_hint")),
+        "full_frn_path_cache_replay": bool(NTFS_FILESYSTEM_CAPABILITIES["usn_full_journal_replay"]),
+    }
+
+
+def trusted_ntfs_diff_status(family: str, details: Mapping[str, object]) -> str:
+    key = "mft_trusted_diff" if family == "mft" else "usn_trusted_diff"
+    trusted_diff = details.get(key) if isinstance(details.get(key), Mapping) else {}
+    return str(trusted_diff.get("status") or "not-attached")
+
+
+def mft_full_parser_profile(artifact_scope: str, details: Mapping[str, object]) -> dict[str, object]:
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    report_grade = (
+        details.get("ntfs_report_grade_assessment")
+        if isinstance(details.get("ntfs_report_grade_assessment"), Mapping)
+        else {}
+    )
+    attribute_types = list(details.get("attribute_types") or [])
+    native_counts = list(details.get("native_attribute_type_counts") or [])
+    attribute_list_profile = (
+        details.get("mft_attribute_list_profile")
+        if isinstance(details.get("mft_attribute_list_profile"), Mapping)
+        else {}
+    )
+    path_profile = (
+        details.get("mft_path_reconstruction_profile")
+        if isinstance(details.get("mft_path_reconstruction_profile"), Mapping)
+        else {}
+    )
+    data_run_summary = (
+        details.get("mft_data_run_summary")
+        if isinstance(details.get("mft_data_run_summary"), Mapping)
+        else {}
+    )
+    attribute_type_names = sorted(
+        set(str(item) for item in attribute_types)
+        | {str(item.get("value")) for item in native_counts if isinstance(item, Mapping) and item.get("value")}
+    )
+    return {
+        "profile_version": "mft-full-parser-readiness-v1",
+        "commercial_batch_id": "commercial-uplift-011-015",
+        "item_number": 13,
+        "artifact_scope": artifact_scope,
+        "current_decode_level": (
+            "native-file-record-attributes-partial"
+            if str(details.get("source_format") or "") == "ntfs-mft"
+            else "trusted-tool-export-row"
+        ),
+        "decoded_components": {
+            "file_record_header": bool(validation_checks.get("magic_valid") or validation_checks.get("has_native_records") or details.get("record_number")),
+            "usa_sequence_fixup": bool(validation_checks.get("sequence_fixup_valid") or validation_checks.get("has_sequence_validation")),
+            "standard_information": "$STANDARD_INFORMATION" in attribute_type_names or bool(validation_checks.get("has_standard_information_attribute")),
+            "file_name_attributes": "$FILE_NAME" in attribute_type_names or bool(validation_checks.get("has_file_name_attribute")),
+            "parent_reference_decode": bool(path_profile.get("parent_record_number") not in (None, "")),
+            "resident_data_hashing": any(isinstance(item, Mapping) and item.get("resident") for item in list(details.get("data_attributes") or [])),
+            "nonresident_runlist_preview": any(
+                isinstance(item, Mapping) and (item.get("resident") is False or item.get("runlist_preview"))
+                for item in list(details.get("data_attributes") or [])
+            ),
+            "attribute_list_detect": bool(attribute_list_profile.get("present")),
+            "attribute_list_resolution": bool(NTFS_FILESYSTEM_CAPABILITIES["mft_attribute_list_resolution"]),
+            "full_parent_path_reconstruction": bool(NTFS_FILESYSTEM_CAPABILITIES["full_volume_path_reconstruction"]),
+        },
+        "path_reconstruction_profile": path_profile,
+        "attribute_list_profile": attribute_list_profile,
+        "data_run_summary": data_run_summary,
+        "source_provenance": {
+            "source_path": str(details.get("source_path") or ""),
+            "source_sha256": (details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}).get("sha256", ""),
+            "record_offset": details.get("record_offset", ""),
+            "record_number": details.get("record_number", ""),
+            "native_record_count": details.get("native_record_count", 0),
+            "scan_bytes": details.get("scan_bytes", 0),
+        },
+        "reportability_decision": ntfs_reportability_decision("mft", report_grade, details),
+        "required_before_report": [
+            "resolve ATTRIBUTE_LIST extension records and merge base/extension attributes",
+            "fully decode nonresident runlists and validate physical cluster ranges",
+            "reconstruct parent paths using a full-volume FRN cache",
+            "diff record identity/path/timestamps against MFTECmd/analyzeMFT/TSK known-answer output",
+        ],
+        "large_data_controls": {
+            "bounded_native_scan": str(details.get("source_format") or "") == "ntfs-mft",
+            "scan_limit_bytes": NATIVE_SCAN_LIMIT,
+            "record_level_rows": artifact_scope in {"record", "trusted-export-row"},
+            "safe_for_case_db_indexing": True,
+        },
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": sorted(
+            set(report_grade.get("blockers") or [])
+            | {
+                "mft-attribute-list-extension-resolution-required",
+                "mft-full-nonresident-runlist-validation-required",
+                "mft-full-volume-path-cache-required",
+            }
+        ),
+    }
+
+
+def usn_journal_replay_profile(artifact_scope: str, details: Mapping[str, object]) -> dict[str, object]:
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    report_grade = (
+        details.get("ntfs_report_grade_assessment")
+        if isinstance(details.get("ntfs_report_grade_assessment"), Mapping)
+        else {}
+    )
+    scan_metadata = details.get("scan_metadata") if isinstance(details.get("scan_metadata"), Mapping) else {}
+    transition_profile = (
+        details.get("usn_replay_transition_profile")
+        if isinstance(details.get("usn_replay_transition_profile"), Mapping)
+        else {}
+    )
+    cursor_profile = (
+        details.get("usn_cursor_pagination_profile")
+        if isinstance(details.get("usn_cursor_pagination_profile"), Mapping)
+        else {}
+    )
+    inventory_profile = (
+        details.get("usn_replay_inventory_profile")
+        if isinstance(details.get("usn_replay_inventory_profile"), Mapping)
+        else {}
+    )
+    return {
+        "profile_version": "usn-journal-replay-readiness-v1",
+        "commercial_batch_id": "commercial-uplift-011-015",
+        "item_number": 14,
+        "artifact_scope": artifact_scope,
+        "current_decode_level": (
+            "native-v2-v3-record-scan"
+            if str(details.get("source_format") or "") == "ntfs-usn-journal"
+            else "trusted-tool-export-row"
+        ),
+        "decoded_components": {
+            "v2_v3_records": bool(validation_checks.get("version_supported") or validation_checks.get("has_native_records")),
+            "reason_flags": bool(details.get("reason_flags") or details.get("reason_flag_counts")),
+            "frn_parent_refs": bool(details.get("file_reference_number_decoded") or details.get("parent_file_reference_number_decoded")),
+            "rename_delete_hints": bool(details.get("rename_hint") or details.get("deleted_hint") or details.get("reason_flag_counts")),
+            "cursor_pagination": bool(details.get("record_cursor") not in (None, "") or validation_checks.get("cursor_progress_validated")),
+            "full_frn_path_cache_replay": bool(NTFS_FILESYSTEM_CAPABILITIES["usn_full_journal_replay"]),
+        },
+        "transition_profile": transition_profile,
+        "cursor_pagination_profile": cursor_profile,
+        "inventory_replay_profile": inventory_profile,
+        "source_provenance": {
+            "source_path": str(details.get("source_path") or ""),
+            "source_sha256": (details.get("source_hashes") if isinstance(details.get("source_hashes"), Mapping) else {}).get("sha256", ""),
+            "record_cursor": details.get("record_cursor", ""),
+            "next_record_cursor": details.get("next_record_cursor", ""),
+            "next_cursor_available": details.get("next_cursor_available", scan_metadata.get("next_cursor_available", False)),
+            "native_record_count": details.get("native_record_count", 0),
+            "timestamp_range": details.get("timestamp_range", scan_metadata.get("timestamp_range", {})),
+        },
+        "reportability_decision": ntfs_reportability_decision("usn", report_grade, details),
+        "required_before_report": [
+            "build FRN-to-path cache from MFT and replay USN changes in order",
+            "validate rename/delete transitions across the complete journal, not just sampled rows",
+            "prove pagination/cursor determinism on large journals",
+            "diff critical timeline rows against MFTECmd/UsnJrnl2Csv/TSK known-answer output",
+        ],
+        "large_data_controls": {
+            "bounded_native_scan": str(details.get("source_format") or "") == "ntfs-usn-journal",
+            "scan_limit_bytes": NATIVE_SCAN_LIMIT,
+            "record_limit": USN_RECORD_SCAN_LIMIT,
+            "record_limit_reached": bool(details.get("record_limit_reached", scan_metadata.get("record_limit_reached", False))),
+            "safe_for_case_db_indexing": True,
+        },
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "commercial_grade_ready": False,
+        "commercial_grade_blockers": sorted(
+            set(report_grade.get("blockers") or [])
+            | {
+                "usn-frn-path-cache-replay-required",
+                "usn-full-journal-pagination-validation-required",
+                "usn-trusted-timeline-diff-required",
+            }
+        ),
+    }
+
+
 def iter_csv_rows(path: Path) -> Iterable[Mapping[str, object]]:
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -961,6 +1527,15 @@ def build_filesystem_record(path: Path, family: str, row: Mapping[str, object], 
         blockers=["source-tool-export-validation-required"],
     )
     details["ntfs_native_capabilities"] = NTFS_FILESYSTEM_CAPABILITIES
+    if family == "mft":
+        details["mft_full_parser_profile"] = mft_full_parser_profile("trusted-export-row", details)
+    else:
+        details["usn_journal_replay_profile"] = usn_journal_replay_profile("trusted-export-row", details)
+    details["ntfs_native_depth_readiness_profile"] = ntfs_native_depth_readiness_profile(
+        family,
+        "trusted-export-row",
+        details,
+    )
     details["commercial_grade_ready"] = False
     details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
     details["commercial_uplift_evidence"] = ntfs_commercial_uplift_evidence(family, details)
@@ -1074,39 +1649,273 @@ def build_usn_trusted_diff(
 def index_mft_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
     indexed: dict[str, dict[str, str]] = {}
     for row in rows:
-        record_number = normalized_diff_value(first_value(row, "entry_number", "record_number", "file_record_number", "frn"))
-        path = normalized_diff_value(first_value(row, "file_path", "full_path", "path", "filename", "name"))
-        key = record_number or path
+        payload = mft_diff_row_payload(row)
+        evidence = payload.get("mft_record_evidence") if isinstance(payload.get("mft_record_evidence"), Mapping) else {}
+        identity = evidence.get("record_identity") if isinstance(evidence.get("record_identity"), Mapping) else {}
+        path_evidence = evidence.get("path_evidence") if isinstance(evidence.get("path_evidence"), Mapping) else {}
+        attribute_evidence = evidence.get("attribute_evidence") if isinstance(evidence.get("attribute_evidence"), Mapping) else {}
+        data_attribute = first_mapping(payload.get("data_attributes"))
+
+        record_number = normalized_int_text(
+            first_present(
+                first_value(payload, "entry_number", "record_number", "file_record_number", "frn", "entrynumber"),
+                first_value(identity, "record_number", "file_record_number"),
+            )
+        )
+        sequence_number = normalized_int_text(
+            first_present(
+                first_value(payload, "sequence_number", "sequence", "seq"),
+                first_value(identity, "sequence_number", "sequence"),
+            )
+        )
+        parent_reference = normalized_int_text(
+            first_present(
+                first_value(payload, "parent_record_number", "parent_reference", "parent_frn", "parent_entry_number", "parent_file_reference"),
+                first_value(path_evidence, "parent_record_number", "parent_reference", "parent_entry_number"),
+            )
+        )
+        path = normalized_diff_value(
+            first_present(
+                first_value(payload, "file_path", "full_path", "path", "filename", "name", "fullpath"),
+                first_value(path_evidence, "primary_path", "file_path", "path"),
+            )
+        )
+        attribute_types = normalized_diff_list(
+            first_present(
+                first_value(payload, "attribute_types", "attributes", "attribute_type_names", "attribute_list"),
+                first_value(attribute_evidence, "attribute_types", "attributes", "attribute_type_names"),
+            )
+        )
+        runlist_status = normalized_diff_value(
+            first_present(
+                first_value(payload, "runlist_decode_status", "data_run_status", "data_runs_status", "runlist_status"),
+                first_value(data_attribute, "runlist_decode_status", "data_run_status", "runlist_status"),
+            )
+        )
+        resident_sha256 = normalized_diff_value(
+            first_present(
+                first_value(payload, "resident_sha256", "resident_data_sha256", "resident_data_hash", "sha256"),
+                first_value(data_attribute, "resident_sha256", "resident_data_sha256", "sha256"),
+            )
+        )
+        record_offset = normalized_int_text(
+            first_present(
+                first_value(payload, "record_offset", "source_offset", "offset", "byte_offset"),
+                first_value(identity, "record_offset", "source_offset", "offset"),
+            )
+        )
+        key = mft_diff_key(record_number=record_number, path=path, record_offset=record_offset)
         if not key:
             continue
         indexed[key] = {
             "record_number": record_number,
-            "parent_reference": normalized_diff_value(first_value(row, "parent_reference", "parent_frn", "parent_entry_number")),
+            "sequence_number": sequence_number,
+            "parent_reference": parent_reference,
             "file_path": path,
-            "timestamp": normalized_diff_value(first_value(row, "timestamp", "modified_at", "created_at", "si_time_created")),
-            "deleted": normalized_diff_value(first_value(row, "deleted_hint", "deleted", "in_use", "isinuse")),
+            "timestamp": normalized_diff_value(
+                first_value(
+                    payload,
+                    "timestamp",
+                    "modified_at",
+                    "created_at",
+                    "si_time_created",
+                    "created0x10",
+                    "fn_time_created",
+                    "standard_information_modified",
+                )
+            ),
+            "deleted": normalized_deleted_state(payload),
+            "attribute_types": attribute_types,
+            "record_offset": record_offset,
+            "runlist_decode_status": runlist_status,
+            "resident_data_sha256": resident_sha256,
         }
     return indexed
+
+
+def mft_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
+    details = row.get("details")
+    if not isinstance(details, Mapping):
+        return row
+    payload = dict(details)
+    for key, value in row.items():
+        if key == "details":
+            continue
+        payload.setdefault(key, value)
+    return payload
+
+
+def mft_diff_key(*, record_number: str, path: str, record_offset: str) -> str:
+    if record_number and path:
+        return f"{record_number}|{path}"
+    if record_number:
+        return record_number
+    if path and record_offset:
+        return f"{path}|{record_offset}"
+    return path or record_offset
+
+
+def first_present(*values: object) -> object:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def first_mapping(value: object) -> Mapping[str, object]:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for item in value:
+            if isinstance(item, Mapping):
+                return item
+    if isinstance(value, Mapping):
+        return value
+    return {}
+
+
+def normalized_diff_list(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        parts = [part.strip() for part in re.split(r"[,;|]", value) if part.strip()]
+    elif isinstance(value, Sequence):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+    else:
+        parts = [str(value).strip()]
+    return "|".join(sorted({normalized_diff_value(part) for part in parts if part}))
+
+
+def normalized_int_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        return normalized_diff_value(text)
+
+
+def normalized_deleted_state(row: Mapping[str, object]) -> str:
+    deleted_value = first_value(row, "deleted_hint", "deleted", "is_deleted", "isdeleted")
+    if deleted_value not in (None, ""):
+        return normalize_bool_text(deleted_value)
+    in_use_value = first_value(row, "in_use", "inuse", "isinuse", "allocated", "isallocated")
+    if in_use_value in (None, ""):
+        return ""
+    state = normalize_bool_text(in_use_value)
+    if state == "true":
+        return "false"
+    if state == "false":
+        return "true"
+    return state
+
+
+def normalize_bool_text(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    text = normalized_diff_value(value)
+    if text in {"1", "yes", "y", "deleted", "true"}:
+        return "true"
+    if text in {"0", "no", "n", "active", "present", "allocated", "inuse", "in use", "false"}:
+        return "false"
+    return text
 
 
 def index_usn_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, str]]:
     indexed: dict[str, dict[str, str]] = {}
     for row in rows:
-        usn = normalized_diff_value(first_value(row, "usn", "usn_number"))
-        frn = normalized_diff_value(first_value(row, "file_reference_number", "frn", "file_reference"))
-        name = normalized_diff_value(first_value(row, "file_name", "filename", "name", "file_path", "path"))
-        key = "|".join(item for item in (usn, frn, name) if item)
+        payload = usn_diff_row_payload(row)
+        evidence = payload.get("usn_record_evidence") if isinstance(payload.get("usn_record_evidence"), Mapping) else {}
+        identity = evidence.get("record_identity") if isinstance(evidence.get("record_identity"), Mapping) else {}
+        file_reference = evidence.get("file_reference_evidence") if isinstance(evidence.get("file_reference_evidence"), Mapping) else {}
+        change = evidence.get("change_evidence") if isinstance(evidence.get("change_evidence"), Mapping) else {}
+        v4_extent_evidence = change.get("v4_extent_evidence") if isinstance(change.get("v4_extent_evidence"), Mapping) else {}
+
+        usn = normalized_int_text(first_present(first_value(payload, "usn", "usn_number"), first_value(identity, "usn", "usn_number")))
+        frn = normalized_int_text(
+            first_present(
+                first_value(payload, "file_reference_number", "frn", "file_reference", "filereference"),
+                first_value(file_reference, "file_reference_number", "frn", "file_reference"),
+            )
+        )
+        parent_reference = normalized_int_text(
+            first_present(
+                first_value(payload, "parent_file_reference_number", "parent_frn", "parent_reference", "parentfilereference"),
+                first_value(file_reference, "parent_file_reference_number", "parent_frn", "parent_reference"),
+            )
+        )
+        name = normalized_diff_value(
+            first_present(
+                first_value(payload, "file_name", "filename", "name", "file_path", "path"),
+                first_value(file_reference, "file_name", "filename", "name", "file_path", "path"),
+            )
+        )
+        record_cursor = normalized_int_text(
+            first_present(
+                first_value(payload, "record_cursor", "record_offset", "offset", "byte_offset"),
+                first_value(identity, "record_cursor", "record_offset", "offset"),
+            )
+        )
+        key = usn_diff_key(usn=usn, frn=frn, name=name, record_cursor=record_cursor)
         if not key:
             continue
         indexed[key] = {
             "usn": usn,
             "file_reference_number": frn,
-            "parent_reference": normalized_diff_value(first_value(row, "parent_file_reference_number", "parent_frn", "parent_reference")),
+            "parent_reference": parent_reference,
             "file_name": name,
-            "reason": normalized_diff_value(first_value(row, "reason", "reason_flags", "usn_reason")),
-            "timestamp": normalized_diff_value(first_value(row, "timestamp", "event_time", "time_created")),
+            "reason": normalized_diff_list(
+                first_present(
+                    first_value(payload, "reason", "reason_flags", "usn_reason", "reasonflags"),
+                    first_value(change, "reason", "reason_flags", "usn_reason", "reasonflags"),
+                )
+            ),
+            "timestamp": normalized_diff_value(first_value(payload, "timestamp", "event_time", "time_created")),
+            "major_version": normalized_int_text(first_present(first_value(payload, "major_version", "major"), first_value(identity, "major_version", "major"))),
+            "source_info": normalized_diff_list(
+                first_present(
+                    first_value(payload, "source_info_flags", "source_info", "sourceinfo"),
+                    first_value(change, "source_info_flags", "source_info", "sourceinfo"),
+                )
+            ),
+            "file_attributes": normalized_diff_list(
+                first_present(
+                    first_value(payload, "file_attribute_names", "file_attributes", "attributes"),
+                    first_value(change, "file_attribute_names", "file_attributes", "attributes"),
+                )
+            ),
+            "record_cursor": record_cursor,
+            "v4_extent_count": normalized_int_text(
+                first_present(
+                    first_value(payload, "v4_extent_count", "extent_count", "extentcount"),
+                    first_value(v4_extent_evidence, "extent_count", "v4_extent_count", "extentcount"),
+                )
+            ),
         }
     return indexed
+
+
+def usn_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
+    details = row.get("details")
+    if not isinstance(details, Mapping):
+        return row
+    payload = dict(details)
+    for key, value in row.items():
+        if key == "details":
+            continue
+        payload.setdefault(key, value)
+    return payload
+
+
+def usn_diff_key(*, usn: str, frn: str, name: str, record_cursor: str) -> str:
+    if usn and frn and name:
+        return f"{usn}|{frn}|{name}"
+    if usn and frn:
+        return f"{usn}|{frn}"
+    if record_cursor and frn:
+        return f"{record_cursor}|{frn}"
+    return "|".join(item for item in (usn, frn, name, record_cursor) if item)
 
 
 def build_ntfs_trusted_diff(
@@ -1247,6 +2056,7 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
                     "attribute_count": len(attributes["attributes"]),
                     "attribute_types": attributes["attribute_types"],
                     "attributes": attributes["attributes"],
+                    "attribute_list_entries": attributes["attribute_list_entries"],
                     "standard_information": attributes["standard_information"],
                     "file_name_entries": attributes["file_name_entries"],
                     "data_attributes": attributes["data_attributes"],
@@ -1259,6 +2069,21 @@ def parse_mft_record_headers(blob: bytes) -> list[dict[str, object]]:
                         "has_standard_information_attribute": bool(attributes["standard_information"]),
                         "has_file_name_attribute": bool(attributes["file_name_entries"]),
                         "has_data_attribute": bool(attributes["data_attributes"]),
+                        "has_attribute_list_attribute": bool(attributes["attribute_list_entries"])
+                        or "$ATTRIBUTE_LIST" in attributes["attribute_types"],
+                        "has_nonresident_data_attribute": any(
+                            isinstance(item, Mapping) and item.get("resident") is False
+                            for item in attributes["data_attributes"]
+                        ),
+                        "has_nonresident_runlist_preview": any(
+                            isinstance(item, Mapping) and bool(item.get("runlist_preview"))
+                            for item in attributes["data_attributes"]
+                        ),
+                        "has_decoded_nonresident_runlist": any(
+                            isinstance(item, Mapping)
+                            and str(item.get("runlist_decode_status") or "").startswith("decoded-preview")
+                            for item in attributes["data_attributes"]
+                        ),
                         "attribute_end_marker_seen": bool(attributes["end_marker_seen"]),
                         "timestamp_fields_present": bool(timestamp_validation.get("timestamp_count")),
                     },
@@ -1318,6 +2143,7 @@ def validate_mft_update_sequence(record_blob: bytes, *, sector_size: int = 512) 
 def parse_mft_attributes(record_blob: bytes, first_attribute_offset: int, used_size: int) -> dict[str, object]:
     attributes: list[dict[str, object]] = []
     attribute_types: list[str] = []
+    attribute_list_entries: list[dict[str, object]] = []
     file_name_entries: list[dict[str, object]] = []
     data_attributes: list[dict[str, object]] = []
     standard_information: dict[str, object] = {}
@@ -1344,6 +2170,8 @@ def parse_mft_attributes(record_blob: bytes, first_attribute_offset: int, used_s
         attribute_types.append(str(parsed["attribute_type_name"]))
         if parsed["attribute_type"] == 0x10 and isinstance(parsed.get("standard_information"), Mapping):
             standard_information = dict(parsed["standard_information"])
+        elif parsed["attribute_type"] == 0x20 and isinstance(parsed.get("attribute_list"), Mapping):
+            attribute_list_entries.extend(list(parsed["attribute_list"].get("entries") or []))
         elif parsed["attribute_type"] == 0x30 and isinstance(parsed.get("file_name"), Mapping):
             file_name_entries.append(dict(parsed["file_name"]))
         elif parsed["attribute_type"] == 0x80 and isinstance(parsed.get("data"), Mapping):
@@ -1355,6 +2183,7 @@ def parse_mft_attributes(record_blob: bytes, first_attribute_offset: int, used_s
     return {
         "attributes": attributes,
         "attribute_types": attribute_types,
+        "attribute_list_entries": attribute_list_entries,
         "standard_information": standard_information,
         "file_name_entries": file_name_entries,
         "data_attributes": data_attributes,
@@ -1384,6 +2213,12 @@ def parse_mft_attribute(attribute_blob: bytes, record_relative_offset: int) -> d
     }
     if nonresident:
         runlist_offset = int_from(attribute_blob, 32, 2)
+        runlist_blob = (
+            attribute_blob[runlist_offset : min(len(attribute_blob), runlist_offset + MFT_RUNLIST_PREVIEW_BYTE_LIMIT)]
+            if runlist_offset < len(attribute_blob)
+            else b""
+        )
+        runlist_decode = decode_mft_runlist(runlist_blob)
         parsed["nonresident_metadata"] = {
             "lowest_vcn": int_from(attribute_blob, 16, 8),
             "highest_vcn": int_from(attribute_blob, 24, 8),
@@ -1392,10 +2227,9 @@ def parse_mft_attribute(attribute_blob: bytes, record_relative_offset: int) -> d
             "allocated_size": int_from(attribute_blob, 40, 8),
             "real_size": int_from(attribute_blob, 48, 8),
             "initialized_size": int_from(attribute_blob, 56, 8),
-            "data_runs_preview": attribute_blob[runlist_offset : min(len(attribute_blob), runlist_offset + 32)].hex()
-            if runlist_offset < len(attribute_blob)
-            else "",
-            "runlist_decode_status": "preview-only",
+            "data_runs_preview": runlist_blob[:32].hex(),
+            "runlist_decode_status": runlist_decode["status"],
+            "runlist_decode": runlist_decode,
         }
         if attribute_type == 0x80:
             parsed["data"] = {
@@ -1403,7 +2237,13 @@ def parse_mft_attribute(attribute_blob: bytes, record_relative_offset: int) -> d
                 "allocated_size": int_from(attribute_blob, 40, 8),
                 "real_size": int_from(attribute_blob, 48, 8),
                 "initialized_size": int_from(attribute_blob, 56, 8),
-                "runlist_decode_status": "preview-only",
+                "runlist_offset": runlist_offset,
+                "runlist_preview": list(runlist_decode["runs"]),
+                "runlist_decode_status": runlist_decode["status"],
+                "runlist_warning_count": len(runlist_decode["warnings"]),
+                "runlist_consumed_bytes": runlist_decode["consumed_bytes"],
+                "runlist_preview_bytes": runlist_decode["preview_bytes"],
+                "runlist_terminator_offset": runlist_decode["terminator_offset"],
             }
         return parsed
 
@@ -1417,15 +2257,150 @@ def parse_mft_attribute(attribute_blob: bytes, record_relative_offset: int) -> d
     }
     if attribute_type == 0x10:
         parsed["standard_information"] = parse_standard_information(value)
+    elif attribute_type == 0x20:
+        parsed["attribute_list"] = parse_attribute_list_attribute(value)
     elif attribute_type == 0x30:
         parsed["file_name"] = parse_file_name_attribute(value)
     elif attribute_type == 0x80:
+        sha256 = hashlib.sha256(value).hexdigest() if value else ""
         parsed["data"] = {
             "resident": True,
             "resident_size": value_length,
-            "sha256": hashlib.sha256(value).hexdigest() if value else "",
+            "sha256": sha256,
+            "resident_data_hashes": {"sha256": sha256} if sha256 else {},
+            "runlist_decode_status": "resident-data-no-runlist",
         }
     return parsed
+
+
+def parse_attribute_list_attribute(value: bytes) -> dict[str, object]:
+    entries: list[dict[str, object]] = []
+    warnings: list[str] = []
+    offset = 0
+    while offset + 26 <= len(value) and len(entries) < 256:
+        attribute_type = int_from(value, offset, 4)
+        entry_length = int_from(value, offset + 4, 2)
+        name_length = int_from(value, offset + 6, 1)
+        name_offset = int_from(value, offset + 7, 1)
+        if attribute_type == 0 or entry_length == 0:
+            break
+        if entry_length < 26:
+            warnings.append(f"invalid-attribute-list-entry-length:{offset}")
+            break
+        if offset + entry_length > len(value):
+            warnings.append(f"attribute-list-entry-overruns-value:{offset}")
+            break
+        name = ""
+        absolute_name_offset = offset + name_offset
+        absolute_name_end = absolute_name_offset + name_length * 2
+        if name_length and absolute_name_end <= offset + entry_length:
+            name = value[absolute_name_offset:absolute_name_end].decode("utf-16le", errors="ignore")
+        extension_reference_raw = int_from(value, offset + 16, 8)
+        entries.append(
+            {
+                "entry_index": len(entries),
+                "entry_offset": offset,
+                "attribute_type": attribute_type,
+                "attribute_type_name": MFT_ATTRIBUTE_TYPE_NAMES.get(attribute_type, f"0x{attribute_type:08x}"),
+                "entry_length": entry_length,
+                "name": name,
+                "lowest_vcn": int_from(value, offset + 8, 8),
+                "extension_reference_raw": extension_reference_raw,
+                "extension_reference_decoded": split_mft_reference(extension_reference_raw),
+                "attribute_id": int_from(value, offset + 24, 2),
+                "requires_extension_record_resolution": bool(extension_reference_raw),
+            }
+        )
+        offset += align8(entry_length)
+    if len(entries) >= 256:
+        warnings.append("attribute-list-entry-limit-reached")
+    return {
+        "status": "decoded" if entries and not warnings else "decoded-with-warnings" if entries else "empty",
+        "entries": entries,
+        "entry_count": len(entries),
+        "warnings": warnings,
+        "resolved": False,
+        "resolution_status": "extension-record-resolution-not-implemented",
+    }
+
+
+def decode_mft_runlist(
+    blob: bytes,
+    *,
+    run_limit: int = MFT_RUNLIST_PREVIEW_RUN_LIMIT,
+) -> dict[str, object]:
+    runs: list[dict[str, object]] = []
+    warnings: list[str] = []
+    offset = 0
+    absolute_lcn = 0
+    terminator_offset: int | None = None
+    preview = blob[:MFT_RUNLIST_PREVIEW_BYTE_LIMIT]
+    while offset < len(preview) and len(runs) < run_limit:
+        header = preview[offset]
+        if header == 0:
+            terminator_offset = offset
+            offset += 1
+            break
+        length_size = header & 0x0F
+        lcn_delta_size = (header >> 4) & 0x0F
+        value_offset = offset + 1
+        value_end = value_offset + length_size + lcn_delta_size
+        if length_size == 0:
+            warnings.append(f"missing-run-length-field:{offset}")
+            break
+        if length_size > 8 or lcn_delta_size > 8:
+            warnings.append(f"oversized-run-field:{offset}")
+            break
+        if value_end > len(preview):
+            warnings.append(f"run-overruns-preview:{offset}")
+            break
+        cluster_count = int.from_bytes(preview[value_offset : value_offset + length_size], "little", signed=False)
+        delta_blob = preview[value_offset + length_size : value_end]
+        sparse = lcn_delta_size == 0
+        lcn_delta = 0 if sparse else int.from_bytes(delta_blob, "little", signed=True)
+        if not sparse:
+            absolute_lcn += lcn_delta
+        if cluster_count == 0:
+            warnings.append(f"zero-cluster-run:{offset}")
+        if not sparse and absolute_lcn < 0:
+            warnings.append(f"negative-absolute-lcn:{offset}")
+        runs.append(
+            {
+                "run_index": len(runs),
+                "header_offset": offset,
+                "header_byte": header,
+                "length_field_size": length_size,
+                "lcn_delta_field_size": lcn_delta_size,
+                "cluster_count": cluster_count,
+                "lcn_delta": lcn_delta,
+                "absolute_lcn": None if sparse else absolute_lcn,
+                "sparse": sparse,
+                "valid": cluster_count > 0 and (sparse or absolute_lcn >= 0),
+            }
+        )
+        offset = value_end
+    if len(runs) >= run_limit and terminator_offset is None:
+        warnings.append("run-limit-reached")
+    if terminator_offset is None and offset >= len(preview) and preview:
+        warnings.append("runlist-terminator-not-seen-in-preview")
+    if not preview:
+        status = "missing"
+    elif runs and not warnings:
+        status = "decoded-preview"
+    elif runs:
+        status = "decoded-preview-with-warnings"
+    else:
+        status = "invalid-preview"
+    return {
+        "status": status,
+        "runs": runs,
+        "run_count": len(runs),
+        "warnings": warnings,
+        "terminator_offset": terminator_offset,
+        "consumed_bytes": offset,
+        "preview_bytes": len(preview),
+        "preview_sha256": hashlib.sha256(preview).hexdigest() if preview else "",
+    }
 
 
 def parse_standard_information(value: bytes) -> dict[str, object]:
@@ -1617,9 +2592,11 @@ def parse_usn_record_scan(blob: bytes, *, record_limit: int = USN_RECORD_SCAN_LI
 def parse_usn_record_at(blob: bytes, offset: int) -> dict[str, object] | None:
     length = int_from(blob, offset, 4)
     major = int_from(blob, offset + 4, 2)
-    if length < 60 or length > 65536 or offset + length > len(blob) or major not in {2, 3}:
+    if length < 60 or length > 65536 or offset + length > len(blob) or major not in {2, 3, 4}:
         return None
     record_blob = blob[offset : offset + length]
+    if major == 4:
+        return parse_usn_v4_record(record_blob, offset)
     if major == 2:
         layout = {
             "minimum_length": 60,
@@ -1740,6 +2717,116 @@ def parse_usn_record_at(blob: bytes, offset: int) -> dict[str, object] | None:
             "large_record": length >= USN_LARGE_RECORD_THRESHOLD,
         },
         "parser_confidence": parser_confidence,
+    }
+
+
+def parse_usn_v4_record(record_blob: bytes, offset: int) -> dict[str, object] | None:
+    length = int_from(record_blob, 0, 4)
+    if length < 64:
+        return None
+    record_end_offset = offset + length
+    reason = int_from(record_blob, 48, 4)
+    source_info = int_from(record_blob, 52, 4)
+    remaining_extents = int_from(record_blob, 56, 4)
+    extent_count = int_from(record_blob, 60, 2)
+    extent_size = int_from(record_blob, 62, 2)
+    extent_table_offset = 64
+    expected_extent_bytes = extent_count * extent_size
+    extent_bounds_valid = (
+        extent_size >= 16
+        and extent_table_offset + expected_extent_bytes <= length
+        and extent_count <= USN_V4_EXTENT_PREVIEW_LIMIT
+    )
+    extents: list[dict[str, object]] = []
+    if extent_size >= 16:
+        for extent_index in range(min(extent_count, USN_V4_EXTENT_PREVIEW_LIMIT)):
+            extent_offset = extent_table_offset + extent_index * extent_size
+            if extent_offset + 16 > length:
+                break
+            extents.append(
+                {
+                    "extent_index": extent_index,
+                    "source_offset": offset + extent_offset,
+                    "file_offset": int_from(record_blob, extent_offset, 8),
+                    "byte_length": int_from(record_blob, extent_offset + 8, 8),
+                }
+            )
+    reason_flag_names = reason_flags(reason)
+    unknown_reason_mask = unknown_flag_mask(reason, USN_REASON_FLAGS)
+    unknown_source_info_mask = unknown_flag_mask(source_info, USN_SOURCE_INFO_FLAGS)
+    validation_warnings: list[str] = []
+    if length % 8:
+        validation_warnings.append("record-length-not-8-byte-aligned")
+    if extent_size < 16:
+        validation_warnings.append("v4-extent-size-too-small")
+    if extent_table_offset + expected_extent_bytes > length:
+        validation_warnings.append("v4-extents-overrun-record")
+    if extent_count > USN_V4_EXTENT_PREVIEW_LIMIT:
+        validation_warnings.append("v4-extent-preview-limit-reached")
+    if reason and not reason_flag_names:
+        validation_warnings.append("unknown-reason-flags")
+    if unknown_reason_mask:
+        validation_warnings.append("reason-has-unknown-bits")
+    if reason == 0:
+        validation_warnings.append("empty-reason")
+    validation_status = "valid" if not validation_warnings else "valid-with-warnings"
+    return {
+        "record_offset": offset,
+        "record_cursor": offset,
+        "next_record_cursor": record_end_offset,
+        "record_end_offset": record_end_offset,
+        "record_length": length,
+        "record_payload_bytes": extent_table_offset + len(extents) * extent_size,
+        "record_padding_bytes": max(length - (extent_table_offset + len(extents) * extent_size), 0),
+        "record_size_class": usn_record_size_class(length),
+        "major_version": 4,
+        "minor_version": int_from(record_blob, 6, 2),
+        "file_reference_number": int_from(record_blob, 8, 16),
+        "parent_file_reference_number": int_from(record_blob, 24, 16),
+        "file_reference_number_decoded": decode_usn_file_reference(int_from(record_blob, 8, 16), 16),
+        "parent_file_reference_number_decoded": decode_usn_file_reference(int_from(record_blob, 24, 16), 16),
+        "usn": int_from(record_blob, 40, 8),
+        "timestamp": "",
+        "timestamp_filetime": 0,
+        "reason": reason_string(reason),
+        "reason_raw": reason,
+        "reason_flags": reason_flag_names,
+        "unknown_reason_mask": unknown_reason_mask,
+        "source_info": source_info,
+        "source_info_flags": flag_names(source_info, USN_SOURCE_INFO_FLAGS),
+        "unknown_source_info_mask": unknown_source_info_mask,
+        "security_id": 0,
+        "file_attributes": 0,
+        "file_attribute_names": [],
+        "unknown_file_attribute_mask": 0,
+        "file_name_length": 0,
+        "file_name_offset": 0,
+        "file_name_character_count": 0,
+        "file_name_decode_status": "not-present-usn-v4",
+        "file_name": "",
+        "deleted_hint": "FILE_DELETE" in reason_flag_names,
+        "rename_hint": rename_hint(reason_flag_names),
+        "v4_remaining_extents": remaining_extents,
+        "v4_extent_count": extent_count,
+        "v4_extent_size": extent_size,
+        "v4_extent_preview_limit": USN_V4_EXTENT_PREVIEW_LIMIT,
+        "v4_extents": extents,
+        "validation_status": validation_status,
+        "validation_warnings": validation_warnings,
+        "validation_checks": {
+            "record_length_aligned": length % 8 == 0,
+            "record_cursor_progresses": record_end_offset > offset,
+            "filename_bounds_valid": True,
+            "filename_utf16_valid": True,
+            "filetime_plausible": True,
+            "version_supported": True,
+            "v4_extent_bounds_valid": extent_bounds_valid,
+            "v4_extent_count_matches": len(extents) == min(extent_count, USN_V4_EXTENT_PREVIEW_LIMIT),
+            "v4_no_filename_by_design": True,
+            "known_reason_bits_only": unknown_reason_mask == 0,
+            "large_record": length >= USN_LARGE_RECORD_THRESHOLD,
+        },
+        "parser_confidence": 0.82 if validation_status == "valid" else 0.68,
     }
 
 

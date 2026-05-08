@@ -25,7 +25,8 @@ CHROMIUM_BROWSER_ROOTS: Tuple[Tuple[str, Sequence[str]], ...] = (
     ("brave", ("AppData", "Local", "BraveSoftware", "Brave-Browser", "User Data")),
 )
 FIREFOX_PROFILE_ROOT = ("AppData", "Roaming", "Mozilla", "Firefox", "Profiles")
-PARSER_VERSION = "windows-browser-v5"
+PARSER_VERSION = "windows-browser-v8"
+FUNCTIONAL_SOURCE_BATCH_ID = "commercial-uplift-046-050"
 MAX_USAGE_ROWS = 500
 MAX_AI_STORAGE_FILES = 80
 MAX_AI_STORAGE_FILE_BYTES = 5 * 1024 * 1024
@@ -298,13 +299,33 @@ def build_browser_artifacts(
         download_rows=download_rows,
         ai_rows=ai_rows,
     )
+    storage_review_profile = browser_storage_review_profile(storage_inventory)
+    storage_citation_manifest = build_browser_storage_citation_manifest(
+        browser=browser,
+        profile=profile,
+        user=user,
+        profile_dir=profile_dir,
+        storage_inventory=storage_inventory,
+    )
+    timeline_integrity_profile = browser_timeline_integrity_profile(unified_timeline)
     source_hashes = file_hashes(source_path)
+    citation_manifest = build_browser_history_download_citation_manifest(
+        browser=browser,
+        profile=profile,
+        user=user,
+        source_path=source_path,
+        source_hashes=source_hashes,
+        history_rows=history_rows,
+        download_rows=download_rows,
+        unified_timeline=unified_timeline,
+    )
     validation_checks = browser_validation_checks(
         history_rows=history_rows,
         download_rows=download_rows,
         storage_inventory=storage_inventory,
         conversation_rows=conversation_rows,
         unified_timeline=unified_timeline,
+        citation_manifest=citation_manifest,
     )
     report_grade = browser_report_grade_assessment(validation_checks)
     base_details = {
@@ -339,7 +360,13 @@ def build_browser_artifacts(
         "ai_usage": ai_rows,
         "ai_conversation_candidates": conversation_rows[:25],
         "browser_storage_inventory": storage_inventory,
+        "browser_storage_review_profile": storage_review_profile,
+        "browser_storage_citation_manifest": storage_citation_manifest,
+        "browser_storage_citation_manifest_hash": storage_citation_manifest["manifest_sha256"],
         "unified_timeline": unified_timeline,
+        "browser_history_download_citation_manifest": citation_manifest,
+        "browser_history_download_citation_manifest_hash": citation_manifest["manifest_sha256"],
+        "browser_timeline_integrity_profile": timeline_integrity_profile,
         "browser_validation_checks": validation_checks,
         "core_accuracy_gates": browser_core_accuracy_gates(
             {
@@ -354,7 +381,11 @@ def build_browser_artifacts(
                 "history_rows": history_rows,
                 "download_rows": download_rows,
                 "storage_inventory": storage_inventory,
+                "storage_review_profile": storage_review_profile,
+                "browser_storage_citation_manifest": storage_citation_manifest,
                 "unified_timeline": unified_timeline,
+                "timeline_integrity_profile": timeline_integrity_profile,
+                "browser_history_download_citation_manifest": citation_manifest,
                 "browser": browser,
                 "profile": profile,
                 "validation_checks": validation_checks,
@@ -372,8 +403,18 @@ def build_browser_artifacts(
                 "profile": profile,
                 "browser_validation_matrix": browser_validation_matrix(validation_checks),
                 "browser_report_grade_assessment": report_grade,
+                "history_count": len(history_rows),
+                "download_count": len(download_rows),
+                "top_domains": count_field(usage_rows, "domain", limit=20),
                 "storage_inventory_count": len(storage_inventory),
+                "sensitive_inventory_count": sum(1 for row in storage_inventory if row.get("sensitive")),
+                "browser_storage_citation_manifest": storage_citation_manifest,
+                "browser_storage_citation_manifest_hash": storage_citation_manifest["manifest_sha256"],
                 "unified_timeline_count": len(unified_timeline),
+                "browser_history_download_citation_manifest": citation_manifest,
+                "browser_history_download_citation_manifest_hash": citation_manifest["manifest_sha256"],
+                "timeline_integrity_profile": timeline_integrity_profile,
+                "storage_review_profile": storage_review_profile,
             }
         ),
         "forensic_review": build_forensic_review(
@@ -410,6 +451,17 @@ def build_browser_artifacts(
     ]
     if ai_rows:
         seen = sorted([str(row.get("last_visited_at")) for row in ai_rows if row.get("last_visited_at")])
+        ai_transcript = build_ai_transcript_summary(conversation_rows)
+        ai_source_summary = summarize_ai_conversation_sources(conversation_rows)
+        ai_candidate_manifest = build_ai_transcript_candidate_manifest(
+            browser=browser,
+            profile=profile,
+            user=user,
+            profile_dir=profile_dir,
+            conversation_rows=conversation_rows,
+            transcript=ai_transcript,
+            source_summary=ai_source_summary,
+        )
         records.append(
             ArtifactRecord(
                 provider=provider,
@@ -439,9 +491,11 @@ def build_browser_artifacts(
                     "last_seen_at": seen[-1] if seen else None,
                     "ai_usage": ai_rows,
                     "ai_conversation_candidates": conversation_rows[:25],
+                    "ai_transcript_candidate_manifest": ai_candidate_manifest,
+                    "ai_transcript_candidate_manifest_hash": ai_candidate_manifest["manifest_sha256"],
                     "browser_storage_inventory_count": len(storage_inventory),
                     "ai_transcript_validation_status": (
-                        build_ai_transcript_summary(conversation_rows)["validation_status"] if conversation_rows else "none"
+                        ai_transcript["validation_status"] if conversation_rows else "none"
                     ),
                     "privacy_legal_warning": BROWSER_PRIVACY_WARNING,
                     "commercial_uplift_evidence": ai_transcript_commercial_uplift_evidence(
@@ -451,8 +505,9 @@ def build_browser_artifacts(
                             "profile": profile,
                             "ai_usage_count": len(ai_rows),
                             "conversation_rows": conversation_rows,
-                            "transcript": build_ai_transcript_summary(conversation_rows),
-                            "source_summary": summarize_ai_conversation_sources(conversation_rows),
+                            "transcript": ai_transcript,
+                            "source_summary": ai_source_summary,
+                            "ai_transcript_candidate_manifest": ai_candidate_manifest,
                             "transcript_validation_checks": {
                                 "has_ai_usage": bool(ai_rows),
                                 "has_candidate_transcript_rows": bool(conversation_rows),
@@ -534,6 +589,15 @@ def build_ai_conversation_record(
 ) -> ArtifactRecord:
     transcript = build_ai_transcript_summary(conversation_rows)
     source_summary = summarize_ai_conversation_sources(conversation_rows)
+    candidate_manifest = build_ai_transcript_candidate_manifest(
+        browser=browser,
+        profile=profile,
+        user=user,
+        profile_dir=profile_dir,
+        conversation_rows=conversation_rows,
+        transcript=transcript,
+        source_summary=source_summary,
+    )
     return ArtifactRecord(
         provider=provider,
         artifact_type=artifact_type,
@@ -560,6 +624,8 @@ def build_ai_conversation_record(
             "transcript_validation_status": transcript["validation_status"],
             "pairing_confidence_summary": transcript["pairing_confidence_summary"],
             "source_storage_summary": source_summary,
+            "ai_transcript_candidate_manifest": candidate_manifest,
+            "ai_transcript_candidate_manifest_hash": candidate_manifest["manifest_sha256"],
             "transcript_validation_checks": {
                 "has_service_label": bool(count_field(conversation_rows, "ai_service")),
                 "has_question_answer_pair": bool(transcript["complete_pair_count"]),
@@ -576,6 +642,7 @@ def build_ai_conversation_record(
                     "conversation_rows": conversation_rows,
                     "transcript": transcript,
                     "source_summary": source_summary,
+                    "ai_transcript_candidate_manifest": candidate_manifest,
                     "transcript_validation_checks": {
                         "has_service_label": bool(count_field(conversation_rows, "ai_service")),
                         "has_question_answer_pair": bool(transcript["complete_pair_count"]),
@@ -594,6 +661,7 @@ def build_ai_conversation_record(
                     "conversation_rows": conversation_rows,
                     "transcript": transcript,
                     "source_summary": source_summary,
+                    "ai_transcript_candidate_manifest": candidate_manifest,
                 }
             ),
             "conversation_candidates": conversation_rows,
@@ -663,6 +731,20 @@ def build_browser_storage_inventory_record(
 ) -> ArtifactRecord:
     sensitive_count = sum(1 for row in storage_inventory if row.get("sensitive"))
     secret_validation_checks = browser_secret_handling_validation_checks(sensitive_count)
+    storage_review_profile = browser_storage_review_profile(storage_inventory)
+    storage_citation_manifest = build_browser_storage_citation_manifest(
+        browser=browser,
+        profile=profile,
+        user=user,
+        profile_dir=profile_dir,
+        storage_inventory=storage_inventory,
+    )
+    secret_authority_profile = browser_secret_authority_profile(
+        browser=browser,
+        profile=profile,
+        storage_inventory=storage_inventory,
+        checks=secret_validation_checks,
+    )
     validation_context = {
         "storage_inventory_present": bool(storage_inventory),
         "sensitive_storage_inventory_present": sensitive_count > 0,
@@ -672,6 +754,7 @@ def build_browser_storage_inventory_record(
         "extension_schema_validated": False,
         "sync_state_validated": False,
         "unified_timeline_present": False,
+        "storage_review_profile_present": bool(storage_review_profile.get("inventory_count")),
     }
     report_grade = browser_report_grade_assessment(validation_context)
     return ArtifactRecord(
@@ -691,6 +774,9 @@ def build_browser_storage_inventory_record(
             "inventory_count": len(storage_inventory),
             "sensitive_inventory_count": sensitive_count,
             "storage_type_counts": count_field(storage_inventory, "storage_type"),
+            "browser_storage_review_profile": storage_review_profile,
+            "browser_storage_citation_manifest": storage_citation_manifest,
+            "browser_storage_citation_manifest_hash": storage_citation_manifest["manifest_sha256"],
             "storage_inventory": list(storage_inventory),
             "privacy_legal_warning": BROWSER_PRIVACY_WARNING,
             "browser_secret_legal_warning": BROWSER_SECRET_HANDLING_WARNING,
@@ -710,13 +796,17 @@ def build_browser_storage_inventory_record(
                         "profile_dir": str(profile_dir.resolve()),
                     },
                     "storage_inventory": storage_inventory,
+                    "storage_review_profile": storage_review_profile,
+                    "browser_storage_citation_manifest": storage_citation_manifest,
                     "browser": browser,
                     "profile": profile,
                     "validation_checks": validation_context,
                     "secret_validation_checks": secret_validation_checks,
+                    "browser_secret_authority_profile": secret_authority_profile,
                 }
             ),
             "secret_handling_validation_checks": secret_validation_checks,
+            "browser_secret_authority_profile": secret_authority_profile,
             "browser_secret_handling_assessment": browser_secret_handling_assessment(secret_validation_checks),
             "secret_handling_commercial_uplift_evidence": browser_secret_commercial_uplift_evidence(
                 {
@@ -727,6 +817,7 @@ def build_browser_storage_inventory_record(
                     "sensitive_inventory_count": sensitive_count,
                     "storage_inventory": storage_inventory,
                     "secret_handling_validation_checks": secret_validation_checks,
+                    "browser_secret_authority_profile": secret_authority_profile,
                     "browser_secret_handling_assessment": browser_secret_handling_assessment(secret_validation_checks),
                 }
             ),
@@ -760,6 +851,9 @@ def build_browser_storage_inventory_record(
                     "browser_report_grade_assessment": report_grade,
                     "storage_inventory_count": len(storage_inventory),
                     "sensitive_inventory_count": sensitive_count,
+                    "storage_review_profile": storage_review_profile,
+                    "browser_storage_citation_manifest": storage_citation_manifest,
+                    "browser_storage_citation_manifest_hash": storage_citation_manifest["manifest_sha256"],
                 }
             ),
             "forensic_review": build_forensic_review(
@@ -800,6 +894,302 @@ def build_source_profile_metadata(*, user: str, browser: str, profile: str, sour
     }
 
 
+def build_browser_history_download_citation_manifest(
+    *,
+    browser: str,
+    profile: str,
+    user: str,
+    source_path: Path,
+    source_hashes: Mapping[str, object],
+    history_rows: Sequence[Mapping[str, object]],
+    download_rows: Sequence[Mapping[str, object]],
+    unified_timeline: Sequence[Mapping[str, object]],
+) -> Dict[str, object]:
+    history_citations = [
+        browser_row_citation(
+            browser=browser,
+            profile=profile,
+            user=user,
+            source_path=source_path,
+            source_hashes=source_hashes,
+            row=row,
+            row_type="visit",
+            source_index=index,
+            default_source_table=str(row.get("source_table") or "history"),
+            timestamp=str(row.get("last_visited_at") or ""),
+            url=str(row.get("url") or ""),
+        )
+        for index, row in enumerate(history_rows[:MAX_BROWSER_TIMELINE_ROWS])
+    ]
+    download_citations = [
+        browser_row_citation(
+            browser=browser,
+            profile=profile,
+            user=user,
+            source_path=source_path,
+            source_hashes=source_hashes,
+            row=row,
+            row_type="download",
+            source_index=index,
+            default_source_table=str(row.get("source_table") or "downloads"),
+            timestamp=str(row.get("started_at") or ""),
+            url=str(row.get("source_url") or row.get("tab_url") or ""),
+            target_path=str(row.get("target_path") or ""),
+        )
+        for index, row in enumerate(download_rows[:MAX_BROWSER_TIMELINE_ROWS])
+    ]
+    timeline_row_hashes = [
+        stable_browser_sha256(
+            {
+                "timeline_type": row.get("timeline_type"),
+                "timestamp": row.get("timestamp"),
+                "url": row.get("url"),
+                "target_path": row.get("target_path"),
+                "source_table": row.get("source_table"),
+                "source_index": row.get("source_index"),
+                "source_row_id": row.get("source_row_id"),
+            }
+        )
+        for row in unified_timeline[:MAX_BROWSER_TIMELINE_ROWS]
+    ]
+    manifest: Dict[str, object] = {
+        "manifest_version": "browser-history-download-citation-manifest-v1",
+        "item_number": 46,
+        "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
+        "gap_id": "#46",
+        "commercial_gap_ids": ["#20", "#46"],
+        "browser": browser,
+        "profile": profile,
+        "user": user,
+        "source_path": str(source_path.resolve()),
+        "source_sha256": str(source_hashes.get("sha256") or ""),
+        "history_row_count": len(history_rows),
+        "download_row_count": len(download_rows),
+        "timeline_row_count": len(unified_timeline),
+        "citation_row_count": len(history_citations) + len(download_citations),
+        "row_locator_count": sum(1 for row in history_citations + download_citations if row.get("source_viewer_locator")),
+        "history_citations": history_citations,
+        "download_citations": download_citations,
+        "timeline_row_hashes": timeline_row_hashes,
+        "large_data_controls": {
+            "max_browser_timeline_rows": MAX_BROWSER_TIMELINE_ROWS,
+            "citation_rows_bounded": len(history_rows) + len(download_rows) > len(history_citations) + len(download_citations),
+            "source_values_are_triage_pivots": True,
+            "open_raw_sqlite_for_report_grade_review": True,
+        },
+        "review_workflow": {
+            "default_view": "timeline-with-source-citation",
+            "source_viewer": "sqlite",
+            "current_file_search_supported": True,
+            "add_to_evidence_tray_supported": True,
+            "required_before_report": [
+                "open source SQLite row or trusted export row before final report citation",
+                "compare browser timestamp/transition semantics against a known-answer fixture",
+                "attach trusted browser timeline diff when claiming complete browser chronology",
+            ],
+        },
+        "validation_status": "implemented-validation-required",
+    }
+    manifest["manifest_sha256"] = stable_browser_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def build_browser_storage_citation_manifest(
+    *,
+    browser: str,
+    profile: str,
+    user: str,
+    profile_dir: Path,
+    storage_inventory: Sequence[Mapping[str, object]],
+) -> Dict[str, object]:
+    citations = [
+        browser_storage_row_citation(
+            browser=browser,
+            profile=profile,
+            user=user,
+            profile_dir=profile_dir,
+            row=row,
+            source_index=index,
+        )
+        for index, row in enumerate(storage_inventory[:MAX_BROWSER_INVENTORY_FILES])
+    ]
+    manifest: Dict[str, object] = {
+        "manifest_version": "browser-storage-citation-manifest-v1",
+        "item_number": 47,
+        "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
+        "gap_id": "#47",
+        "commercial_gap_ids": ["#19", "#42", "#47"],
+        "browser": browser,
+        "profile": profile,
+        "user": user,
+        "profile_dir": str(profile_dir.resolve()),
+        "inventory_count": len(storage_inventory),
+        "citation_row_count": len(citations),
+        "sensitive_citation_count": sum(1 for row in citations if row.get("sensitive")),
+        "sample_file_hash_count": sum(
+            len(row.get("sample_file_hashes") or []) for row in citations if isinstance(row.get("sample_file_hashes"), list)
+        ),
+        "storage_type_counts": count_field(storage_inventory, "storage_type"),
+        "citations": citations,
+        "large_data_controls": {
+            "max_browser_inventory_files": MAX_BROWSER_INVENTORY_FILES,
+            "inventory_bounded": len(storage_inventory) > len(citations),
+            "secret_values_redacted_by_default": True,
+            "raw_store_open_requires_authority": True,
+        },
+        "review_workflow": {
+            "default_view": "storage-grouped-by-type",
+            "source_viewer": "file-or-sqlite-as-applicable",
+            "metadata_collapsed_by_default": True,
+            "recommended_grouping": ["storage_type", "sensitive", "storage_name"],
+            "required_before_report": [
+                "verify raw store scope and legal authority before opening sensitive stores",
+                "do not report password/cookie/session values from inventory rows",
+                "attach trusted browser storage diff for cache/session/extension/cookie semantic claims",
+            ],
+        },
+        "validation_status": "inventory-implemented-validation-required",
+    }
+    manifest["manifest_sha256"] = stable_browser_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def browser_storage_row_citation(
+    *,
+    browser: str,
+    profile: str,
+    user: str,
+    profile_dir: Path,
+    row: Mapping[str, object],
+    source_index: int,
+) -> Dict[str, object]:
+    source_path = str(row.get("source_path") or "")
+    sample_file_hashes = []
+    for sample in row.get("sample_files") or []:
+        if not isinstance(sample, Mapping):
+            continue
+        hashes = sample.get("hashes") if isinstance(sample.get("hashes"), Mapping) else {}
+        if hashes.get("sha256"):
+            sample_file_hashes.append(
+                {
+                    "relative_path": str(sample.get("relative_path") or ""),
+                    "sha256": str(hashes.get("sha256") or ""),
+                    "hash_scope": str(hashes.get("hash_scope") or ""),
+                }
+            )
+    citation_payload = {
+        "browser": browser,
+        "profile": profile,
+        "user": user,
+        "source_index": source_index,
+        "storage_type": str(row.get("storage_type") or ""),
+        "storage_name": str(row.get("storage_name") or ""),
+        "relative_path": str(row.get("relative_path") or ""),
+        "source_path": source_path,
+        "file_count": int(row.get("file_count") or 0),
+        "total_bytes": int(row.get("total_bytes") or 0),
+        "sensitive": bool(row.get("sensitive")),
+        "inventory_truncated": bool(row.get("inventory_truncated")),
+        "sample_file_hashes": sample_file_hashes,
+    }
+    return {
+        **citation_payload,
+        "row_hash": stable_browser_sha256(citation_payload),
+        "source_viewer_locator": {
+            "viewer": "file" if not bool(row.get("is_file")) else "sqlite-or-file",
+            "profile_dir": str(profile_dir.resolve()),
+            "relative_path": str(row.get("relative_path") or ""),
+            "source_path": source_path,
+            "open_requires_authority": bool(row.get("sensitive")),
+        },
+        "raw_values_extracted": False,
+        "validation_status": "storage-inventory-citation-candidate",
+    }
+
+
+def browser_row_citation(
+    *,
+    browser: str,
+    profile: str,
+    user: str,
+    source_path: Path,
+    source_hashes: Mapping[str, object],
+    row: Mapping[str, object],
+    row_type: str,
+    source_index: int,
+    default_source_table: str,
+    timestamp: str,
+    url: str,
+    target_path: str = "",
+) -> Dict[str, object]:
+    source_table = str(row.get("source_table") or default_source_table)
+    source_row_id = row.get("source_row_id")
+    locator = {
+        "viewer": "sqlite",
+        "source_table": source_table,
+        "source_index": source_index,
+        "source_row_id": source_row_id,
+        "source_path": str(source_path.resolve()),
+    }
+    citation_payload = {
+        "row_type": row_type,
+        "browser": browser,
+        "profile": profile,
+        "user": user,
+        "timestamp": timestamp,
+        "url": url,
+        "target_path": target_path,
+        "source_table": source_table,
+        "source_index": source_index,
+        "source_row_id": source_row_id,
+        "source_sha256": source_hashes.get("sha256") or "",
+    }
+    return {
+        **citation_payload,
+        "row_hash": stable_browser_sha256(citation_payload),
+        "source_viewer_locator": locator,
+        "review_citation": (
+            f"{browser}/{profile}/{row_type}"
+            f"[{source_table}:{source_row_id if source_row_id is not None else source_index}]"
+        ),
+        "validation_status": "source-row-citation-candidate",
+    }
+
+
+def stable_browser_sha256(payload: Mapping[str, object] | Sequence[object]) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def browser_storage_review_profile(storage_inventory: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+    sensitive_count = sum(1 for row in storage_inventory if row.get("sensitive"))
+    total_bytes = sum(int(row.get("total_bytes") or 0) for row in storage_inventory)
+    truncated_count = sum(1 for row in storage_inventory if row.get("inventory_truncated"))
+    priority = "normal"
+    if sensitive_count:
+        priority = "legal-scope-review"
+    if truncated_count or total_bytes > MAX_BROWSER_INVENTORY_HASH_BYTES:
+        priority = "large-profile-review"
+    return {
+        "profile_version": "browser-storage-review-profile-v1",
+        "inventory_count": len(storage_inventory),
+        "sensitive_inventory_count": sensitive_count,
+        "storage_type_counts": count_field(storage_inventory, "storage_type"),
+        "total_bytes": total_bytes,
+        "sample_hash_file_count": sum(
+            len(row.get("sample_files") or []) for row in storage_inventory if isinstance(row.get("sample_files"), list)
+        ),
+        "truncated_inventory_count": truncated_count,
+        "review_priority": priority,
+        "recommended_view": "group-by-storage-type-then-open-sample-hashes",
+        "secret_values_redacted_by_default": True,
+    }
+
+
 def browser_validation_checks(
     *,
     history_rows: Sequence[Mapping[str, object]],
@@ -807,7 +1197,11 @@ def browser_validation_checks(
     storage_inventory: Sequence[Mapping[str, object]],
     conversation_rows: Sequence[Mapping[str, object]],
     unified_timeline: Sequence[Mapping[str, object]] | None = None,
+    citation_manifest: Mapping[str, object] | None = None,
 ) -> Dict[str, object]:
+    timeline_integrity = browser_timeline_integrity_profile(unified_timeline or [])
+    citations = citation_manifest or {}
+    history_download_count = len(history_rows) + len(download_rows)
     return {
         "history_rows_present": bool(history_rows),
         "download_rows_present": bool(download_rows),
@@ -820,6 +1214,11 @@ def browser_validation_checks(
         "timeline_has_visit_rows": any(row.get("timeline_type") == "visit" for row in (unified_timeline or [])),
         "timeline_has_download_rows": any(row.get("timeline_type") == "download" for row in (unified_timeline or [])),
         "timeline_source_indices_present": all("source_index" in row for row in (unified_timeline or [])),
+        "timeline_sorted_descending": timeline_integrity["sorted_descending"],
+        "timeline_integrity_profile_present": bool(unified_timeline),
+        "row_level_citation_manifest_present": bool(citations.get("manifest_sha256")),
+        "row_level_source_locators_present": int(citations.get("row_locator_count") or 0) >= history_download_count,
+        "storage_review_profile_present": bool(storage_inventory),
         "full_cache_entry_decode": False,
         "cookie_values_decrypted": False,
         "extension_schema_validated": False,
@@ -848,6 +1247,13 @@ def browser_validation_matrix(checks: Mapping[str, object]) -> List[Dict[str, ob
             "passed": bool(checks.get("unified_timeline_present"))
             and bool(checks.get("timeline_source_indices_present", True)),
             "severity": "high",
+        },
+        {
+            "id": "timeline-integrity-profile",
+            "label": "Timeline sort/source-index integrity profile is emitted",
+            "passed": bool(checks.get("timeline_integrity_profile_present"))
+            and bool(checks.get("timeline_sorted_descending", True)),
+            "severity": "medium",
         },
         {
             "id": "storage-report-grade",
@@ -898,10 +1304,24 @@ def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[st
         if isinstance(details.get("browser_timeline_trusted_diff"), Mapping)
         else {"status": "not-attached"}
     )
+    citation_manifest = (
+        details.get("browser_history_download_citation_manifest")
+        if isinstance(details.get("browser_history_download_citation_manifest"), Mapping)
+        else {}
+    )
+    storage_citation_manifest = (
+        details.get("browser_storage_citation_manifest")
+        if isinstance(details.get("browser_storage_citation_manifest"), Mapping)
+        else {}
+    )
     reportability_decision = browser_reportability_decision(report_grade, details)
     return {
         "batch_id": "commercial-uplift-016-020",
         "item_numbers": [19, 20],
+        "functional_priority_profiles": [
+            browser_history_downloads_functional_profile(details),
+            browser_storage_inventory_functional_profile(details, storage_diff=storage_diff),
+        ],
         "implementation_track": "ux-and-parser-depth",
         "objective": "Expose browser cache/session inventory and unified timeline validation evidence without overclaiming secret/deleted-state support.",
         "source_refs": [
@@ -927,6 +1347,8 @@ def browser_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[st
             "max_storage_inventory_files": MAX_BROWSER_INVENTORY_FILES,
             "storage_inventory_count": int(details.get("storage_inventory_count") or 0),
             "unified_timeline_count": int(details.get("unified_timeline_count") or 0),
+            "row_citation_manifest_hash": str(citation_manifest.get("manifest_sha256") or ""),
+            "row_citation_count": int(citation_manifest.get("citation_row_count") or 0),
             "secret_values_redacted_by_default": True,
             "browser_version_corpus_required_for_commercial_claims": True,
         },
@@ -960,6 +1382,132 @@ def browser_reportability_decision(
     }
 
 
+def browser_history_downloads_functional_profile(details: Mapping[str, object]) -> Dict[str, object]:
+    history_count = int(details.get("history_count") or 0)
+    download_count = int(details.get("download_count") or 0)
+    timeline_count = int(details.get("unified_timeline_count") or 0)
+    browser = str(details.get("browser") or "")
+    citation_manifest = (
+        details.get("browser_history_download_citation_manifest")
+        if isinstance(details.get("browser_history_download_citation_manifest"), Mapping)
+        else {}
+    )
+    failed_checks: List[str] = []
+    if history_count + download_count == 0:
+        failed_checks.append("browser-history-download-rows-not-present")
+    if timeline_count == 0:
+        failed_checks.append("unified-browser-timeline-not-emitted")
+    if not citation_manifest.get("manifest_sha256"):
+        failed_checks.append("browser-row-citation-manifest-not-emitted")
+    if int(citation_manifest.get("row_locator_count") or 0) < history_count + download_count:
+        failed_checks.append("browser-row-source-locators-incomplete")
+    failed_checks.extend(
+        [
+            "browser-transition-semantics-known-answer-not-attached",
+            "deleted-browser-history-validation-not-attached",
+            "trusted-browser-timeline-diff-required",
+        ]
+    )
+    passed_checks = [
+        "chromium-history-download-sqlite-normalized",
+        "firefox-places-history-normalized",
+        "browser-profile-and-source-hash-preserved",
+        "bounded-unified-browser-timeline-emitted",
+    ]
+    if citation_manifest.get("manifest_sha256"):
+        passed_checks.append("browser-row-citation-manifest-emitted")
+    if int(citation_manifest.get("row_locator_count") or 0) >= history_count + download_count:
+        passed_checks.append("sqlite-source-viewer-locators-emitted")
+    return {
+        "item_number": 46,
+        "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
+        "status": "complete" if not failed_checks else "partial",
+        "implemented_controls": {
+            "browser": browser,
+            "profile": str(details.get("profile") or ""),
+            "supported_browser_families": ["chrome", "edge", "brave", "firefox", "safari"],
+            "detected_browser_supported": browser in {"chrome", "edge", "brave", "firefox"},
+            "safari_support_note": "Safari parity is handled on macOS collection paths; Windows Safari profiles are not claimed.",
+            "history_count": history_count,
+            "download_count": download_count,
+            "unified_timeline_count": timeline_count,
+            "row_citation_manifest_hash": str(citation_manifest.get("manifest_sha256") or ""),
+            "row_citation_count": int(citation_manifest.get("citation_row_count") or 0),
+            "row_locator_count": int(citation_manifest.get("row_locator_count") or 0),
+            "top_domain_count": len(details.get("top_domains") or {}),
+        },
+        "passed_validation_check_ids": passed_checks,
+        "failed_validation_check_ids": failed_checks,
+        "reportability_decision": {
+            "allowed_use": "browser-history-download-timeline-triage-pivot",
+            "commercial_claim_allowed": not failed_checks,
+            "operator_warning": "Validate browser version, transition semantics, deleted-state, and trusted export diff before final reporting.",
+        },
+    }
+
+
+def browser_storage_inventory_functional_profile(
+    details: Mapping[str, object],
+    *,
+    storage_diff: Mapping[str, object],
+) -> Dict[str, object]:
+    inventory_count = int(details.get("storage_inventory_count") or 0)
+    sensitive_count = int(details.get("sensitive_inventory_count") or 0)
+    citation_manifest = (
+        details.get("browser_storage_citation_manifest")
+        if isinstance(details.get("browser_storage_citation_manifest"), Mapping)
+        else {}
+    )
+    failed_checks: List[str] = []
+    if inventory_count == 0:
+        failed_checks.append("browser-storage-inventory-not-present")
+    if not citation_manifest.get("manifest_sha256"):
+        failed_checks.append("browser-storage-citation-manifest-not-emitted")
+    failed_checks.extend(
+        [
+            "full-cache-session-extension-schema-decode-not-complete",
+            "browser-secret-values-redacted-authority-gate-required",
+        ]
+    )
+    if storage_diff.get("status") != "pass":
+        failed_checks.append("browser-storage-trusted-diff-required")
+    passed_checks = [
+        "browser-storage-path-inventory-emitted",
+        "sensitive-store-count-emitted",
+        "secret-values-not-exposed-by-default",
+        "legal-scope-warning-emitted",
+    ]
+    if citation_manifest.get("manifest_sha256"):
+        passed_checks.append("browser-storage-citation-manifest-emitted")
+    if int(citation_manifest.get("sample_file_hash_count") or 0) > 0:
+        passed_checks.append("browser-storage-sample-hashes-cited")
+    return {
+        "item_number": 47,
+        "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
+        "status": "complete" if not failed_checks else "partial",
+        "implemented_controls": {
+            "browser": str(details.get("browser") or ""),
+            "profile": str(details.get("profile") or ""),
+            "inventory_count": inventory_count,
+            "sensitive_inventory_count": sensitive_count,
+            "cache_session_extension_sync_cookie_credential_inventory": True,
+            "secret_values_redacted_by_default": True,
+            "trusted_diff_status": str(storage_diff.get("status") or "missing"),
+            "storage_citation_manifest_hash": str(citation_manifest.get("manifest_sha256") or ""),
+            "storage_citation_count": int(citation_manifest.get("citation_row_count") or 0),
+            "sensitive_citation_count": int(citation_manifest.get("sensitive_citation_count") or 0),
+            "sample_file_hash_count": int(citation_manifest.get("sample_file_hash_count") or 0),
+        },
+        "passed_validation_check_ids": passed_checks,
+        "failed_validation_check_ids": failed_checks,
+        "reportability_decision": {
+            "allowed_use": "browser-storage-inventory-triage-pivot",
+            "commercial_claim_allowed": not failed_checks,
+            "operator_warning": "Storage inventory is not cache/cookie/session semantic decoding; keep secrets hidden unless authority and audit are attached.",
+        },
+    }
+
+
 def ai_transcript_commercial_uplift_evidence(details: Mapping[str, object]) -> Dict[str, object]:
     checks = (
         details.get("transcript_validation_checks")
@@ -974,6 +1522,11 @@ def ai_transcript_commercial_uplift_evidence(details: Mapping[str, object]) -> D
         if isinstance(details.get("ai_transcript_trusted_diff"), Mapping)
         else {"status": "not-attached", "commercial_grade_evidence": False}
     )
+    candidate_manifest = (
+        details.get("ai_transcript_candidate_manifest")
+        if isinstance(details.get("ai_transcript_candidate_manifest"), Mapping)
+        else {}
+    )
     reportability_decision = ai_transcript_reportability_decision(
         details,
         checks=checks,
@@ -984,6 +1537,14 @@ def ai_transcript_commercial_uplift_evidence(details: Mapping[str, object]) -> D
     return {
         "batch_id": "commercial-uplift-021-025",
         "item_numbers": [21],
+        "functional_priority_profile": ai_transcript_functional_profile(
+            details,
+            checks=checks,
+            transcript=transcript,
+            source_summary=source_summary,
+            conversation_rows=conversation_rows,
+            trusted_diff=trusted_diff,
+        ),
         "implementation_track": "ai-transcript-parser-validation",
         "objective": "Expose AI service question/answer candidate pairing evidence, source storage provenance, and validation blockers without claiming complete transcript recovery.",
         "reportability_decision": reportability_decision,
@@ -993,6 +1554,7 @@ def ai_transcript_commercial_uplift_evidence(details: Mapping[str, object]) -> D
             f"browser:{details.get('browser', '')}",
             f"profile:{details.get('profile', '')}",
             f"source_file_count:{source_summary.get('source_file_count', 0)}",
+            f"candidate_manifest_sha256:{candidate_manifest.get('manifest_sha256', '')}",
         ],
         "passed_validation_check_ids": [str(key) for key, value in checks.items() if bool(value) and key != "has_orphans"],
         "failed_validation_check_ids": [str(key) for key, value in checks.items() if not bool(value)],
@@ -1011,11 +1573,86 @@ def ai_transcript_commercial_uplift_evidence(details: Mapping[str, object]) -> D
             "max_ai_storage_file_bytes": MAX_AI_STORAGE_FILE_BYTES,
             "max_ai_conversation_rows": MAX_AI_CONVERSATION_ROWS,
             "source_storage_area_count": len(source_summary.get("storage_area_counts") or {}),
+            "candidate_manifest_hash": str(candidate_manifest.get("manifest_sha256") or ""),
+            "candidate_citation_count": int(candidate_manifest.get("candidate_citation_count") or 0),
+            "pair_citation_count": len(candidate_manifest.get("pair_citations") or []),
             "service_schema_version_corpus_required": True,
             "service_side_export_validation_required": True,
         },
         "next_internal_step": "Add service-specific export/schema validators, deleted-fragment recovery fixtures, and FP/FN measurement for ChatGPT/Claude/Gemini/Perplexity.",
         "external_evidence_required": True,
+    }
+
+
+def ai_transcript_functional_profile(
+    details: Mapping[str, object],
+    *,
+    checks: Mapping[str, object],
+    transcript: Mapping[str, object],
+    source_summary: Mapping[str, object],
+    conversation_rows: Sequence[Mapping[str, object]],
+    trusted_diff: Mapping[str, object],
+) -> Dict[str, object]:
+    question_count = int(transcript.get("question_count") or sum(1 for row in conversation_rows if row.get("direction") == "question"))
+    answer_count = int(transcript.get("answer_count") or sum(1 for row in conversation_rows if row.get("direction") == "answer"))
+    failed_checks: List[str] = []
+    if not conversation_rows:
+        failed_checks.append("ai-transcript-candidate-rows-not-present")
+    if int(transcript.get("complete_pair_count") or 0) == 0:
+        failed_checks.append("ai-question-answer-pair-not-present")
+    if not checks.get("service_side_export_validated"):
+        failed_checks.append("service-side-ai-export-not-validated")
+    if not checks.get("service_schema_version_known"):
+        failed_checks.append("ai-service-schema-version-not-validated")
+    if trusted_diff.get("status") != "pass":
+        failed_checks.append("ai-transcript-trusted-export-diff-required")
+    candidate_manifest = (
+        details.get("ai_transcript_candidate_manifest")
+        if isinstance(details.get("ai_transcript_candidate_manifest"), Mapping)
+        else {}
+    )
+    if not candidate_manifest.get("manifest_sha256"):
+        failed_checks.append("ai-transcript-candidate-manifest-not-emitted")
+    service_counts = source_summary.get("service_counts") if isinstance(source_summary.get("service_counts"), Mapping) else {}
+    passed_checks = [
+        "ai-service-domain-detection-enabled",
+        "browser-storage-fragment-source-hash-preserved",
+        "question-answer-candidate-pairing-attempted",
+        "pairing-confidence-summary-emitted",
+    ]
+    if candidate_manifest.get("manifest_sha256"):
+        passed_checks.append("ai-transcript-candidate-manifest-emitted")
+    if int(candidate_manifest.get("candidate_citation_count") or 0) >= len(conversation_rows):
+        passed_checks.append("ai-candidate-source-locators-emitted")
+    if len(candidate_manifest.get("pair_citations") or []) >= int(transcript.get("pair_count") or 0):
+        passed_checks.append("ai-pair-source-locators-emitted")
+    return {
+        "item_number": 48,
+        "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
+        "status": "complete" if not failed_checks else "partial",
+        "implemented_controls": {
+            "supported_ai_services": [label for _, label in AI_SERVICE_DOMAINS],
+            "detected_service_counts": dict(service_counts),
+            "conversation_candidate_count": len(conversation_rows),
+            "question_count": question_count,
+            "answer_count": answer_count,
+            "complete_pair_count": int(transcript.get("complete_pair_count") or 0),
+            "completeness_score": transcript.get("completeness_score"),
+            "source_file_count": int(source_summary.get("source_file_count") or 0),
+            "trusted_diff_status": str(trusted_diff.get("status") or "missing"),
+            "candidate_manifest_hash": str(candidate_manifest.get("manifest_sha256") or ""),
+            "candidate_citation_count": int(candidate_manifest.get("candidate_citation_count") or 0),
+            "pair_citation_count": len(candidate_manifest.get("pair_citations") or []),
+            "browser": str(details.get("browser") or ""),
+            "profile": str(details.get("profile") or ""),
+        },
+        "passed_validation_check_ids": passed_checks,
+        "failed_validation_check_ids": failed_checks,
+        "reportability_decision": {
+            "allowed_use": "ai-transcript-candidate-review-pivot",
+            "commercial_claim_allowed": not failed_checks,
+            "operator_warning": "Treat Q/A pairs as candidates until service-side export or trusted browser fixture diff confirms them.",
+        },
     }
 
 
@@ -1084,6 +1721,16 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
         if isinstance(details.get("browser_timeline_trusted_diff"), Mapping)
         else {}
     )
+    citation_manifest = (
+        details.get("browser_history_download_citation_manifest")
+        if isinstance(details.get("browser_history_download_citation_manifest"), Mapping)
+        else {}
+    )
+    storage_citation_manifest = (
+        details.get("browser_storage_citation_manifest")
+        if isinstance(details.get("browser_storage_citation_manifest"), Mapping)
+        else {}
+    )
     evidence_refs = [
         f"source_path:{details.get('source_path', '')}",
         f"browser:{details.get('browser', '')}",
@@ -1097,6 +1744,12 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
         item19.append("profile/source attribution")
     if storage_inventory:
         item19.append("cache/session schema validation")
+    if details.get("storage_review_profile"):
+        item19.append("storage review prioritization")
+    if storage_citation_manifest.get("manifest_sha256"):
+        item19.append("storage citation manifest")
+    if int(storage_citation_manifest.get("sample_file_hash_count") or 0) > 0:
+        item19.append("storage sample hash citations")
     if any(str(row.get("storage_type") or "") == "extension" or "extension" in str(row.get("storage_name") or "") for row in storage_inventory):
         item19.append("extension ID/source mapping")
     if details.get("secret_validation_checks") or checks.get("sensitive_storage_inventory_present") is not None:
@@ -1109,10 +1762,16 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
     item20: list[str] = []
     if timeline:
         item20.append("timestamp normalization")
+    if details.get("timeline_integrity_profile") or checks.get("timeline_integrity_profile_present"):
+        item20.append("timeline integrity profile")
     if any(str(row.get("transition") or "") for row in timeline) or checks.get("visit_transition_metadata_present"):
         item20.append("transition semantics")
     if downloads and any(row.get("target_path") and (row.get("source_url") or row.get("tab_url")) for row in downloads):
         item20.append("download target/source URL linkage")
+    if citation_manifest.get("manifest_sha256"):
+        item20.append("row-level source citation manifest")
+    if int(citation_manifest.get("row_locator_count") or 0) >= len(timeline):
+        item20.append("sqlite source viewer locators")
     if not BROWSER_NATIVE_CAPABILITIES["safari_windows_profile_support"]:
         item20.append("Safari scope limitation disclosure")
     if timeline_diff.get("status") == "pass":
@@ -1142,6 +1801,17 @@ def browser_core_accuracy_gates(details: Mapping[str, object]) -> list[dict[str,
             item42.append("opt-in reveal workflow warning")
         if secret_checks.get("scope_review_required") is not None:
             item42.append("audit and scope review requirement")
+        authority_profile = (
+            details.get("browser_secret_authority_profile")
+            if isinstance(details.get("browser_secret_authority_profile"), Mapping)
+            else {}
+        )
+        if authority_profile:
+            item42.append("browser secret authority profile")
+        if authority_profile.get("controlled_reveal_policy") == "disabled-by-default" and not authority_profile.get(
+            "raw_secret_reveal_allowed"
+        ):
+            item42.append("controlled reveal disabled by default")
         if secret_diff.get("status") == "pass":
             item42.append("trusted browser secret authority diff pass")
         gates.append(build_accuracy_gate(42, satisfied_checks=item42, evidence_refs=evidence_refs))
@@ -1219,87 +1889,297 @@ def build_ai_transcript_trusted_diff(
 def index_browser_storage_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, str]]:
     indexed: Dict[str, Dict[str, str]] = {}
     for row in rows:
-        browser = normalized_diff_value(first_alias(row, "browser"))
-        profile = normalized_diff_value(first_alias(row, "profile"))
-        storage_type = normalized_diff_value(first_alias(row, "storage_type", "type"))
-        storage_name = normalized_diff_value(first_alias(row, "storage_name", "name", "path"))
-        key = "|".join(item for item in (browser, profile, storage_type, storage_name) if item)
-        if not key:
-            continue
-        indexed[key] = {
-            "browser": browser,
-            "profile": profile,
-            "storage_type": storage_type,
-            "storage_name": storage_name,
-            "sensitive": normalized_diff_value(first_alias(row, "sensitive", "contains_secrets", "scope_sensitive")),
-        }
+        for payload in browser_storage_diff_payloads(row):
+            browser = normalized_diff_value(first_alias(payload, "browser"))
+            profile = normalized_diff_value(first_alias(payload, "profile"))
+            storage_type = normalized_diff_value(first_alias(payload, "storage_type", "type", "store_type"))
+            storage_name = normalized_diff_value(
+                first_alias(payload, "storage_name", "name", "store_name", "path", "relative_path")
+            )
+            key = "|".join(item for item in (browser, profile, storage_type, storage_name) if item)
+            if not key:
+                continue
+            indexed[key] = {
+                "browser": browser,
+                "profile": profile,
+                "storage_type": storage_type,
+                "storage_name": storage_name,
+                "relative_path": normalized_diff_value(first_alias(payload, "relative_path", "path", "source_path")),
+                "artifact_hint": normalized_diff_value(first_alias(payload, "artifact_hint", "hint", "artifact")),
+                "file_count": normalized_browser_int_text(first_alias(payload, "file_count", "files", "count")),
+                "total_bytes": normalized_browser_int_text(first_alias(payload, "total_bytes", "size", "bytes")),
+                "is_file": normalized_browser_bool_text(first_alias(payload, "is_file", "file")),
+                "sensitive": normalized_browser_bool_text(
+                    first_alias(payload, "sensitive", "contains_secrets", "scope_sensitive")
+                ),
+                "sample_hashes": normalized_browser_list(first_alias(payload, "sample_hashes", "sample_files", "hashes")),
+                "inventory_truncated": normalized_browser_bool_text(
+                    first_alias(payload, "inventory_truncated", "truncated")
+                ),
+            }
     return indexed
+
+
+def browser_storage_diff_payloads(row: Mapping[str, object]) -> list[Mapping[str, object]]:
+    payload = browser_diff_row_payload(row)
+    nested = payload.get("storage_inventory")
+    if isinstance(nested, Sequence) and not isinstance(nested, (str, bytes, bytearray)):
+        expanded: list[Mapping[str, object]] = []
+        for item in nested:
+            if not isinstance(item, Mapping):
+                continue
+            child = dict(item)
+            child.setdefault("browser", payload.get("browser", ""))
+            child.setdefault("profile", payload.get("profile", ""))
+            expanded.append(child)
+        if expanded:
+            return expanded
+    return [payload]
+
+
+def browser_diff_row_payload(row: Mapping[str, object]) -> Mapping[str, object]:
+    details = row.get("details")
+    if not isinstance(details, Mapping):
+        return row
+    payload = dict(details)
+    for key, value in row.items():
+        if key == "details":
+            continue
+        payload.setdefault(key, value)
+    return payload
+
+
+def normalized_browser_int_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        return normalized_diff_value(text)
+
+
+def normalized_browser_bool_text(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    text = normalized_diff_value(value)
+    if text in {"1", "yes", "y", "true", "enabled"}:
+        return "true"
+    if text in {"0", "no", "n", "false", "disabled"}:
+        return "false"
+    return text
+
+
+def normalized_browser_list(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        parts = [part.strip() for part in re.split(r"[\r\n,;|]", value) if part.strip()]
+    elif isinstance(value, Mapping):
+        parts = [normalize_browser_list_item(value)]
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        parts = [normalize_browser_list_item(item) for item in value]
+    else:
+        parts = [str(value).strip()]
+    return "|".join(sorted({normalized_diff_value(part) for part in parts if part}))
+
+
+def normalize_browser_list_item(value: object) -> str:
+    if isinstance(value, Mapping):
+        hashes = value.get("hashes")
+        if isinstance(hashes, Mapping):
+            digest = first_alias(hashes, "sha256", "sha1", "md5")
+            if digest:
+                return str(digest)
+        return str(first_alias(value, "sha256", "sha1", "md5", "relative_path", "path", "name", "value"))
+    return str(value)
 
 
 def index_browser_secret_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, str]]:
     indexed: Dict[str, Dict[str, str]] = {}
     for row in rows:
-        browser = normalized_diff_value(first_alias(row, "browser"))
-        profile = normalized_diff_value(first_alias(row, "profile"))
-        storage_type = normalized_diff_value(first_alias(row, "storage_type", "type"))
-        storage_name = normalized_diff_value(first_alias(row, "storage_name", "name", "path"))
-        legal_authority_id = normalized_diff_value(first_alias(row, "legal_authority_id", "authority_record_id"))
-        audit_event_id = normalized_diff_value(first_alias(row, "audit_event_id", "audit_id"))
-        key = "|".join(item for item in (browser, profile, storage_type, storage_name, legal_authority_id) if item)
-        if not key:
-            continue
-        indexed[key] = {
-            "browser": browser,
-            "profile": profile,
-            "storage_type": storage_type,
-            "storage_name": storage_name,
-            "raw_secret_values_extracted": normalized_diff_value(first_alias(row, "raw_secret_values_extracted", "secrets_extracted")),
-            "legal_authority_id": legal_authority_id,
-            "audit_event_id": audit_event_id,
-        }
+        for payload in browser_secret_diff_payloads(row):
+            browser = normalized_diff_value(first_alias(payload, "browser"))
+            profile = normalized_diff_value(first_alias(payload, "profile"))
+            storage_type = normalized_diff_value(first_alias(payload, "storage_type", "type"))
+            storage_name = normalized_diff_value(first_alias(payload, "storage_name", "name", "path"))
+            legal_authority_id = normalized_diff_value(first_alias(payload, "legal_authority_id", "authority_record_id"))
+            audit_event_id = normalized_diff_value(first_alias(payload, "audit_event_id", "audit_id"))
+            key = "|".join(item for item in (browser, profile, storage_type, storage_name, legal_authority_id) if item)
+            if not key:
+                continue
+            indexed[key] = {
+                "browser": browser,
+                "profile": profile,
+                "storage_type": storage_type,
+                "storage_name": storage_name,
+                "raw_secret_values_extracted": normalized_diff_value(
+                    first_alias(payload, "raw_secret_values_extracted", "secrets_extracted")
+                ),
+                "legal_authority_id": legal_authority_id,
+                "audit_event_id": audit_event_id,
+            }
     return indexed
+
+
+def browser_secret_diff_payloads(row: Mapping[str, object]) -> list[Mapping[str, object]]:
+    payload = browser_diff_row_payload(row)
+    nested = payload.get("storage_inventory")
+    if isinstance(nested, Sequence) and not isinstance(nested, (str, bytes, bytearray)):
+        expanded: list[Mapping[str, object]] = []
+        for item in nested:
+            if not isinstance(item, Mapping):
+                continue
+            if item.get("sensitive") is False:
+                continue
+            child = dict(item)
+            child.setdefault("browser", payload.get("browser", ""))
+            child.setdefault("profile", payload.get("profile", ""))
+            child.setdefault("raw_secret_values_extracted", payload.get("raw_secret_values_extracted", False))
+            child.setdefault("legal_authority_id", payload.get("legal_authority_id", ""))
+            child.setdefault("audit_event_id", payload.get("audit_event_id", ""))
+            expanded.append(child)
+        if expanded:
+            return expanded
+    return [payload]
 
 
 def index_ai_transcript_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, str]]:
     indexed: Dict[str, Dict[str, str]] = {}
     for row in rows:
-        service = normalized_diff_value(first_alias(row, "ai_service", "service", "provider"))
-        question = normalized_diff_value(first_alias(row, "question", "prompt", "user_text", "user_message"))
-        answer = normalized_diff_value(first_alias(row, "answer", "response", "assistant_text", "assistant_message"))
-        timestamp = normalized_diff_value(first_alias(row, "timestamp", "created_at", "message_time"))
-        source = normalized_diff_value(first_alias(row, "source_path", "source", "export_path"))
-        key = "|".join(item for item in (service, timestamp, question[:160], answer[:160]) if item)
-        if not key:
-            continue
-        indexed[key] = {
-            "ai_service": service,
-            "question": question,
-            "answer": answer,
-            "timestamp": timestamp,
-            "source_path": source,
-        }
+        for payload in ai_transcript_diff_payloads(row):
+            service = normalized_diff_value(first_alias(payload, "ai_service", "service", "provider"))
+            question = normalized_diff_value(first_alias(payload, "question", "prompt", "user_text", "user_message"))
+            answer = normalized_diff_value(first_alias(payload, "answer", "response", "assistant_text", "assistant_message"))
+            timestamp = normalized_diff_value(first_alias(payload, "timestamp", "created_at", "message_time", "createdat"))
+            source = normalized_diff_value(first_alias(payload, "source_path", "source", "export_path"))
+            key = "|".join(item for item in (service, timestamp, question[:160], answer[:160]) if item)
+            if not key:
+                continue
+            indexed[key] = {
+                "ai_service": service,
+                "question": question,
+                "answer": answer,
+                "timestamp": timestamp,
+                "source_path": source,
+                "source_sha256s": normalized_browser_list(
+                    first_alias(payload, "source_sha256s", "source_sha256", "source_hashes", "sourcehashes")
+                ),
+                "question_source_path": normalized_diff_value(first_alias(payload, "question_source_path", "prompt_source_path")),
+                "answer_source_path": normalized_diff_value(first_alias(payload, "answer_source_path", "response_source_path")),
+                "question_source_offset": normalized_browser_int_text(
+                    first_alias(payload, "question_source_offset", "prompt_offset")
+                ),
+                "answer_source_offset": normalized_browser_int_text(
+                    first_alias(payload, "answer_source_offset", "response_offset")
+                ),
+                "pairing_confidence": normalized_diff_value(first_alias(payload, "pairing_confidence", "confidence_label")),
+                "confidence": normalized_diff_value(first_alias(payload, "confidence", "score")),
+                "storage_area": normalized_diff_value(first_alias(payload, "storage_area", "source_storage_area")),
+                "pair_id": normalized_diff_value(first_alias(payload, "pair_id", "conversation_id", "id")),
+            }
     return indexed
+
+
+def ai_transcript_diff_payloads(row: Mapping[str, object]) -> list[Mapping[str, object]]:
+    payload = browser_diff_row_payload(row)
+    direct_pairs = payload.get("transcript_pairs")
+    if isinstance(direct_pairs, Sequence) and not isinstance(direct_pairs, (str, bytes, bytearray)):
+        expanded = expand_ai_transcript_pair_rows(payload, direct_pairs)
+        if expanded:
+            return expanded
+    transcript = payload.get("transcript")
+    if isinstance(transcript, Mapping):
+        transcript_pairs = transcript.get("pairs")
+        if isinstance(transcript_pairs, Sequence) and not isinstance(transcript_pairs, (str, bytes, bytearray)):
+            expanded = expand_ai_transcript_pair_rows(payload, transcript_pairs)
+            if expanded:
+                return expanded
+    conversation_rows = payload.get("conversation_rows") or payload.get("conversation_candidates")
+    if isinstance(conversation_rows, Sequence) and not isinstance(conversation_rows, (str, bytes, bytearray)):
+        candidate_rows = [item for item in conversation_rows if isinstance(item, Mapping)]
+        if candidate_rows:
+            summary = build_ai_transcript_summary(candidate_rows)
+            expanded = expand_ai_transcript_pair_rows(payload, summary.get("pairs") or [])
+            if expanded:
+                return expanded
+    return [payload]
+
+
+def expand_ai_transcript_pair_rows(
+    parent: Mapping[str, object],
+    pairs: Sequence[object],
+) -> list[Mapping[str, object]]:
+    expanded: list[Mapping[str, object]] = []
+    for pair in pairs:
+        if not isinstance(pair, Mapping):
+            continue
+        child = dict(pair)
+        child.setdefault("ai_service", parent.get("ai_service") or parent.get("service") or parent.get("provider") or "")
+        child.setdefault("timestamp", parent.get("timestamp") or parent.get("created_at") or "")
+        child.setdefault("source_path", parent.get("source_path") or "")
+        evidence = child.get("pairing_evidence")
+        if isinstance(evidence, Mapping):
+            child.setdefault("question_source_offset", evidence.get("question_source_offset"))
+            child.setdefault("answer_source_offset", evidence.get("answer_source_offset"))
+            child.setdefault("storage_area", evidence.get("storage_area"))
+        expanded.append(child)
+    return expanded
 
 
 def index_browser_timeline_rows(rows: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, str]]:
     indexed: Dict[str, Dict[str, str]] = {}
     for row in rows:
-        browser = normalized_diff_value(first_alias(row, "browser"))
-        profile = normalized_diff_value(first_alias(row, "profile"))
-        url = normalized_diff_value(first_alias(row, "url", "source_url", "target_url"))
-        timestamp = normalized_diff_value(first_alias(row, "timestamp", "visit_time", "start_time"))
-        key = "|".join(item for item in (browser, profile, timestamp, url) if item)
-        if not key:
-            continue
-        indexed[key] = {
-            "browser": browser,
-            "profile": profile,
-            "url": url,
-            "timestamp": timestamp,
-            "transition": normalized_diff_value(first_alias(row, "transition", "transition_type")),
-            "target_path": normalized_diff_value(first_alias(row, "target_path", "download_path", "filename")),
-        }
+        for payload in browser_timeline_diff_payloads(row):
+            browser = normalized_diff_value(first_alias(payload, "browser"))
+            profile = normalized_diff_value(first_alias(payload, "profile"))
+            url = normalized_diff_value(first_alias(payload, "url", "source_url", "target_url"))
+            timestamp = normalized_diff_value(first_alias(payload, "timestamp", "visit_time", "start_time", "started_at"))
+            timeline_type = normalized_diff_value(first_alias(payload, "timeline_type", "type", "row_type"))
+            key = "|".join(item for item in (browser, profile, timeline_type, timestamp, url) if item)
+            if not key:
+                continue
+            indexed[key] = {
+                "browser": browser,
+                "profile": profile,
+                "timeline_type": timeline_type,
+                "url": url,
+                "timestamp": timestamp,
+                "title": normalized_diff_value(first_alias(payload, "title", "page_title")),
+                "domain": normalized_diff_value(first_alias(payload, "domain", "host", "hostname")),
+                "transition": normalized_diff_value(first_alias(payload, "transition", "transition_type")),
+                "visit_count": normalized_browser_int_text(first_alias(payload, "visit_count", "visitcount")),
+                "typed_count": normalized_browser_int_text(first_alias(payload, "typed_count", "typedcount")),
+                "target_path": normalized_diff_value(first_alias(payload, "target_path", "download_path", "filename")),
+                "total_bytes": normalized_browser_int_text(first_alias(payload, "total_bytes", "bytes", "size")),
+                "state": normalized_browser_int_text(first_alias(payload, "state", "download_state")),
+                "ended_at": normalized_diff_value(first_alias(payload, "ended_at", "end_time", "completed_at")),
+                "ai_service": normalized_diff_value(first_alias(payload, "ai_service", "service")),
+                "source_table": normalized_diff_value(first_alias(payload, "source_table", "table")),
+                "source_index": normalized_browser_int_text(first_alias(payload, "source_index", "row_index", "index")),
+            }
     return indexed
+
+
+def browser_timeline_diff_payloads(row: Mapping[str, object]) -> list[Mapping[str, object]]:
+    payload = browser_diff_row_payload(row)
+    nested = payload.get("unified_timeline")
+    if isinstance(nested, Sequence) and not isinstance(nested, (str, bytes, bytearray)):
+        expanded: list[Mapping[str, object]] = []
+        for item in nested:
+            if not isinstance(item, Mapping):
+                continue
+            child = dict(item)
+            child.setdefault("browser", payload.get("browser", ""))
+            child.setdefault("profile", payload.get("profile", ""))
+            expanded.append(child)
+        if expanded:
+            return expanded
+    return [payload]
 
 
 def build_browser_diff_payload(
@@ -1376,6 +2256,11 @@ def ai_transcript_core_accuracy_gates(details: Mapping[str, object]) -> list[dic
         if isinstance(details.get("ai_transcript_trusted_diff"), Mapping)
         else {}
     )
+    candidate_manifest = (
+        details.get("ai_transcript_candidate_manifest")
+        if isinstance(details.get("ai_transcript_candidate_manifest"), Mapping)
+        else {}
+    )
     evidence_refs = [
         f"source_path:{details.get('source_path', '')}",
         f"browser:{details.get('browser', '')}",
@@ -1389,6 +2274,14 @@ def ai_transcript_core_accuracy_gates(details: Mapping[str, object]) -> list[dic
         satisfied.append("service/schema version detection")
     if transcript.get("pair_count") or transcript.get("pairing_confidence_summary"):
         satisfied.append("question/answer pairing confidence")
+    if any(isinstance(pair, Mapping) and pair.get("pairing_evidence") for pair in transcript.get("pairs") or []):
+        satisfied.append("pair-level source citation")
+    if candidate_manifest.get("manifest_sha256"):
+        satisfied.append("AI transcript candidate manifest")
+    if int(candidate_manifest.get("candidate_citation_count") or 0) >= len(rows):
+        satisfied.append("candidate source viewer locators")
+    if len(candidate_manifest.get("pair_citations") or []) >= int(transcript.get("pair_count") or 0):
+        satisfied.append("pair source viewer locators")
     if "orphan_question_count" in transcript and "orphan_answer_count" in transcript:
         satisfied.append("orphan prompt/answer tracking")
     if rows and all(row.get("source_path") and row.get("source_sha256") for row in rows):
@@ -1408,6 +2301,53 @@ def browser_secret_handling_validation_checks(sensitive_count: int) -> Dict[str,
         "strict_legal_warning_present": True,
         "scope_review_required": sensitive_count > 0,
         "inventory_only_mode": True,
+    }
+
+
+def browser_secret_authority_profile(
+    *,
+    browser: str,
+    profile: str,
+    storage_inventory: Sequence[Mapping[str, object]],
+    checks: Mapping[str, object],
+) -> Dict[str, object]:
+    sensitive_rows = [row for row in storage_inventory if row.get("sensitive")]
+    sensitive_type_counts = count_field(sensitive_rows, "storage_type")
+    sensitive_name_counts = count_field(sensitive_rows, "storage_name")
+    return {
+        "profile_version": "browser-secret-authority-v1",
+        "selected_track": "inventory-only-controlled-reveal-required",
+        "browser": browser,
+        "profile": profile,
+        "sensitive_inventory_count": len(sensitive_rows),
+        "sensitive_storage_type_counts": sensitive_type_counts,
+        "sensitive_storage_names": sorted(str(row.get("storage_name") or "") for row in sensitive_rows if row.get("storage_name"))[:50],
+        "cookie_store_present": any(str(row.get("storage_type") or "") == "cookie" for row in sensitive_rows),
+        "credential_store_present": any(str(row.get("storage_type") or "") == "credential" for row in sensitive_rows),
+        "session_store_present": any(str(row.get("storage_type") or "") == "session" for row in sensitive_rows),
+        "controlled_reveal_policy": "disabled-by-default",
+        "raw_secret_reveal_allowed": False,
+        "raw_secret_values_extracted": bool(checks.get("raw_secret_values_extracted")),
+        "secret_values_redacted_by_default": not bool(checks.get("raw_secret_values_extracted")),
+        "dpapi_keychain_integration": False,
+        "browser_version_known_answer_validated": False,
+        "legal_authority_record_required": bool(sensitive_rows),
+        "reveal_audit_log_required": bool(sensitive_rows),
+        "trusted_secret_authority_diff_required": True,
+        "ready_for_court_report": False,
+        "blockers": [
+            "lawful-secret-reveal-authority-not-attached",
+            "dpapi-keychain-known-answer-validation-required",
+            "browser-version-secret-store-validation-required",
+            "controlled-reveal-audit-log-required",
+            BROWSER_SECRET_TRUSTED_DIFF_BLOCKER,
+        ],
+        "required_before_report": [
+            "document lawful authority and case scope before any external secret review",
+            "validate browser-version and OS DPAPI/keychain behavior with known-answer fixtures",
+            "record a per-store controlled reveal audit event before exposing any secret value",
+            "attach a passing trusted browser secret authority diff before reporting decrypted or revealed secrets",
+        ],
     }
 
 
@@ -1437,6 +2377,9 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
     assessment = details.get("browser_secret_handling_assessment")
     if not isinstance(assessment, Mapping):
         assessment = {}
+    authority_profile = details.get("browser_secret_authority_profile")
+    if not isinstance(authority_profile, Mapping):
+        authority_profile = {}
     storage_inventory = details.get("storage_inventory")
     if not isinstance(storage_inventory, list):
         storage_inventory = []
@@ -1465,6 +2408,16 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
             passed_control_ids.append(str(check_id))
         else:
             failed_control_ids.append(str(check_id))
+    if authority_profile:
+        passed_control_ids.append("browser-secret-authority-profile-present")
+    else:
+        failed_control_ids.append("browser-secret-authority-profile-present")
+    if authority_profile.get("controlled_reveal_policy") == "disabled-by-default" and not authority_profile.get(
+        "raw_secret_reveal_allowed"
+    ):
+        passed_control_ids.append("controlled-reveal-disabled-by-default")
+    else:
+        failed_control_ids.append("controlled-reveal-disabled-by-default")
     return {
         "batch_id": "commercial-uplift-041-045",
         "item_numbers": [42],
@@ -1481,6 +2434,7 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
             f"browser:{details.get('browser', '')}",
             f"profile:{details.get('profile', '')}",
         ],
+        "browser_secret_authority_profile": dict(authority_profile),
         "passed_control_ids": passed_control_ids,
         "failed_control_ids": failed_control_ids,
         "trusted_diff": dict(trusted_diff) if trusted_diff else {
@@ -1498,6 +2452,10 @@ def browser_secret_commercial_uplift_evidence(details: Mapping[str, object]) -> 
             "raw_secret_values_extracted": bool(checks.get("raw_secret_values_extracted")),
             "requires_scope_review": bool(checks.get("scope_review_required")),
             "dpapi_keychain_integration": False,
+            "browser_secret_authority_profile_present": bool(authority_profile),
+            "controlled_reveal_disabled_by_default": authority_profile.get("controlled_reveal_policy")
+            == "disabled-by-default"
+            and not bool(authority_profile.get("raw_secret_reveal_allowed")),
         },
         "reporting_status": "inventory-only-validation-required",
     }
@@ -1520,6 +2478,11 @@ def browser_secret_reportability_decision(
         blockers.add("case-scope-review-not-required-by-fixture-but-still-operator-owned")
     if not checks.get("inventory_only_mode"):
         blockers.add("inventory-only-mode-not-confirmed")
+    authority_profile = (
+        details.get("browser_secret_authority_profile")
+        if isinstance(details.get("browser_secret_authority_profile"), Mapping)
+        else {}
+    )
     return {
         "profile_version": "browser-secret-reportability-decision-v1",
         "commercial_gap_ids": ["#42"],
@@ -1531,6 +2494,9 @@ def browser_secret_reportability_decision(
         "profile": str(details.get("profile") or ""),
         "secret_values_redacted_by_default": not bool(checks.get("raw_secret_values_extracted")),
         "dpapi_keychain_integration": False,
+        "browser_secret_authority_profile_present": bool(authority_profile),
+        "controlled_reveal_policy": str(authority_profile.get("controlled_reveal_policy") or ""),
+        "raw_secret_reveal_allowed": bool(authority_profile.get("raw_secret_reveal_allowed")),
         "ready_for_court_report": False,
         "required_before_report": [
             "document legal authority and case scope before any reveal workflow",
@@ -1606,6 +2572,7 @@ def build_ai_transcript_pair(question: Mapping[str, object], answer: Mapping[str
     )
     confidence = min(float(question.get("confidence") or 0), float(answer.get("confidence") or 0))
     pair_material = f"{service}\n{question_text}\n{answer_text}\n{','.join(source_hashes)}"
+    same_source = bool(source_hashes) and len(source_hashes) == 1
     return {
         "pair_id": hashlib.sha256(pair_material.encode("utf-8")).hexdigest()[:24],
         "pair_index": index,
@@ -1616,11 +2583,186 @@ def build_ai_transcript_pair(question: Mapping[str, object], answer: Mapping[str
         "answer_source_path": str(answer.get("source_path") or ""),
         "source_paths": source_paths,
         "source_sha256s": source_hashes,
-        "same_source": bool(source_hashes) and len(source_hashes) == 1,
+        "same_source": same_source,
+        "pairing_evidence": {
+            "question_source_path": str(question.get("source_path") or ""),
+            "answer_source_path": str(answer.get("source_path") or ""),
+            "question_source_offset": question.get("source_offset"),
+            "answer_source_offset": answer.get("source_offset"),
+            "same_source_hash": same_source,
+            "source_ordering": "question-before-answer",
+            "storage_area": str(question.get("storage_area") or answer.get("storage_area") or ""),
+            "validation_required": True,
+        },
         "confidence": round(confidence, 3),
-        "pairing_confidence": classify_pairing_confidence(confidence, bool(source_hashes) and len(source_hashes) == 1),
+        "pairing_confidence": classify_pairing_confidence(confidence, same_source),
         "validation_status": "paired-candidate",
         "evidence_note": "Question/answer pair inferred from recovered browser storage order; verify against raw source before reporting.",
+    }
+
+
+def build_ai_transcript_candidate_manifest(
+    *,
+    browser: str,
+    profile: str,
+    user: str,
+    profile_dir: Path,
+    conversation_rows: Sequence[Mapping[str, object]],
+    transcript: Mapping[str, object],
+    source_summary: Mapping[str, object],
+) -> Dict[str, object]:
+    candidate_citations = [
+        ai_conversation_candidate_citation(
+            browser=browser,
+            profile=profile,
+            user=user,
+            profile_dir=profile_dir,
+            row=row,
+            source_index=index,
+        )
+        for index, row in enumerate(conversation_rows[:MAX_AI_CONVERSATION_ROWS])
+    ]
+    pair_citations = [
+        ai_transcript_pair_citation(pair, source_index=index)
+        for index, pair in enumerate(transcript.get("pairs") or [])
+        if isinstance(pair, Mapping)
+    ]
+    manifest: Dict[str, object] = {
+        "manifest_version": "ai-transcript-candidate-manifest-v1",
+        "item_number": 48,
+        "batch_id": FUNCTIONAL_SOURCE_BATCH_ID,
+        "gap_id": "#48",
+        "commercial_gap_ids": ["#21", "#48"],
+        "browser": browser,
+        "profile": profile,
+        "user": user,
+        "profile_dir": str(profile_dir.resolve()),
+        "supported_ai_services": sorted({label for _domain, label in AI_SERVICE_DOMAINS}),
+        "detected_service_counts": source_summary.get("service_counts") or [],
+        "source_file_count": int(source_summary.get("source_file_count") or 0),
+        "source_sha256s": list(source_summary.get("source_sha256s") or [])[:25],
+        "storage_area_counts": source_summary.get("storage_area_counts") or [],
+        "candidate_row_count": len(conversation_rows),
+        "candidate_citation_count": len(candidate_citations),
+        "pair_count": int(transcript.get("pair_count") or 0),
+        "complete_pair_count": int(transcript.get("complete_pair_count") or 0),
+        "orphan_question_count": int(transcript.get("orphan_question_count") or 0),
+        "orphan_answer_count": int(transcript.get("orphan_answer_count") or 0),
+        "completeness_score": transcript.get("completeness_score"),
+        "pairing_confidence_summary": transcript.get("pairing_confidence_summary") or {},
+        "candidate_citations": candidate_citations,
+        "pair_citations": pair_citations,
+        "large_data_controls": {
+            "max_ai_storage_files": MAX_AI_STORAGE_FILES,
+            "max_ai_storage_file_bytes": MAX_AI_STORAGE_FILE_BYTES,
+            "max_ai_conversation_rows": MAX_AI_CONVERSATION_ROWS,
+            "candidate_rows_bounded": len(conversation_rows) > len(candidate_citations),
+            "text_hashes_preserved": True,
+            "raw_storage_open_requires_source_review": True,
+        },
+        "review_workflow": {
+            "default_view": "chat-like-pair-review",
+            "metadata_collapsed_by_default": True,
+            "source_viewer": "raw-storage-file-offset",
+            "recommended_grouping": ["ai_service", "source_storage_kind", "pairing_confidence"],
+            "required_before_report": [
+                "verify each prompt/answer against the cited raw storage file and offset",
+                "attach service-side export or trusted browser fixture diff before claiming completeness",
+                "record service/schema version for the detected AI provider",
+                "document orphan prompt/answer and deleted-fragment limitations",
+            ],
+        },
+        "validation_status": "candidate-paired-validation-required",
+    }
+    manifest["manifest_sha256"] = stable_browser_sha256(
+        {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    )
+    return manifest
+
+
+def ai_conversation_candidate_citation(
+    *,
+    browser: str,
+    profile: str,
+    user: str,
+    profile_dir: Path,
+    row: Mapping[str, object],
+    source_index: int,
+) -> Dict[str, object]:
+    text = str(row.get("text") or "")
+    source_path = str(row.get("source_path") or "")
+    source_offset = row.get("source_offset")
+    citation_payload = {
+        "browser": browser,
+        "profile": profile,
+        "user": user,
+        "source_index": source_index,
+        "ai_service": str(row.get("ai_service") or ""),
+        "direction": str(row.get("direction") or ""),
+        "role": str(row.get("role") or ""),
+        "storage_area": str(row.get("storage_area") or ""),
+        "source_storage_kind": str(row.get("source_storage_kind") or ""),
+        "source_relative_path": str(row.get("source_relative_path") or ""),
+        "source_path": source_path,
+        "source_sha256": str(row.get("source_sha256") or ""),
+        "source_offset": source_offset,
+        "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest() if text else "",
+        "text_preview": text[:160],
+    }
+    return {
+        **citation_payload,
+        "row_hash": stable_browser_sha256(citation_payload),
+        "source_viewer_locator": {
+            "viewer": "text-offset",
+            "profile_dir": str(profile_dir.resolve()),
+            "source_path": source_path,
+            "source_relative_path": str(row.get("source_relative_path") or ""),
+            "source_offset": source_offset,
+            "open_requires_source_validation": True,
+        },
+        "validation_status": "ai-candidate-source-citation",
+    }
+
+
+def ai_transcript_pair_citation(pair: Mapping[str, object], *, source_index: int) -> Dict[str, object]:
+    question = str(pair.get("question") or "")
+    answer = str(pair.get("answer") or "")
+    evidence = pair.get("pairing_evidence") if isinstance(pair.get("pairing_evidence"), Mapping) else {}
+    citation_payload = {
+        "pair_id": str(pair.get("pair_id") or ""),
+        "pair_index": int(pair.get("pair_index") or source_index),
+        "ai_service": str(pair.get("ai_service") or ""),
+        "pairing_confidence": str(pair.get("pairing_confidence") or ""),
+        "confidence": pair.get("confidence"),
+        "question_sha256": hashlib.sha256(question.encode("utf-8")).hexdigest() if question else "",
+        "answer_sha256": hashlib.sha256(answer.encode("utf-8")).hexdigest() if answer else "",
+        "question_preview": question[:160],
+        "answer_preview": answer[:160],
+        "question_source_path": str(evidence.get("question_source_path") or pair.get("question_source_path") or ""),
+        "answer_source_path": str(evidence.get("answer_source_path") or pair.get("answer_source_path") or ""),
+        "question_source_offset": evidence.get("question_source_offset"),
+        "answer_source_offset": evidence.get("answer_source_offset"),
+        "source_sha256s": list(pair.get("source_sha256s") or []),
+        "same_source_hash": bool(evidence.get("same_source_hash")),
+    }
+    return {
+        **citation_payload,
+        "row_hash": stable_browser_sha256(citation_payload),
+        "source_viewer_locators": [
+            {
+                "role": "question",
+                "viewer": "text-offset",
+                "source_path": citation_payload["question_source_path"],
+                "source_offset": citation_payload["question_source_offset"],
+            },
+            {
+                "role": "answer",
+                "viewer": "text-offset",
+                "source_path": citation_payload["answer_source_path"],
+                "source_offset": citation_payload["answer_source_offset"],
+            },
+        ],
+        "validation_status": "paired-candidate-source-citation",
     }
 
 
@@ -1829,8 +2971,9 @@ def build_unified_browser_timeline(
                 "ai_service": ai_row.get("ai_service") or detect_ai_service(url, str(row.get("title") or "")),
                 "query_hint": row.get("query_hint") or extract_query_hint(url),
                 "source_path": str(source_path.resolve()),
-                "source_table": "history",
+                "source_table": str(row.get("source_table") or "history"),
                 "source_index": index,
+                "source_row_id": row.get("source_row_id"),
                 "validation_status": "normalized-candidate",
             }
         )
@@ -1851,12 +2994,31 @@ def build_unified_browser_timeline(
                 "state": int(row.get("state") or 0),
                 "ended_at": row.get("ended_at"),
                 "source_path": str(source_path.resolve()),
-                "source_table": "downloads",
+                "source_table": str(row.get("source_table") or "downloads"),
                 "source_index": index,
+                "source_row_id": row.get("source_row_id"),
                 "validation_status": "normalized-candidate",
             }
         )
     return sorted(rows, key=lambda item: str(item.get("timestamp") or ""), reverse=True)[:MAX_BROWSER_TIMELINE_ROWS]
+
+
+def browser_timeline_integrity_profile(timeline: Sequence[Mapping[str, object]]) -> Dict[str, object]:
+    timestamps = [str(row.get("timestamp") or "") for row in timeline]
+    populated_timestamps = [value for value in timestamps if value]
+    source_index_complete = all("source_index" in row and "source_table" in row for row in timeline)
+    return {
+        "profile_version": "browser-timeline-integrity-profile-v1",
+        "timeline_count": len(timeline),
+        "timestamped_count": len(populated_timestamps),
+        "visit_count": sum(1 for row in timeline if row.get("timeline_type") == "visit"),
+        "download_count": sum(1 for row in timeline if row.get("timeline_type") == "download"),
+        "sorted_descending": timestamps == sorted(timestamps, reverse=True),
+        "source_index_complete": source_index_complete,
+        "missing_timestamp_count": len(timestamps) - len(populated_timestamps),
+        "validation_status": "normalized-candidate",
+        "reportability_warning": "Browser timeline order is normalized for review; browser-version semantics and deleted/session state require known-answer validation.",
+    }
 
 
 def relative_profile_path(profile_dir: Path, source: Path) -> str:
@@ -2226,6 +3388,8 @@ def extract_chromium_history_and_downloads(history_db: Path) -> Tuple[List[Dict[
             typed_count_column = "urls.typed_count" if "typed_count" in url_columns else "NULL"
             history_rows = [
                 {
+                    "source_table": "urls",
+                    "source_row_id": int(row["source_row_id"]),
                     "url": row["url"],
                     "title": row["title"] or "",
                     "visit_count": int(row["visit_count"] or 0),
@@ -2239,6 +3403,7 @@ def extract_chromium_history_and_downloads(history_db: Path) -> Tuple[List[Dict[
                 for row in connection.execute(
                     f"""
                     SELECT
+                        urls.id AS source_row_id,
                         urls.url AS url,
                         urls.title AS title,
                         urls.visit_count AS visit_count,
@@ -2298,6 +3463,8 @@ def extract_chromium_downloads(connection: sqlite3.Connection) -> List[Dict[str,
         target_path = row["target_path"] or row["current_path"] or ""
         rows.append(
             {
+                "source_table": "downloads",
+                "source_row_id": download_id,
                 "source_url": chain_urls.get(download_id) or row["tab_url"] or "",
                 "target_path": str(target_path),
                 "tab_url": row["tab_url"] or "",
@@ -2319,6 +3486,7 @@ def extract_firefox_history(places_db: Path) -> List[Dict[str, object]]:
             for row in connection.execute(
                 """
                 SELECT
+                    moz_places.id AS source_row_id,
                     moz_places.url AS url,
                     moz_places.title AS title,
                     moz_places.visit_count AS visit_count,
@@ -2332,6 +3500,8 @@ def extract_firefox_history(places_db: Path) -> List[Dict[str, object]]:
             ):
                 history_rows.append(
                     {
+                        "source_table": "moz_places",
+                        "source_row_id": int(row["source_row_id"]),
                         "url": row["url"],
                         "title": row["title"] or "",
                         "visit_count": int(row["visit_count"] or 0),
