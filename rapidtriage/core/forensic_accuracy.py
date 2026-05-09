@@ -1069,6 +1069,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "output path and size captured",
             "reused flag captured",
             "resume status summarized",
+            "checkpoint resume decision manifest emitted",
             "partial-stage limitation warning",
             "trusted checkpoint/resume manifest diff pass",
         ),

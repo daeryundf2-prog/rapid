@@ -536,11 +536,35 @@ class RapidTriageRunTests(unittest.TestCase):
                 checkpoints["checkpoint_integrity_profile"]["row_hash_count"],
                 checkpoints["summary"]["checkpoint_count"],
             )
+            decision_manifest = checkpoints["checkpoint_resume_decision_manifest"]
+            self.assertEqual(decision_manifest["profile_version"], "checkpoint-resume-decision-manifest-v1")
+            self.assertEqual(decision_manifest["item_number"], 70)
+            self.assertEqual(decision_manifest["gap_id"], "#70")
+            self.assertEqual(len(decision_manifest["manifest_hash"]), 64)
+            self.assertEqual(
+                checkpoints["checkpoint_resume_decision_manifest_hash"],
+                decision_manifest["manifest_hash"],
+            )
+            self.assertEqual(decision_manifest["checkpoint_count"], checkpoints["summary"]["checkpoint_count"])
+            self.assertEqual(
+                decision_manifest["checkpoint_integrity_head_hash"],
+                checkpoints["checkpoint_integrity_profile"]["head_hash"],
+            )
+            self.assertGreater(len(decision_manifest["decision_rows"]), 0)
+            self.assertRegex(decision_manifest["decision_row_head_hash"], r"^[0-9a-f]{64}$")
             self.assertEqual(checkpoints["core_accuracy_gates"][0]["gap_id"], "#70")
             self.assertIn("stage checkpoints emitted", checkpoints["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertIn("checkpoint row hash emitted", checkpoints["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn(
+                "checkpoint resume decision manifest emitted",
+                checkpoints["core_accuracy_gates"][0]["satisfied_checks"],
+            )
             self.assertEqual(checkpoints["commercial_uplift_evidence"]["batch_id"], "commercial-uplift-066-070")
             self.assertEqual(checkpoints["commercial_uplift_evidence"]["item_numbers"], [70])
+            self.assertIn(
+                "checkpoint resume decision manifest emitted",
+                checkpoints["commercial_uplift_evidence"]["passed_validation_check_ids"],
+            )
             self.assertIn("#70", checkpoints["checkpoints"][0]["commercial_gap_ids"])
             self.assertRegex(checkpoints["checkpoints"][0]["row_hash"], r"^[0-9a-f]{64}$")
             self.assertEqual(checkpoints["checkpoints"][0]["core_accuracy_gates"][0]["gap_id"], "#70")
@@ -611,6 +635,7 @@ class RapidTriageRunTests(unittest.TestCase):
                 checkpoints=checkpoints["checkpoints"],
                 resume_requested=checkpoints["resume"]["requested"],
                 resume_effective=checkpoints["resume"]["effective"],
+                decision_manifest_hash=checkpoints["checkpoint_resume_decision_manifest_hash"],
                 trusted_diff=checkpoint_diff,
             )
             self.assertEqual(checkpoint_diff["status"], "pass")

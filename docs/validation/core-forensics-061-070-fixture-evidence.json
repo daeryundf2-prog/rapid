@@ -90,7 +90,7 @@
       "title": "Stage checkpoint/resume hardening",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Run checkpoint output preserves stage outputs, sizes, reused flags, row hashes, checkpoint integrity head hash, resume state, partial-stage warnings, trusted checkpoint diff helper/gate, #70 core_accuracy_gates, #70 commercial_uplift_evidence, and reportability blockers for missing failed-stage and mid-parser resume validation across long-running corpora."
+        "Run checkpoint output preserves stage outputs, sizes, reused flags, row hashes, checkpoint integrity head hash, checkpoint resume decision row hashes, resume state, partial-stage warnings, trusted checkpoint diff helper/gate, #70 core_accuracy_gates, #70 commercial_uplift_evidence, and reportability blockers for missing failed-stage and mid-parser resume validation across long-running corpora."
       ],
       "remaining_external_validation": ["Mid-parser checkpointing, trusted checkpoint manifests, failed-stage resume, and long-running case replay validation."]
     }

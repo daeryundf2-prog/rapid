@@ -2075,6 +2075,14 @@ def write_run_checkpoints(
 ) -> None:
     status_counts = Counter(str(item.get("status") or "unknown") for item in checkpoints)
     integrity_profile = checkpoint_integrity_profile(checkpoints)
+    decision_manifest = checkpoint_resume_decision_manifest(
+        checkpoints,
+        input_fingerprint=input_fingerprint,
+        resume_requested=resume_requested,
+        resume_effective=resume_effective,
+        resume_disabled_reason=resume_disabled_reason,
+        integrity_profile=integrity_profile,
+    )
     payload = {
         "command": "run-checkpoints",
         "generated_at": dt.datetime.now().isoformat(),
@@ -2089,6 +2097,7 @@ def write_run_checkpoints(
             "checkpoint_count": len(checkpoints),
             "status_counts": dict(status_counts),
             "reused_count": sum(1 for item in checkpoints if item.get("reused")),
+            "checkpoint_resume_decision_manifest_hash": decision_manifest["manifest_hash"],
             "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
             "commercial_grade_ready": False,
         },
@@ -2096,12 +2105,16 @@ def write_run_checkpoints(
             resume_requested=resume_requested,
             resume_effective=resume_effective,
             checkpoints=checkpoints,
+            decision_manifest=decision_manifest,
         ),
         "checkpoint_integrity_profile": integrity_profile,
+        "checkpoint_resume_decision_manifest": decision_manifest,
+        "checkpoint_resume_decision_manifest_hash": decision_manifest["manifest_hash"],
         "core_accuracy_gates": checkpoint_resume_core_accuracy_gates(
             checkpoints=checkpoints,
             resume_requested=resume_requested,
             resume_effective=resume_effective,
+            decision_manifest_hash=decision_manifest["manifest_hash"],
         ),
         "commercial_uplift_evidence": performance_commercial_uplift_evidence(
             item_number=70,
@@ -2112,10 +2125,12 @@ def write_run_checkpoints(
                 "resume status summarized",
                 "checkpoint row hash emitted",
                 "checkpoint integrity head hash emitted",
+                "checkpoint resume decision manifest emitted",
             ],
             large_data_controls=[
                 "every completed stage is listed with output path, size, status, and reuse flag",
                 "checkpoint row hashes and aggregate head hash make manifest review repeatable",
+                "checkpoint resume decision manifest hashes every stage reuse/completion decision",
                 "resume requested/effective/disabled reason is persisted",
                 "input fingerprint is embedded next to checkpoints for reproducibility",
                 "checkpoint summary counts reused and completed stage outputs",
@@ -2167,6 +2182,75 @@ def checkpoint_integrity_profile(checkpoints: Sequence[Mapping[str, object]]) ->
         "database_enforced_append_only": False,
         "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
         "commercial_claim_allowed": False,
+    }
+
+
+def checkpoint_resume_decision_manifest(
+    checkpoints: Sequence[Mapping[str, object]],
+    *,
+    input_fingerprint: Mapping[str, object],
+    resume_requested: bool,
+    resume_effective: bool,
+    resume_disabled_reason: str,
+    integrity_profile: Mapping[str, object],
+) -> dict[str, object]:
+    rows: list[dict[str, object]] = []
+    for index, checkpoint in enumerate(checkpoints):
+        output_path = str(checkpoint.get("output") or "")
+        row_core = {
+            "index": index,
+            "stage": str(checkpoint.get("stage") or ""),
+            "status": str(checkpoint.get("status") or ""),
+            "exists": bool(checkpoint.get("exists")),
+            "reused": bool(checkpoint.get("reused")),
+            "size_bytes": int(checkpoint.get("size_bytes") or 0),
+            "decision": "reuse-complete-stage-output" if checkpoint.get("reused") else "accept-completed-stage-output",
+            "output_path_hash": hashlib.sha256(output_path.encode("utf-8", errors="replace")).hexdigest(),
+            "checkpoint_row_hash": str(checkpoint.get("row_hash") or checkpoint_record_hash(checkpoint)),
+        }
+        rows.append(
+            {
+                **row_core,
+                "decision_row_hash": hashlib.sha256(
+                    json.dumps(row_core, sort_keys=True).encode("utf-8")
+                ).hexdigest(),
+            }
+        )
+    decision_head_hash = hashlib.sha256(
+        "\n".join(str(row["decision_row_hash"]) for row in rows).encode("ascii")
+    ).hexdigest()
+    manifest_core = {
+        "profile_version": "checkpoint-resume-decision-manifest-v1",
+        "item_number": 70,
+        "gap_id": CHECKPOINT_RESUME_GAP_ID,
+        "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
+        "input_fingerprint": str(input_fingerprint.get("fingerprint") or ""),
+        "resume_requested": resume_requested,
+        "resume_effective": resume_effective,
+        "resume_disabled_reason": resume_disabled_reason,
+        "checkpoint_count": len(rows),
+        "reused_count": sum(1 for row in rows if row.get("reused")),
+        "missing_output_count": sum(1 for row in rows if not row.get("exists")),
+        "checkpoint_integrity_head_hash": str(integrity_profile.get("head_hash") or ""),
+        "decision_row_head_hash": decision_head_hash,
+        "decision_rows": rows,
+        "resume_policy": {
+            "reuse_scope": "complete-json-stage-output",
+            "mid_parser_resume": False,
+            "failed_stage_partial_resume": False,
+            "changed_input_disables_reuse": True,
+            "missing_outputs_require_rebuild_or_manual_review": True,
+        },
+        "commercial_claim_allowed": False,
+        "blockers": [
+            "mid-parser-checkpointing-not-implemented",
+            "failed-stage-partial-resume-validation-not-attached",
+            CHECKPOINT_TRUSTED_DIFF_BLOCKER_70,
+        ],
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
     }
 
 
@@ -2238,6 +2322,7 @@ def checkpoint_resume_assessment(
     resume_requested: bool,
     resume_effective: bool,
     checkpoints: Sequence[Mapping[str, object]],
+    decision_manifest: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     return {
         "component": "stage-checkpoint-resume",
@@ -2245,6 +2330,7 @@ def checkpoint_resume_assessment(
         "commercial_gap_ids": [CHECKPOINT_RESUME_GAP_ID],
         "checkpoint_count": len(checkpoints),
         "reused_count": sum(1 for item in checkpoints if item.get("reused")),
+        "checkpoint_resume_decision_manifest_hash": str((decision_manifest or {}).get("manifest_hash") or ""),
         "ready_for_court_report": False,
         "blockers": [
             "checkpointing-reuses-complete-json-stage-outputs-not-mid-parser-state",
@@ -2262,6 +2348,7 @@ def checkpoint_resume_assessment(
             large_data_controls=[
                 "checkpoint count and reused count are operator-visible",
                 "stage status records make resumed runs auditable",
+                "checkpoint resume decisions are available as hashed manifest rows",
             ],
             external_validation=[
                 "failed-stage and mid-parser replay validation remain required",
@@ -2272,6 +2359,7 @@ def checkpoint_resume_assessment(
             checkpoints=checkpoints,
             resume_requested=resume_requested,
             resume_effective=resume_effective,
+            decision_manifest_hash=str((decision_manifest or {}).get("manifest_hash") or ""),
         ),
     }
 
@@ -2468,6 +2556,7 @@ def checkpoint_resume_core_accuracy_gates(
     checkpoints: Sequence[Mapping[str, object]],
     resume_requested: bool,
     resume_effective: bool,
+    decision_manifest_hash: str = "",
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["partial-stage limitation warning"]
@@ -2481,10 +2570,13 @@ def checkpoint_resume_core_accuracy_gates(
         satisfied.append("checkpoint row hash emitted")
     if resume_requested or resume_effective or checkpoints:
         satisfied.append("resume status summarized")
+    if decision_manifest_hash:
+        satisfied.append("checkpoint resume decision manifest emitted")
     evidence_refs = [
         f"checkpoint_count:{len(checkpoints)}",
         f"resume_requested:{resume_requested}",
         f"resume_effective:{resume_effective}",
+        f"checkpoint_resume_decision_manifest_hash:{decision_manifest_hash}",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted checkpoint/resume manifest diff pass")

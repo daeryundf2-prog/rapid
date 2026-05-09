@@ -110,7 +110,7 @@
       "status": "pass",
       "backlog_items": [70],
       "evidence_paths": ["docs/validation/core-forensics-061-070-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Run checkpoint output preserves stage checkpoints, output path/size, reused flags, row hashes, checkpoint integrity head hash, resume summary, partial-stage warning, trusted checkpoint diff status, #70 core_accuracy_gates, and #70 commercial_uplift_evidence.", "Checkpoint reportability decisions block mid-parser-complete resume claims until failed-stage and mid-parser resume are validated against trusted manifests across long-running corpora."]},
+      "expected": {"required_assertions": ["Run checkpoint output preserves stage checkpoints, output path/size, reused flags, row hashes, checkpoint integrity head hash, checkpoint resume decision row hashes, resume summary, partial-stage warning, trusted checkpoint diff status, #70 core_accuracy_gates, and #70 commercial_uplift_evidence.", "Checkpoint reportability decisions block mid-parser-complete resume claims until failed-stage and mid-parser resume are validated against trusted manifests across long-running corpora."]},
       "notes": "Internal fixture pass; mid-parser checkpointing, trusted checkpoint manifests, and failed-stage resume remain blockers."
     }
   ]
