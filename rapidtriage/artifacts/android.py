@@ -8,7 +8,7 @@ import sqlite3
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from ..core.forensic_accuracy import build_accuracy_gate
 from ..core.models import ArtifactRecord
@@ -179,6 +179,7 @@ def build_apk_record(path: Path) -> ArtifactRecord:
         ),
     )
     details["commercial_uplift_evidence"] = android_commercial_uplift_evidence(details, gap_ids=[30])
+    details["android_analyst_review_profile"] = build_android_analyst_review_profile(details, gap_ids=["#30"])
     return ArtifactRecord(
         provider=AndroidApkProvider.name,
         artifact_type="android-apk",
@@ -482,6 +483,7 @@ def build_android_app_data_record(path: Path, package: str) -> ArtifactRecord:
         *android_core_accuracy_gates(30, details),
     ]
     details["commercial_uplift_evidence"] = android_commercial_uplift_evidence(details, gap_ids=[29, 30])
+    details["android_analyst_review_profile"] = build_android_analyst_review_profile(details, gap_ids=["#29", "#30"])
     return ArtifactRecord(
         provider=AndroidApkProvider.name,
         artifact_type="android-app-data",
@@ -1721,6 +1723,113 @@ def android_forensic_review(
             "Encrypted stores, secrets, and deleted records are not extracted by this parser.",
         ],
     )
+
+
+def build_android_analyst_review_profile(details: Mapping[str, object], *, gap_ids: list[str]) -> dict[str, object]:
+    artifact_type = "android-app-data" if details.get("source_format") == "android-export-file" else "android-apk"
+    parser_manifest = details.get("android_parser_manifest") if isinstance(details.get("android_parser_manifest"), Mapping) else {}
+    app_data_manifest = (
+        details.get("android_app_data_deep_parser_manifest")
+        if isinstance(details.get("android_app_data_deep_parser_manifest"), Mapping)
+        else {}
+    )
+    apk_manifest = (
+        details.get("android_apk_deep_analysis_manifest")
+        if isinstance(details.get("android_apk_deep_analysis_manifest"), Mapping)
+        else {}
+    )
+    viewer_locator = parser_manifest.get("source_viewer_locator") if isinstance(parser_manifest.get("source_viewer_locator"), Mapping) else {}
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    risk_flags = details.get("risk_flags") if isinstance(details.get("risk_flags"), list) else []
+    hashes = details.get("hashes") if isinstance(details.get("hashes"), Mapping) else {}
+    package = str(details.get("package") or "")
+    not_proof_of = [
+        "malware verdict",
+        "signature trust or certificate chain validation",
+        "complete DEX/native behavior analysis",
+        "encrypted store decryption",
+        "deleted record recovery",
+    ]
+    if artifact_type == "android-app-data":
+        not_proof_of.append("decoded app-specific message/account contents")
+    else:
+        not_proof_of.append("binary AndroidManifest equivalence when manifest is unsupported")
+    manifest_hashes = [
+        str(value)
+        for value in (
+            parser_manifest.get("manifest_sha256"),
+            app_data_manifest.get("manifest_sha256"),
+            apk_manifest.get("manifest_sha256"),
+        )
+        if value
+    ]
+    return {
+        "profile_version": "android-analyst-review-profile-v1",
+        "gap_ids": list(gap_ids),
+        "artifact_type": artifact_type,
+        "package": package,
+        "severity": "high" if risk_flags else "medium",
+        "summary": f"{artifact_type} / {package or 'unknown-package'} / risk={details.get('risk_score', 0)}",
+        "evidence_interpretation": (
+            "Android app-data inventory and schema redaction pivot"
+            if artifact_type == "android-app-data"
+            else "Android APK manifest/permission/signing/string pivot inventory"
+        ),
+        "not_proof_of": not_proof_of,
+        "analyst_questions": [
+            "Does package identity match the acquisition path and trusted Android tooling?",
+            "Are binary manifest, signature chain, and app schema results verified by known-answer fixtures?",
+            "Do risky permissions or string pivots need malware-tool correlation?",
+            "Should app data be correlated with mobile messages, browser records, media, or contacts?",
+        ],
+        "primary_pivots": [
+            value
+            for value in (
+                package,
+                str(details.get("source_path") or ""),
+                str(details.get("data_category") or ""),
+                str(details.get("manifest_format") or ""),
+            )
+            if value
+        ],
+        "source_field_values": {
+            "source_path": str(details.get("source_path") or ""),
+            "source_sha256": str(hashes.get("sha256") or ""),
+            "source_format": str(details.get("source_format") or ""),
+            "package": package,
+            "manifest_format": str(details.get("manifest_format") or ""),
+            "data_category": str(details.get("data_category") or ""),
+            "dex_count": int(details.get("dex_count") or 0),
+            "native_library_count": int(details.get("native_library_count") or 0),
+            "dangerous_permission_count": len(details.get("dangerous_permissions") or [])
+            if isinstance(details.get("dangerous_permissions"), list)
+            else 0,
+            "sqlite_table_count": int(
+                (
+                    details.get("android_app_data_profile", {}).get("sqlite_schema_inventory", {}).get("table_count")
+                    if isinstance(details.get("android_app_data_profile"), Mapping)
+                    and isinstance(details.get("android_app_data_profile", {}).get("sqlite_schema_inventory"), Mapping)
+                    else 0
+                )
+                or 0
+            ),
+            "manifest_hashes": manifest_hashes,
+            "viewer": str(viewer_locator.get("viewer") or ""),
+        },
+        "correlation_targets": [
+            "aapt/apkanalyzer/MobSF/ALEAPP diff",
+            "Android acquisition manifest",
+            "package signature lineage",
+            "mobile timeline",
+            "network IOC/string pivot review",
+        ],
+        "risk_tags": sorted(set(map(str, risk_flags)) | {"android-validation-required"}),
+        "validation_required": True,
+        "report_grade_ready": False,
+        "validation_snapshot": dict(validation_checks),
+        "commercial_blockers": list(ANDROID_REPORT_GRADE_BLOCKERS),
+        "report_guidance": "Use as a triage/review pivot until trusted Android tooling, known-answer corpora, and acquisition metadata validate the row.",
+    }
 
 
 def apk_blockers() -> list[str]:

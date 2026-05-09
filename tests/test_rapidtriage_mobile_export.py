@@ -75,6 +75,13 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("message_text_sha256", message["details"])
             self.assertIn("#26", message["details"]["mobile_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(message["details"]["forensic_review"]["gap_id"], "#26")
+            mobile_review = message["details"]["mobile_analyst_review_profile"]
+            self.assertEqual(mobile_review["profile_version"], "mobile-analyst-review-profile-v1")
+            self.assertEqual(mobile_review["gap_ids"], ["#26"])
+            self.assertEqual(mobile_review["artifact_type"], "mobile-message")
+            self.assertIn("vendor/mobile tool row diff", mobile_review["correlation_targets"])
+            self.assertIn("complete device extraction", mobile_review["not_proof_of"])
+            self.assertFalse(mobile_review["report_grade_ready"])
             self.assertFalse(message["details"]["mobile_native_capabilities"]["proprietary_vendor_package_decode"])
             message_gate = message["details"]["core_accuracy_gates"][0]
             self.assertEqual(message_gate["gap_id"], "#26")
@@ -804,6 +811,12 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("message-store-candidate", ios_file["details"]["risk_flags"])
             self.assertIn("#27", ios_file["details"]["mobile_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(ios_file["details"]["forensic_review"]["gap_id"], "#27")
+            ios_review = ios_file["details"]["mobile_analyst_review_profile"]
+            self.assertEqual(ios_review["profile_version"], "mobile-analyst-review-profile-v1")
+            self.assertEqual(ios_review["gap_ids"], ["#27"])
+            self.assertEqual(ios_review["artifact_type"], "ios-backup-file")
+            self.assertIn("decrypted iOS protected file contents", ios_review["not_proof_of"])
+            self.assertIn("mobile timeline", ios_review["correlation_targets"])
             self.assertFalse(ios_file["details"]["mobile_native_capabilities"]["ios_protected_file_decryption"])
             ios_gate = ios_file["details"]["core_accuracy_gates"][0]
             self.assertEqual(ios_gate["gap_id"], "#27")
@@ -926,6 +939,12 @@ class RapidTriageMobileExportTests(unittest.TestCase):
             self.assertIn("sensitive-artifact-redacted", keychain["details"]["risk_flags"])
             self.assertIn("#28", keychain["details"]["mobile_report_grade_assessment"]["commercial_gap_ids"])
             self.assertEqual(keychain["details"]["forensic_review"]["gap_id"], "#28")
+            keychain_review = keychain["details"]["mobile_analyst_review_profile"]
+            self.assertEqual(keychain_review["profile_version"], "mobile-analyst-review-profile-v1")
+            self.assertEqual(keychain_review["gap_ids"], ["#28"])
+            self.assertEqual(keychain_review["artifact_type"], "ios-keychain-inventory")
+            self.assertEqual(keychain_review["severity"], "high")
+            self.assertIn("keychain secret values or access semantics", keychain_review["not_proof_of"])
             self.assertFalse(keychain["details"]["mobile_native_capabilities"]["ios_keychain_secret_decryption"])
             keychain_gate = keychain["details"]["core_accuracy_gates"][0]
             self.assertEqual(keychain_gate["gap_id"], "#28")

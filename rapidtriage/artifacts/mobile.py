@@ -1158,6 +1158,16 @@ def build_record(
                 report_grade=report_grade,
                 details=detail_payload,
             ),
+            "mobile_analyst_review_profile": build_mobile_analyst_review_profile(
+                artifact_type=artifact_type,
+                source_tool=source_tool,
+                source_format=source_format,
+                source_index=source_index,
+                source_hashes=source_hashes,
+                gap_ids=gap_ids,
+                report_grade=report_grade,
+                details=detail_payload,
+            ),
             **chat_app_review_payload(
                 artifact_type,
                 detail_payload,
@@ -6570,6 +6580,112 @@ def build_mobile_forensic_review(
             "Protected/encrypted stores and deleted-record recovery are not report-grade in this parser.",
         ],
     )
+
+
+def build_mobile_analyst_review_profile(
+    *,
+    artifact_type: str,
+    source_tool: str,
+    source_format: str,
+    source_index: int,
+    source_hashes: Mapping[str, str],
+    gap_ids: Sequence[str],
+    report_grade: Mapping[str, object],
+    details: Mapping[str, object],
+) -> dict[str, object]:
+    manifest = details.get("mobile_vendor_import_manifest")
+    if not isinstance(manifest, Mapping):
+        manifest = details.get("ios_backup_parser_manifest")
+    if not isinstance(manifest, Mapping):
+        manifest = {}
+    viewer_locator = manifest.get("source_viewer_locator") if isinstance(manifest.get("source_viewer_locator"), Mapping) else {}
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    failed_checks = report_grade.get("failed_check_ids") if isinstance(report_grade.get("failed_check_ids"), list) else []
+    risk_flags = details.get("risk_flags") if isinstance(details.get("risk_flags"), list) else []
+    summary_parts = [artifact_type, source_tool or "unknown-tool"]
+    service = optional_text(details.get("service"))
+    if service:
+        summary_parts.append(service)
+    domain = optional_text(details.get("domain"))
+    if domain:
+        summary_parts.append(domain)
+    table = optional_text(details.get("table"))
+    if table:
+        summary_parts.append(table)
+    package = optional_text(details.get("package"))
+    if package:
+        summary_parts.append(package)
+    not_proof_of = [
+        "complete device extraction",
+        "vendor parser equivalence",
+        "deleted record recovery",
+        "protected or encrypted value decryption",
+    ]
+    if "#28" in gap_ids:
+        not_proof_of.append("keychain secret values or access semantics")
+    if "#27" in gap_ids:
+        not_proof_of.append("decrypted iOS protected file contents")
+    if "#26" in gap_ids:
+        not_proof_of.append("source-complete vendor export coverage")
+    return {
+        "profile_version": "mobile-analyst-review-profile-v1",
+        "gap_ids": list(gap_ids),
+        "artifact_type": artifact_type,
+        "source_tool": source_tool,
+        "source_format": source_format,
+        "source_index": source_index,
+        "severity": "high" if {"credential-or-otp", "sensitive-artifact-redacted"} & set(map(str, risk_flags)) else "medium",
+        "summary": " / ".join(part for part in summary_parts if part),
+        "evidence_interpretation": mobile_artifact_goal(artifact_type),
+        "not_proof_of": not_proof_of,
+        "analyst_questions": [
+            "Does this row match the original vendor/mobile tool view?",
+            "Are acquisition hash, export settings, timezone, and parser version preserved?",
+            "Is the source app/schema version covered by a known-answer fixture?",
+            "Should this item be correlated with messages, contacts, calls, media, browser, or cloud records?",
+        ],
+        "primary_pivots": [
+            key
+            for key in (
+                optional_text(details.get("source_record_id")),
+                optional_text(details.get("message_id")),
+                optional_text(details.get("conversation_id")),
+                optional_text(details.get("file_id")),
+                optional_text(details.get("domain")),
+                optional_text(details.get("logical_path")),
+                optional_text(details.get("table")),
+                optional_text(details.get("package")),
+            )
+            if key
+        ][:8],
+        "source_field_values": {
+            "source_path": optional_text(details.get("source_path")),
+            "source_sha256": source_hashes.get("sha256", ""),
+            "source_record_id": optional_text(details.get("source_record_id")),
+            "event_type": optional_text(details.get("event_type")),
+            "service": service,
+            "domain": domain,
+            "logical_path": optional_text(details.get("logical_path")),
+            "file_id": optional_text(details.get("file_id")),
+            "table": table,
+            "row_count": int(details.get("row_count") or details.get("record_count") or 0),
+            "manifest_sha256": optional_text(manifest.get("manifest_sha256")),
+            "viewer": optional_text(viewer_locator.get("viewer")),
+        },
+        "correlation_targets": [
+            "vendor/mobile tool row diff",
+            "acquisition hash log",
+            "mobile timeline",
+            "contacts/calls/SMS/media correlation",
+            "app schema version registry",
+        ],
+        "risk_tags": sorted(set(map(str, risk_flags)) | set(map(str, failed_checks)) | {"mobile-validation-required"}),
+        "validation_required": True,
+        "report_grade_ready": False,
+        "validation_snapshot": dict(validation_checks),
+        "commercial_blockers": list(report_grade.get("blockers", MOBILE_REPORT_GRADE_BLOCKERS)),
+        "report_guidance": "Use as a triage/review pivot until source export settings, acquisition hashes, known-answer fixtures, and trusted tool diffs are attached.",
+    }
 
 
 def chat_app_review_payload(

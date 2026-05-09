@@ -119,6 +119,13 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
             self.assertFalse(apk_deep_manifest["capability_statement"]["signature_chain_validation"])
             self.assertFalse(apk_deep_manifest["validation"]["commercial_grade"])
             self.assertIn("trusted-aapt-apkanalyzer-mobsf-diff-required", apk_deep_manifest["commercial_blockers"])
+            apk_review = details["android_analyst_review_profile"]
+            self.assertEqual(apk_review["profile_version"], "android-analyst-review-profile-v1")
+            self.assertEqual(apk_review["gap_ids"], ["#30"])
+            self.assertEqual(apk_review["artifact_type"], "android-apk")
+            self.assertIn("aapt/apkanalyzer/MobSF/ALEAPP diff", apk_review["correlation_targets"])
+            self.assertIn("malware verdict", apk_review["not_proof_of"])
+            self.assertFalse(apk_review["report_grade_ready"])
             apk_uplift = details["commercial_uplift_evidence"]
             self.assertEqual(apk_uplift["batch_id"], "commercial-uplift-026-030")
             self.assertEqual(apk_uplift["item_numbers"], [30])
@@ -237,6 +244,12 @@ class RapidTriageAndroidApkTests(unittest.TestCase):
                 "trusted-aleapp-or-vendor-export-diff-required",
                 app_data_deep_manifest["commercial_blockers"],
             )
+            app_data_review = app_data["details"]["android_analyst_review_profile"]
+            self.assertEqual(app_data_review["profile_version"], "android-analyst-review-profile-v1")
+            self.assertEqual(app_data_review["gap_ids"], ["#29", "#30"])
+            self.assertEqual(app_data_review["artifact_type"], "android-app-data")
+            self.assertIn("decoded app-specific message/account contents", app_data_review["not_proof_of"])
+            self.assertIn("mobile timeline", app_data_review["correlation_targets"])
             app_data_uplift = app_data["details"]["commercial_uplift_evidence"]
             self.assertEqual(app_data_uplift["item_numbers"], [29, 30])
             app_data_profiles = {
