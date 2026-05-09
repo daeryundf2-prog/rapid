@@ -33,6 +33,7 @@ from rapidtriage.artifacts.windows.registry import (
     build_registry_key_tree_diff,
     collect_reg_export,
     collect_registry_hive,
+    registry_analyst_review_profile,
 )
 from rapidtriage.artifacts.windows.filesystem import (
     build_mft_bounded_path_cache,
@@ -3772,6 +3773,12 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("registry-cell-offset", key_citation_kinds)
             self.assertIn("registry-key-path", key_citation_kinds)
             self.assertIn("registry-transaction-log-context", key_citation_kinds)
+            key_review = run_key.details["registry_analyst_review_profile"]
+            self.assertEqual(key_review["profile_version"], "registry-analyst-review-profile-v1")
+            self.assertEqual(key_review["catalog_key"], "persistence")
+            self.assertEqual(key_review["source_field_values"]["key_path"], "HKEY_CURRENT_USER\\Software\\Run")
+            self.assertIn("prefetch", key_review["correlation_targets"])
+            self.assertIn("transaction-log-present-not-replayed", key_review["commercial_blockers"])
 
             value_recovery = next(
                 record
@@ -3918,6 +3925,11 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("registry-recovery-validation", value_citation_kinds)
             self.assertIn("deleted-value-cell", value_manifest["validation_summary"]["passed_matrix_ids"])
             self.assertIn("registry-deleted-cell-cross-tool-diff-required", value_manifest["reportability"]["blockers"])
+            value_review = value_recovery.details["registry_analyst_review_profile"]
+            self.assertEqual(value_review["catalog_key"], "deleted-cell")
+            self.assertEqual(value_review["source_field_values"]["parent_key_path_candidate"], "HKEY_CURRENT_USER\\Software\\Run")
+            self.assertIn("registry-explorer-diff", value_review["correlation_targets"])
+            self.assertTrue(value_review["validation_required"])
             key_recovery = next(
                 record
                 for record in records
@@ -4129,9 +4141,32 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             self.assertIn("MountPoints2", mounted.details["registry_user_activity_profile"]["target_artifact_coverage"]["matched_targets"])
             network = next(record for record in records if record.details["user_activity_category"] == "network-share")
             self.assertEqual(network.details["decoded_values"]["RemotePath"]["network_share_hint"], "Z")
+            network_review = network.details["registry_analyst_review_profile"]
+            self.assertEqual(network_review["catalog_key"], "network-share")
+            self.assertFalse(network_review["validation_required"])
+            self.assertIn("eventlog-share-access", network_review["correlation_targets"])
             self.assertTrue(
                 all(record.details["registry_user_activity_profile"]["normalized_activity_schema"]["safe_for_search_index"] for record in records)
             )
+
+    def test_registry_analyst_review_profile_bounds_large_decoded_values(self) -> None:
+        profile = registry_analyst_review_profile(
+            artifact_type="registry-user-activity",
+            category="recent-document",
+            source_format="reg",
+            hive_hint="HKEY_CURRENT_USER",
+            key_path=r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs",
+            decoded_values={"0": {"value": "A" * 3000}},
+            normalized_rows=[{"display_value": "report.docx"}],
+            risk_flags=["recent-document"],
+            validation_required=False,
+        )
+
+        self.assertEqual(profile["profile_version"], "registry-analyst-review-profile-v1")
+        self.assertEqual(profile["catalog_key"], "recent-document")
+        self.assertIn("mft-usn", profile["correlation_targets"])
+        self.assertIn("decoded_values", profile["source_field_values"])
+        self.assertIn("truncated_json_preview", profile["source_field_values"]["decoded_values"])
 
     def test_sam_v_value_decodes_layout_string_candidates_without_secret_output(self) -> None:
         def put_descriptor(raw: bytearray, descriptor_offset: int, relative_offset: int, text: str) -> int:

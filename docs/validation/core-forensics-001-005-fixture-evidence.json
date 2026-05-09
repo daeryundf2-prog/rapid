@@ -67,6 +67,7 @@
       "assertions": [
         "registry-key-tree-node rows preserve root reachability, parent-child backlinks, value-list ownership, last-write timestamp evidence, transaction-log disclosure, source hashes, and #4 core_accuracy_gates.",
         "registry hive/key-tree rows distinguish absent transaction logs from present-but-not-replayed LOG1/LOG2 files and preserve transaction log names, sizes, and hashes for later replay validation.",
+        "registry_analyst_review_profile fixture assertions preserve persistence/key-tree severity, analyst questions, primary pivots, populated source values, correlation targets, transaction-log blockers, and GUI-ready review guidance.",
         "build_registry_key_tree_diff compares native key-tree rows with Registry Explorer/RegRipper/python-registry/.reg-style rows by normalized key path, value names, last-write timestamp, and root reachability."
       ],
       "blockers_kept": [
@@ -79,6 +80,7 @@
       "title": "Registry deleted key/value recovery",
       "assertions": [
         "registry-key-recovery-candidate and registry-value-recovery-candidate rows preserve positive-size free-cell evidence, parent-key confirmation, data plausibility, allocator evidence, reportability blocking, and #5 core_accuracy_gates.",
+        "deleted-cell registry_analyst_review_profile fixture assertions preserve offset/name/parent-path pivots, decoded value previews, recovery correlation targets, validation requirements, and trusted-parser blocker wording.",
         "build_registry_deleted_cell_diff compares deleted/free registry candidates with a hand-labeled or trusted parser oracle by cell offset, candidate class, name, data preview hash, and parent key path."
       ],
       "blockers_kept": [

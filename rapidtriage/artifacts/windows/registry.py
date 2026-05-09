@@ -92,6 +92,140 @@ REGISTRY_REPORT_GRADE_BLOCKERS = [
     "registry-security-descriptor-decoding-not-implemented",
 ]
 REGISTRY_TRUSTED_TOOL_HINTS = ("regipper", "regripper", "registryexplorer", "pythonregistry", "recmd", "regexport")
+REGISTRY_ANALYST_REVIEW_CATALOG = {
+    "persistence": {
+        "severity": "high",
+        "summary": "Registry persistence location; inspect command path, user scope, file creation, signer, and execution artifacts.",
+        "primary_pivots": ["key_path", "value_names", "decoded_values", "raw_preview"],
+        "correlation_targets": ["mft-usn", "prefetch", "amcache", "bam-dam", "srum", "eventlog-process", "defender"],
+        "analyst_questions": [
+            "Does the value launch an executable or script from user-writable paths?",
+            "Can file creation, execution, or download artifacts corroborate it?",
+            "Is the key from HKCU, HKLM, policy, service, or a recovered/deleted cell?",
+        ],
+        "risk_tags": ["persistence", "execution-review"],
+    },
+    "execution": {
+        "severity": "medium",
+        "summary": "User activity/execution registry artifact; decode payloads and correlate with execution timeline.",
+        "primary_pivots": ["key_path", "decoded_values", "normalized_activity_rows", "raw_preview"],
+        "correlation_targets": ["prefetch", "amcache", "bam-dam", "srum", "mft-usn", "eventlog-process"],
+        "analyst_questions": [
+            "Which executable or command is represented by the decoded value?",
+            "Does the timestamp/path align with other execution artifacts?",
+            "Is this from an exported key or only a native string pivot?",
+        ],
+        "risk_tags": ["user-activity", "execution"],
+    },
+    "recent-document": {
+        "severity": "info",
+        "summary": "Recent document/MRU artifact; use as a user activity pivot, not standalone file access proof.",
+        "primary_pivots": ["decoded_values", "normalized_activity_rows", "key_path", "raw_preview"],
+        "correlation_targets": ["mft-usn", "lnk", "jumplist", "shellbags", "office-recent", "search-index"],
+        "analyst_questions": [
+            "What document name/path is represented after binary payload decoding?",
+            "Does filesystem, LNK, JumpList, or application recent-file evidence corroborate access?",
+            "Is MRU order preserved and source hive/user attribution clear?",
+        ],
+        "risk_tags": ["user-activity", "recent-file"],
+    },
+    "file-dialog-mru": {
+        "severity": "info",
+        "summary": "File dialog MRU artifact; useful for user-selected file/folder pivots.",
+        "primary_pivots": ["decoded_values", "normalized_activity_rows", "key_path"],
+        "correlation_targets": ["mft-usn", "shellbags", "jumplist", "lnk", "application-logs"],
+        "analyst_questions": [
+            "Which filename, extension, or folder was selected in the dialog?",
+            "Can the target be found in filesystem or application artifacts?",
+            "Does MRU order align with the case timeline?",
+        ],
+        "risk_tags": ["user-activity", "file-dialog"],
+    },
+    "browser-typed-url": {
+        "severity": "info",
+        "summary": "Typed URL registry artifact; correlate with browser history, cache, and downloads.",
+        "primary_pivots": ["decoded_values", "normalized_activity_rows", "key_path"],
+        "correlation_targets": ["browser-history", "browser-cache", "downloads", "zone-identifier", "dns"],
+        "analyst_questions": [
+            "Which URL was typed and under which user hive?",
+            "Does browser history/cache/download evidence corroborate the visit?",
+            "Are there related credentials, cloud, or AI-service artifacts?",
+        ],
+        "risk_tags": ["web-activity"],
+    },
+    "typed-path": {
+        "severity": "info",
+        "summary": "Typed Explorer path; correlate with ShellBags, LNK, JumpList, and filesystem timeline.",
+        "primary_pivots": ["decoded_values", "normalized_activity_rows", "key_path"],
+        "correlation_targets": ["shellbags", "lnk", "jumplist", "mft-usn", "network-share"],
+        "analyst_questions": [
+            "What path was typed or visited?",
+            "Does it represent local, removable, or network storage?",
+            "Do ShellBags or filesystem timestamps corroborate browsing?",
+        ],
+        "risk_tags": ["user-activity", "path-navigation"],
+    },
+    "mounted-device": {
+        "severity": "medium",
+        "summary": "Mounted device/USB registry artifact; correlate device identity with setupapi, MFT, and user activity.",
+        "primary_pivots": ["key_path", "decoded_values", "raw_preview"],
+        "correlation_targets": ["setupapi", "usbstor", "mountpoints2", "mft-usn", "lnk", "shellbags"],
+        "analyst_questions": [
+            "What serial/vendor/product or mount point is represented?",
+            "Which user hive recorded the mount point?",
+            "Can file access or transfer be correlated around mount time?",
+        ],
+        "risk_tags": ["device", "removable-media"],
+    },
+    "network-share": {
+        "severity": "medium",
+        "summary": "Mapped network share/user network artifact; correlate with logon, share access, and file activity.",
+        "primary_pivots": ["decoded_values", "key_path", "raw_preview"],
+        "correlation_targets": ["eventlog-share-access", "rdp-logons", "mft-usn", "lnk", "shellbags"],
+        "analyst_questions": [
+            "Which remote path or drive letter is represented?",
+            "Which account/user hive owns the mapping?",
+            "Do share access events or file artifacts corroborate use?",
+        ],
+        "risk_tags": ["network-share", "user-activity"],
+    },
+    "shellbag": {
+        "severity": "info",
+        "summary": "ShellBag registry location; decode shell items and correlate folder browsing with filesystem evidence.",
+        "primary_pivots": ["key_path", "decoded_values", "raw_preview"],
+        "correlation_targets": ["shellbags-native", "mft-usn", "lnk", "jumplist", "removable-media"],
+        "analyst_questions": [
+            "Which folder path is represented after shell item decoding?",
+            "Does UsrClass/NTUSER transaction-log context change the interpretation?",
+            "Can filesystem or shortcut artifacts corroborate folder access?",
+        ],
+        "risk_tags": ["user-activity", "folder-browsing"],
+    },
+    "deleted-cell": {
+        "severity": "high",
+        "summary": "Deleted/free registry cell candidate; useful as a lead only until allocator and trusted-parser validation pass.",
+        "primary_pivots": ["cell_offset", "name", "key_path_candidate", "parent_key_path_candidate", "decoded_data_preview"],
+        "correlation_targets": ["registry-explorer-diff", "recmd-diff", "transaction-logs", "mft-usn", "eventlog"],
+        "analyst_questions": [
+            "Is the positive-size cell truly free/deleted in allocator context?",
+            "Can a second parser confirm the same offset/name/data?",
+            "Do transaction logs or neighboring cells change the interpretation?",
+        ],
+        "risk_tags": ["recovery-candidate", "validation-required"],
+    },
+    "key-tree": {
+        "severity": "medium",
+        "summary": "Native registry key-tree row; review parent chain, root reachability, value-list links, and transaction logs.",
+        "primary_pivots": ["key_path", "value_names", "subkey_names", "cell_offset", "last_written_at"],
+        "correlation_targets": ["registry-explorer-diff", "recmd-diff", "transaction-logs", "eventlog", "mft-usn"],
+        "analyst_questions": [
+            "Is the parent chain root-reachable and free of cycles?",
+            "Are subkey and value list offsets resolved without gaps?",
+            "Are LOG1/LOG2 transaction files present and replayed or disclosed?",
+        ],
+        "risk_tags": ["registry-structure", "validation-required"],
+    },
+}
 
 
 class WindowsRegistryProvider:
@@ -464,6 +598,7 @@ def build_registry_key_tree_records(
         ]
         missing_subkey_offsets = [offset for offset in subkey_offsets if offset not in key_by_offset]
         key_path, path_confidence = registry_key_path_for_node(key_node, key_by_offset, root_cell_offset=root_cell_offset)
+        full_key_path = f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path)
         path_evidence = registry_key_path_evidence(
             hive_hint_from_path(path),
             key_node,
@@ -650,6 +785,29 @@ def build_registry_key_tree_records(
                         "registry_native_capabilities": REGISTRY_NATIVE_CAPABILITIES,
                     },
                 ),
+                "registry_analyst_review_profile": registry_analyst_review_profile(
+                    artifact_type="registry-key-tree-node",
+                    category="persistence"
+                    if "\\run" in full_key_path.lower() or any("persistence" in flag for flag in risk_flags)
+                    else "key-tree",
+                    source_format="registry-hive",
+                    hive_name=path.name,
+                    hive_hint=hive_hint_from_path(path),
+                    key_path=full_key_path,
+                    name=str(key_node.get("name") or ""),
+                    value_names=sorted(str(value.get("name") or "") for value in value_cells if value.get("name")),
+                    risk_flags=risk_flags,
+                    validation_required=validation_required or not report_grade_assessment["report_grade_ready"],
+                    transaction_log_evidence=metadata.get("transaction_log_evidence")
+                    if isinstance(metadata.get("transaction_log_evidence"), Mapping)
+                    else {},
+                    report_grade_assessment=report_grade_assessment,
+                    source_values={
+                        "subkey_names": sorted(subkey_names),
+                        "cell_offset": key_node.get("cell_offset", 0),
+                        "last_written_at": key_node.get("last_written_at", ""),
+                    },
+                ),
                 "core_accuracy_gates": core_accuracy_gates,
                 "commercial_uplift_evidence": registry_commercial_uplift_evidence(
                     gap_ids=["#4"],
@@ -693,6 +851,7 @@ def build_registry_key_recovery_records(
         if candidate.get("cell_kind") != "key-node" or candidate.get("allocation_status") != "free-or-deleted-candidate":
             continue
         key_path, path_confidence = registry_key_path_for_node(candidate, key_by_offset)
+        recovered_key_path = f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path)
         risk_flags = registry_cell_risk_flags(candidate)
         validation_matrix = registry_key_tree_validation_matrix(
             candidate,
@@ -712,7 +871,7 @@ def build_registry_key_recovery_records(
             candidate,
             "deleted-or-free-key-cell",
             path_confidence=path_confidence,
-            recovered_path=f"{hive_hint_from_path(path)}\\{key_path}" if key_path else hive_hint_from_path(path),
+            recovered_path=recovered_key_path,
             allocator_neighbor_context=registry_allocator_neighbor_context(candidate, candidates),
         )
         recovery_profile = registry_recovery_validation_profile(
@@ -807,6 +966,24 @@ def build_registry_key_recovery_records(
                         "registry_validation_matrix": validation_matrix,
                         "registry_report_grade_assessment": report_grade_assessment,
                         "registry_transaction_log_evidence": dict(transaction_log_evidence),
+                    },
+                ),
+                "registry_analyst_review_profile": registry_analyst_review_profile(
+                    artifact_type="registry-key-recovery-candidate",
+                    category="deleted-cell",
+                    source_format="registry-hive",
+                    hive_name=path.name,
+                    hive_hint=hive_hint_from_path(path),
+                    key_path=recovered_key_path,
+                    name=str(candidate.get("name") or ""),
+                    risk_flags=risk_flags,
+                    validation_required=True,
+                    transaction_log_evidence=transaction_log_evidence,
+                    report_grade_assessment=report_grade_assessment,
+                    recovery_profile=recovery_profile,
+                    source_values={
+                        "key_path_candidate": recovered_key_path,
+                        "cell_offset": candidate.get("cell_offset", 0),
                     },
                 ),
                 "core_accuracy_gates": core_accuracy_gates,
@@ -1001,6 +1178,25 @@ def build_registry_value_recovery_records(
                         "registry_validation_matrix": validation_matrix,
                         "registry_report_grade_assessment": report_grade_assessment,
                         "registry_transaction_log_evidence": dict(transaction_log_evidence),
+                    },
+                ),
+                "registry_analyst_review_profile": registry_analyst_review_profile(
+                    artifact_type="registry-value-recovery-candidate",
+                    category="deleted-cell",
+                    source_format="registry-hive",
+                    hive_name=path.name,
+                    hive_hint=hive_hint_from_path(path),
+                    key_path=parent_path,
+                    name=str(candidate.get("name") or ""),
+                    risk_flags=registry_cell_risk_flags(candidate),
+                    validation_required=True,
+                    transaction_log_evidence=transaction_log_evidence,
+                    report_grade_assessment=report_grade_assessment,
+                    recovery_profile=recovery_profile,
+                    source_values={
+                        "parent_key_path_candidate": parent_path,
+                        "decoded_data_preview": decoded_data,
+                        "cell_offset": candidate.get("cell_offset", 0),
                     },
                 ),
                 "core_accuracy_gates": core_accuracy_gates,
@@ -1987,6 +2183,17 @@ def build_registry_user_activity_from_reg(
                 normalized_rows=normalized_rows,
                 metadata={"source_hashes": dict(source_hashes), "regf_valid": True},
             ),
+            "registry_analyst_review_profile": registry_analyst_review_profile(
+                artifact_type="registry-user-activity",
+                category=classification["category"],
+                source_format="reg",
+                hive_hint=key.split("\\", 1)[0],
+                key_path=key,
+                decoded_values=decoded_values,
+                normalized_rows=normalized_rows,
+                risk_flags=risk_flags,
+                validation_required=False,
+            ),
             "parser_confidence": 0.86,
             "evidence_strength": "registry-export-key",
             "risk_flags": risk_flags,
@@ -2051,6 +2258,20 @@ def build_registry_user_activity_from_hive_strings(
                     decoded_values={},
                     normalized_rows=normalized_rows,
                     metadata=metadata,
+                ),
+                "registry_analyst_review_profile": registry_analyst_review_profile(
+                    artifact_type="registry-user-activity",
+                    category=classification["category"],
+                    source_format="registry-hive",
+                    hive_name=path.name,
+                    hive_hint=hive_hint_from_path(path),
+                    key_path=value,
+                    normalized_rows=normalized_rows,
+                    risk_flags=risk_flags,
+                    validation_required=True,
+                    transaction_log_evidence=metadata.get("transaction_log_evidence")
+                    if isinstance(metadata.get("transaction_log_evidence"), Mapping)
+                    else {},
                 ),
                 "parser_confidence": 0.52 if metadata.get("regf_valid") else 0.25,
                 "evidence_strength": "registry-hive-string-candidate",
@@ -2554,6 +2775,98 @@ def registry_user_activity_profile(
             "trusted-user-activity-parser-diff-required",
         ],
     }
+
+
+def registry_analyst_review_profile(
+    *,
+    artifact_type: str,
+    category: str,
+    source_format: str,
+    hive_name: str = "",
+    hive_hint: str = "",
+    key_path: str = "",
+    name: str = "",
+    value_names: Sequence[str] | None = None,
+    decoded_values: Mapping[str, object] | None = None,
+    normalized_rows: Sequence[Mapping[str, object]] | None = None,
+    risk_flags: Sequence[str] | None = None,
+    validation_required: bool = True,
+    transaction_log_evidence: Mapping[str, object] | None = None,
+    report_grade_assessment: Mapping[str, object] | None = None,
+    recovery_profile: Mapping[str, object] | None = None,
+    source_values: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    catalog_key = "deleted-cell" if "recovery" in artifact_type or "deleted" in artifact_type else category
+    catalog = REGISTRY_ANALYST_REVIEW_CATALOG.get(catalog_key) or REGISTRY_ANALYST_REVIEW_CATALOG.get("key-tree", {})
+    transaction_log_evidence = transaction_log_evidence if isinstance(transaction_log_evidence, Mapping) else {}
+    report_grade_assessment = report_grade_assessment if isinstance(report_grade_assessment, Mapping) else {}
+    recovery_profile = recovery_profile if isinstance(recovery_profile, Mapping) else {}
+    normalized_rows = list(normalized_rows or [])
+    decoded_values = dict(decoded_values or {})
+    source_values = dict(source_values or {})
+    source_field_values: dict[str, object] = {}
+    for field in catalog.get("primary_pivots", []):
+        field_name = str(field)
+        if field_name == "key_path" and key_path:
+            source_field_values[field_name] = key_path
+        elif field_name == "name" and name:
+            source_field_values[field_name] = name
+        elif field_name == "value_names" and value_names:
+            source_field_values[field_name] = list(value_names)[:50]
+        elif field_name == "decoded_values" and decoded_values:
+            source_field_values[field_name] = bounded_jsonable(decoded_values)
+        elif field_name == "normalized_activity_rows" and normalized_rows:
+            source_field_values[field_name] = [bounded_jsonable(row) for row in normalized_rows[:20]]
+        elif field_name in source_values and source_values[field_name] not in ("", None):
+            source_field_values[field_name] = source_values[field_name]
+
+    blockers = list(report_grade_assessment.get("blockers") or [])
+    reportability_decision = recovery_profile.get("reportability_decision")
+    if isinstance(reportability_decision, Mapping):
+        blockers.extend(reportability_decision.get("blockers", []))
+    if transaction_log_evidence.get("status") == "present-not-replayed":
+        blockers.append("transaction-log-present-not-replayed")
+    if validation_required:
+        blockers.append("trusted-registry-parser-diff-required")
+
+    return {
+        "profile_version": "registry-analyst-review-profile-v1",
+        "artifact_type": artifact_type,
+        "category": category,
+        "catalog_key": catalog_key,
+        "source_format": source_format,
+        "hive_name": hive_name,
+        "hive_hint": hive_hint,
+        "key_path": key_path,
+        "name": name,
+        "severity": str(catalog.get("severity") or "medium"),
+        "summary": str(catalog.get("summary") or "Registry artifact review pivot."),
+        "analyst_questions": list(catalog.get("analyst_questions") or []),
+        "primary_pivots": list(catalog.get("primary_pivots") or []),
+        "source_field_values": source_field_values,
+        "correlation_targets": list(catalog.get("correlation_targets") or []),
+        "risk_tags": sorted(
+            set([str(item) for item in catalog.get("risk_tags", [])] + [str(item) for item in risk_flags or []])
+        ),
+        "validation_required": validation_required,
+        "transaction_log_status": str(transaction_log_evidence.get("status") or "not-evaluated"),
+        "report_grade_ready": bool(report_grade_assessment.get("report_grade_ready")),
+        "commercial_blockers": sorted(set(str(item) for item in blockers if str(item))),
+        "report_guidance": (
+            "Use this registry row as a review/search pivot. Final reporting needs source hive hash, "
+            "transaction-log handling, parser-version disclosure, and trusted parser or known-answer validation."
+        ),
+    }
+
+
+def bounded_jsonable(value: object) -> object:
+    try:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        return str(value)[:500]
+    if len(text) <= 2000:
+        return value
+    return {"truncated_json_preview": text[:2000], "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
 
 
 def decode_rot13_registry_value_name(value: str) -> str:
