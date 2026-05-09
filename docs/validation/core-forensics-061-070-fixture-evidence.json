@@ -72,7 +72,7 @@
       "title": "Incremental indexing",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Run fingerprint output preserves path/size/mtime metadata, bounded per-file SHA-256 hashes, incremental reuse plan counts, truncation disclosure, reuse safety, trusted reuse diff helper/gate, #68 core_accuracy_gates, #68 commercial_uplift_evidence, and reportability blockers for missing full large-file delta reuse, trusted manifests, and large-case replay validation."
+        "Run fingerprint output preserves path/size/mtime metadata, bounded per-file SHA-256 hashes, incremental reuse plan counts, per-path reuse decision row hashes, truncation disclosure, reuse safety, trusted reuse diff helper/gate, #68 core_accuracy_gates, #68 commercial_uplift_evidence, and reportability blockers for missing full large-file delta reuse, trusted manifests, and large-case replay validation."
       ],
       "remaining_external_validation": ["Full large-file content-hash delta reindexing, trusted reuse manifests, and large-case validation."]
     },

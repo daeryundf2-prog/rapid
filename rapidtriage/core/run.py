@@ -1749,7 +1749,9 @@ def build_run_input_fingerprint(
 def refresh_incremental_fingerprint_manifest(payload: Dict[str, object], *, reuse_disabled: bool) -> None:
     summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
     manifest = build_incremental_indexing_manifest(payload)
+    decision_manifest = build_incremental_reuse_decision_manifest(payload, reuse_disabled=reuse_disabled)
     payload["incremental_indexing_manifest"] = manifest
+    payload["incremental_reuse_decision_manifest"] = decision_manifest
     payload["incremental_indexing_assessment"] = incremental_indexing_assessment(
         scanned_files=int(summary.get("scanned_file_count") or 0),
         max_files=int(summary.get("max_files") or 0),
@@ -1757,6 +1759,7 @@ def refresh_incremental_fingerprint_manifest(payload: Dict[str, object], *, reus
         content_hashed_files=int(summary.get("content_hashed_file_count") or 0),
         content_skipped_files=int(summary.get("content_hash_skipped_file_count") or 0),
         manifest_hash=str(manifest.get("manifest_hash") or ""),
+        decision_manifest_hash=str(decision_manifest.get("manifest_hash") or ""),
     )
     payload["core_accuracy_gates"] = incremental_indexing_core_accuracy_gates(
         scanned_files=int(summary.get("scanned_file_count") or 0),
@@ -1766,6 +1769,7 @@ def refresh_incremental_fingerprint_manifest(payload: Dict[str, object], *, reus
         reuse_disabled=reuse_disabled,
         content_hashed_files=int(summary.get("content_hashed_file_count") or 0),
         manifest_hash=str(manifest.get("manifest_hash") or ""),
+        decision_manifest_hash=str(decision_manifest.get("manifest_hash") or ""),
     )
 
 
@@ -1814,6 +1818,96 @@ def build_incremental_indexing_manifest(fingerprint_payload: Mapping[str, object
         "required_external_evidence": [
             "multi-million-file changed-source replay validation",
             "large-file full content-hash delta indexing validation",
+            "trusted incremental reuse manifest diff",
+        ],
+        "commercial_claim_allowed": False,
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
+def build_incremental_reuse_decision_manifest(
+    fingerprint_payload: Mapping[str, object],
+    *,
+    reuse_disabled: bool,
+) -> dict[str, object]:
+    reuse_plan = (
+        fingerprint_payload.get("incremental_reuse_plan")
+        if isinstance(fingerprint_payload.get("incremental_reuse_plan"), Mapping)
+        else {}
+    )
+    rows: list[dict[str, object]] = []
+    if reuse_plan:
+        for change_type, decision, paths in (
+            ("added", "rebuild-affected-stages", reuse_plan.get("added")),
+            ("removed", "rebuild-affected-stages", reuse_plan.get("removed")),
+            ("changed", "rebuild-affected-stages", reuse_plan.get("changed")),
+            ("metadata-only", "verify-or-rebuild-affected-stages", reuse_plan.get("metadata_only")),
+            ("unchanged-sample", "reuse-eligible-at-stage-level", reuse_plan.get("unchanged_sample")),
+        ):
+            if not isinstance(paths, list):
+                continue
+            for path in paths[:500]:
+                row_core = {
+                    "relative_path": str(path),
+                    "change_type": change_type,
+                    "reuse_decision": decision,
+                    "row_level_delta_reindexing": False,
+                }
+                rows.append(
+                    {
+                        **row_core,
+                        "row_hash": hashlib.sha256(
+                            json.dumps(row_core, sort_keys=True).encode("utf-8")
+                        ).hexdigest(),
+                    }
+                )
+    else:
+        row_core = {
+            "relative_path": "",
+            "change_type": "fresh-run",
+            "reuse_decision": "no-prior-fingerprint",
+            "row_level_delta_reindexing": False,
+        }
+        rows.append(
+            {
+                **row_core,
+                "row_hash": hashlib.sha256(json.dumps(row_core, sort_keys=True).encode("utf-8")).hexdigest(),
+            }
+        )
+    row_hashes = [str(row["row_hash"]) for row in rows]
+    row_head_hash = hashlib.sha256("\n".join(row_hashes).encode("ascii")).hexdigest()
+    manifest_core = {
+        "profile_version": "incremental-reuse-decision-manifest-v1",
+        "item_number": 68,
+        "gap_id": INCREMENTAL_INDEXING_GAP_ID,
+        "commercial_gap_ids": [INCREMENTAL_INDEXING_GAP_ID],
+        "fingerprint": str(fingerprint_payload.get("fingerprint") or ""),
+        "previous_fingerprint": str(reuse_plan.get("previous_fingerprint") or "") if reuse_plan else "",
+        "current_fingerprint": str(reuse_plan.get("current_fingerprint") or fingerprint_payload.get("fingerprint") or ""),
+        "resume_requested": bool(reuse_plan.get("resume_requested")) if reuse_plan else False,
+        "resume_effective": bool(reuse_plan.get("resume_effective")) if reuse_plan else False,
+        "reuse_disabled": reuse_disabled,
+        "resume_disabled_reason": str(reuse_plan.get("resume_disabled_reason") or "") if reuse_plan else "",
+        "reindex_recommendation": str(reuse_plan.get("reindex_recommendation") or "fresh-run-no-prior-fingerprint"),
+        "counts": dict(reuse_plan.get("counts") or {}) if isinstance(reuse_plan.get("counts"), Mapping) else {},
+        "decision_row_count": len(rows),
+        "decision_row_head_hash": row_head_hash,
+        "decision_rows": rows,
+        "decision_policy": {
+            "safe_to_reuse_outputs": bool(
+                reuse_plan and reuse_plan.get("reindex_recommendation") == "safe-to-reuse-stage-outputs"
+            ),
+            "changed_source_disables_stage_reuse": reuse_disabled,
+            "whole_stage_reuse_only": True,
+            "row_level_delta_reindexing": False,
+            "large_file_metadata_only_paths_are_not_content_complete": True,
+        },
+        "required_external_evidence": [
+            "row-level per-file content-hash delta reindex validation",
+            "large-case changed-source replay validation",
             "trusted incremental reuse manifest diff",
         ],
         "commercial_claim_allowed": False,
@@ -2084,6 +2178,7 @@ def incremental_indexing_assessment(
     content_hashed_files: int = 0,
     content_skipped_files: int = 0,
     manifest_hash: str = "",
+    decision_manifest_hash: str = "",
 ) -> dict[str, object]:
     return {
         "component": "incremental-indexing",
@@ -2095,6 +2190,7 @@ def incremental_indexing_assessment(
         "content_hashed_file_count": content_hashed_files,
         "content_hash_skipped_file_count": content_skipped_files,
         "incremental_indexing_manifest_hash": manifest_hash,
+        "incremental_reuse_decision_manifest_hash": decision_manifest_hash,
         "ready_for_court_report": False,
         "blockers": [
             "large-files-above-content-hash-policy-still-use-metadata-only-delta",
@@ -2132,6 +2228,7 @@ def incremental_indexing_assessment(
             reuse_disabled=False,
             content_hashed_files=content_hashed_files,
             manifest_hash=manifest_hash,
+            decision_manifest_hash=decision_manifest_hash,
         ),
     }
 
@@ -2207,6 +2304,11 @@ def build_incremental_indexing_trusted_diff(
 def incremental_fingerprint_diff_value(item: Mapping[str, object]) -> dict[str, object]:
     summary = item.get("summary") if isinstance(item.get("summary"), Mapping) else {}
     manifest = item.get("incremental_indexing_manifest") if isinstance(item.get("incremental_indexing_manifest"), Mapping) else {}
+    decision_manifest = (
+        item.get("incremental_reuse_decision_manifest")
+        if isinstance(item.get("incremental_reuse_decision_manifest"), Mapping)
+        else {}
+    )
     return {
         "fingerprint": str(item.get("fingerprint") or ""),
         "scanned_file_count": int(summary.get("scanned_file_count") or 0),
@@ -2214,6 +2316,8 @@ def incremental_fingerprint_diff_value(item: Mapping[str, object]) -> dict[str, 
         "truncated": bool(summary.get("truncated")),
         "file_record_head_hash": str(manifest.get("file_record_head_hash") or ""),
         "incremental_manifest_hash": str(manifest.get("manifest_hash") or ""),
+        "reuse_decision_manifest_hash": str(decision_manifest.get("manifest_hash") or ""),
+        "reuse_decision_row_head_hash": str(decision_manifest.get("decision_row_head_hash") or ""),
     }
 
 
@@ -2268,6 +2372,7 @@ def incremental_indexing_core_accuracy_gates(
     reuse_disabled: bool,
     content_hashed_files: int = 0,
     manifest_hash: str = "",
+    decision_manifest_hash: str = "",
     trusted_diff: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     satisfied = ["input fingerprint emitted", "path/size/mtime metadata captured", "per-file reindex limitation warning"]
@@ -2275,6 +2380,8 @@ def incremental_indexing_core_accuracy_gates(
         satisfied.append("bounded per-file content hashes captured")
     if manifest_hash:
         satisfied.append("incremental indexing manifest hash emitted")
+    if decision_manifest_hash:
+        satisfied.append("reuse decision manifest emitted")
     if reuse_disabled:
         satisfied.append("changed-source reuse disabled")
     if truncated or max_files:
@@ -2288,6 +2395,8 @@ def incremental_indexing_core_accuracy_gates(
     ]
     if manifest_hash:
         evidence_refs.append(f"incremental_manifest_hash:{manifest_hash}")
+    if decision_manifest_hash:
+        evidence_refs.append(f"reuse_decision_manifest_hash:{decision_manifest_hash}")
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted incremental reuse diff pass")
         evidence_refs.append(f"trusted_tool:{trusted_diff.get('trusted_tool', '')}")
@@ -2959,6 +3068,11 @@ def build_processing_summary(
         if isinstance(input_fingerprint.get("incremental_indexing_manifest"), Mapping)
         else {}
     )
+    reuse_decision_manifest = (
+        input_fingerprint.get("incremental_reuse_decision_manifest")
+        if isinstance(input_fingerprint.get("incremental_reuse_decision_manifest"), Mapping)
+        else {}
+    )
     profile_label = infer_processing_profile_label(
         read_only=read_only,
         dry_run=dry_run,
@@ -3002,15 +3116,19 @@ def build_processing_summary(
             "resume_disabled_reason": str(safety.get("resume_disabled_reason") or ""),
             "incremental_indexing_manifest": dict(incremental_manifest),
             "incremental_indexing_manifest_hash": str(incremental_manifest.get("manifest_hash") or ""),
+            "incremental_reuse_decision_manifest": dict(reuse_decision_manifest),
+            "incremental_reuse_decision_manifest_hash": str(reuse_decision_manifest.get("manifest_hash") or ""),
             "commercial_uplift_evidence": performance_commercial_uplift_evidence(
                 item_number=68,
                 validation_ids=[
                     "input fingerprint emitted",
                     "path/size/mtime metadata captured",
+                    "reuse decision manifest emitted",
                     "per-file reindex limitation warning",
                 ],
                 large_data_controls=[
                     "bounded fingerprint controls whether stage outputs can be reused",
+                    "per-path reuse/rebuild decisions are hashed for reviewer traceability",
                     "changed-source runs disable reuse instead of silently trusting stale outputs",
                     "resume state is surfaced in the run summary for analyst review",
                 ],
@@ -3117,6 +3235,7 @@ def build_processing_summary(
             if isinstance(memory_cap_enforcement.get("memory_cap_enforcement_manifest"), Mapping)
             else {},
             incremental_manifest=incremental_manifest,
+            reuse_decision_manifest=reuse_decision_manifest,
             resume=resume,
             resume_effective=bool(safety.get("resume_effective")),
             reused_output_count=len(reused_outputs),
@@ -3347,6 +3466,7 @@ def build_functional_large_data_profiles(
     streaming_boundary: Mapping[str, object],
     memory_cap_manifest: Mapping[str, object],
     incremental_manifest: Mapping[str, object],
+    reuse_decision_manifest: Mapping[str, object],
     resume: bool,
     resume_effective: bool,
     reused_output_count: int,
@@ -3429,6 +3549,11 @@ def build_functional_large_data_profiles(
                 "input_fingerprint_controls_reuse": True,
                 "incremental_indexing_manifest_hash": str(incremental_manifest.get("manifest_hash") or ""),
                 "incremental_indexing_manifest_profile": str(incremental_manifest.get("profile_version") or ""),
+                "incremental_reuse_decision_manifest_hash": str(reuse_decision_manifest.get("manifest_hash") or ""),
+                "incremental_reuse_decision_row_head_hash": str(
+                    reuse_decision_manifest.get("decision_row_head_hash") or ""
+                ),
+                "reuse_decision_row_count": int(reuse_decision_manifest.get("decision_row_count") or 0),
                 "file_record_head_hash": str(incremental_manifest.get("file_record_head_hash") or ""),
                 "content_hashed_file_count": int(incremental_manifest.get("content_hashed_file_count") or 0),
                 "reindex_recommendation": str(incremental_manifest.get("reindex_recommendation") or ""),

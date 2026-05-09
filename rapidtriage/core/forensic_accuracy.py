@@ -1037,6 +1037,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "path/size/mtime metadata captured",
             "changed-source reuse disabled",
             "truncation disclosure",
+            "reuse decision manifest emitted",
             "per-file reindex limitation warning",
             "trusted incremental reuse diff pass",
         ),

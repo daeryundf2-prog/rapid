@@ -511,6 +511,13 @@ class RapidTriageRunTests(unittest.TestCase):
                 profile_by_number[30]["controls"]["incremental_indexing_manifest_profile"],
                 "incremental-indexing-manifest-v1",
             )
+            self.assertEqual(
+                profile_by_number[30]["controls"]["incremental_reuse_decision_manifest_hash"],
+                summary_payload["processing"]["incremental_indexing"][
+                    "incremental_reuse_decision_manifest_hash"
+                ],
+            )
+            self.assertGreater(profile_by_number[30]["controls"]["reuse_decision_row_count"], 0)
             self.assertIn("#75", summary_payload["safety"]["artifact_scheduler"]["commercial_gap_ids"])
             self.assertEqual(summary_payload["processing"]["parser_crash_isolation"]["core_accuracy_gates"][0]["gap_id"], "#71")
             self.assertEqual(summary_payload["processing"]["memory_cap_enforcement"]["core_accuracy_gates"][0]["gap_id"], "#72")
@@ -553,6 +560,18 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(fingerprint["incremental_indexing_manifest"]["gap_id"], "#30")
             self.assertEqual(len(fingerprint["incremental_indexing_manifest"]["manifest_hash"]), 64)
             self.assertEqual(
+                fingerprint["incremental_reuse_decision_manifest"]["profile_version"],
+                "incremental-reuse-decision-manifest-v1",
+            )
+            self.assertEqual(fingerprint["incremental_reuse_decision_manifest"]["item_number"], 68)
+            self.assertEqual(fingerprint["incremental_reuse_decision_manifest"]["gap_id"], "#68")
+            self.assertEqual(len(fingerprint["incremental_reuse_decision_manifest"]["manifest_hash"]), 64)
+            self.assertGreater(fingerprint["incremental_reuse_decision_manifest"]["decision_row_count"], 0)
+            self.assertEqual(
+                fingerprint["incremental_indexing_assessment"]["incremental_reuse_decision_manifest_hash"],
+                fingerprint["incremental_reuse_decision_manifest"]["manifest_hash"],
+            )
+            self.assertEqual(
                 fingerprint["incremental_indexing_assessment"]["incremental_indexing_manifest_hash"],
                 fingerprint["incremental_indexing_manifest"]["manifest_hash"],
             )
@@ -560,6 +579,7 @@ class RapidTriageRunTests(unittest.TestCase):
                 "incremental indexing manifest hash emitted",
                 fingerprint["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            self.assertIn("reuse decision manifest emitted", fingerprint["core_accuracy_gates"][0]["satisfied_checks"])
             self.assertGreater(fingerprint["summary"]["content_hashed_file_count"], 0)
             self.assertGreater(len(fingerprint["files"]), 0)
             self.assertTrue(any(item.get("sha256") for item in fingerprint["files"]))
@@ -634,7 +654,17 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(fingerprint["incremental_indexing_manifest"]["profile_version"], "incremental-indexing-manifest-v1")
             self.assertEqual(fingerprint["incremental_indexing_manifest"]["reindex_recommendation"], "rebuild-affected-stages")
             self.assertEqual(len(fingerprint["incremental_indexing_manifest"]["reuse_plan_hash"]), 64)
+            decision_manifest = fingerprint["incremental_reuse_decision_manifest"]
+            self.assertEqual(decision_manifest["profile_version"], "incremental-reuse-decision-manifest-v1")
+            self.assertTrue(decision_manifest["reuse_disabled"])
+            self.assertEqual(decision_manifest["decision_policy"]["changed_source_disables_stage_reuse"], True)
+            changed_rows = [row for row in decision_manifest["decision_rows"] if row["change_type"] == "changed"]
+            self.assertTrue(
+                any(row["relative_path"] == "Users/alice/Documents/wire-transfer-notes.txt" for row in changed_rows)
+            )
+            self.assertEqual(len(decision_manifest["manifest_hash"]), 64)
             self.assertIn("changed-source reuse disabled", fingerprint["core_accuracy_gates"][0]["satisfied_checks"])
+            self.assertIn("reuse decision manifest emitted", fingerprint["core_accuracy_gates"][0]["satisfied_checks"])
 
     def test_search_command_finds_keyword_across_completed_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

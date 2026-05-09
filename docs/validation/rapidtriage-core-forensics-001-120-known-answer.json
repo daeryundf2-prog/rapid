@@ -1611,7 +1611,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "Run fingerprint output preserves fingerprint, path/size/mtime metadata, bounded per-file SHA-256 hashes, incremental reuse plan counts, changed-source reuse behavior, truncation disclosure, limitation warning, #68 core_accuracy_gates, and #68 commercial_uplift_evidence."
+          "Run fingerprint output preserves fingerprint, path/size/mtime metadata, bounded per-file SHA-256 hashes, incremental reuse plan counts, per-path reuse decision row hashes, changed-source reuse behavior, truncation disclosure, limitation warning, #68 core_accuracy_gates, and #68 commercial_uplift_evidence."
         ]
       },
       "notes": "Internal fixture pass; full large-file content-hash delta reindexing remains blocker.",
