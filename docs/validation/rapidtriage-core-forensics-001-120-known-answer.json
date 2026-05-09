@@ -1738,7 +1738,7 @@
       ],
       "expected": {
         "required_assertions": [
-          "SQLite outputs preserve performance pragmas, table profiles, searchable text column counts, bounded row previews, source preview query-plan profiles, Case DB query-plan head hashes, large-corpus warnings, and #74 core_accuracy_gates."
+          "SQLite outputs preserve performance pragmas, table profiles, searchable text column counts, bounded row previews, source preview query-plan profiles, query-plan row hashes, Case DB query-plan head hashes, large-corpus warnings, and #74 core_accuracy_gates."
         ]
       },
       "notes": "Internal fixture pass; 10M-row query-plan and WAL/deleted-row validation remain blockers.",

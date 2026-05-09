@@ -36,7 +36,7 @@
       "title": "Large SQLite/FTS optimization",
       "test_files": ["tests/test_rapidtriage_api.py", "tests/test_rapidtriage_case_db.py"],
       "assertions": [
-        "Case DB and source-viewer SQLite outputs preserve WAL/cache pragmas, table profiles, searchable text column counts, bounded row previews, source preview query-plan profiles, Case DB query-plan head hashes, trusted query-plan diff helpers/gates, and #74 core_accuracy_gates."
+        "Case DB and source-viewer SQLite outputs preserve WAL/cache pragmas, table profiles, searchable text column counts, bounded row previews, source preview query-plan profiles, query-plan row hashes, Case DB query-plan head hashes, trusted query-plan diff helpers/gates, and #74 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Trusted query-plan manifests, 10M-row benchmark, deleted-row/WAL replay validation, and query-plan regression gates."]
     },

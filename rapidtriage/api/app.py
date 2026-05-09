@@ -7059,6 +7059,8 @@ def sqlite_fts_optimization_manifest(
         "preview_row_count": preview_row_count,
         "searchable_text_column_count": searchable_text_column_count,
         "query_plan_hash": str(query_plan_profile.get("plan_hash") or ""),
+        "query_plan_row_head_hash": str(query_plan_profile.get("plan_row_head_hash") or ""),
+        "query_plan_row_hash_count": int(query_plan_profile.get("plan_row_hash_count") or 0),
         "bounded_preview_query": bool(query_plan_profile.get("bounded_preview_query")),
         "arbitrary_sql_allowed": bool(query_plan_profile.get("arbitrary_sql_allowed")),
         "wal_journal_replay_supported": False,
@@ -7089,12 +7091,20 @@ def sqlite_preview_query_plan_profile(previews: Sequence[Mapping[str, object]]) 
             "bounded_rows": True,
             "full_table_materialization": False,
         }
-        plans.append(plan)
+        plans.append(
+            {
+                **plan,
+                "row_hash": hashlib.sha256(json.dumps(plan, sort_keys=True).encode("utf-8")).hexdigest(),
+            }
+        )
+    row_hashes = [str(plan["row_hash"]) for plan in plans if plan.get("row_hash")]
     plan_hash = hashlib.sha256(json.dumps(plans, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
     return {
         "profile_version": "sqlite-preview-query-plan-profile-v1",
         "plan_count": len(plans),
         "plan_hash": plan_hash,
+        "plan_row_hash_count": len(row_hashes),
+        "plan_row_head_hash": hashlib.sha256("\n".join(row_hashes).encode("utf-8")).hexdigest(),
         "plans": plans[:20],
         "bounded_preview_query": True,
         "arbitrary_sql_allowed": False,
@@ -7132,6 +7142,8 @@ def sqlite_fts_functional_profile(
             "case_db_fts_recommended_for_large_search": True,
             "optimization_manifest_hash": str(optimization_manifest.get("manifest_hash") or ""),
             "query_plan_hash": str(optimization_manifest.get("query_plan_hash") or ""),
+            "query_plan_row_head_hash": str(optimization_manifest.get("query_plan_row_head_hash") or ""),
+            "query_plan_row_hash_count": int(optimization_manifest.get("query_plan_row_hash_count") or 0),
             "wal_journal_replay_supported": bool(optimization_manifest.get("wal_journal_replay_supported")),
         },
         "blockers": [
@@ -7162,6 +7174,7 @@ def large_sqlite_fts_core_accuracy_gates(
         "searchable text columns counted",
         "bounded row preview preserved",
         "bounded query plan profile emitted",
+        "query plan row hashes emitted",
         "SQLite/FTS optimization manifest hash emitted",
         "large corpus optimization limitation warning",
     ]

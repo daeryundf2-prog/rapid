@@ -1126,26 +1126,29 @@ def build_sqlite_fts_run_optimization_manifest(*, outputs: Mapping[str, Path]) -
     for name in tracked_output_names:
         path = outputs.get(name)
         if not path:
-            tracked_outputs.append({"name": name, "status": "missing"})
+            tracked_outputs.append(sqlite_fts_tracked_output_row(name=name, status="missing"))
             continue
         if path.is_file():
             tracked_outputs.append(
-                {
-                    "name": name,
-                    "path": str(path),
-                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                    "size_bytes": path.stat().st_size,
-                }
+                sqlite_fts_tracked_output_row(
+                    name=name,
+                    path=str(path),
+                    sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                    size_bytes=path.stat().st_size,
+                )
             )
         else:
-            tracked_outputs.append({"name": name, "path": str(path), "status": "missing"})
+            tracked_outputs.append(sqlite_fts_tracked_output_row(name=name, path=str(path), status="missing"))
     missing_outputs = sorted(str(item["name"]) for item in tracked_outputs if item.get("status") == "missing")
+    row_hashes = [str(item["row_hash"]) for item in tracked_outputs if item.get("row_hash")]
     manifest_core: Dict[str, object] = {
         "profile_version": "sqlite-fts-run-optimization-manifest-v1",
         "item_number": 74,
         "commercial_gap_ids": [LARGE_SQLITE_FTS_GAP_ID],
         "commercial_claim_allowed": False,
         "tracked_outputs": tracked_outputs,
+        "tracked_output_row_count": len(tracked_outputs),
+        "tracked_output_row_head_hash": hashlib.sha256("\n".join(row_hashes).encode("utf-8")).hexdigest(),
         "missing_outputs": missing_outputs,
         "optimization_policy": {
             "case_db_wal_pragmas_expected": True,
@@ -1174,6 +1177,27 @@ def build_sqlite_fts_run_optimization_manifest(*, outputs: Mapping[str, Path]) -
         json.dumps(manifest_core, sort_keys=True).encode("utf-8")
     ).hexdigest()
     return manifest_core
+
+
+def sqlite_fts_tracked_output_row(
+    *,
+    name: str,
+    path: str = "",
+    sha256: str = "",
+    size_bytes: int = 0,
+    status: str = "present",
+) -> dict[str, object]:
+    row_core = {
+        "name": name,
+        "path": path,
+        "status": status,
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+    }
+    return {
+        **row_core,
+        "row_hash": hashlib.sha256(json.dumps(row_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
 
 
 def collect_artifact_stages(
@@ -3685,6 +3709,8 @@ def build_runtime_defensibility_profiles(
                 "bounded_sqlite_preview_contract": True,
                 "fts_optimization_metadata_available": True,
                 "run_sqlite_fts_optimization_manifest_hash": str((sqlite_fts_optimization or {}).get("manifest_hash", "")),
+                "tracked_output_row_count": int((sqlite_fts_optimization or {}).get("tracked_output_row_count") or 0),
+                "tracked_output_row_head_hash": str((sqlite_fts_optimization or {}).get("tracked_output_row_head_hash") or ""),
                 "ten_million_row_query_plan_regression_attached": False,
                 "deleted_row_wal_replay_validation_attached": False,
             },

@@ -470,6 +470,9 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(sqlite_fts["profile_version"], "sqlite-fts-run-optimization-manifest-v1")
             self.assertEqual(sqlite_fts["item_number"], 74)
             self.assertIn("manifest_hash", sqlite_fts)
+            self.assertEqual(sqlite_fts["tracked_output_row_count"], len(sqlite_fts["tracked_outputs"]))
+            self.assertRegex(sqlite_fts["tracked_output_row_head_hash"], r"^[0-9a-f]{64}$")
+            self.assertRegex(sqlite_fts["tracked_outputs"][0]["row_hash"], r"^[0-9a-f]{64}$")
             self.assertTrue(sqlite_fts["optimization_policy"]["cursor_pagination_required"])
             self.assertFalse(sqlite_fts["optimization_policy"]["ten_million_row_regression_attached"])
             self.assertEqual(
@@ -529,6 +532,14 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(
                 runtime_by_number[74]["controls"]["run_sqlite_fts_optimization_manifest_hash"],
                 sqlite_fts["manifest_hash"],
+            )
+            self.assertEqual(
+                runtime_by_number[74]["controls"]["tracked_output_row_count"],
+                sqlite_fts["tracked_output_row_count"],
+            )
+            self.assertEqual(
+                runtime_by_number[74]["controls"]["tracked_output_row_head_hash"],
+                sqlite_fts["tracked_output_row_head_hash"],
             )
             self.assertEqual(runtime_by_number[75]["component"], "parallel-parser-scheduler")
             self.assertTrue(runtime_by_number[75]["controls"]["deterministic_output_paths"])

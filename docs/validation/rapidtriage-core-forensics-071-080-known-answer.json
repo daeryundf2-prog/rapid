@@ -44,7 +44,7 @@
       "status": "pass",
       "backlog_items": [74],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_api.py", "tests/test_rapidtriage_case_db.py"],
-      "expected": {"required_assertions": ["SQLite outputs preserve performance pragmas, table profiles, searchable text column counts, bounded row previews, source preview query-plan profiles, Case DB query-plan head hashes, large-corpus warnings, trusted query-plan diff status, and #74 core_accuracy_gates."]},
+      "expected": {"required_assertions": ["SQLite outputs preserve performance pragmas, table profiles, searchable text column counts, bounded row previews, source preview query-plan profiles, query-plan row hashes, Case DB query-plan head hashes, large-corpus warnings, trusted query-plan diff status, and #74 core_accuracy_gates."]},
       "notes": "Internal fixture pass; trusted query-plan manifests, 10M-row query-plan, and WAL/deleted-row validation remain blockers."
     },
     {

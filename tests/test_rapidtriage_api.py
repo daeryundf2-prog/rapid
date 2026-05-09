@@ -1034,9 +1034,29 @@ class RapidTriageApiTests(unittest.TestCase):
                 sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["query_plan_profile"]["plan_hash"],
                 r"^[0-9a-f]{64}$",
             )
+            self.assertGreaterEqual(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["query_plan_profile"]["plan_row_hash_count"],
+                1,
+            )
+            self.assertRegex(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["query_plan_profile"]["plan_row_head_hash"],
+                r"^[0-9a-f]{64}$",
+            )
+            self.assertRegex(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["query_plan_profile"]["plans"][0]["row_hash"],
+                r"^[0-9a-f]{64}$",
+            )
             self.assertRegex(
                 sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["sqlite_fts_optimization_manifest"]["manifest_hash"],
                 r"^[0-9a-f]{64}$",
+            )
+            self.assertEqual(
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["sqlite_fts_optimization_manifest"][
+                    "query_plan_row_head_hash"
+                ],
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["query_plan_profile"][
+                    "plan_row_head_hash"
+                ],
             )
             self.assertEqual(
                 sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["sqlite_fts_optimization_manifest_hash"],
@@ -1052,6 +1072,10 @@ class RapidTriageApiTests(unittest.TestCase):
             )
             self.assertIn(
                 "SQLite/FTS optimization manifest hash emitted",
+                sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+            self.assertIn(
+                "query plan row hashes emitted",
                 sqlite_preview["sqlite"]["large_sqlite_fts_optimization"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
             self.assertEqual(
