@@ -35,6 +35,7 @@
       "assertions": [
         "amcache-entry rows preserve path, program name, publisher, SHA1, timestamp source, execution caveat, source hash, and #7 core_accuracy_gates.",
         "amcache-hive native rows preserve bounded path/hash string pivots and keep native schema decode blockers explicit.",
+        "amcache-entry and amcache-hive rows emit execution_analyst_review_profile with severity, not-proof-of warnings, populated pivots, correlation targets, and trusted-diff blockers.",
         "build_execution_artifact_trusted_diff can compare Amcache rows with AmcacheParser/RECmd-style output by executable path, timestamp, SHA1, and semantics warning.",
         "Amcache reportability decisions block standalone execution claims."
       ],
@@ -47,7 +48,8 @@
       "number": 8,
       "title": "ShimCache/AppCompatCache parser",
       "assertions": [
-        "shimcache-entry rows preserve path/timestamp candidates, source order, OS-layout warning, not-proof-of-execution wording, #8 core_accuracy_gates, and program-presence-only reportability decisions."
+        "shimcache-entry rows preserve path/timestamp candidates, source order, OS-layout warning, not-proof-of-execution wording, #8 core_accuracy_gates, and program-presence-only reportability decisions.",
+        "shimcache-entry rows emit execution_analyst_review_profile with explicit program-execution denial, not-execution-proof risk tags, Prefetch correlation targets, and native layout blockers."
         ,"build_execution_artifact_trusted_diff can compare ShimCache rows with AppCompatCacheParser/ShimCacheParser-style output while preserving the not-proof-of-execution warning."
       ],
       "blockers_kept": [
@@ -58,7 +60,8 @@
       "number": 9,
       "title": "BAM/DAM execution parser",
       "assertions": [
-        "bam-entry rows preserve SID, device path, FILETIME timestamp, CurrentControlSet attribution, execution semantics warning, #9 core_accuracy_gates, and correlate-before-testimony reportability decisions."
+        "bam-entry rows preserve SID, device path, FILETIME timestamp, CurrentControlSet attribution, execution semantics warning, #9 core_accuracy_gates, and correlate-before-testimony reportability decisions.",
+        "bam-entry rows emit execution_analyst_review_profile with high severity, SID/device/timestamp pivots, SRUM/Prefetch correlation targets, and native SYSTEM hive decoding blockers."
         ,"build_execution_artifact_trusted_diff can compare BAM/DAM rows with trusted SYSTEM hive/BAM parser output by path, SID, timestamp, and semantics warning."
       ],
       "blockers_kept": [
@@ -72,6 +75,7 @@
       "assertions": [
         "srum-network-usage rows preserve source-tool app/user/timestamp/counter normalization.",
         "srum-database-file, srum-table-candidate, and srum-row-candidate rows preserve ESE header validation, table markers, row string candidates, counter/timestamp candidates, source hashes, #10 core_accuracy_gates, and native-row-not-decoded reportability decisions.",
+        "SRUM import/database/pivot/table/row candidate rows emit execution_analyst_review_profile with app/counter/source-offset pivots, DNS/process/network correlation targets, and native ESE row-decoding blockers.",
         "build_execution_artifact_trusted_diff can compare SRUM rows with SrumECmd/libesedb-style output by app/path, timestamp, user SID, and counter hash."
       ],
       "blockers_kept": [

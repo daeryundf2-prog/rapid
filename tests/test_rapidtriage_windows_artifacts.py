@@ -2200,6 +2200,16 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 "program-presence-install-execution-related-pivot",
             )
             self.assertEqual(len(exported_amcache_manifest["manifest_sha256"]), 64)
+            amcache_review_profile = exported_amcache["details"]["execution_analyst_review_profile"]
+            self.assertEqual(amcache_review_profile["profile_version"], "execution-analyst-review-profile-v1")
+            self.assertEqual(amcache_review_profile["artifact_type"], "amcache-entry")
+            self.assertIn("standalone execution", amcache_review_profile["not_proof_of"])
+            self.assertEqual(
+                amcache_review_profile["source_field_values"]["sha1"],
+                "0123456789abcdef0123456789abcdef01234567",
+            )
+            self.assertIn("Prefetch", amcache_review_profile["correlation_targets"])
+            self.assertIn("execution-artifact-trusted-diff-required", amcache_review_profile["commercial_blockers"])
             amcache_gate = exported_amcache["details"]["core_accuracy_gates"][0]
             self.assertEqual(amcache_gate["gap_id"], "#7")
             self.assertIn("schema-version detection", amcache_gate["satisfied_checks"])
@@ -2297,6 +2307,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 {row["kind"] for row in bam_manifest["citation_refs"]},
             )
             self.assertEqual(len(bam_manifest["manifest_sha256"]), 64)
+            bam_review_profile = bam["details"]["execution_analyst_review_profile"]
+            self.assertEqual(bam_review_profile["severity"], "high")
+            self.assertEqual(bam_review_profile["source_field_values"]["user_sid"], "S-1-5-21-1000")
+            self.assertIn("SRUM", bam_review_profile["correlation_targets"])
+            self.assertIn("bam-execution-indicator", bam_review_profile["risk_tags"])
+            self.assertIn("native-system-hive-bam-decoding-required", bam_review_profile["commercial_blockers"])
             bam_uplift = bam["details"]["commercial_uplift_evidence"]
             self.assertEqual(bam_uplift["item_numbers"], [9])
             self.assertEqual(
@@ -2373,6 +2389,14 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 {row["kind"] for row in shimcache_manifest["citation_refs"]},
             )
             self.assertEqual(len(shimcache_manifest["manifest_sha256"]), 64)
+            shimcache_review_profile = shimcache["details"]["execution_analyst_review_profile"]
+            self.assertIn("program execution", shimcache_review_profile["not_proof_of"])
+            self.assertIn("not-execution-proof", shimcache_review_profile["risk_tags"])
+            self.assertIn("Prefetch", shimcache_review_profile["correlation_targets"])
+            self.assertIn(
+                "native-appcompatcache-layout-decoding-required",
+                shimcache_review_profile["commercial_blockers"],
+            )
             shimcache_gate = shimcache["details"]["core_accuracy_gates"][0]
             self.assertEqual(shimcache_gate["gap_id"], "#8")
             self.assertIn("not-proof-of-execution warning", shimcache_gate["satisfied_checks"])
@@ -2436,6 +2460,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(srum_import_manifest["reportability"]["allowed_use"], "srum-usage-triage-pivot")
             self.assertFalse(srum_import_manifest["reportability"]["standalone_execution_proof"])
             self.assertIn("srum-counter-semantics", {row["kind"] for row in srum_import_manifest["citation_refs"]})
+            srum_import_review_profile = srum_rows[0]["details"]["execution_analyst_review_profile"]
+            self.assertEqual(srum_import_review_profile["artifact_type"], "srum-network-usage")
+            self.assertEqual(srum_import_review_profile["source_field_values"]["bytes_total"], 2560)
+            self.assertIn("DNS", srum_import_review_profile["correlation_targets"])
+            self.assertTrue(srum_import_review_profile["validation_required"])
+            self.assertIn("execution-artifact-trusted-diff-required", srum_import_review_profile["commercial_blockers"])
             self.assertEqual(srum_database_rows[0]["details"]["source_path"], str(fixture.srum_db.resolve()))
             self.assertTrue(srum_database_rows[0]["details"]["ese_header"]["signature_valid"])
             self.assertTrue(srum_database_rows[0]["details"]["srum_database_evidence"]["ese_signature_valid"])
@@ -2504,6 +2534,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertIn("bytes_received", srum_row_manifest["row_identity"]["counter_names"])
             self.assertIn("srum-row-cluster", {row["kind"] for row in srum_row_manifest["citation_refs"]})
             self.assertFalse(srum_row_manifest["reportability"]["standalone_execution_proof"])
+            srum_row_review_profile = srum_row_candidate["details"]["execution_analyst_review_profile"]
+            self.assertEqual(srum_row_review_profile["artifact_type"], "srum-row-candidate")
+            self.assertEqual(srum_row_review_profile["source_field_values"]["app_id"], "powershell.exe")
+            self.assertGreaterEqual(srum_row_review_profile["source_field_values"]["source_offset"], 0)
+            self.assertIn("native-ese-page-row-decoding-required", srum_row_review_profile["commercial_blockers"])
             self.assertTrue(srum_row_candidate["details"]["validation_checks"]["requires_srum_parser"])
             self.assertFalse(srum_row_candidate["details"]["commercial_grade_ready"])
             self.assertIn("native-ese-page-row-decoding-required", srum_row_candidate["details"]["commercial_grade_blockers"])

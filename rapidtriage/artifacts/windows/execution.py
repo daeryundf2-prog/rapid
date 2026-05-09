@@ -76,6 +76,134 @@ EXECUTION_REPORT_GRADE_BLOCKERS = [
     "known-answer-execution-artifact-validation-required",
 ]
 EXECUTION_TRUSTED_TOOL_HINTS = ("amcacheparser", "appcompatcacheparser", "shimcacheparser", "srumecmd", "recmd", "velociraptor")
+EXECUTION_ANALYST_REVIEW_CATALOG = {
+    "amcache-entry": {
+        "severity": "medium",
+        "summary": "Amcache program inventory/execution-related pivot; useful for path/hash/install context but not standalone execution proof.",
+        "evidence_interpretation": "program presence, install, and execution-related metadata depending on schema/version",
+        "not_proof_of": ["standalone execution", "precise last-run time without schema validation"],
+        "primary_pivots": ["executable_path", "sha1", "sha1_candidates", "program_name", "publisher", "timestamp"],
+        "correlation_targets": ["Prefetch", "BAM/DAM", "SRUM", "ShimCache", "MFT/USN", "EventLog 4688/Sysmon 1"],
+        "analyst_questions": [
+            "Does a trusted Amcache parser confirm the same row and schema version?",
+            "Do Prefetch/BAM/SRUM/EventLog/MFT corroborate actual execution?",
+            "Is the path/hash suspicious or located in a user-writable directory?",
+        ],
+        "risk_tags": ["program-inventory", "execution-related-pivot"],
+    },
+    "amcache-hive": {
+        "severity": "medium",
+        "summary": "Native Amcache.hve inventory; bounded string pivots expose candidate paths/hashes until schema decoding is validated.",
+        "evidence_interpretation": "candidate Amcache paths and hashes from bounded native hive scan",
+        "not_proof_of": ["decoded row semantics", "execution timestamp"],
+        "primary_pivots": ["path_candidates", "sha1_candidates", "amcache_candidate_cluster_count"],
+        "correlation_targets": ["AmcacheParser", "RECmd", "Prefetch", "BAM/DAM", "SRUM", "MFT/USN"],
+        "analyst_questions": [
+            "Which candidate path/hash needs row-level Amcache validation?",
+            "Does a trusted parser decode the same inventory row?",
+            "Are suspicious paths corroborated by filesystem and execution artifacts?",
+        ],
+        "risk_tags": ["native-string-pivot", "schema-validation-required"],
+    },
+    "shimcache-entry": {
+        "severity": "medium",
+        "summary": "ShimCache/AppCompatCache presence/order pivot; never treat it as standalone proof of execution.",
+        "evidence_interpretation": "program presence/cache order with OS-build-dependent timestamp semantics",
+        "not_proof_of": ["program execution", "exact run time"],
+        "primary_pivots": ["executable_path", "cache_order", "timestamp", "source_offset"],
+        "correlation_targets": ["Amcache", "Prefetch", "BAM/DAM", "MFT/USN", "EventLog 4688/Sysmon 1"],
+        "analyst_questions": [
+            "What OS build/layout applies to this AppCompatCache record?",
+            "Does another execution artifact corroborate the executable actually ran?",
+            "Is the cache order/path suspicious or user-writable?",
+        ],
+        "risk_tags": ["presence-pivot", "not-execution-proof"],
+    },
+    "bam-entry": {
+        "severity": "high",
+        "summary": "BAM/DAM recent-execution pivot; strong when SID, device path, and FILETIME are validated.",
+        "evidence_interpretation": "recent execution indicator candidate tied to user SID and device path",
+        "not_proof_of": ["complete execution timeline without correlation", "decoded binary FILETIME unless validated"],
+        "primary_pivots": ["executable_path", "device_path", "user_sid", "timestamp", "source_key"],
+        "correlation_targets": ["Prefetch", "SRUM", "UserAssist", "EventLog 4688/Sysmon 1", "MFT/USN"],
+        "analyst_questions": [
+            "Does the SID map to the expected account?",
+            "Can Prefetch/SRUM/UserAssist/EventLog corroborate execution?",
+            "Was the device path normalized to a filesystem path?",
+        ],
+        "risk_tags": ["recent-execution-pivot", "correlation-required"],
+    },
+    "srum-network-usage": {
+        "severity": "medium",
+        "summary": "SRUM network/resource usage export; pivot by application, user, timestamp, counters, and network profile.",
+        "evidence_interpretation": "application resource/network usage from source-tool export",
+        "not_proof_of": ["full process lineage", "payload content"],
+        "primary_pivots": ["app_id", "user", "timestamp", "bytes_total", "network_profile"],
+        "correlation_targets": ["Process execution", "DNS", "Browser history", "Firewall", "MFT/USN", "SRUDB.dat"],
+        "analyst_questions": [
+            "Which application generated network/resource counters?",
+            "Do process, DNS, browser, or firewall artifacts explain the network usage?",
+            "Does source-tool provenance confirm table and timestamp semantics?",
+        ],
+        "risk_tags": ["resource-usage", "network-usage"],
+    },
+    "srum-database-file": {
+        "severity": "medium",
+        "summary": "Native SRUDB.dat inventory; ESE header/string pivots need dedicated SRUM row decoding for report-grade usage.",
+        "evidence_interpretation": "SRUM database presence plus table/string/row candidates",
+        "not_proof_of": ["decoded SRUM row facts", "validated counters or timestamps"],
+        "primary_pivots": ["native_srum_table_candidate_count", "native_srum_row_candidate_count", "path_candidates", "url_candidates"],
+        "correlation_targets": ["SrumECmd", "libesedb", "Process execution", "Network artifacts", "MFT/USN"],
+        "analyst_questions": [
+            "Does a dedicated SRUM parser decode the same rows?",
+            "Which candidate app/URL/table should be validated first?",
+            "Are database page size and file alignment plausible?",
+        ],
+        "risk_tags": ["ese-database", "native-row-validation-required"],
+    },
+    "srum-database-pivot": {
+        "severity": "info",
+        "summary": "SRUDB native string pivot; useful for search/correlation but not decoded row semantics.",
+        "evidence_interpretation": "app/path/URL string presence inside SRUDB.dat",
+        "not_proof_of": ["usage timestamp", "counter value", "row ownership"],
+        "primary_pivots": ["candidate_kind", "candidate_value", "app_id", "url"],
+        "correlation_targets": ["SrumECmd", "Browser history", "DNS", "MFT/USN", "EventLog"],
+        "analyst_questions": [
+            "Which decoded SRUM row contains this string?",
+            "Does the app/URL appear in browser, DNS, or filesystem artifacts?",
+            "Is the string only a schema/resource marker or actual usage data?",
+        ],
+        "risk_tags": ["string-pivot", "validation-required"],
+    },
+    "srum-table-candidate": {
+        "severity": "info",
+        "summary": "SRUDB table-family candidate from native markers; validate catalog and row decoding before reporting.",
+        "evidence_interpretation": "bounded native marker cluster that suggests a SRUM table family",
+        "not_proof_of": ["decoded table catalog", "decoded row facts"],
+        "primary_pivots": ["table_family", "matched_marker_count", "source_offset"],
+        "correlation_targets": ["SrumECmd", "libesedb", "SRUDB.dat row candidates"],
+        "analyst_questions": [
+            "Does a dedicated ESE/SRUM parser confirm this table family?",
+            "Do decoded rows exist for this marker cluster?",
+            "Are marker offsets plausible within ESE page boundaries?",
+        ],
+        "risk_tags": ["table-candidate", "validation-required"],
+    },
+    "srum-row-candidate": {
+        "severity": "medium",
+        "summary": "SRUM row candidate clustered from nearby strings; validate ESE row decoding before reporting facts.",
+        "evidence_interpretation": "bounded native string cluster that resembles a SRUM usage row",
+        "not_proof_of": ["decoded row fact", "final counter/timestamp semantics"],
+        "primary_pivots": ["app_id", "timestamp", "table_family", "bytes_received", "bytes_sent", "source_offset"],
+        "correlation_targets": ["SrumECmd", "libesedb", "Process execution", "Network artifacts", "MFT/USN"],
+        "analyst_questions": [
+            "Can a trusted SRUM parser confirm table, row, counters, and timestamp?",
+            "Do process/network artifacts corroborate the app and usage window?",
+            "Is this cluster a false positive from nearby strings?",
+        ],
+        "risk_tags": ["row-candidate", "validation-required"],
+    },
+}
 
 
 class WindowsExecutionProvider:
@@ -326,6 +454,24 @@ def build_execution_registry_record(path: Path, key: str, values: Mapping[str, s
                     "execution_report_grade_assessment": report_grade,
                 },
             ),
+            "execution_analyst_review_profile": execution_analyst_review_profile(
+                artifact_type=artifact_type,
+                source_format="reg",
+                validation_checks=validation_checks,
+                report_grade=report_grade,
+                risk_flags=risk_flags,
+                evidence_fields={
+                    "executable_path": executable_path,
+                    "device_path": executable_path if executable_path.lower().startswith("\\device\\") else "",
+                    "user_sid": user_sid,
+                    "timestamp": timestamp,
+                    "program_name": execution_fields.get("program_name", ""),
+                    "publisher": execution_fields.get("publisher", ""),
+                    "sha1": execution_fields.get("sha1", ""),
+                    "source_key": key,
+                    "decoded_values": decoded_values,
+                },
+            ),
             "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
             "forensic_review": build_forensic_review(
                 gap_id=execution_gap_ids(artifact_type)[0] if execution_gap_ids(artifact_type) else "#7",
@@ -524,6 +670,20 @@ def build_native_shimcache_records(path: Path) -> Iterable[ArtifactRecord]:
                         "execution_report_grade_assessment": row_report_grade,
                     },
                 ),
+                "execution_analyst_review_profile": execution_analyst_review_profile(
+                    artifact_type="shimcache-entry",
+                    source_format="system-hive-native-shimcache-scan",
+                    validation_checks=row_checks,
+                    report_grade=row_report_grade,
+                    risk_flags=execution_risk_flags("shimcache-entry", executable_path, {}),
+                    evidence_fields={
+                        "executable_path": executable_path,
+                        "cache_order": cluster.get("cache_order", index),
+                        "timestamp": timestamp,
+                        "source_offset": cluster.get("source_offset", 0),
+                        "nearby_metadata_candidates": cluster.get("nearby_metadata_candidates", []),
+                    },
+                ),
                 "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
                 "execution_caveat": "Presence in ShimCache is not proof the executable ran.",
                 "validation_guidance": "Native SYSTEM hive scan preserves ShimCache/AppCompatCache path/order pivots only; validate OS build layout and trusted parser parity before report-grade use.",
@@ -688,6 +848,21 @@ def build_native_bam_dam_records(path: Path) -> Iterable[ArtifactRecord]:
                         "execution_report_grade_assessment": row_report_grade,
                     },
                 ),
+                "execution_analyst_review_profile": execution_analyst_review_profile(
+                    artifact_type="bam-entry",
+                    source_format="system-hive-native-bam-dam-scan",
+                    validation_checks=row_checks,
+                    report_grade=row_report_grade,
+                    risk_flags=execution_risk_flags("bam-entry", executable_path, {}),
+                    evidence_fields={
+                        "executable_path": executable_path,
+                        "device_path": executable_path if executable_path.lower().startswith("\\device\\") else "",
+                        "user_sid": user_sid,
+                        "timestamp": timestamp,
+                        "source_key": source_key,
+                        "source_offset": cluster.get("source_offset", 0),
+                    },
+                ),
                 "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
                 "execution_caveat": "BAM/DAM should be correlated with other execution artifacts for final conclusions.",
                 "validation_guidance": "Native SYSTEM hive scan preserves BAM/DAM path/SID/timestamp pivots only; validate binary FILETIME row decoding before report-grade execution claims.",
@@ -800,6 +975,18 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
                     "source_format": "amcache-hive",
                     "execution_validation_matrix": execution_validation_matrix(hive_validation_checks),
                     "execution_report_grade_assessment": hive_report_grade,
+                },
+            ),
+            "execution_analyst_review_profile": execution_analyst_review_profile(
+                artifact_type="amcache-hive",
+                source_format="amcache-hive",
+                validation_checks=hive_validation_checks,
+                report_grade=hive_report_grade,
+                risk_flags=sorted({flag for value in path_candidates for flag in execution_path_risk_flags(value)}),
+                evidence_fields={
+                    "path_candidates": path_candidates,
+                    "sha1_candidates": sha1_candidates,
+                    "amcache_candidate_cluster_count": len(amcache_clusters),
                 },
             ),
             "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
@@ -930,6 +1117,20 @@ def build_native_amcache_records(path: Path) -> Iterable[ArtifactRecord]:
                         "source_format": "amcache-hive",
                         "execution_validation_matrix": execution_validation_matrix(entry_validation_checks),
                         "execution_report_grade_assessment": entry_report_grade,
+                    },
+                ),
+                "execution_analyst_review_profile": execution_analyst_review_profile(
+                    artifact_type="amcache-entry",
+                    source_format="amcache-hive",
+                    validation_checks=entry_validation_checks,
+                    report_grade=entry_report_grade,
+                    risk_flags=execution_path_risk_flags(candidate),
+                    evidence_fields={
+                        "executable_path": candidate,
+                        "sha1_candidates": row_sha1_candidates,
+                        "program_name": display_name_for_execution_key(candidate),
+                        "timestamp": timestamp,
+                        "source_offset": cluster.get("source_offset", 0) if isinstance(cluster, Mapping) else 0,
                     },
                 ),
                 "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
@@ -1136,6 +1337,19 @@ def build_srum_database_inventory_record(path: Path) -> ArtifactRecord:
                     "native_srudb_validation": native_validation,
                 },
             ),
+            "execution_analyst_review_profile": execution_analyst_review_profile(
+                artifact_type="srum-database-file",
+                source_format="ese-srum",
+                validation_checks=validation_checks,
+                report_grade=report_grade,
+                risk_flags=[],
+                evidence_fields={
+                    "native_srum_table_candidate_count": len(table_candidates),
+                    "native_srum_row_candidate_count": len(row_candidates),
+                    "path_candidates": pivots.get("path_candidates", []),
+                    "url_candidates": pivots.get("url_candidates", []),
+                },
+            ),
             "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
             "forensic_review": build_forensic_review(
                 gap_id="#10",
@@ -1261,6 +1475,19 @@ def build_srum_database_pivot_records(path: Path, inventory_details: Mapping[str
                 "execution_report_grade_assessment": report_grade,
                 "core_accuracy_gates": core_accuracy_gates,
                 "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
+                "execution_analyst_review_profile": execution_analyst_review_profile(
+                    artifact_type="srum-database-pivot",
+                    source_format="ese-srum",
+                    validation_checks=validation_checks,
+                    report_grade=report_grade,
+                    risk_flags=risk_flags,
+                    evidence_fields={
+                        "candidate_kind": candidate_kind,
+                        "candidate_value": candidate_value,
+                        "app_id": display_name_for_execution_key(executable_path) if executable_path else "",
+                        "url": url,
+                    },
+                ),
                 "forensic_review": build_forensic_review(
                     gap_id="#10",
                     artifact_goal="SRUM native ESE string pivot",
@@ -1380,6 +1607,18 @@ def build_srum_database_table_candidate_records(path: Path, inventory_details: M
                 "execution_report_grade_assessment": report_grade,
                 "core_accuracy_gates": core_accuracy_gates,
                 "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
+                "execution_analyst_review_profile": execution_analyst_review_profile(
+                    artifact_type="srum-table-candidate",
+                    source_format="ese-srum",
+                    validation_checks=validation_checks,
+                    report_grade=report_grade,
+                    risk_flags=[],
+                    evidence_fields={
+                        "table_family": table_family,
+                        "matched_marker_count": len(matched),
+                        "source_offset": int((candidate.get("source_offsets") or [0])[0] or 0),
+                    },
+                ),
                 "forensic_review": build_forensic_review(
                     gap_id="#10",
                     artifact_goal="SRUM native table-family candidate",
@@ -1525,6 +1764,21 @@ def build_srum_database_row_candidate_records(path: Path, inventory_details: Map
                 "execution_report_grade_assessment": report_grade,
                 "core_accuracy_gates": core_accuracy_gates,
                 "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
+                "execution_analyst_review_profile": execution_analyst_review_profile(
+                    artifact_type="srum-row-candidate",
+                    source_format="ese-srum",
+                    validation_checks=validation_checks,
+                    report_grade=report_grade,
+                    risk_flags=risk_flags,
+                    evidence_fields={
+                        "app_id": app_id,
+                        "timestamp": str(candidate.get("timestamp") or ""),
+                        "table_family": str(candidate.get("table_family") or "unknown"),
+                        "bytes_received": candidate.get("bytes_received", 0),
+                        "bytes_sent": candidate.get("bytes_sent", 0),
+                        "source_offset": int(candidate.get("source_offset") or 0),
+                    },
+                ),
                 "forensic_review": build_forensic_review(
                     gap_id="#10",
                     artifact_goal="SRUM native row candidate",
@@ -1657,6 +1911,21 @@ def build_srum_record(path: Path, row: Mapping[str, object], index: int) -> Arti
         "execution_report_grade_assessment": report_grade,
         "core_accuracy_gates": core_accuracy_gates,
         "execution_native_capabilities": EXECUTION_NATIVE_CAPABILITIES,
+        "execution_analyst_review_profile": execution_analyst_review_profile(
+            artifact_type=artifact_type,
+            source_format=path.suffix.lower().lstrip("."),
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            risk_flags=risk_flags,
+            evidence_fields={
+                "app_id": app_id,
+                "executable_path": app_id if looks_like_executable_path(app_id) else "",
+                "user": user,
+                "timestamp": timestamp,
+                "bytes_total": bytes_total,
+                "network_profile": network_profile,
+            },
+        ),
         "forensic_review": build_forensic_review(
             gap_id="#10",
             artifact_goal="SRUM source-tool usage export",
@@ -2593,6 +2862,79 @@ def execution_artifact_validation_profile(
         "commercial_grade_ready": False,
         "commercial_grade_blockers": sorted(set(report_grade.get("blockers") or []) | {"execution-artifact-trusted-diff-required"}),
     }
+
+
+def execution_analyst_review_profile(
+    *,
+    artifact_type: str,
+    source_format: str,
+    validation_checks: Mapping[str, object],
+    report_grade: Mapping[str, object],
+    risk_flags: Sequence[str] | None = None,
+    evidence_fields: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    catalog = EXECUTION_ANALYST_REVIEW_CATALOG.get(artifact_type) or {
+        "severity": "info",
+        "summary": "Windows execution-related artifact requiring source-specific validation.",
+        "evidence_interpretation": "execution-related pivot",
+        "not_proof_of": ["standalone execution without corroboration"],
+        "primary_pivots": ["executable_path", "timestamp", "user_sid"],
+        "correlation_targets": execution_correlation_targets(artifact_type),
+        "analyst_questions": [
+            "What independent artifact can corroborate this row?",
+            "Are timestamp semantics and parser limitations preserved?",
+            "Does a trusted parser or known-answer fixture confirm the row?",
+        ],
+        "risk_tags": ["execution-review"],
+    }
+    evidence_fields = dict(evidence_fields or {})
+    source_values: dict[str, object] = {}
+    for pivot in catalog.get("primary_pivots", []):
+        pivot_name = str(pivot)
+        value = evidence_fields.get(pivot_name)
+        if value not in ("", None, [], {}):
+            source_values[pivot_name] = bounded_execution_value(value)
+
+    blockers = sorted(
+        set(str(item) for item in report_grade.get("blockers", []) if str(item))
+        | {"execution-artifact-trusted-diff-required"}
+    )
+    failed_checks = sorted(str(key) for key, value in validation_checks.items() if not bool(value))
+    return {
+        "profile_version": "execution-analyst-review-profile-v1",
+        "artifact_type": artifact_type,
+        "source_format": source_format,
+        "severity": str(catalog.get("severity") or "info"),
+        "summary": str(catalog.get("summary") or ""),
+        "evidence_interpretation": str(catalog.get("evidence_interpretation") or ""),
+        "not_proof_of": list(catalog.get("not_proof_of") or []),
+        "analyst_questions": list(catalog.get("analyst_questions") or []),
+        "primary_pivots": list(catalog.get("primary_pivots") or []),
+        "source_field_values": source_values,
+        "correlation_targets": list(catalog.get("correlation_targets") or execution_correlation_targets(artifact_type)),
+        "risk_tags": sorted(set([str(item) for item in catalog.get("risk_tags", [])] + [str(item) for item in risk_flags or []])),
+        "validation_required": bool(report_grade.get("status") != "report-grade-ready" or failed_checks),
+        "failed_validation_checks": failed_checks,
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "commercial_blockers": blockers,
+        "report_guidance": (
+            "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, "
+            "timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
+        ),
+    }
+
+
+def bounded_execution_value(value: object) -> object:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        text = str(value)
+        return text[:1000] if len(text) > 1000 else value
+    try:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        return str(value)[:1000]
+    if len(text) <= 2000:
+        return value
+    return {"truncated_json_preview": text[:2000], "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
 
 
 def shimcache_entry_evidence(
