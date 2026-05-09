@@ -629,6 +629,191 @@ PROVIDER_EVENT_MESSAGE_TEMPLATES = {
     },
 }
 
+EVENT_SEMANTICS_CATALOG = {
+    "logon-success": {
+        "severity": "info",
+        "summary": "Successful authentication; verify source, logon type, account, and session context.",
+        "analyst_questions": [
+            "Is this logon type expected for the account and host?",
+            "Does the source IP/workstation match normal user activity?",
+            "Are nearby 4625, 4648, 4672, RDP, or process events present?",
+        ],
+        "primary_pivots": ["target_user_name", "subject_user_name", "source_ip", "workstation_name", "logon_type"],
+        "correlation_targets": ["failed-logons", "privileged-logons", "rdp-session-events", "process-creation", "browser-downloads"],
+        "risk_tags": ["authentication"],
+    },
+    "logon-failure": {
+        "severity": "low",
+        "summary": "Failed authentication; cluster by account, source, status, and time window.",
+        "analyst_questions": [
+            "Is the failure repeated from one source or sprayed across accounts?",
+            "Does a successful 4624 follow the failed attempts?",
+            "Do status/substatus values indicate bad password, disabled account, or lockout?",
+        ],
+        "primary_pivots": ["target_user_name", "source_ip", "workstation_name", "status_code", "failure_reason"],
+        "correlation_targets": ["successful-logons", "account-lockouts", "kerberos-failures", "rdp-authentication"],
+        "risk_tags": ["credential-access", "bruteforce-review"],
+    },
+    "explicit-credential-logon": {
+        "severity": "medium",
+        "summary": "Explicit credentials were used; inspect process, target server, and lateral movement context.",
+        "analyst_questions": [
+            "Which process supplied the credentials?",
+            "Was the target server expected for this user?",
+            "Did a new network connection, service, or scheduled task follow?",
+        ],
+        "primary_pivots": ["subject_user_name", "target_user_name", "process_name", "command_line", "source_ip"],
+        "correlation_targets": ["process-creation", "network-connections", "remote-logons", "service-installation"],
+        "risk_tags": ["credential-use", "lateral-movement"],
+    },
+    "privileged-logon": {
+        "severity": "medium",
+        "summary": "Special privileges were assigned at logon; review admin legitimacy and subsequent actions.",
+        "analyst_questions": [
+            "Is the account expected to receive administrative privileges?",
+            "What process, service, or task activity follows this logon?",
+            "Is this paired with a suspicious source host or explicit credential use?",
+        ],
+        "primary_pivots": ["target_user_name", "subject_user_name", "source_ip", "logon_type"],
+        "correlation_targets": ["account-management", "process-creation", "service-installation", "scheduled-tasks"],
+        "risk_tags": ["privilege-escalation", "admin-session"],
+    },
+    "process-created": {
+        "severity": "medium",
+        "summary": "Process creation; preserve image, command line, parent, user, and execution lineage.",
+        "analyst_questions": [
+            "Is the command line consistent with normal software behavior?",
+            "Does the parent process explain the child process?",
+            "Can Prefetch, Amcache, BAM, SRUM, MFT, or USN corroborate execution?",
+        ],
+        "primary_pivots": ["new_process_name", "process_name", "command_line", "parent_process_name", "user_name"],
+        "correlation_targets": ["prefetch", "amcache", "shimcache", "bam-dam", "srum", "mft-usn", "network-connections"],
+        "risk_tags": ["execution"],
+    },
+    "powershell-script-block": {
+        "severity": "high",
+        "summary": "PowerShell script block content; decode, deobfuscate, and correlate with process and file activity.",
+        "analyst_questions": [
+            "Is encoded, compressed, downloaded, or in-memory execution present?",
+            "What user and process context executed the script block?",
+            "Do Defender, Sysmon, file, or network artifacts corroborate the action?",
+        ],
+        "primary_pivots": ["script_block_text", "command_line", "user_name", "process_id"],
+        "correlation_targets": ["process-creation", "defender-events", "sysmon-network", "dns", "mft-usn", "download-history"],
+        "risk_tags": ["execution", "script-content", "defense-evasion-review"],
+    },
+    "service-installed": {
+        "severity": "medium",
+        "summary": "Service installation; verify binary path, account, signer, and persistence legitimacy.",
+        "analyst_questions": [
+            "Is the service name and binary path expected?",
+            "Was the binary recently created, downloaded, or moved?",
+            "Which account installed or runs the service?",
+        ],
+        "primary_pivots": ["service_name", "service_file_name", "subject_user_name", "user_name"],
+        "correlation_targets": ["mft-usn", "prefetch", "amcache", "registry-services", "defender-events"],
+        "risk_tags": ["persistence", "service-install"],
+    },
+    "scheduled-task-created": {
+        "severity": "medium",
+        "summary": "Scheduled task created; inspect command, author, trigger, and TaskCache registry consistency.",
+        "analyst_questions": [
+            "What action will the task execute?",
+            "Who created it and when?",
+            "Does Task Scheduler XML match TaskCache registry and operational events?",
+        ],
+        "primary_pivots": ["task_name", "command_line", "subject_user_name", "user_name"],
+        "correlation_targets": ["task-scheduler-xml", "taskcache-registry", "process-creation", "mft-usn"],
+        "risk_tags": ["persistence", "scheduled-task"],
+    },
+    "audit-log-cleared": {
+        "severity": "critical",
+        "summary": "Security log cleared; treat as high-priority defense evasion until proven administrative.",
+        "analyst_questions": [
+            "Which account cleared the log?",
+            "What activity occurred immediately before and after the clear event?",
+            "Are copied EVTX, VSC, EDR, or remote log sources available?",
+        ],
+        "primary_pivots": ["subject_user_name", "user_name", "computer", "event_created_at"],
+        "correlation_targets": ["vsc-snapshots", "remote-logs", "security-events-before-gap", "account-logons"],
+        "risk_tags": ["defense-evasion", "log-clearing"],
+    },
+    "defender-malware-detected": {
+        "severity": "high",
+        "summary": "Defender detection/remediation; preserve threat name, path, action, signature state, and quarantine context.",
+        "analyst_questions": [
+            "What threat name, path, and action were recorded?",
+            "Was the file quarantined, allowed, or remediated?",
+            "Do filesystem, browser download, or process artifacts identify origin and execution?",
+        ],
+        "primary_pivots": ["process_name", "command_line", "relative_target_name", "user_name"],
+        "correlation_targets": ["defender-mplog", "quarantine", "browser-downloads", "mft-usn", "prefetch"],
+        "risk_tags": ["malware", "defender"],
+    },
+    "defender-config-changed": {
+        "severity": "medium",
+        "summary": "Defender configuration changed; review exclusions, disabled controls, responsible process, and user.",
+        "analyst_questions": [
+            "Was an exclusion or protection setting changed?",
+            "Which user/process initiated the change?",
+            "Was malware, script execution, or service/task activity nearby?",
+        ],
+        "primary_pivots": ["user_name", "process_name", "command_line", "target_object"],
+        "correlation_targets": ["registry-defender-policy", "powershell", "process-creation", "defender-detections"],
+        "risk_tags": ["defense-evasion", "defender"],
+    },
+    "wmi-permanent-event": {
+        "severity": "medium",
+        "summary": "WMI permanent event activity; inspect consumer/filter/binding persistence details.",
+        "analyst_questions": [
+            "Which consumer, filter, or command is present?",
+            "Was it created by expected management software?",
+            "Do repository files, registry, and process events corroborate persistence?",
+        ],
+        "primary_pivots": ["command_line", "process_name", "user_name", "target_object"],
+        "correlation_targets": ["wmi-repository", "process-creation", "registry", "mft-usn"],
+        "risk_tags": ["persistence", "wmi"],
+    },
+    "firewall-rule-added": {
+        "severity": "medium",
+        "summary": "Firewall rule added; review application, direction, port, actor, and network exposure.",
+        "analyst_questions": [
+            "Which application or port did the rule affect?",
+            "Was the rule expected for installed software?",
+            "Did network connections follow the change?",
+        ],
+        "primary_pivots": ["process_name", "command_line", "destination_port", "user_name"],
+        "correlation_targets": ["firewall-policy", "network-connections", "sysmon-network", "installed-programs"],
+        "risk_tags": ["network", "defense-evasion"],
+    },
+    "sysmon-network-connection": {
+        "severity": "info",
+        "summary": "Sysmon network connection; pivot by image, destination, port, user, and DNS context.",
+        "analyst_questions": [
+            "Is the destination expected for the process?",
+            "Is there a matching DNS query or browser record?",
+            "Does the process execution chain look legitimate?",
+        ],
+        "primary_pivots": ["process_name", "destination_ip", "destination_hostname", "destination_port", "user_name"],
+        "correlation_targets": ["dns", "process-creation", "browser-history", "ioc-ti"],
+        "risk_tags": ["network"],
+    },
+}
+
+EVENT_SEMANTICS_ALIASES = {
+    "scheduled-task-updated": "scheduled-task-created",
+    "scheduled-task-deleted": "scheduled-task-created",
+    "scheduled-task-registered": "scheduled-task-created",
+    "system-log-cleared": "audit-log-cleared",
+    "powershell-module": "powershell-script-block",
+    "sysmon-process-created": "process-created",
+    "defender-remediation-action": "defender-malware-detected",
+    "firewall-rule-modified": "firewall-rule-added",
+    "firewall-rule-deleted": "firewall-rule-added",
+    "wmi-activity": "wmi-permanent-event",
+    "wmi-activity-error": "wmi-permanent-event",
+}
+
 
 def load_event_message_catalog(path: Path) -> dict[str, dict[str, dict[str, object]]]:
     """Load a curated provider/event message catalog.
@@ -4696,6 +4881,124 @@ def native_evtx_template_ids(data: Mapping[str, object]) -> list[str]:
     return sorted(set(candidates))
 
 
+def event_semantics_profile(
+    *,
+    event_id: str,
+    provider_name: str,
+    channel: str,
+    category: str,
+    event_family: str,
+    channel_family_value: str,
+    data: Mapping[str, object],
+    normalized_fields: Mapping[str, object],
+    detected_terms: Sequence[str],
+    risk_flags: Sequence[str],
+    is_native_evtx: bool,
+) -> dict[str, object]:
+    catalog_key = EVENT_SEMANTICS_ALIASES.get(category, category)
+    catalog = EVENT_SEMANTICS_CATALOG.get(catalog_key, {})
+    severity = str(catalog.get("severity") or ("high" if event_id in HIGH_RISK_EVENT_IDS else "info"))
+    primary_pivots = [str(item) for item in catalog.get("primary_pivots", []) if str(item)]
+    source_values: dict[str, str] = {}
+    for pivot in primary_pivots:
+        value = str(normalized_fields.get(pivot) or "").strip()
+        if not value:
+            value = first_data_text(data, pivot, pivot[:1].upper() + pivot[1:])
+        if value:
+            source_values[pivot] = value[:500]
+
+    semantic_risk_tags = [str(item) for item in catalog.get("risk_tags", []) if str(item)]
+    if detected_terms:
+        semantic_risk_tags.append("suspicious-text-present")
+    if any(str(flag).startswith("high-value-event-id:") for flag in risk_flags):
+        semantic_risk_tags.append("high-value-windows-event")
+    if any("suspicious-term:" in str(flag) for flag in risk_flags):
+        semantic_risk_tags.append("content-risk-term")
+
+    validation_requirements = [
+        "verify provider-rendered message text before quoting",
+        "correlate with at least one independent artifact family for conclusions",
+        "preserve source path, source hash, record ID, and timestamp in report citations",
+    ]
+    if is_native_evtx:
+        validation_requirements.insert(0, "attach trusted EVTX parser diff for native row final reporting")
+
+    return {
+        "profile_version": "eventlog-analyst-semantics-v1",
+        "event_id": event_id,
+        "provider_name": provider_name,
+        "channel": channel,
+        "category": category,
+        "catalog_key": catalog_key if catalog else "",
+        "event_family": event_family,
+        "channel_family": channel_family_value,
+        "severity": severity,
+        "summary": str(
+            catalog.get("summary")
+            or EVENT_ID_CATEGORIES.get(event_id, (category, "Windows event of interest"))[1]
+            or "Windows event of interest"
+        ),
+        "analyst_questions": list(catalog.get("analyst_questions") or generic_event_questions(event_family)),
+        "primary_pivots": primary_pivots or generic_event_pivots(event_family),
+        "source_field_values": source_values,
+        "correlation_targets": list(catalog.get("correlation_targets") or generic_correlation_targets(event_family)),
+        "risk_tags": sorted(set(semantic_risk_tags)),
+        "detected_terms": list(detected_terms),
+        "validation_requirements": validation_requirements,
+        "report_guidance": (
+            "Use this profile to decide what to review next; final testimony still depends on source hash, "
+            "provider-rendered message validation, and cross-artifact corroboration."
+        ),
+    }
+
+
+def generic_event_questions(event_family: str) -> list[str]:
+    if event_family == "authentication":
+        return [
+            "Is the account/source/timing expected?",
+            "Do failed and successful authentication events form a suspicious sequence?",
+            "Is there corroborating process, RDP, or network activity?",
+        ]
+    if event_family == "execution":
+        return [
+            "What executable or script ran and under which account?",
+            "Can execution be corroborated by Prefetch, Amcache, BAM, SRUM, MFT, or USN?",
+            "Does the command line contain living-off-the-land or obfuscation indicators?",
+        ]
+    if event_family == "persistence":
+        return [
+            "What persistence object was created or modified?",
+            "Which user/process made the change?",
+            "Does registry, filesystem, task/service, or WMI evidence corroborate it?",
+        ]
+    return [
+        "What entity, file, account, process, host, or network value is the main pivot?",
+        "Is the activity expected for this user and system?",
+        "Which independent artifact family can corroborate the event?",
+    ]
+
+
+def generic_event_pivots(event_family: str) -> list[str]:
+    if event_family == "authentication":
+        return ["user_name", "source_ip", "workstation_name", "logon_type"]
+    if event_family == "execution":
+        return ["process_name", "command_line", "parent_process_name", "user_name"]
+    if event_family == "network":
+        return ["process_name", "destination_ip", "destination_hostname", "destination_port"]
+    return ["user_name", "computer", "process_name", "command_line"]
+
+
+def generic_correlation_targets(event_family: str) -> list[str]:
+    targets = {
+        "authentication": ["security-logons", "rdp-events", "process-creation", "network-connections"],
+        "execution": ["prefetch", "amcache", "bam-dam", "srum", "mft-usn"],
+        "persistence": ["registry", "task-scheduler", "services", "wmi", "mft-usn"],
+        "network": ["dns", "browser-history", "sysmon-network", "firewall", "ioc-ti"],
+        "malware": ["defender-mplog", "quarantine", "mft-usn", "browser-downloads"],
+    }
+    return list(targets.get(event_family, ["timeline", "filesystem", "registry", "search-index"]))
+
+
 def normalize_event_details(
     *,
     parser: str,
@@ -4786,6 +5089,55 @@ def normalize_event_details(
         is_native_evtx=is_native_evtx,
         message_catalog=message_catalog,
     )
+    normalized_field_values = {
+        "computer": computer,
+        "event_created_at": normalized_timestamp,
+        "user_sid": user_sid,
+        "user_name": user_name,
+        "subject_user_name": subject_user_name,
+        "target_user_name": target_user_name,
+        "target_domain_name": target_domain_name,
+        "logon_type": logon_type,
+        "source_ip": source_ip,
+        "source_port": source_port,
+        "destination_ip": destination_ip,
+        "destination_hostname": destination_hostname,
+        "destination_port": destination_port,
+        "service_name": service_name,
+        "service_file_name": service_file_name,
+        "process_id": process_id,
+        "thread_id": thread_id,
+        "process_name": process_name,
+        "new_process_name": new_process_name,
+        "parent_process_name": parent_process_name,
+        "parent_command_line": parent_command_line,
+        "command_line": command_line,
+        "script_block_text": script_block_text,
+        "query_name": query_name,
+        "target_object": target_object,
+        "image_loaded": image_loaded,
+        "task_name": task_name,
+        "workstation_name": workstation_name,
+        "logon_process_name": logon_process_name,
+        "authentication_package_name": authentication_package_name,
+        "status_code": status_code,
+        "failure_reason": failure_reason,
+        "share_name": share_name,
+        "relative_target_name": relative_target_name,
+    }
+    semantics_profile = event_semantics_profile(
+        event_id=normalized_event_id,
+        provider_name=provider_name,
+        channel=channel,
+        category=category,
+        event_family=event_family,
+        channel_family_value=channel_family_value,
+        data=data,
+        normalized_fields=normalized_field_values,
+        detected_terms=detected_terms,
+        risk_flags=risk_flags,
+        is_native_evtx=is_native_evtx,
+    )
     return {
         "parser": parser,
         "parser_version": PARSER_VERSION,
@@ -4803,6 +5155,7 @@ def normalize_event_details(
         "event_family": event_family,
         "event_tags": event_tags(normalized_event_id, category, event_family, channel_family_value, detected_terms),
         "event_description": description,
+        "event_semantics_profile": semantics_profile,
         "event_message": message_rendering.get("message") or "",
         "message_rendering": message_rendering,
         "record_id": str(record_id or ""),

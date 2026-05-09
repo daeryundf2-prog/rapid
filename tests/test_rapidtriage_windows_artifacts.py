@@ -1222,6 +1222,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(logon["details"]["event_family"], "authentication")
             self.assertEqual(logon["details"]["channel_family"], "security")
             self.assertIn("event-id:4624", logon["details"]["event_tags"])
+            logon_semantics = logon["details"]["event_semantics_profile"]
+            self.assertEqual(logon_semantics["profile_version"], "eventlog-analyst-semantics-v1")
+            self.assertEqual(logon_semantics["category"], "logon-success")
+            self.assertEqual(logon_semantics["source_field_values"]["target_user_name"], "alice")
+            self.assertIn("rdp-session-events", logon_semantics["correlation_targets"])
             powershell = [item for item in event_rows if item["details"]["event_id"] == "4104"][0]
             self.assertEqual(powershell["details"]["event_category"], "powershell-script-block")
             self.assertEqual(powershell["details"]["event_family"], "execution")
@@ -1230,6 +1235,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertGreaterEqual(powershell["details"]["parser_confidence"], 0.9)
             self.assertIn("high-value-event-id:4104", powershell["details"]["risk_flags"])
             self.assertIn("suspicious-term:powershell -enc", powershell["details"]["risk_flags"])
+            self.assertIn("script-content", powershell["details"]["event_semantics_profile"]["risk_tags"])
+            self.assertIn(
+                "defender-events",
+                powershell["details"]["event_semantics_profile"]["correlation_targets"],
+            )
             rules_by_id = {item["details"]["rule"]["id"]: item for item in detection_rows}
             encoded_powershell_rules = [
                 item for item in detection_rows if item["details"]["rule"]["id"] == "RT-EVTX-PS-ENCODED"
@@ -1285,6 +1295,11 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(native_evtx["details"]["user_sid"], "S-1-5-21-111-222-333-1001")
             self.assertEqual(native_evtx["details"]["message_rendering"]["status"], "rendered-builtin-template")
             self.assertTrue(native_evtx["details"]["message_rendering"]["validation_required"])
+            self.assertEqual(native_evtx["details"]["event_semantics_profile"]["severity"], "high")
+            self.assertIn(
+                "attach trusted EVTX parser diff",
+                native_evtx["details"]["event_semantics_profile"]["validation_requirements"][0],
+            )
             self.assertEqual(
                 native_evtx["details"]["message_rendering"]["provenance"]["renderer"],
                 "rapidtriage-builtin-template",
