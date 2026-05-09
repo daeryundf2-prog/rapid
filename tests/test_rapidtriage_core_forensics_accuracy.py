@@ -159,6 +159,7 @@ class RapidTriageCoreForensicsAccuracyTests(unittest.TestCase):
         self.assertIn("per-parser exception capture", parser_crash["required_checks"])
         self.assertIn("trusted parser crash-corpus diff pass", parser_crash["required_checks"])
         self.assertIn("memory cap configuration recorded", memory_cap["required_checks"])
+        self.assertIn("stage telemetry row hashes emitted", memory_cap["required_checks"])
         self.assertIn("trusted memory cap/RSS diff pass", memory_cap["required_checks"])
         self.assertIn("active content execution blocked", preview_sandbox["required_checks"])
         self.assertIn("trusted preview sandbox/no-exec diff pass", preview_sandbox["required_checks"])

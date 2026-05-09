@@ -1695,10 +1695,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "Run summaries preserve memory cap configuration, RSS readings, utilization/over-cap policy profiles, stage-boundary enforcement, fail-fast warnings, hard-limit caveats, and #72 core_accuracy_gates."
+          "Run summaries preserve memory cap configuration, RSS readings, utilization/over-cap policy profiles, per-stage telemetry row hashes, stage-boundary enforcement, fail-fast warnings, hard-limit caveats, and #72 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; hard OS memory controls and platform RSS validation remain blockers.",
+      "notes": "Internal fixture pass; hard OS memory controls, per-parser live RSS telemetry, and platform RSS validation remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-071-080-known-answer.json"
     },
     {

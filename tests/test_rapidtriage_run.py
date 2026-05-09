@@ -24,6 +24,7 @@ from rapidtriage.core.run import (
     isolated_parser_error_payload,
     memory_cap_enforcement_assessment,
     memory_cap_policy_profile,
+    memory_cap_stage_check_row,
     parallel_parser_scheduler_assessment,
     parser_crash_isolation_assessment,
 )
@@ -197,11 +198,23 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(crash_diff["status"], "pass")
             self.assertIn("trusted parser crash-corpus diff pass", crash_gates["core_accuracy_gates"][0]["satisfied_checks"])
 
-        assessment = memory_cap_enforcement_assessment(memory_cap_bytes=123456)
+        stage_rows = [
+            memory_cap_stage_check_row("prepare", 123456, sequence=1, current_rss_bytes=4096),
+            memory_cap_stage_check_row("docs", 123456, sequence=2, current_rss_bytes=8192),
+        ]
+        assessment = memory_cap_enforcement_assessment(memory_cap_bytes=123456, stage_checks=stage_rows)
         self.assertEqual(assessment["memory_cap_bytes"], 123456)
         self.assertEqual(assessment["memory_cap_policy_profile"]["profile_version"], "memory-cap-policy-profile-v1")
         self.assertTrue(assessment["memory_cap_policy_profile"]["cap_configured"])
         self.assertIn("utilization_percent", assessment["memory_cap_policy_profile"])
+        telemetry = assessment["memory_cap_stage_telemetry_manifest"]
+        self.assertEqual(telemetry["profile_version"], "memory-cap-stage-telemetry-manifest-v1")
+        self.assertEqual(telemetry["item_number"], 72)
+        self.assertEqual(telemetry["stage_check_count"], 2)
+        self.assertEqual(telemetry["first_stage"], "prepare")
+        self.assertEqual(telemetry["last_stage"], "docs")
+        self.assertRegex(telemetry["row_head_hash"], r"^[0-9a-f]{64}$")
+        self.assertEqual(len(telemetry["manifest_hash"]), 64)
         self.assertEqual(
             assessment["memory_cap_enforcement_manifest"]["profile_version"],
             "memory-cap-enforcement-manifest-v1",
@@ -210,6 +223,11 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertEqual(assessment["memory_cap_enforcement_manifest"]["gap_id"], "#29")
         self.assertEqual(assessment["memory_cap_enforcement_manifest"]["commercial_gap_ids"], ["#72"])
         self.assertEqual(assessment["memory_cap_enforcement_manifest"]["enforcement_mode"], "python-process-stage-boundary-rss-check")
+        self.assertEqual(
+            assessment["memory_cap_enforcement_manifest"]["stage_telemetry_manifest_hash"],
+            telemetry["manifest_hash"],
+        )
+        self.assertEqual(assessment["memory_cap_enforcement_manifest"]["stage_check_count"], 2)
         self.assertFalse(assessment["memory_cap_enforcement_manifest"]["hard_os_limit_configured"])
         self.assertEqual(len(assessment["memory_cap_enforcement_manifest"]["manifest_hash"]), 64)
         self.assertEqual(
@@ -220,6 +238,7 @@ class RapidTriageRunTests(unittest.TestCase):
         self.assertEqual(assessment["core_accuracy_gates"][0]["gap_id"], "#72")
         self.assertIn("memory cap configuration recorded", assessment["core_accuracy_gates"][0]["satisfied_checks"])
         self.assertIn("memory cap policy profile emitted", assessment["core_accuracy_gates"][0]["satisfied_checks"])
+        self.assertIn("stage telemetry row hashes emitted", assessment["core_accuracy_gates"][0]["satisfied_checks"])
         self.assertIn("memory cap enforcement manifest hash emitted", assessment["core_accuracy_gates"][0]["satisfied_checks"])
         self.assertIn("trusted-memory-cap-rss-diff-missing", assessment["blockers"])
         memory_diff = build_memory_cap_trusted_diff(assessment, assessment)
@@ -399,10 +418,26 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(memory_cap_ledger["profile_version"], "memory-cap-enforcement-manifest-v1")
             self.assertEqual(memory_cap_ledger["commercial_gap_ids"], ["#72"])
             self.assertEqual(len(memory_cap_ledger["manifest_hash"]), 64)
+            self.assertRegex(memory_cap_ledger["stage_telemetry_manifest_hash"], r"^[0-9a-f]{64}$")
+            self.assertGreater(memory_cap_ledger["stage_check_count"], 0)
+            self.assertRegex(memory_cap_ledger["stage_row_head_hash"], r"^[0-9a-f]{64}$")
             self.assertEqual(
                 summary_payload["processing"]["memory_cap_enforcement"]["memory_cap_manifest_hash"],
                 memory_cap_ledger["manifest_hash"],
             )
+            memory_cap_telemetry = summary_payload["processing"]["memory_cap_enforcement"][
+                "memory_cap_stage_telemetry_manifest"
+            ]
+            self.assertEqual(
+                summary_payload["processing"]["memory_cap_enforcement"][
+                    "memory_cap_stage_telemetry_manifest_hash"
+                ],
+                memory_cap_telemetry["manifest_hash"],
+            )
+            self.assertEqual(memory_cap_ledger["stage_telemetry_manifest_hash"], memory_cap_telemetry["manifest_hash"])
+            self.assertGreaterEqual(memory_cap_telemetry["stage_check_count"], 8)
+            self.assertEqual(memory_cap_telemetry["first_stage"], "prepare")
+            self.assertEqual(memory_cap_telemetry["last_stage"], "indicators")
             self.assertFalse(memory_cap_ledger["hard_os_limit_configured"])
             preview_policy_path = Path(summary_payload["outputs"]["preview_sandbox_policy"])
             self.assertTrue(preview_policy_path.is_file())
@@ -453,6 +488,15 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertGreater(runtime_by_number[71]["controls"]["parser_crash_continuation_row_count"], 0)
             self.assertEqual(runtime_by_number[72]["component"], "memory-cap-enforcement")
             self.assertTrue(runtime_by_number[72]["controls"]["stage_boundary_checks"])
+            self.assertEqual(
+                runtime_by_number[72]["controls"]["stage_telemetry_manifest_hash"],
+                memory_cap_telemetry["manifest_hash"],
+            )
+            self.assertEqual(
+                runtime_by_number[72]["controls"]["stage_check_count"],
+                memory_cap_telemetry["stage_check_count"],
+            )
+            self.assertRegex(runtime_by_number[72]["controls"]["stage_row_head_hash"], r"^[0-9a-f]{64}$")
             self.assertEqual(runtime_by_number[73]["component"], "preview-sandboxing")
             self.assertTrue(runtime_by_number[73]["controls"]["active_content_blocking_declared"])
             self.assertEqual(
@@ -515,6 +559,14 @@ class RapidTriageRunTests(unittest.TestCase):
             self.assertEqual(
                 profile_by_number[29]["controls"]["memory_cap_manifest_hash"],
                 memory_cap_manifest["manifest_hash"],
+            )
+            self.assertEqual(
+                profile_by_number[29]["controls"]["memory_cap_stage_telemetry_manifest_hash"],
+                memory_cap_telemetry["manifest_hash"],
+            )
+            self.assertEqual(
+                profile_by_number[29]["controls"]["memory_cap_stage_check_count"],
+                memory_cap_telemetry["stage_check_count"],
             )
             self.assertEqual(
                 profile_by_number[29]["controls"]["memory_cap_manifest_profile"],

@@ -18,7 +18,7 @@
       "title": "Memory cap enforcement",
       "test_files": ["tests/test_rapidtriage_run.py"],
       "assertions": [
-        "Run processing metadata records configured memory caps, RSS readings, utilization/over-cap policy profiles, stage-boundary checks, fail-fast warnings, trusted RSS diff helpers/gates, and #72 core_accuracy_gates."
+        "Run processing metadata records configured memory caps, RSS readings, utilization/over-cap policy profiles, per-stage telemetry row hashes, stage-boundary checks, fail-fast warnings, trusted RSS diff helpers/gates, and #72 core_accuracy_gates."
       ],
       "remaining_external_validation": ["Hard OS resource limits, trusted RSS manifests, and platform-specific RSS validation on Windows, macOS, and Linux."]
     },

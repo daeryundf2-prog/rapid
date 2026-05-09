@@ -22,8 +22,8 @@
       "status": "pass",
       "backlog_items": [72],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_run.py"],
-      "expected": {"required_assertions": ["Run summaries preserve memory cap configuration, RSS readings, utilization/over-cap policy profiles, stage-boundary enforcement, fail-fast warnings, hard-limit caveats, trusted RSS diff status, and #72 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; hard OS memory controls, trusted RSS manifests, and platform RSS validation remain blockers."
+      "expected": {"required_assertions": ["Run summaries preserve memory cap configuration, RSS readings, utilization/over-cap policy profiles, per-stage telemetry row hashes, stage-boundary enforcement, fail-fast warnings, hard-limit caveats, trusted RSS diff status, and #72 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; hard OS memory controls, per-parser live RSS telemetry, trusted RSS manifests, and platform RSS validation remain blockers."
     },
     {
       "id": "core-forensics-073-preview-sandbox-fixture",

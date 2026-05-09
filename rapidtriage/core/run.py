@@ -243,7 +243,14 @@ def run_triage_mode(
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     effective_memory_cap = resolve_memory_cap_bytes(memory_cap_bytes)
-    enforce_memory_cap("prepare", effective_memory_cap)
+    memory_cap_stage_checks: list[dict[str, object]] = []
+
+    def record_memory_cap(stage: str) -> None:
+        memory_cap_stage_checks.append(
+            enforce_memory_cap(stage, effective_memory_cap, sequence=len(memory_cap_stage_checks) + 1)
+        )
+
+    record_memory_cap("prepare")
     input_root, image_result = prepare_run_input_root(
         root,
         input_kind=input_kind,
@@ -289,7 +296,7 @@ def run_triage_mode(
         write_result(image_result.to_dict(), virtual_disk_metadata_path)
 
     current_fingerprint = build_run_input_fingerprint(scan_root)
-    enforce_memory_cap("fingerprint", effective_memory_cap)
+    record_memory_cap("fingerprint")
     previous_fingerprint = (
         load_reusable_json(
             fingerprint_path,
@@ -346,7 +353,7 @@ def run_triage_mode(
     if reused:
         reused_outputs.add("manifest")
     record_run_checkpoint(checkpoint_records, "manifest", manifest_path, reused=reused)
-    enforce_memory_cap("manifest", effective_memory_cap)
+    record_memory_cap("manifest")
 
     docs_payload, reused = load_or_build_json(
         docs_path,
@@ -360,7 +367,7 @@ def run_triage_mode(
     record_run_checkpoint(checkpoint_records, "docs", docs_path, reused=reused)
     docs_payload["manifest"] = manifest_payload
     docs_payload["scan_scope_root"] = str(scan_input_root.root_path)
-    enforce_memory_cap("docs", effective_memory_cap)
+    record_memory_cap("docs")
 
     files_payload, reused = load_or_build_json(
         files_path,
@@ -378,7 +385,7 @@ def run_triage_mode(
         reused_outputs.add("files")
     record_run_checkpoint(checkpoint_records, "files", files_path, reused=reused)
     files_payload["scan_scope_root"] = str(scan_input_root.root_path)
-    enforce_memory_cap("files", effective_memory_cap)
+    record_memory_cap("files")
 
     write_result(manifest_payload, manifest_path)
     write_result(docs_payload, docs_path)
@@ -407,7 +414,7 @@ def run_triage_mode(
         scheduler_manifest=artifact_scheduler_manifest,
     )
     write_result(parser_crash_ledger, parser_crash_ledger_path)
-    enforce_memory_cap("artifacts", effective_memory_cap)
+    record_memory_cap("artifacts")
 
     docs_extract_payload, reused = load_or_build_json(
         docs_extract_manifest,
@@ -449,7 +456,7 @@ def run_triage_mode(
     record_run_checkpoint(checkpoint_records, "files-extract", files_extract_manifest, reused=reused)
     write_result(docs_extract_payload, docs_extract_manifest)
     write_result(files_extract_payload, files_extract_manifest)
-    enforce_memory_cap("extract", effective_memory_cap)
+    record_memory_cap("extract")
 
     timeline_payload, reused = load_or_build_json(
         timeline_path,
@@ -470,7 +477,7 @@ def run_triage_mode(
     record_run_checkpoint(checkpoint_records, "timeline", timeline_path, reused=reused)
     write_result(timeline_payload, timeline_path)
     timeline_report_path.write_text(build_timeline_report(timeline_payload), encoding="utf-8")
-    enforce_memory_cap("timeline", effective_memory_cap)
+    record_memory_cap("timeline")
 
     provisional_outputs = {
         "manifest": manifest_path,
@@ -497,7 +504,7 @@ def run_triage_mode(
         reused_outputs.add("indicators")
     record_run_checkpoint(checkpoint_records, "indicators", indicators_path, reused=reused)
     write_result(indicators_payload, indicators_path)
-    enforce_memory_cap("indicators", effective_memory_cap)
+    record_memory_cap("indicators")
     write_run_checkpoints(
         checkpoint_path,
         output_dir=output_dir,
@@ -581,6 +588,7 @@ def run_triage_mode(
                 ),
             },
             "parser_crash_isolation_ledger": parser_crash_ledger,
+            "memory_cap_stage_checks": memory_cap_stage_checks,
             "preview_sandbox_policy": preview_sandbox_policy,
             "sqlite_fts_optimization": sqlite_fts_optimization,
         },
@@ -789,35 +797,68 @@ def current_memory_rss_bytes() -> int:
     return rss * 1024
 
 
-def enforce_memory_cap(stage: str, memory_cap_bytes: int) -> None:
-    if memory_cap_bytes <= 0:
-        return
-    current = current_memory_rss_bytes()
-    if current and current > memory_cap_bytes:
-        policy = memory_cap_policy_profile(memory_cap_bytes=memory_cap_bytes, current_rss_bytes=current)
+def enforce_memory_cap(stage: str, memory_cap_bytes: int, *, sequence: int = 0) -> dict[str, object]:
+    row = memory_cap_stage_check_row(stage, memory_cap_bytes, sequence=sequence)
+    if row["over_cap"]:
         raise RunModeError(
-            f"memory cap exceeded at stage {stage}: current_rss_bytes={current} "
-            f"cap_bytes={memory_cap_bytes} utilization_percent={policy['utilization_percent']}"
+            f"memory cap exceeded at stage {stage}: current_rss_bytes={row['current_rss_bytes']} "
+            f"cap_bytes={memory_cap_bytes} utilization_percent={row['utilization_percent']}"
         )
+    return row
+
+
+def memory_cap_stage_check_row(
+    stage: str,
+    memory_cap_bytes: int,
+    *,
+    sequence: int = 0,
+    current_rss_bytes: int | None = None,
+) -> dict[str, object]:
+    current = current_memory_rss_bytes() if current_rss_bytes is None else current_rss_bytes
+    policy = memory_cap_policy_profile(memory_cap_bytes=memory_cap_bytes, current_rss_bytes=current)
+    row_core = {
+        "sequence": sequence,
+        "stage": stage,
+        "platform": sys.platform,
+        "memory_cap_bytes": memory_cap_bytes,
+        "current_rss_bytes": current,
+        "utilization_percent": policy.get("utilization_percent"),
+        "cap_configured": bool(policy.get("cap_configured")),
+        "over_cap": bool(policy.get("over_cap")),
+        "breach_action": policy.get("breach_action"),
+        "enforcement_mode": "python-process-stage-boundary-rss-check",
+        "hard_os_limit_configured": False,
+    }
+    return {
+        **row_core,
+        "row_hash": hashlib.sha256(json.dumps(row_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
 
 
 def memory_cap_enforcement_assessment(
     *,
     memory_cap_bytes: int,
     warning_count: int = 0,
+    stage_checks: Sequence[Mapping[str, object]] | None = None,
     trusted_diff: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     current_rss = current_memory_rss_bytes()
     policy = memory_cap_policy_profile(memory_cap_bytes=memory_cap_bytes, current_rss_bytes=current_rss)
+    stage_telemetry = memory_cap_stage_telemetry_manifest(
+        stage_checks=stage_checks or (),
+        memory_cap_bytes=memory_cap_bytes,
+    )
     manifest = memory_cap_enforcement_manifest(
         memory_cap_bytes=memory_cap_bytes,
         current_rss_bytes=current_rss,
         warning_count=warning_count,
         policy=policy,
+        stage_telemetry=stage_telemetry,
     )
     satisfied = [
         "RSS reading captured",
         "stage-boundary enforcement",
+        "stage telemetry row hashes emitted",
         "fail-fast corruption prevention warning",
         "hard OS limit limitation warning",
         "memory cap policy profile emitted",
@@ -831,6 +872,7 @@ def memory_cap_enforcement_assessment(
         f"memory_cap_bytes:{memory_cap_bytes}",
         f"current_rss_bytes:{current_rss}",
         f"memory_cap_manifest_hash:{manifest['manifest_hash']}",
+        f"memory_cap_stage_telemetry_hash:{stage_telemetry['manifest_hash']}",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted memory cap/RSS diff pass")
@@ -842,6 +884,8 @@ def memory_cap_enforcement_assessment(
         "memory_cap_bytes": memory_cap_bytes,
         "current_rss_bytes": current_rss,
         "memory_cap_policy_profile": policy,
+        "memory_cap_stage_telemetry_manifest": stage_telemetry,
+        "memory_cap_stage_telemetry_manifest_hash": stage_telemetry["manifest_hash"],
         "memory_cap_enforcement_manifest": manifest,
         "memory_cap_manifest_hash": manifest["manifest_hash"],
         "ready_for_court_report": False,
@@ -872,9 +916,11 @@ def memory_cap_enforcement_manifest(
     current_rss_bytes: int,
     warning_count: int,
     policy: Mapping[str, object],
+    stage_telemetry: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     cap_configured = memory_cap_bytes > 0
     over_cap = bool(policy.get("over_cap"))
+    stage_telemetry = stage_telemetry if isinstance(stage_telemetry, Mapping) else {}
     manifest_core = {
         "profile_version": "memory-cap-enforcement-manifest-v1",
         "item_number": 29,
@@ -889,6 +935,10 @@ def memory_cap_enforcement_manifest(
         "warning_count": warning_count,
         "enforcement_mode": "python-process-stage-boundary-rss-check",
         "stage_boundary_checks": True,
+        "stage_telemetry_manifest_hash": str(stage_telemetry.get("manifest_hash") or ""),
+        "stage_check_count": int(stage_telemetry.get("stage_check_count") or 0),
+        "stage_row_head_hash": str(stage_telemetry.get("row_head_hash") or ""),
+        "over_cap_stage_count": int(stage_telemetry.get("over_cap_stage_count") or 0),
         "hard_os_limit_configured": False,
         "hard_limit_provider": "",
         "breach_action": policy.get("breach_action"),
@@ -903,6 +953,47 @@ def memory_cap_enforcement_manifest(
             "large-case memory profile with failure/retry behavior",
         ],
         "commercial_claim_allowed": False,
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
+def memory_cap_stage_telemetry_manifest(
+    *,
+    stage_checks: Sequence[Mapping[str, object]],
+    memory_cap_bytes: int,
+) -> dict[str, object]:
+    rows = [dict(row) for row in stage_checks if isinstance(row, Mapping)]
+    row_hashes = [str(row.get("row_hash") or "") for row in rows if row.get("row_hash")]
+    row_head_hash = hashlib.sha256("\n".join(row_hashes).encode("utf-8")).hexdigest()
+    over_cap_stage_count = sum(1 for row in rows if bool(row.get("over_cap")))
+    manifest_core = {
+        "profile_version": "memory-cap-stage-telemetry-manifest-v1",
+        "item_number": 72,
+        "gap_id": MEMORY_CAP_GAP_ID,
+        "memory_cap_bytes": memory_cap_bytes,
+        "cap_configured": memory_cap_bytes > 0,
+        "stage_check_count": len(rows),
+        "over_cap_stage_count": over_cap_stage_count,
+        "row_head_hash": row_head_hash,
+        "first_stage": str(rows[0].get("stage") or "") if rows else "",
+        "last_stage": str(rows[-1].get("stage") or "") if rows else "",
+        "stage_rows": rows,
+        "policy": {
+            "records_every_safe_stage_boundary": True,
+            "raises_before_next_stage_output_when_over_cap": memory_cap_bytes > 0,
+            "row_hashes_are_reproducible_without_timestamps": True,
+            "hard_os_limit_configured": False,
+        },
+        "commercial_gap_ids": [MEMORY_CAP_GAP_ID],
+        "commercial_claim_allowed": False,
+        "required_external_evidence": [
+            "OS-level hard-limit provider validation",
+            "trusted RSS diff on Windows/macOS/Linux",
+            "large-case RSS graph for 1TB+ evidence",
+        ],
     }
     return {
         **manifest_core,
@@ -3216,6 +3307,11 @@ def build_processing_summary(
     max_extract_size = int(safety.get("max_extract_size_bytes") or 0)
     max_file_count = int(safety.get("max_file_count") or 0)
     memory_cap_bytes = int(safety.get("memory_cap_bytes") or 0)
+    memory_cap_stage_checks = (
+        safety.get("memory_cap_stage_checks")
+        if isinstance(safety.get("memory_cap_stage_checks"), list)
+        else []
+    )
     read_only = bool(safety.get("read_only"))
     dry_run = bool(safety.get("dry_run"))
     resume = bool(safety.get("resume"))
@@ -3260,6 +3356,7 @@ def build_processing_summary(
     memory_cap_enforcement = memory_cap_enforcement_assessment(
         memory_cap_bytes=memory_cap_bytes,
         warning_count=len(warnings),
+        stage_checks=memory_cap_stage_checks,
     )
     preview_sandbox_policy = (
         safety.get("preview_sandbox_policy")
@@ -3404,6 +3501,9 @@ def build_processing_summary(
             memory_cap_manifest=memory_cap_enforcement.get("memory_cap_enforcement_manifest")
             if isinstance(memory_cap_enforcement.get("memory_cap_enforcement_manifest"), Mapping)
             else {},
+            memory_cap_stage_telemetry=memory_cap_enforcement.get("memory_cap_stage_telemetry_manifest")
+            if isinstance(memory_cap_enforcement.get("memory_cap_stage_telemetry_manifest"), Mapping)
+            else {},
             incremental_manifest=incremental_manifest,
             reuse_decision_manifest=reuse_decision_manifest,
             resume=resume,
@@ -3417,6 +3517,9 @@ def build_processing_summary(
             parser_error_count=parser_error_count,
             parser_crash_ledger=parser_crash_ledger,
             memory_cap_bytes=memory_cap_bytes,
+            memory_cap_stage_telemetry=memory_cap_enforcement.get("memory_cap_stage_telemetry_manifest")
+            if isinstance(memory_cap_enforcement.get("memory_cap_stage_telemetry_manifest"), Mapping)
+            else {},
             scheduled_count=int(artifact_scheduler.get("scheduled_count") or 0),
             scheduler_max_workers=int(artifact_scheduler.get("max_workers") or 0),
             scheduler_manifest=artifact_scheduler.get("manifest")
@@ -3444,6 +3547,7 @@ def build_runtime_defensibility_profiles(
     parser_error_count: int,
     parser_crash_ledger: Mapping[str, object],
     memory_cap_bytes: int,
+    memory_cap_stage_telemetry: Mapping[str, object],
     scheduled_count: int,
     scheduler_max_workers: int,
     scheduler_manifest: Mapping[str, object] | None = None,
@@ -3494,6 +3598,10 @@ def build_runtime_defensibility_profiles(
                     current_rss_bytes=current_memory_rss_bytes(),
                 ),
                 "stage_boundary_checks": True,
+                "stage_telemetry_manifest_hash": str(memory_cap_stage_telemetry.get("manifest_hash") or ""),
+                "stage_check_count": int(memory_cap_stage_telemetry.get("stage_check_count") or 0),
+                "stage_row_head_hash": str(memory_cap_stage_telemetry.get("row_head_hash") or ""),
+                "over_cap_stage_count": int(memory_cap_stage_telemetry.get("over_cap_stage_count") or 0),
                 "hard_os_job_object_or_cgroup_limit": False,
             },
             blockers=[
@@ -3648,6 +3756,7 @@ def build_functional_large_data_profiles(
     dry_run: bool,
     streaming_boundary: Mapping[str, object],
     memory_cap_manifest: Mapping[str, object],
+    memory_cap_stage_telemetry: Mapping[str, object],
     incremental_manifest: Mapping[str, object],
     reuse_decision_manifest: Mapping[str, object],
     resume: bool,
@@ -3708,6 +3817,9 @@ def build_functional_large_data_profiles(
                 "rss_stage_boundary_checks": True,
                 "memory_cap_manifest_hash": str(memory_cap_manifest.get("manifest_hash") or ""),
                 "memory_cap_manifest_profile": str(memory_cap_manifest.get("profile_version") or ""),
+                "memory_cap_stage_telemetry_manifest_hash": str(memory_cap_stage_telemetry.get("manifest_hash") or ""),
+                "memory_cap_stage_check_count": int(memory_cap_stage_telemetry.get("stage_check_count") or 0),
+                "memory_cap_stage_row_head_hash": str(memory_cap_stage_telemetry.get("row_head_hash") or ""),
                 "memory_cap_platform": str(memory_cap_manifest.get("platform") or ""),
                 "memory_cap_current_rss_bytes": int(memory_cap_manifest.get("current_rss_bytes") or 0),
                 "memory_cap_over_cap": bool(memory_cap_manifest.get("over_cap")),

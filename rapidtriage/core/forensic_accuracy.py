@@ -1100,6 +1100,7 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
             "memory cap configuration recorded",
             "RSS reading captured",
             "stage-boundary enforcement",
+            "stage telemetry row hashes emitted",
             "fail-fast corruption prevention warning",
             "hard OS limit limitation warning",
             "trusted memory cap/RSS diff pass",
