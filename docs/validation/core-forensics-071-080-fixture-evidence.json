@@ -54,9 +54,9 @@
       "title": "File hash cache",
       "test_files": ["tests/test_rapidtriage_files.py", "tests/test_rapidtriage_api.py"],
       "assertions": [
-        "File scan and source metadata outputs preserve MD5/SHA1/SHA256 support, path-size-mtime-inode cache metadata, hit/miss/invalidation counters, hash-cache-manifest-v1 path-hash entries, manifest hash, trusted hash-cache manifest diff helpers/gates, and #76 core_accuracy_gates."
+        "File scan and source metadata outputs preserve MD5/SHA1/SHA256 support, path-size-mtime-inode cache metadata, hit/miss/invalidation counters, hash-cache-manifest-v1 path-hash entries, content-addressed persistence rows, explicit snapshot export/import support, manifest hash, trusted hash-cache manifest diff helpers/gates, and #76 core_accuracy_gates."
       ],
-      "remaining_external_validation": ["Persistent content-addressed cache, trusted hash-cache manifests, and large-case hit-ratio validation."]
+      "remaining_external_validation": ["Automatic on-disk cache wiring, trusted hash-cache manifests, and large-case hit-ratio validation."]
     },
     {
       "item": 77,

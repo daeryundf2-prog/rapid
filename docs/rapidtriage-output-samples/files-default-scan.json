@@ -48,11 +48,77 @@
   },
   "hash_cache_manifest": {
     "profile": "hash-cache-manifest-v1",
+    "profile_version": "hash-cache-manifest-v1",
     "item_number": 76,
+    "cache_session_id": "<HASH_CACHE_SESSION_ID>",
     "entry_count": 2,
     "event_count": 2,
     "entries_truncated": false,
     "events_truncated": false,
+    "entries_head_hash": "<HASH_CACHE_ENTRIES_HEAD_HASH>",
+    "events_head_hash": "<HASH_CACHE_EVENTS_HEAD_HASH>",
+    "persistence_manifest": {
+      "profile_version": "hash-cache-persistence-manifest-v1",
+      "item_number": 76,
+      "commercial_gap_ids": [
+        "#76"
+      ],
+      "snapshot_format": "hash-cache-persistent-snapshot-v1",
+      "persistence_mode": "explicit-export-import-snapshot",
+      "content_address_key": "sha256",
+      "cache_key_fields": [
+        "path",
+        "size",
+        "mtime_ns",
+        "inode",
+        "device"
+      ],
+      "row_count": 2,
+      "row_head_hash": "<HASH_CACHE_PERSISTENCE_ROW_HEAD_HASH>",
+      "rows": [
+        {
+          "content_address_key": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
+          "path_hash": "<PATH_HASH>",
+          "name": "bundle.zip",
+          "size": 4,
+          "mtime_ns": "<MTIME_NS>",
+          "inode": "<INODE>",
+          "device": "<DEVICE>",
+          "algorithms": [
+            "md5",
+            "sha1",
+            "sha256"
+          ],
+          "md5": "10893fd7cff66dca193f658ca9438d15",
+          "sha1": "fb467bb25be45fcf0c84c03ce5801abd5a28c1fd",
+          "sha256": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
+          "row_hash": "<HASH_CACHE_PERSISTENCE_ROW_HASH>"
+        },
+        {
+          "content_address_key": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
+          "path_hash": "<PATH_HASH>",
+          "name": "tool.exe",
+          "size": 4,
+          "mtime_ns": "<MTIME_NS>",
+          "inode": "<INODE>",
+          "device": "<DEVICE>",
+          "algorithms": [
+            "md5",
+            "sha1",
+            "sha256"
+          ],
+          "md5": "20879c987e2f9a916e578386d499f629",
+          "sha1": "c7b33ddcc42361fdb847036fc07e880b81935d5d",
+          "sha256": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
+          "row_hash": "<HASH_CACHE_PERSISTENCE_ROW_HASH>"
+        }
+      ],
+      "automatic_on_disk_cache": false,
+      "large_case_hit_ratio_validated": false,
+      "commercial_claim_allowed": false,
+      "manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>"
+    },
+    "persistence_manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>",
     "stats": {
       "hits": "<HASH_CACHE_HITS>",
       "misses": "<HASH_CACHE_MISSES>",
@@ -71,10 +137,18 @@
       "sha256"
     ],
     "policy": {
-      "scope": "process-local",
-      "persistent_across_restarts": false,
+      "scope": "process-local-with-explicit-snapshot",
+      "persistent_across_restarts": true,
+      "persistence_mode": "explicit-export-import-snapshot",
+      "export_import_contract_declared": true,
       "stale_entry_invalidation": "same-path size/mtime/inode/device mismatch invalidates previous entries",
-      "path_disclosure": "full paths are hashed in manifest entries; basename is retained for analyst orientation"
+      "path_disclosure": "full paths are hashed in manifest entries; basename is retained for analyst orientation",
+      "persistent_cache_next_step": "Promote explicit snapshots to an automatic content-addressed on-disk cache only after large-case hit-ratio validation."
+    },
+    "invalidation_proof": {
+      "invalidations": 0,
+      "same_path_invalidation_events": 0,
+      "latest_invalidation_event": null
     },
     "entries": [
       {
@@ -146,17 +220,87 @@
       "sha1",
       "sha256"
     ],
+    "cache_session_id": "<HASH_CACHE_SESSION_ID>",
     "entry_count": "<HASH_CACHE_ENTRY_COUNT>",
     "hit_count": "<HASH_CACHE_HIT_COUNT>",
     "miss_count": "<HASH_CACHE_MISS_COUNT>",
     "invalidation_count": "<HASH_CACHE_INVALIDATION_COUNT>",
+    "entries_head_hash": "<HASH_CACHE_ENTRIES_HEAD_HASH>",
+    "events_head_hash": "<HASH_CACHE_EVENTS_HEAD_HASH>",
+    "persistence_manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>",
     "hash_cache_manifest": {
       "profile": "hash-cache-manifest-v1",
+      "profile_version": "hash-cache-manifest-v1",
       "item_number": 76,
+      "cache_session_id": "<HASH_CACHE_SESSION_ID>",
       "entry_count": 2,
       "event_count": 2,
       "entries_truncated": false,
       "events_truncated": false,
+      "entries_head_hash": "<HASH_CACHE_ENTRIES_HEAD_HASH>",
+      "events_head_hash": "<HASH_CACHE_EVENTS_HEAD_HASH>",
+      "persistence_manifest": {
+        "profile_version": "hash-cache-persistence-manifest-v1",
+        "item_number": 76,
+        "commercial_gap_ids": [
+          "#76"
+        ],
+        "snapshot_format": "hash-cache-persistent-snapshot-v1",
+        "persistence_mode": "explicit-export-import-snapshot",
+        "content_address_key": "sha256",
+        "cache_key_fields": [
+          "path",
+          "size",
+          "mtime_ns",
+          "inode",
+          "device"
+        ],
+        "row_count": 2,
+        "row_head_hash": "<HASH_CACHE_PERSISTENCE_ROW_HEAD_HASH>",
+        "rows": [
+          {
+            "content_address_key": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
+            "path_hash": "<PATH_HASH>",
+            "name": "bundle.zip",
+            "size": 4,
+            "mtime_ns": "<MTIME_NS>",
+            "inode": "<INODE>",
+            "device": "<DEVICE>",
+            "algorithms": [
+              "md5",
+              "sha1",
+              "sha256"
+            ],
+            "md5": "10893fd7cff66dca193f658ca9438d15",
+            "sha1": "fb467bb25be45fcf0c84c03ce5801abd5a28c1fd",
+            "sha256": "8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2",
+            "row_hash": "<HASH_CACHE_PERSISTENCE_ROW_HASH>"
+          },
+          {
+            "content_address_key": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
+            "path_hash": "<PATH_HASH>",
+            "name": "tool.exe",
+            "size": 4,
+            "mtime_ns": "<MTIME_NS>",
+            "inode": "<INODE>",
+            "device": "<DEVICE>",
+            "algorithms": [
+              "md5",
+              "sha1",
+              "sha256"
+            ],
+            "md5": "20879c987e2f9a916e578386d499f629",
+            "sha1": "c7b33ddcc42361fdb847036fc07e880b81935d5d",
+            "sha256": "9f2981a7cc4d40a2a409dc895de64253acd819d7c0011c8e80b86fe899464e31",
+            "row_hash": "<HASH_CACHE_PERSISTENCE_ROW_HASH>"
+          }
+        ],
+        "automatic_on_disk_cache": false,
+        "large_case_hit_ratio_validated": false,
+        "commercial_claim_allowed": false,
+        "manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>"
+      },
+      "persistence_manifest_hash": "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>",
       "stats": {
         "hits": "<HASH_CACHE_HITS>",
         "misses": "<HASH_CACHE_MISSES>",
@@ -175,10 +319,18 @@
         "sha256"
       ],
       "policy": {
-        "scope": "process-local",
-        "persistent_across_restarts": false,
+        "scope": "process-local-with-explicit-snapshot",
+        "persistent_across_restarts": true,
+        "persistence_mode": "explicit-export-import-snapshot",
+        "export_import_contract_declared": true,
         "stale_entry_invalidation": "same-path size/mtime/inode/device mismatch invalidates previous entries",
-        "path_disclosure": "full paths are hashed in manifest entries; basename is retained for analyst orientation"
+        "path_disclosure": "full paths are hashed in manifest entries; basename is retained for analyst orientation",
+        "persistent_cache_next_step": "Promote explicit snapshots to an automatic content-addressed on-disk cache only after large-case hit-ratio validation."
+      },
+      "invalidation_proof": {
+        "invalidations": 0,
+        "same_path_invalidation_events": 0,
+        "latest_invalidation_event": null
       },
       "entries": [
         {
@@ -258,18 +410,20 @@
       }
     ],
     "blockers": [
-      "cache-is-process-local-not-persistent-across-restarts",
-      "cache-key-uses-path-size-mtime-not-verified-content-addressed-store",
+      "automatic-on-disk-cache-not-enabled-without-explicit-snapshot-import",
+      "cache-lookup-still-uses-path-size-mtime-key-with-content-addressed-export-evidence",
       "large-scale-hash-cache-hit-ratio-validation-remains-required",
       "trusted-hash-cache-manifest-diff-missing"
     ]
   },
   "duplicate_content_manifest": {
     "profile": "duplicate-content-manifest-v1",
+    "profile_version": "duplicate-content-manifest-v1",
     "item_number": 77,
     "method": "same-size-bucket-sha256-confirmation",
     "group_count": 0,
     "duplicate_file_count": 0,
+    "group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "exact_hash_grouping": true,
     "fuzzy_text_grouping": false,
     "perceptual_media_grouping": false,
@@ -307,6 +461,9 @@
         "same_size_candidate_bucketing": true,
         "bounded_sha256_confirmation": true,
         "representative_paths_listed": true,
+        "suppression_manifest_hash": "a618801932db82a4612c34673218bda496d1b02917131b3ca6472f9dcb289f02",
+        "review_matrix_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "duplicate_content_manifest_hash": "d31146780da623ee0bf008f4665d7f4b8d65fe423384295557838de39100ad05",
         "collapse_by_default_in_ui": false,
         "auto_suppression_enabled": false,
         "analyst_override_required_before_report_suppression": true
@@ -323,10 +480,12 @@
     },
     "duplicate_content_manifest": {
       "profile": "duplicate-content-manifest-v1",
+      "profile_version": "duplicate-content-manifest-v1",
       "item_number": 77,
       "method": "same-size-bucket-sha256-confirmation",
       "group_count": 0,
       "duplicate_file_count": 0,
+      "group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "exact_hash_grouping": true,
       "fuzzy_text_grouping": false,
       "perceptual_media_grouping": false,
@@ -342,6 +501,31 @@
       "commercial_claim_allowed": false,
       "manifest_hash": "<DUPLICATE_CONTENT_MANIFEST_HASH>"
     },
+    "duplicate_suppression_manifest": {
+      "profile_version": "duplicate-suppression-manifest-v1",
+      "item_number": 33,
+      "gap_id": "#33",
+      "commercial_gap_ids": [
+        "#77"
+      ],
+      "duplicate_content_manifest_hash": "d31146780da623ee0bf008f4665d7f4b8d65fe423384295557838de39100ad05",
+      "duplicate_group_count": 0,
+      "duplicate_file_count": 0,
+      "representative_selection": "stable-path-order-first-candidate",
+      "report_suppression_default": "not-suppressed",
+      "auto_suppression_enabled": false,
+      "analyst_override_required": true,
+      "review_matrix": [],
+      "review_matrix_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "review_decision_required_for_each_group": true,
+      "collapse_by_default_in_ui": false,
+      "near_duplicate_text_supported": false,
+      "perceptual_media_similarity_supported": false,
+      "trusted_diff_blocker": "trusted-duplicate-file-manifest-diff-missing",
+      "commercial_claim_allowed": false,
+      "manifest_hash": "a618801932db82a4612c34673218bda496d1b02917131b3ca6472f9dcb289f02"
+    },
+    "duplicate_suppression_manifest_hash": "a618801932db82a4612c34673218bda496d1b02917131b3ca6472f9dcb289f02",
     "duplicate_group_count": 0,
     "duplicate_file_count": 0,
     "ready_for_court_report": false,
@@ -368,6 +552,7 @@
       "bounded-content-sha256-confirmation",
       "representative-path-lists",
       "duplicate-content-manifest",
+      "duplicate-review-matrix",
       "not-suppressed-until-analyst-review"
     ],
     "blockers": [

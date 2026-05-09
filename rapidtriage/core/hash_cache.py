@@ -113,6 +113,7 @@ def build_hash_cache_manifest(*, max_entries: int = 100, max_events: int = 100) 
     recent_events = _HASH_CACHE_EVENTS[-max_events:]
     entries_head_hash = hashlib.sha256(json.dumps(entries, sort_keys=True).encode("utf-8")).hexdigest()
     events_head_hash = hashlib.sha256(json.dumps(recent_events, sort_keys=True).encode("utf-8")).hexdigest()
+    persistence_manifest = build_hash_cache_persistence_manifest(max_entries=max_entries)
     manifest_core = {
         "profile": "hash-cache-manifest-v1",
         "profile_version": "hash-cache-manifest-v1",
@@ -124,16 +125,19 @@ def build_hash_cache_manifest(*, max_entries: int = 100, max_events: int = 100) 
         "events_truncated": len(_HASH_CACHE_EVENTS) > max_events,
         "entries_head_hash": entries_head_hash,
         "events_head_hash": events_head_hash,
+        "persistence_manifest": persistence_manifest,
+        "persistence_manifest_hash": persistence_manifest["manifest_hash"],
         "stats": dict(_HASH_CACHE_STATS),
         "cache_key_fields": ["path", "size", "mtime_ns", "inode", "device"],
         "algorithms": list(HASH_ALGORITHMS),
         "policy": {
-            "scope": "process-local",
-            "persistent_across_restarts": False,
+            "scope": "process-local-with-explicit-snapshot",
+            "persistent_across_restarts": True,
+            "persistence_mode": "explicit-export-import-snapshot",
             "export_import_contract_declared": True,
             "stale_entry_invalidation": "same-path size/mtime/inode/device mismatch invalidates previous entries",
             "path_disclosure": "full paths are hashed in manifest entries; basename is retained for analyst orientation",
-            "persistent_cache_next_step": "Promote entries to a content-addressed on-disk cache only after large-case hit-ratio validation.",
+            "persistent_cache_next_step": "Promote explicit snapshots to an automatic content-addressed on-disk cache only after large-case hit-ratio validation.",
         },
         "invalidation_proof": {
             "invalidations": _HASH_CACHE_STATS["invalidations"],
@@ -152,6 +156,126 @@ def build_hash_cache_manifest(*, max_entries: int = 100, max_events: int = 100) 
     return {**manifest_core, "manifest_hash": manifest_hash}
 
 
+def build_hash_cache_persistence_manifest(*, max_entries: int = 100) -> dict[str, object]:
+    rows = []
+    for key, hashes in sorted(_HASH_CACHE.items(), key=lambda item: (item[1].get("sha256", ""), item[0][0]))[:max_entries]:
+        path_text, size, mtime_ns, inode, device = key
+        row_core = {
+            "content_address_key": hashes.get("sha256", ""),
+            "path_hash": hashlib.sha256(path_text.encode("utf-8")).hexdigest(),
+            "name": Path(path_text).name,
+            "size": size,
+            "mtime_ns": mtime_ns,
+            "inode": inode,
+            "device": device,
+            "algorithms": sorted(hashes),
+            "md5": hashes.get("md5", ""),
+            "sha1": hashes.get("sha1", ""),
+            "sha256": hashes.get("sha256", ""),
+        }
+        rows.append(
+            {
+                **row_core,
+                "row_hash": hashlib.sha256(json.dumps(row_core, sort_keys=True).encode("utf-8")).hexdigest(),
+            }
+        )
+    row_hashes = [str(row["row_hash"]) for row in rows]
+    manifest_core = {
+        "profile_version": "hash-cache-persistence-manifest-v1",
+        "item_number": 76,
+        "commercial_gap_ids": [HASH_CACHE_GAP_ID],
+        "snapshot_format": "hash-cache-persistent-snapshot-v1",
+        "persistence_mode": "explicit-export-import-snapshot",
+        "content_address_key": "sha256",
+        "cache_key_fields": ["path", "size", "mtime_ns", "inode", "device"],
+        "row_count": len(rows),
+        "row_head_hash": hashlib.sha256("\n".join(row_hashes).encode("utf-8")).hexdigest(),
+        "rows": rows,
+        "automatic_on_disk_cache": False,
+        "large_case_hit_ratio_validated": False,
+        "commercial_claim_allowed": False,
+    }
+    return {
+        **manifest_core,
+        "manifest_hash": hashlib.sha256(json.dumps(manifest_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+
+
+def export_hash_cache_snapshot(path: Path, *, max_entries: int = 1000) -> dict[str, object]:
+    snapshot_path = path.expanduser().resolve()
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    entries = []
+    for key, hashes in sorted(_HASH_CACHE.items(), key=lambda item: (item[0][0], item[0][1], item[0][2]))[:max_entries]:
+        entries.append(
+            {
+                "key": list(key),
+                "hashes": dict(hashes),
+            }
+        )
+    persistence_manifest = build_hash_cache_persistence_manifest(max_entries=max_entries)
+    snapshot_core = {
+        "profile_version": "hash-cache-persistent-snapshot-v1",
+        "item_number": 76,
+        "cache_session_id": _HASH_CACHE_SESSION_ID,
+        "entry_count": len(entries),
+        "entries": entries,
+        "persistence_manifest": persistence_manifest,
+        "persistence_manifest_hash": persistence_manifest["manifest_hash"],
+        "commercial_gap_ids": [HASH_CACHE_GAP_ID],
+        "commercial_claim_allowed": False,
+    }
+    snapshot = {
+        **snapshot_core,
+        "snapshot_hash": hashlib.sha256(json.dumps(snapshot_core, sort_keys=True).encode("utf-8")).hexdigest(),
+    }
+    snapshot_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return {
+        "profile_version": "hash-cache-snapshot-export-report-v1",
+        "path": str(snapshot_path),
+        "entry_count": len(entries),
+        "snapshot_hash": snapshot["snapshot_hash"],
+        "persistence_manifest_hash": persistence_manifest["manifest_hash"],
+    }
+
+
+def import_hash_cache_snapshot(path: Path) -> dict[str, object]:
+    snapshot_path = path.expanduser().resolve()
+    payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    if payload.get("profile_version") != "hash-cache-persistent-snapshot-v1":
+        raise ValueError("unsupported hash cache snapshot profile")
+    imported = 0
+    skipped = 0
+    for entry in payload.get("entries", []):
+        if not isinstance(entry, Mapping):
+            skipped += 1
+            continue
+        key_values = entry.get("key")
+        hashes = entry.get("hashes")
+        if not isinstance(key_values, list) or len(key_values) != 5 or not isinstance(hashes, Mapping):
+            skipped += 1
+            continue
+        key = (
+            str(key_values[0]),
+            int(key_values[1]),
+            int(key_values[2]),
+            int(key_values[3]),
+            int(key_values[4]),
+        )
+        if not all(str(hashes.get(name) or "") for name in HASH_ALGORITHMS):
+            skipped += 1
+            continue
+        _HASH_CACHE[key] = {name: str(hashes.get(name) or "") for name in HASH_ALGORITHMS}
+        imported += 1
+    return {
+        "profile_version": "hash-cache-snapshot-import-report-v1",
+        "path": str(snapshot_path),
+        "imported_count": imported,
+        "skipped_count": skipped,
+        "snapshot_hash": str(payload.get("snapshot_hash") or ""),
+        "persistence_manifest_hash": str(payload.get("persistence_manifest_hash") or ""),
+    }
+
+
 def hash_cache_assessment(
     *,
     cache_manifest: Mapping[str, object] | None = None,
@@ -165,13 +289,15 @@ def hash_cache_assessment(
         "hash cache assessment attached",
         "hash-cache manifest hash emitted",
         "stale same-path invalidation policy emitted",
-        "persistent cache limitation warning",
+        "persistent snapshot manifest emitted",
+        "content-addressed cache rows emitted",
+        "automatic persistent cache limitation warning",
     ]
     if trusted_diff and trusted_diff.get("status") == "pass":
         satisfied.append("trusted hash-cache manifest diff pass")
     blockers = [
-        "cache-is-process-local-not-persistent-across-restarts",
-        "cache-key-uses-path-size-mtime-not-verified-content-addressed-store",
+        "automatic-on-disk-cache-not-enabled-without-explicit-snapshot-import",
+        "cache-lookup-still-uses-path-size-mtime-key-with-content-addressed-export-evidence",
         "large-scale-hash-cache-hit-ratio-validation-remains-required",
     ]
     if not trusted_diff or trusted_diff.get("status") != "pass":
@@ -189,6 +315,7 @@ def hash_cache_assessment(
         "invalidation_count": _HASH_CACHE_STATS["invalidations"],
         "entries_head_hash": str(manifest.get("entries_head_hash") or ""),
         "events_head_hash": str(manifest.get("events_head_hash") or ""),
+        "persistence_manifest_hash": str(manifest.get("persistence_manifest_hash") or ""),
         "hash_cache_manifest": manifest,
         "ready_for_court_report": False,
         "trusted_hash_cache_diff": dict(trusted_diff) if trusted_diff else missing_hash_cache_trusted_diff(),
@@ -201,6 +328,7 @@ def hash_cache_assessment(
                     f"hit_count:{_HASH_CACHE_STATS['hits']}",
                     f"miss_count:{_HASH_CACHE_STATS['misses']}",
                     f"manifest_hash:{manifest.get('manifest_hash', '')}",
+                    f"persistence_manifest_hash:{manifest.get('persistence_manifest_hash', '')}",
                 ],
             )
         ],
@@ -234,6 +362,7 @@ def build_hash_cache_trusted_diff(
         "invalidation_count",
         "entries_head_hash",
         "events_head_hash",
+        "persistence_manifest_hash",
     ):
         rapid_value = rapid_assessment.get(field)
         trusted_value = trusted_assessment.get(field)
@@ -242,7 +371,14 @@ def build_hash_cache_trusted_diff(
     rapid_manifest = rapid_assessment.get("hash_cache_manifest")
     trusted_manifest = trusted_assessment.get("hash_cache_manifest")
     if isinstance(rapid_manifest, Mapping) and isinstance(trusted_manifest, Mapping):
-        for field in ("profile", "entry_count", "entries_head_hash", "events_head_hash", "manifest_hash"):
+        for field in (
+            "profile",
+            "entry_count",
+            "entries_head_hash",
+            "events_head_hash",
+            "persistence_manifest_hash",
+            "manifest_hash",
+        ):
             if rapid_manifest.get(field) != trusted_manifest.get(field):
                 mismatches.append(
                     {
@@ -267,6 +403,7 @@ def build_hash_cache_trusted_diff(
             "hash_cache_manifest.entry_count",
             "hash_cache_manifest.entries_head_hash",
             "hash_cache_manifest.events_head_hash",
+            "hash_cache_manifest.persistence_manifest_hash",
             "hash_cache_manifest.manifest_hash",
         ],
         "mismatches": mismatches,

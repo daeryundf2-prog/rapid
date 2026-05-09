@@ -19,7 +19,9 @@ from rapidtriage.core.hash_cache import (
     build_hash_cache_manifest,
     build_hash_cache_trusted_diff,
     compute_hashes_cached,
+    export_hash_cache_snapshot,
     hash_cache_assessment,
+    import_hash_cache_snapshot,
     reset_hash_cache,
 )
 
@@ -69,7 +71,13 @@ class RapidTriageFilesTests(unittest.TestCase):
             self.assertIn("cache_session_id", payload["hash_cache_manifest"])
             self.assertIn("entries_head_hash", payload["hash_cache_manifest"])
             self.assertIn("events_head_hash", payload["hash_cache_manifest"])
-            self.assertEqual(payload["hash_cache_manifest"]["policy"]["scope"], "process-local")
+            self.assertEqual(payload["hash_cache_manifest"]["policy"]["scope"], "process-local-with-explicit-snapshot")
+            self.assertTrue(payload["hash_cache_manifest"]["policy"]["persistent_across_restarts"])
+            self.assertEqual(
+                payload["hash_cache_manifest"]["persistence_manifest"]["profile_version"],
+                "hash-cache-persistence-manifest-v1",
+            )
+            self.assertRegex(payload["hash_cache_manifest"]["persistence_manifest_hash"], r"^[0-9a-f]{64}$")
             self.assertTrue(payload["hash_cache_manifest"]["policy"]["export_import_contract_declared"])
             self.assertIn("#76", payload["hash_cache_assessment"]["commercial_gap_ids"])
             self.assertIn("#77", payload["duplicate_detection_assessment"]["commercial_gap_ids"])
@@ -248,6 +256,24 @@ class RapidTriageFilesTests(unittest.TestCase):
             self.assertRegex(hash_manifest["cache_session_id"], r"^[0-9a-f]{64}$")
             self.assertRegex(hash_manifest["entries_head_hash"], r"^[0-9a-f]{64}$")
             self.assertRegex(hash_manifest["events_head_hash"], r"^[0-9a-f]{64}$")
+            self.assertRegex(hash_manifest["persistence_manifest_hash"], r"^[0-9a-f]{64}$")
+            self.assertEqual(hash_manifest["persistence_manifest"]["row_count"], 1)
+            self.assertEqual(
+                hash_manifest["persistence_manifest"]["rows"][0]["content_address_key"],
+                first["sha256"],
+            )
+            snapshot = Path(tmp_dir) / "hash-cache-snapshot.json"
+            export_report = export_hash_cache_snapshot(snapshot)
+            self.assertTrue(snapshot.is_file())
+            self.assertEqual(export_report["entry_count"], 1)
+            self.assertRegex(export_report["snapshot_hash"], r"^[0-9a-f]{64}$")
+            reset_hash_cache()
+            import_report = import_hash_cache_snapshot(snapshot)
+            self.assertEqual(import_report["imported_count"], 1)
+            third = compute_hashes_cached(path)
+            self.assertEqual(third, first)
+            restored_manifest = build_hash_cache_manifest()
+            self.assertEqual(restored_manifest["stats"]["hits"], 1)
 
         hash_assessment = hash_cache_assessment(cache_manifest=hash_manifest)
         hash_diff = build_hash_cache_trusted_diff(hash_assessment, hash_assessment)

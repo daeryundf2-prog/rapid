@@ -238,7 +238,7 @@ def normalize_payload(payload: Any, root: Path) -> Any:
 
 
 def canonicalize_manifest(payload: dict[str, Any]) -> dict[str, Any]:
-    canonical = dict(payload)
+    canonical = mask_dynamic_manifest_hashes(dict(payload))
     providers = [dict(item) for item in canonical["providers"]]
     for provider in providers:
         provider["artifacts"] = sorted(
@@ -271,10 +271,14 @@ def canonicalize_files(payload: dict[str, Any]) -> dict[str, Any]:
     )
     cache = canonical.get("hash_cache_assessment")
     if isinstance(cache, dict):
+        cache["cache_session_id"] = "<HASH_CACHE_SESSION_ID>"
         cache["entry_count"] = "<HASH_CACHE_ENTRY_COUNT>"
         cache["hit_count"] = "<HASH_CACHE_HIT_COUNT>"
         cache["miss_count"] = "<HASH_CACHE_MISS_COUNT>"
         cache["invalidation_count"] = "<HASH_CACHE_INVALIDATION_COUNT>"
+        cache["entries_head_hash"] = "<HASH_CACHE_ENTRIES_HEAD_HASH>"
+        cache["events_head_hash"] = "<HASH_CACHE_EVENTS_HEAD_HASH>"
+        cache["persistence_manifest_hash"] = "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>"
         cache["hash_cache_manifest"] = compact_hash_cache_manifest(cache.get("hash_cache_manifest"))
         cache["core_accuracy_gates"] = compact_core_accuracy_gates(cache.get("core_accuracy_gates"))
     duplicate = canonical.get("duplicate_detection_assessment")
@@ -306,7 +310,14 @@ def compact_hash_cache_manifest(value: object) -> object:
     if not isinstance(value, dict):
         return value
     compact = dict(value)
+    compact["cache_session_id"] = "<HASH_CACHE_SESSION_ID>"
     compact["manifest_hash"] = "<HASH_CACHE_MANIFEST_HASH>"
+    compact["entries_head_hash"] = "<HASH_CACHE_ENTRIES_HEAD_HASH>"
+    compact["events_head_hash"] = "<HASH_CACHE_EVENTS_HEAD_HASH>"
+    compact["persistence_manifest_hash"] = "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>"
+    persistence = compact.get("persistence_manifest")
+    if isinstance(persistence, dict):
+        compact["persistence_manifest"] = compact_hash_cache_persistence_manifest(persistence)
     stats = compact.get("stats")
     if isinstance(stats, dict):
         compact["stats"] = {
@@ -337,6 +348,39 @@ def compact_hash_cache_manifest(value: object) -> object:
         if isinstance(event, dict)
     ]
     return compact
+
+
+def compact_hash_cache_persistence_manifest(value: dict[str, Any]) -> dict[str, Any]:
+    compact = dict(value)
+    compact["manifest_hash"] = "<HASH_CACHE_PERSISTENCE_MANIFEST_HASH>"
+    compact["row_head_hash"] = "<HASH_CACHE_PERSISTENCE_ROW_HEAD_HASH>"
+    compact["rows"] = [
+        {
+            **row,
+            "path_hash": "<PATH_HASH>",
+            "inode": "<INODE>",
+            "device": "<DEVICE>",
+            "mtime_ns": "<MTIME_NS>",
+            "row_hash": "<HASH_CACHE_PERSISTENCE_ROW_HASH>",
+        }
+        for row in compact.get("rows", [])
+        if isinstance(row, dict)
+    ]
+    return compact
+
+
+def mask_dynamic_manifest_hashes(value: Any) -> Any:
+    if isinstance(value, dict):
+        masked = {}
+        for key, child in value.items():
+            if key == "manifest_sha256" or key.endswith("_manifest_hash"):
+                masked[key] = "<DYNAMIC_MANIFEST_HASH>"
+            else:
+                masked[key] = mask_dynamic_manifest_hashes(child)
+        return masked
+    if isinstance(value, list):
+        return [mask_dynamic_manifest_hashes(item) for item in value]
+    return value
 
 
 def compact_core_accuracy_gates(value: object) -> list[dict[str, object]]:
@@ -502,7 +546,7 @@ class RapidTriageOutputSamplesTests(unittest.TestCase):
             self.assertEqual(main(["manifest", str(root), "--output", str(output)]), 0)
 
             actual = canonicalize_manifest(normalize_payload(load_json(output), root))
-            expected = load_json(SAMPLES_DIR / "manifest-windows-artifacts.json")
+            expected = canonicalize_manifest(load_json(SAMPLES_DIR / "manifest-windows-artifacts.json"))
             self.assertEqual(actual, expected)
 
     def test_repo_windows_fixture_still_matches_documented_collector_shape(self) -> None:
