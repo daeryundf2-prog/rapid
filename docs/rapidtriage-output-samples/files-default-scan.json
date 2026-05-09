@@ -41,6 +41,8 @@
     "oldest_modified_at": "2024-02-03T13:05:06",
     "duplicate_group_count": 0,
     "duplicate_file_count": 0,
+    "fuzzy_text_duplicate_group_count": 0,
+    "fuzzy_text_duplicate_file_count": 0,
     "commercial_gap_ids": [
       "#76",
       "#77"
@@ -420,19 +422,28 @@
     "profile": "duplicate-content-manifest-v1",
     "profile_version": "duplicate-content-manifest-v1",
     "item_number": 77,
-    "method": "same-size-bucket-sha256-confirmation",
+    "method": "same-size-bucket-sha256-confirmation-and-normalized-text-near-duplicate-candidates",
     "group_count": 0,
     "duplicate_file_count": 0,
+    "fuzzy_text_group_count": 0,
+    "fuzzy_text_file_count": 0,
     "group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "fuzzy_text_group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "exact_hash_grouping": true,
-    "fuzzy_text_grouping": false,
+    "fuzzy_text_grouping": true,
     "perceptual_media_grouping": false,
+    "fuzzy_text_policy": {
+      "method": "normalized-token-jaccard-with-sequence-ratio-fallback",
+      "auto_suppression_enabled": false,
+      "analyst_review_required": true
+    },
     "suppression_policy": {
       "auto_suppression_enabled": false,
       "analyst_override_required": true,
       "report_suppression_default": "not-suppressed"
     },
     "groups": [],
+    "fuzzy_text_groups": [],
     "commercial_gap_ids": [
       "#77"
     ],
@@ -458,12 +469,15 @@
       "controls": {
         "duplicate_group_count": 0,
         "duplicate_file_count": 0,
+        "fuzzy_text_duplicate_group_count": 0,
+        "fuzzy_text_duplicate_file_count": 0,
         "same_size_candidate_bucketing": true,
         "bounded_sha256_confirmation": true,
+        "normalized_text_near_duplicate_candidates": true,
         "representative_paths_listed": true,
-        "suppression_manifest_hash": "a618801932db82a4612c34673218bda496d1b02917131b3ca6472f9dcb289f02",
+        "suppression_manifest_hash": "299f2f72b8033cd58e34660ab78a77f780a5b08b70e77173a10063ee3d49b9ae",
         "review_matrix_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "duplicate_content_manifest_hash": "d31146780da623ee0bf008f4665d7f4b8d65fe423384295557838de39100ad05",
+        "duplicate_content_manifest_hash": "e2ec33446497d1926eb51c8115c1b23b4cacb101cda3a956db53fc7889f1100b",
         "collapse_by_default_in_ui": false,
         "auto_suppression_enabled": false,
         "analyst_override_required_before_report_suppression": true
@@ -471,7 +485,7 @@
       "blockers": [
         "trusted-duplicate-file-manifest-diff-missing",
         "ui-collapse-and-suppression-state-not-yet-persisted",
-        "near-duplicate-text-and-perceptual-media-similarity-not-complete"
+        "perceptual-media-similarity-not-complete"
       ],
       "validation_evidence": [
         "files-output-emits-functional-duplicate-suppression-profile",
@@ -482,19 +496,28 @@
       "profile": "duplicate-content-manifest-v1",
       "profile_version": "duplicate-content-manifest-v1",
       "item_number": 77,
-      "method": "same-size-bucket-sha256-confirmation",
+      "method": "same-size-bucket-sha256-confirmation-and-normalized-text-near-duplicate-candidates",
       "group_count": 0,
       "duplicate_file_count": 0,
+      "fuzzy_text_group_count": 0,
+      "fuzzy_text_file_count": 0,
       "group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "fuzzy_text_group_head_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "exact_hash_grouping": true,
-      "fuzzy_text_grouping": false,
+      "fuzzy_text_grouping": true,
       "perceptual_media_grouping": false,
+      "fuzzy_text_policy": {
+        "method": "normalized-token-jaccard-with-sequence-ratio-fallback",
+        "auto_suppression_enabled": false,
+        "analyst_review_required": true
+      },
       "suppression_policy": {
         "auto_suppression_enabled": false,
         "analyst_override_required": true,
         "report_suppression_default": "not-suppressed"
       },
       "groups": [],
+      "fuzzy_text_groups": [],
       "commercial_gap_ids": [
         "#77"
       ],
@@ -508,9 +531,11 @@
       "commercial_gap_ids": [
         "#77"
       ],
-      "duplicate_content_manifest_hash": "d31146780da623ee0bf008f4665d7f4b8d65fe423384295557838de39100ad05",
+      "duplicate_content_manifest_hash": "e2ec33446497d1926eb51c8115c1b23b4cacb101cda3a956db53fc7889f1100b",
       "duplicate_group_count": 0,
       "duplicate_file_count": 0,
+      "fuzzy_text_duplicate_group_count": 0,
+      "fuzzy_text_duplicate_file_count": 0,
       "representative_selection": "stable-path-order-first-candidate",
       "report_suppression_default": "not-suppressed",
       "auto_suppression_enabled": false,
@@ -519,15 +544,17 @@
       "review_matrix_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "review_decision_required_for_each_group": true,
       "collapse_by_default_in_ui": false,
-      "near_duplicate_text_supported": false,
+      "near_duplicate_text_supported": true,
       "perceptual_media_similarity_supported": false,
       "trusted_diff_blocker": "trusted-duplicate-file-manifest-diff-missing",
       "commercial_claim_allowed": false,
-      "manifest_hash": "a618801932db82a4612c34673218bda496d1b02917131b3ca6472f9dcb289f02"
+      "manifest_hash": "299f2f72b8033cd58e34660ab78a77f780a5b08b70e77173a10063ee3d49b9ae"
     },
-    "duplicate_suppression_manifest_hash": "a618801932db82a4612c34673218bda496d1b02917131b3ca6472f9dcb289f02",
+    "duplicate_suppression_manifest_hash": "299f2f72b8033cd58e34660ab78a77f780a5b08b70e77173a10063ee3d49b9ae",
     "duplicate_group_count": 0,
     "duplicate_file_count": 0,
+    "fuzzy_text_duplicate_group_count": 0,
+    "fuzzy_text_duplicate_file_count": 0,
     "ready_for_court_report": false,
     "trusted_duplicate_content_diff": {
       "status": "missing",
@@ -552,11 +579,13 @@
       "bounded-content-sha256-confirmation",
       "representative-path-lists",
       "duplicate-content-manifest",
+      "normalized-text-near-duplicate-candidates",
       "duplicate-review-matrix",
       "not-suppressed-until-analyst-review"
     ],
     "blockers": [
       "near-duplicate-text-and-media-similarity-are-not-full-file-deduplication",
+      "perceptual-media-similarity-not-implemented",
       "hashing-is-bounded-to-protect-large-case-responsiveness",
       "operator-must-verify-source-hashes-before-suppressing-duplicates-in-reports",
       "trusted-duplicate-file-manifest-diff-missing"
@@ -571,6 +600,7 @@
     }
   ],
   "duplicate_content_groups": [],
+  "fuzzy_text_duplicate_groups": [],
   "candidates": [
     {
       "path": "<ROOT>/bundle.zip",

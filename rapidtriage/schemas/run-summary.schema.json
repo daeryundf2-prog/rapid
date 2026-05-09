@@ -202,6 +202,33 @@
             "type": "string"
           }
         },
+        "input_fingerprint": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "memory_cap_stage_checks": {
+          "type": [
+            "object",
+            "array"
+          ],
+          "additionalProperties": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "parser_crash_isolation_ledger": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "preview_sandbox_policy": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "sqlite_fts_optimization": {
+          "type": "object",
+          "additionalProperties": true
+        },
         "artifact_scheduler": {
           "type": "object",
           "additionalProperties": false,
@@ -342,11 +369,23 @@
           "type": "object",
           "additionalProperties": true
         },
+        "preview_sandboxing": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "sqlite_fts_optimization": {
+          "type": "object",
+          "additionalProperties": true
+        },
         "functional_large_data_profiles": {
           "type": "object",
           "additionalProperties": true
         },
         "runtime_defensibility_profiles": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "streaming_parser_boundary": {
           "type": "object",
           "additionalProperties": true
         },

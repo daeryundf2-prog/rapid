@@ -119,6 +119,12 @@
         "duplicate_file_count": {
           "type": "integer"
         },
+        "fuzzy_text_duplicate_group_count": {
+          "type": "integer"
+        },
+        "fuzzy_text_duplicate_file_count": {
+          "type": "integer"
+        },
         "commercial_gap_ids": {
           "type": "array",
           "items": {
@@ -279,6 +285,79 @@
           },
           "duplicate_resolution_status": {
             "type": "string"
+          }
+        }
+      }
+    },
+    "fuzzy_text_duplicate_groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "group_id",
+          "group_fingerprint",
+          "file_count",
+          "paths",
+          "truncated_paths",
+          "match_type",
+          "report_suppression_status"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string"
+          },
+          "group_fingerprint": {
+            "type": "string"
+          },
+          "file_count": {
+            "type": "integer"
+          },
+          "representative_path": {
+            "type": "string"
+          },
+          "representative_name": {
+            "type": "string"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "truncated_paths": {
+            "type": "boolean"
+          },
+          "min_similarity": {
+            "type": "number"
+          },
+          "match_type": {
+            "type": "string"
+          },
+          "normalized_sha256_values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "commercial_gap_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "duplicate_resolution_status": {
+            "type": "string"
+          },
+          "report_suppression_status": {
+            "type": "string"
+          },
+          "analyst_review_required": {
+            "type": "boolean"
+          },
+          "suppression_policy": {
+            "type": "object",
+            "additionalProperties": true
           }
         }
       }

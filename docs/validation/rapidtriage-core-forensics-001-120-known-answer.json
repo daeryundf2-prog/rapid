@@ -1802,10 +1802,10 @@
       ],
       "expected": {
         "required_assertions": [
-          "File scans preserve same-size bucketing, bounded SHA256 confirmation, duplicate group counts, stable group IDs/fingerprints, representative paths, not-suppressed analyst-review policy, duplicate-content-manifest-v1 manifest hashes, and #77 core_accuracy_gates."
+          "File scans preserve same-size bucketing, bounded SHA256 confirmation, duplicate group counts, normalized text near-duplicate candidate grouping, stable group IDs/fingerprints, representative paths, not-suppressed analyst-review policy, duplicate-content-manifest-v1 exact/fuzzy manifest hashes, and #77 core_accuracy_gates."
         ]
       },
-      "notes": "Internal fixture pass; fuzzy/media duplicate validation, trusted external duplicate group manifests, and analyst suppression UX remain blockers.",
+      "notes": "Internal fixture pass; perceptual media duplicate validation, trusted external duplicate group manifests, and analyst suppression UX remain blockers.",
       "source_manifest": "docs/validation/rapidtriage-core-forensics-071-080-known-answer.json"
     },
     {

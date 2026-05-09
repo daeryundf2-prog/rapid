@@ -1175,13 +1175,14 @@ CORE_FORENSIC_ACCURACY_ITEMS: tuple[dict[str, object], ...] = (
     {
         "number": 77,
         "title": "Duplicate file/content detection",
-        "surface": "same-size buckets, bounded SHA256 confirmation, duplicate groups, stable group fingerprints, representative paths, not-suppressed manifest policy, and suppression warnings",
-        "corpus": "file scan fixtures with exact duplicates, same-size non-duplicates, large skipped candidates, and path truncation",
-        "oracle": "expected duplicate group manifest, SHA256 equality proof, skipped-boundary records, and analyst suppression checklist",
+        "surface": "same-size buckets, bounded SHA256 confirmation, normalized text near-duplicate candidates, duplicate groups, stable group fingerprints, representative paths, not-suppressed manifest policy, and suppression warnings",
+        "corpus": "file scan fixtures with exact duplicates, same-size non-duplicates, near-duplicate text files, large skipped candidates, and path truncation",
+        "oracle": "expected duplicate group manifest, SHA256 equality proof, normalized-text similarity candidates, skipped-boundary records, and analyst suppression checklist",
         "required_checks": (
             "same-size candidate bucketing",
             "bounded SHA256 confirmation",
             "duplicate group counts",
+            "fuzzy text duplicate candidate grouping",
             "representative paths listed",
             "duplicate-content manifest hash emitted",
             "not-suppressed policy emitted",

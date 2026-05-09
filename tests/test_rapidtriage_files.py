@@ -236,6 +236,48 @@ class RapidTriageFilesTests(unittest.TestCase):
                 "duplicate review matrix hash emitted",
                 payload["duplicate_detection_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
             )
+            self.assertIn(
+                "fuzzy text duplicate candidate grouping",
+                payload["duplicate_detection_assessment"]["core_accuracy_gates"][0]["satisfied_checks"],
+            )
+
+    def test_files_command_groups_fuzzy_text_duplicate_candidates_without_auto_suppression(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "statement-a.txt").write_text("alpha beta gamma delta epsilon", encoding="utf-8")
+            (root / "statement-b.txt").write_text("alpha beta gamma delta epsilon zeta", encoding="utf-8")
+            output = root / "fuzzy-duplicates.json"
+
+            self.assertEqual(main(["files", str(root), "--output", str(output)]), 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+
+            self.assertEqual(payload["summary"]["duplicate_group_count"], 0)
+            self.assertEqual(payload["summary"]["fuzzy_text_duplicate_group_count"], 1)
+            group = payload["fuzzy_text_duplicate_groups"][0]
+            self.assertEqual(group["file_count"], 2)
+            self.assertTrue(group["group_id"].startswith("textdup-"))
+            self.assertEqual(group["match_type"], "normalized-text-near-duplicate-candidate")
+            self.assertEqual(group["report_suppression_status"], "not-suppressed")
+            self.assertTrue(group["analyst_review_required"])
+            self.assertFalse(group["suppression_policy"]["safe_to_auto_suppress"])
+            manifest = payload["duplicate_content_manifest"]
+            self.assertTrue(manifest["fuzzy_text_grouping"])
+            self.assertEqual(manifest["fuzzy_text_group_count"], 1)
+            self.assertFalse(manifest["perceptual_media_grouping"])
+            suppression = payload["duplicate_detection_assessment"]["duplicate_suppression_manifest"]
+            self.assertTrue(suppression["near_duplicate_text_supported"])
+            self.assertFalse(suppression["perceptual_media_similarity_supported"])
+            self.assertEqual(suppression["review_matrix"][0]["group_kind"], "fuzzy-text")
+            self.assertEqual(
+                suppression["review_matrix"][0]["required_decision"],
+                "review-near-duplicate-text-before-collapse-or-suppression",
+            )
+            self.assertEqual(
+                payload["duplicate_detection_assessment"]["functional_priority_profile"]["controls"][
+                    "fuzzy_text_duplicate_group_count"
+                ],
+                1,
+            )
 
     def test_hash_cache_and_duplicate_trusted_diffs_promote_core_gates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

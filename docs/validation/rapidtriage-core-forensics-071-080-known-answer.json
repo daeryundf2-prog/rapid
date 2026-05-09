@@ -77,8 +77,8 @@
       "status": "pass",
       "backlog_items": [77],
       "evidence_paths": ["docs/validation/core-forensics-071-080-fixture-evidence.json", "tests/test_rapidtriage_files.py"],
-      "expected": {"required_assertions": ["File scans preserve same-size bucketing, bounded SHA256 confirmation, duplicate group counts, stable group IDs/fingerprints, representative paths, not-suppressed analyst-review policy, duplicate-content-manifest-v1 manifest hashes, trusted duplicate file manifest diff helpers/gates, and #77 core_accuracy_gates."]},
-      "notes": "Internal fixture pass; fuzzy/media duplicate validation, trusted external duplicate group manifests, and analyst suppression UX remain blockers."
+      "expected": {"required_assertions": ["File scans preserve same-size bucketing, bounded SHA256 confirmation, duplicate group counts, normalized text near-duplicate candidate grouping, stable group IDs/fingerprints, representative paths, not-suppressed analyst-review policy, duplicate-content-manifest-v1 exact/fuzzy manifest hashes, trusted duplicate file manifest diff helpers/gates, and #77 core_accuracy_gates."]},
+      "notes": "Internal fixture pass; perceptual media duplicate validation, trusted external duplicate group manifests, and analyst suppression UX remain blockers."
     },
     {
       "id": "core-forensics-078-pagination-fixture",
