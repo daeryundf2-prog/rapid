@@ -538,6 +538,7 @@ def build_native_mft_record(
     details["ntfs_native_depth_readiness_profile"] = ntfs_native_depth_readiness_profile("mft", "record", details)
     details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
     details["commercial_uplift_evidence"] = ntfs_commercial_uplift_evidence("mft", details)
+    details["ntfs_analyst_review_profile"] = ntfs_analyst_review_profile("mft", "record", details)
     details["forensic_review"] = build_forensic_review(
         gap_id="#12",
         artifact_goal="$MFT native FILE record evidence",
@@ -670,6 +671,7 @@ def build_native_usn_record(
     details["ntfs_native_depth_readiness_profile"] = ntfs_native_depth_readiness_profile("usn", "record", details)
     details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
     details["commercial_uplift_evidence"] = ntfs_commercial_uplift_evidence("usn", details)
+    details["ntfs_analyst_review_profile"] = ntfs_analyst_review_profile("usn", "record", details)
     details["forensic_review"] = build_forensic_review(
         gap_id="#13",
         artifact_goal="$UsnJrnl native change record evidence",
@@ -2825,6 +2827,91 @@ def trusted_ntfs_diff_status(family: str, details: Mapping[str, object]) -> str:
     return str(trusted_diff.get("status") or "not-attached")
 
 
+def ntfs_analyst_review_profile(family: str, artifact_scope: str, details: Mapping[str, object]) -> dict[str, object]:
+    report_grade = (
+        details.get("ntfs_report_grade_assessment")
+        if isinstance(details.get("ntfs_report_grade_assessment"), Mapping)
+        else {}
+    )
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    if family == "mft":
+        catalog = {
+            "severity": "high",
+            "summary": "$MFT FILE record pivot; validates record structure and timestamps but not full-volume path/content completeness.",
+            "evidence_interpretation": "NTFS file record metadata, attributes, timestamps, and bounded path candidates",
+            "not_proof_of": ["complete file content recovery", "full path reconstruction without volume-wide parent cache", "attribute-list extension resolution"],
+            "primary_pivots": ["record_number", "file_path", "parent_reference", "timestamp", "record_offset"],
+            "correlation_targets": ["USN", "File content hash", "Directory listing", "Windows Search", "JumpList/ShellBags"],
+            "analyst_questions": [
+                "Does a trusted MFT parser confirm the same record, parent, and timestamps?",
+                "Is the displayed path from a full parent cache or only a bounded candidate?",
+                "Do USN and application artifacts explain create/modify/delete activity?",
+            ],
+            "risk_tags": ["filesystem-record", "path-validation-required"],
+        }
+        blockers = set(MFT_REPORT_GRADE_BLOCKERS)
+    else:
+        catalog = {
+            "severity": "high",
+            "summary": "$UsnJrnl change record pivot; validates record layout and reason flags but not a complete replayed timeline.",
+            "evidence_interpretation": "NTFS change journal record with cursor, FRN, reason flags, timestamp, and bounded path correlation",
+            "not_proof_of": ["complete timeline replay", "full FRN path-cache history", "user intent"],
+            "primary_pivots": ["usn", "record_number", "parent_reference", "file_path", "timestamp", "reason_flags", "record_cursor"],
+            "correlation_targets": ["MFT", "Timeline", "File content hash", "Windows Search", "Execution artifacts"],
+            "analyst_questions": [
+                "Does UsnJrnl2Csv/MFTECmd confirm this record and cursor?",
+                "Is the path reconstructed from a reliable MFT cache or just the event filename?",
+                "Does rename/delete replay pass a known-answer or trusted transition diff?",
+            ],
+            "risk_tags": ["journal-record", "timeline-validation-required"],
+        }
+        blockers = set(USN_REPORT_GRADE_BLOCKERS)
+    source_values: dict[str, object] = {}
+    for pivot in catalog["primary_pivots"]:
+        value = details.get(pivot)
+        if value not in ("", None, [], {}):
+            source_values[pivot] = bounded_ntfs_review_value(value)
+    failed_checks = sorted(str(key) for key, value in validation_checks.items() if not bool(value))
+    blockers |= set(str(item) for item in report_grade.get("blockers", []) if str(item))
+    blockers.add("mft-trusted-parser-diff-required" if family == "mft" else "usn-trusted-parser-diff-required")
+    return {
+        "profile_version": "ntfs-analyst-review-profile-v1",
+        "family": family,
+        "artifact_scope": artifact_scope,
+        "severity": catalog["severity"],
+        "summary": catalog["summary"],
+        "evidence_interpretation": catalog["evidence_interpretation"],
+        "not_proof_of": catalog["not_proof_of"],
+        "analyst_questions": catalog["analyst_questions"],
+        "primary_pivots": catalog["primary_pivots"],
+        "source_field_values": source_values,
+        "correlation_targets": catalog["correlation_targets"],
+        "risk_tags": sorted(catalog["risk_tags"]),
+        "validation_required": bool(report_grade.get("status") != "report-grade-ready" or failed_checks),
+        "failed_validation_checks": failed_checks,
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "commercial_blockers": sorted(blockers),
+        "report_guidance": (
+            "Use this NTFS row as a file-system review pivot. Report final path, content, or timeline conclusions only "
+            "after trusted parser diff, full-volume/path-cache validation, and source citation checks."
+        ),
+    }
+
+
+def bounded_ntfs_review_value(value: object) -> object:
+    if isinstance(value, str):
+        return value[:1000]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    try:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        return str(value)[:1000]
+    if len(text) <= 2000:
+        return value
+    return {"truncated_json_preview": text[:2000], "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+
+
 def mft_full_parser_profile(artifact_scope: str, details: Mapping[str, object]) -> dict[str, object]:
     validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
     report_grade = (
@@ -3102,6 +3189,7 @@ def build_filesystem_record(path: Path, family: str, row: Mapping[str, object], 
     details["commercial_grade_ready"] = False
     details["commercial_grade_blockers"] = details["ntfs_report_grade_assessment"]["blockers"]
     details["commercial_uplift_evidence"] = ntfs_commercial_uplift_evidence(family, details)
+    details["ntfs_analyst_review_profile"] = ntfs_analyst_review_profile(family, "trusted-export-row", details)
     return ArtifactRecord(
         provider=WindowsFilesystemProvider.name,
         artifact_type=artifact_type,

@@ -948,6 +948,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
                 jumplist_manifest["reportability"]["allowed_use"],
                 "recent-destination-triage-pivot",
             )
+            jumplist_review_profile = automatic["details"]["jumplist_analyst_review_profile"]
+            self.assertEqual(jumplist_review_profile["profile_version"], "jumplist-analyst-review-profile-v1")
+            self.assertEqual(jumplist_review_profile["source_field_values"]["destination_count"], 1)
+            self.assertIn(r"C:\Users\alice\Documents\Incident Notes.docx", jumplist_review_profile["source_field_values"]["target_paths"])
+            self.assertIn("ShellBags", jumplist_review_profile["correlation_targets"])
+            self.assertIn("destlist-os-version-specific-field-validation-required", jumplist_review_profile["commercial_blockers"])
             self.assertFalse(jumplist_manifest["reportability"]["destlist_semantics_final"])
             self.assertEqual(
                 automatic["details"]["jumplist_destlist_depth_manifest_hash"],
@@ -2943,6 +2949,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertTrue(
                 mft_uplift["large_data_controls"]["full_volume_or_journal_validation_required_for_commercial_claims"]
             )
+            mft_review_profile = native_mft[0]["details"]["ntfs_analyst_review_profile"]
+            self.assertEqual(mft_review_profile["profile_version"], "ntfs-analyst-review-profile-v1")
+            self.assertEqual(mft_review_profile["family"], "mft")
+            self.assertEqual(mft_review_profile["source_field_values"]["record_number"], "0")
+            self.assertIn("USN", mft_review_profile["correlation_targets"])
+            self.assertIn("full path reconstruction without volume-wide parent cache", mft_review_profile["not_proof_of"])
+            self.assertIn("mft-trusted-parser-diff-required", mft_review_profile["commercial_blockers"])
             self.assertIn({"value": "valid", "count": 1}, mft_files[0]["details"]["sequence_validation_counts"])
             self.assertIn({"value": "$FILE_NAME", "count": 1}, mft_files[0]["details"]["native_attribute_type_counts"])
             self.assertEqual(usn_files[0]["details"]["source_path"], str(fixture.usn_journal.resolve()))
@@ -3065,6 +3078,13 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(usn_uplift["reportability_decision"]["allowed_use"], "usn-change-record-triage-pivot")
             self.assertIn("record-cursor-progresses", usn_uplift["passed_validation_matrix_ids"])
             self.assertEqual(usn_uplift["large_data_controls"]["record_cursor"], 16)
+            usn_review_profile = native_usn[0]["details"]["ntfs_analyst_review_profile"]
+            self.assertEqual(usn_review_profile["profile_version"], "ntfs-analyst-review-profile-v1")
+            self.assertEqual(usn_review_profile["family"], "usn")
+            self.assertEqual(usn_review_profile["source_field_values"]["usn"], 9001)
+            self.assertIn("MFT", usn_review_profile["correlation_targets"])
+            self.assertIn("complete timeline replay", usn_review_profile["not_proof_of"])
+            self.assertIn("usn-trusted-parser-diff-required", usn_review_profile["commercial_blockers"])
             self.assertEqual(native_usn[1]["details"]["major_version"], 3)
             self.assertEqual(native_usn[1]["details"]["file_path"], "renamed.txt")
             self.assertEqual(native_usn[1]["details"]["rename_hint"], "rename-new-name")
@@ -3112,6 +3132,10 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(entry_manifest["reportability"]["allowed_use"], "search-index-triage-pivot")
             self.assertFalse(entry_manifest["reportability"]["standalone_decoded_row_fact"])
             self.assertIn("windows-edb-path-url-content", {row["kind"] for row in entry_manifest["citation_refs"]})
+            entry_review_profile = entries[0]["details"]["windows_search_analyst_review_profile"]
+            self.assertEqual(entry_review_profile["profile_version"], "windows-search-analyst-review-profile-v1")
+            self.assertEqual(entry_review_profile["source_field_values"]["file_name"], "Incident Notes.docx")
+            self.assertIn("MFT", entry_review_profile["correlation_targets"])
             self.assertEqual(edb_files[0]["details"]["source_path"], str(fixture.windows_edb.resolve()))
             self.assertTrue(edb_files[0]["details"]["ese_header"]["signature_valid"])
             self.assertIn("ese-string:powershell", edb_files[0]["details"]["risk_flags"])
@@ -3158,6 +3182,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             self.assertEqual(edb_uplift["reportability_decision"]["allowed_use"], "search-index-triage-pivot")
             self.assertIn("ese-signature-valid", edb_uplift["passed_validation_matrix_ids"])
             self.assertTrue(edb_uplift["large_data_controls"]["row_level_native_decode_required_for_commercial_claims"])
+            edb_review_profile = edb_files[0]["details"]["windows_search_analyst_review_profile"]
+            self.assertEqual(edb_review_profile["artifact_type"], "windows-search-edb-file")
+            self.assertGreaterEqual(edb_review_profile["source_field_values"]["row_candidate_count"], 1)
+            self.assertIn("decoded ESE row facts", edb_review_profile["not_proof_of"])
+            self.assertIn("libesedb/esedbexport", edb_review_profile["correlation_targets"])
+            self.assertIn("windows-edb-trusted-parser-diff-required", edb_review_profile["commercial_blockers"])
             self.assertEqual(
                 edb_files[0]["details"]["native_validation"]["row_candidate_decode_status"],
                 "correlated-native-string-candidates-only",
@@ -3227,6 +3257,12 @@ class RapidTriageWindowsArtifactsTests(unittest.TestCase):
             row_uplift = row_candidate["details"]["commercial_uplift_evidence"]
             self.assertIn("row-level-decoding-available", row_uplift["failed_validation_matrix_ids"])
             self.assertEqual(row_uplift["reportability_decision"]["allowed_use"], "search-index-triage-pivot")
+            row_review_profile = row_candidate["details"]["windows_search_analyst_review_profile"]
+            self.assertEqual(row_review_profile["severity"], "high")
+            self.assertEqual(row_review_profile["source_field_values"]["file_name"], "Incident Notes.docx")
+            self.assertEqual(row_review_profile["source_field_values"]["deleted_state"], "candidate-marker-present")
+            self.assertIn("Document viewer", row_review_profile["correlation_targets"])
+            self.assertIn("final deleted state", row_review_profile["not_proof_of"])
             self.assertEqual(summary["details"]["entry_count"], 1)
             self.assertEqual(summary["details"]["inventory_count"], 1)
             self.assertGreaterEqual(summary["details"]["edb_pivot_count"], 2)

@@ -3558,6 +3558,13 @@ class RapidTriageWindowsArtifactsCollectorTests(unittest.TestCase):
                 shellbag_manifest["reportability"]["allowed_use"],
                 "folder-view-history-triage-pivot",
             )
+            shellbag_review_profile = key_tree.details["shellbag_analyst_review_profile"]
+            self.assertEqual(shellbag_review_profile["profile_version"], "shellbag-analyst-review-profile-v1")
+            self.assertEqual(shellbag_review_profile["source_field_values"]["shellbag_section"], "bagmru")
+            self.assertEqual(shellbag_review_profile["source_field_values"]["user_hive_scope"], "usrclass")
+            self.assertIn("ShellBagsExplorer/SBECmd", shellbag_review_profile["correlation_targets"])
+            self.assertIn("final shell-item path semantics", shellbag_review_profile["not_proof_of"])
+            self.assertIn("trusted ShellBags parser diff is required", shellbag_review_profile["commercial_blockers"])
             self.assertFalse(shellbag_manifest["reportability"]["folder_access_final"])
             self.assertEqual(
                 key_tree.details["shellbag_depth_manifest_hash"],

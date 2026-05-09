@@ -3227,6 +3227,76 @@
               "report_grade": false
             },
             "note": "OLE Jump List streams are traversed when recoverable; DestList rows are exposed as metadata candidates and embedded Shell Link/path extraction is provided for triage search.",
+            "jumplist_analyst_review_profile": {
+              "profile_version": "jumplist-analyst-review-profile-v1",
+              "artifact_type": "jumplist-automatic",
+              "severity": "medium",
+              "summary": "JumpList recent-destination pivot with OLE stream, DestList, and embedded LNK context.",
+              "evidence_interpretation": "recent destination/container evidence; DestList fields remain candidate-level until version validation",
+              "not_proof_of": [
+                "file opened by a specific user without account/context validation",
+                "final DestList semantics",
+                "deleted entry recovery"
+              ],
+              "analyst_questions": [
+                "Which application does the AppID hash map to, and is that mapping documented?",
+                "Do embedded LNK targets match DestList entry candidates?",
+                "Does JLECmd/LECmd confirm the same destinations and MRU/pin semantics?"
+              ],
+              "primary_pivots": [
+                "application_id_hash",
+                "jumplist_kind",
+                "destination_count",
+                "destlist_parse_status",
+                "target_paths"
+              ],
+              "source_field_values": {
+                "application_id_hash": "5f7b5f1e01b83767",
+                "jumplist_kind": "automatic",
+                "destination_count": 1,
+                "destlist_parse_status": "not-ole",
+                "target_paths": [
+                  "C:\\Users\\alice\\Documents\\Case Notes.docx"
+                ]
+              },
+              "correlation_targets": [
+                "LNK viewer",
+                "MFT",
+                "USN",
+                "ShellBags",
+                "Windows Search",
+                "Application activity"
+              ],
+              "risk_tags": [
+                "recent-destination",
+                "destlist-validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "destlist_candidate_decoding_available",
+                "destlist_report_grade",
+                "has_destlist_stream",
+                "is_ole_compound",
+                "ole_streams_recovered"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "application-id-hash-to-application-name-map-not-bundled",
+                "destlist-account-metadata-not-fully-decoded",
+                "destlist-deleted-entry-recovery-not-implemented",
+                "destlist-os-version-specific-field-validation-required",
+                "destlist-stream-not-present-or-unrecoverable",
+                "jumplist-destlist-trusted-diff-required",
+                "recent-files-validation-required",
+                "validation-check-failed:destlist-candidate-decoding-available",
+                "validation-check-failed:destlist-report-grade",
+                "validation-check-failed:has-destlist-stream",
+                "validation-check-failed:is-ole-compound",
+                "validation-check-failed:ole-streams-recovered",
+                "validation-check-failed:requires-external-validation"
+              ],
+              "report_guidance": "Use JumpList rows as recent-destination review leads. Final MRU, pin, account, or deleted-entry claims require dedicated parser diff and OS-version-specific DestList validation."
+            },
             "jumplist_destlist_depth_manifest": {
               "manifest_version": "jumplist-destlist-depth-manifest-v1",
               "parser_version": "windows-recent-files-v6",
@@ -3745,6 +3815,76 @@
               "report_grade": false
             },
             "note": "OLE Jump List streams are traversed when recoverable; DestList rows are exposed as metadata candidates and embedded Shell Link/path extraction is provided for triage search.",
+            "jumplist_analyst_review_profile": {
+              "profile_version": "jumplist-analyst-review-profile-v1",
+              "artifact_type": "jumplist-custom",
+              "severity": "medium",
+              "summary": "JumpList recent-destination pivot with OLE stream, DestList, and embedded LNK context.",
+              "evidence_interpretation": "recent destination/container evidence; DestList fields remain candidate-level until version validation",
+              "not_proof_of": [
+                "file opened by a specific user without account/context validation",
+                "final DestList semantics",
+                "deleted entry recovery"
+              ],
+              "analyst_questions": [
+                "Which application does the AppID hash map to, and is that mapping documented?",
+                "Do embedded LNK targets match DestList entry candidates?",
+                "Does JLECmd/LECmd confirm the same destinations and MRU/pin semantics?"
+              ],
+              "primary_pivots": [
+                "application_id_hash",
+                "jumplist_kind",
+                "destination_count",
+                "destlist_parse_status",
+                "target_paths"
+              ],
+              "source_field_values": {
+                "application_id_hash": "9b9cdc69c1c24e2b",
+                "jumplist_kind": "custom",
+                "destination_count": 1,
+                "destlist_parse_status": "not-ole",
+                "target_paths": [
+                  "C:\\Users\\alice\\Downloads\\installer.exe"
+                ]
+              },
+              "correlation_targets": [
+                "LNK viewer",
+                "MFT",
+                "USN",
+                "ShellBags",
+                "Windows Search",
+                "Application activity"
+              ],
+              "risk_tags": [
+                "recent-destination",
+                "destlist-validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "destlist_candidate_decoding_available",
+                "destlist_report_grade",
+                "has_destlist_stream",
+                "is_ole_compound",
+                "ole_streams_recovered"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "application-id-hash-to-application-name-map-not-bundled",
+                "destlist-account-metadata-not-fully-decoded",
+                "destlist-deleted-entry-recovery-not-implemented",
+                "destlist-os-version-specific-field-validation-required",
+                "destlist-stream-not-present-or-unrecoverable",
+                "jumplist-destlist-trusted-diff-required",
+                "recent-files-validation-required",
+                "validation-check-failed:destlist-candidate-decoding-available",
+                "validation-check-failed:destlist-report-grade",
+                "validation-check-failed:has-destlist-stream",
+                "validation-check-failed:is-ole-compound",
+                "validation-check-failed:ole-streams-recovered",
+                "validation-check-failed:requires-external-validation"
+              ],
+              "report_guidance": "Use JumpList rows as recent-destination review leads. Final MRU, pin, account, or deleted-entry claims require dedicated parser diff and OS-version-specific DestList validation."
+            },
             "jumplist_destlist_depth_manifest": {
               "manifest_version": "jumplist-destlist-depth-manifest-v1",
               "parser_version": "windows-recent-files-v6",
@@ -5067,6 +5207,72 @@
               "next_internal_step": "Add native binary/schema row decoding plus cross-tool known-answer diffs before removing #7-#10 commercial blockers.",
               "external_evidence_required": true
             },
+            "execution_analyst_review_profile": {
+              "profile_version": "execution-analyst-review-profile-v1",
+              "artifact_type": "srum-database-file",
+              "source_format": "ese-srum",
+              "severity": "medium",
+              "summary": "Native SRUDB.dat inventory; ESE header/string pivots need dedicated SRUM row decoding for report-grade usage.",
+              "evidence_interpretation": "SRUM database presence plus table/string/row candidates",
+              "not_proof_of": [
+                "decoded SRUM row facts",
+                "validated counters or timestamps"
+              ],
+              "analyst_questions": [
+                "Does a dedicated SRUM parser decode the same rows?",
+                "Which candidate app/URL/table should be validated first?",
+                "Are database page size and file alignment plausible?"
+              ],
+              "primary_pivots": [
+                "native_srum_table_candidate_count",
+                "native_srum_row_candidate_count",
+                "path_candidates",
+                "url_candidates"
+              ],
+              "source_field_values": {
+                "native_srum_table_candidate_count": 3,
+                "native_srum_row_candidate_count": 1,
+                "path_candidates": [
+                  "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+                ],
+                "url_candidates": [
+                  "https://download.example/tools/installer.exe"
+                ]
+              },
+              "correlation_targets": [
+                "SrumECmd",
+                "libesedb",
+                "Process execution",
+                "Network artifacts",
+                "MFT/USN"
+              ],
+              "risk_tags": [
+                "ese-database",
+                "native-row-validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "native_table_catalog_decoding_available",
+                "row_level_decoding_available"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "execution-artifact-trusted-diff-required",
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "large-known-answer-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:native-table-catalog-decoding-available",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
+            },
             "execution_native_capabilities": {
               "amcache_export_mapping": true,
               "amcache_native_string_pivots": true,
@@ -5569,6 +5775,70 @@
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },
+            "execution_analyst_review_profile": {
+              "profile_version": "execution-analyst-review-profile-v1",
+              "artifact_type": "srum-database-pivot",
+              "source_format": "ese-srum",
+              "severity": "info",
+              "summary": "SRUDB native string pivot; useful for search/correlation but not decoded row semantics.",
+              "evidence_interpretation": "app/path/URL string presence inside SRUDB.dat",
+              "not_proof_of": [
+                "usage timestamp",
+                "counter value",
+                "row ownership"
+              ],
+              "analyst_questions": [
+                "Which decoded SRUM row contains this string?",
+                "Does the app/URL appear in browser, DNS, or filesystem artifacts?",
+                "Is the string only a schema/resource marker or actual usage data?"
+              ],
+              "primary_pivots": [
+                "candidate_kind",
+                "candidate_value",
+                "app_id",
+                "url"
+              ],
+              "source_field_values": {
+                "candidate_kind": "string",
+                "candidate_value": "SruDbTable=NetworkUsage Application=powershell.exe UserSid=S-1-5-21-1000 Timestamp=2024-04-01T05:06:07Z BytesSent=512 BytesReceived=2048 InterfaceLuid=12 NetworkProfile=CorpWiFi Url=https://download.example/tools/installer.exe",
+                "url": "https://download.example/tools/installer.exe"
+              },
+              "correlation_targets": [
+                "SrumECmd",
+                "Browser history",
+                "DNS",
+                "MFT/USN",
+                "EventLog"
+              ],
+              "risk_tags": [
+                "srum-network-url-pivot",
+                "string-pivot",
+                "validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "has_app_id",
+                "native_table_catalog_decoding_available",
+                "row_level_decoding_available"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "execution-artifact-trusted-diff-required",
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:has-app-id",
+                "validation-check-failed:native-table-catalog-decoding-available",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
+            },
             "forensic_review": {
               "gap_id": "#10",
               "artifact_goal": "SRUM native ESE string pivot",
@@ -6029,6 +6299,70 @@
               "native_bam_system_hive_decode": false,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
+            },
+            "execution_analyst_review_profile": {
+              "profile_version": "execution-analyst-review-profile-v1",
+              "artifact_type": "srum-database-pivot",
+              "source_format": "ese-srum",
+              "severity": "info",
+              "summary": "SRUDB native string pivot; useful for search/correlation but not decoded row semantics.",
+              "evidence_interpretation": "app/path/URL string presence inside SRUDB.dat",
+              "not_proof_of": [
+                "usage timestamp",
+                "counter value",
+                "row ownership"
+              ],
+              "analyst_questions": [
+                "Which decoded SRUM row contains this string?",
+                "Does the app/URL appear in browser, DNS, or filesystem artifacts?",
+                "Is the string only a schema/resource marker or actual usage data?"
+              ],
+              "primary_pivots": [
+                "candidate_kind",
+                "candidate_value",
+                "app_id",
+                "url"
+              ],
+              "source_field_values": {
+                "candidate_kind": "url",
+                "candidate_value": "https://download.example/tools/installer.exe",
+                "url": "https://download.example/tools/installer.exe"
+              },
+              "correlation_targets": [
+                "SrumECmd",
+                "Browser history",
+                "DNS",
+                "MFT/USN",
+                "EventLog"
+              ],
+              "risk_tags": [
+                "srum-network-url-pivot",
+                "string-pivot",
+                "validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "has_app_id",
+                "native_table_catalog_decoding_available",
+                "row_level_decoding_available"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "execution-artifact-trusted-diff-required",
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:has-app-id",
+                "validation-check-failed:native-table-catalog-decoding-available",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
             },
             "forensic_review": {
               "gap_id": "#10",
@@ -6491,6 +6825,69 @@
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },
+            "execution_analyst_review_profile": {
+              "profile_version": "execution-analyst-review-profile-v1",
+              "artifact_type": "srum-database-pivot",
+              "source_format": "ese-srum",
+              "severity": "info",
+              "summary": "SRUDB native string pivot; useful for search/correlation but not decoded row semantics.",
+              "evidence_interpretation": "app/path/URL string presence inside SRUDB.dat",
+              "not_proof_of": [
+                "usage timestamp",
+                "counter value",
+                "row ownership"
+              ],
+              "analyst_questions": [
+                "Which decoded SRUM row contains this string?",
+                "Does the app/URL appear in browser, DNS, or filesystem artifacts?",
+                "Is the string only a schema/resource marker or actual usage data?"
+              ],
+              "primary_pivots": [
+                "candidate_kind",
+                "candidate_value",
+                "app_id",
+                "url"
+              ],
+              "source_field_values": {
+                "candidate_kind": "path",
+                "candidate_value": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                "app_id": "powershell.exe"
+              },
+              "correlation_targets": [
+                "SrumECmd",
+                "Browser history",
+                "DNS",
+                "MFT/USN",
+                "EventLog"
+              ],
+              "risk_tags": [
+                "string-pivot",
+                "validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "has_url",
+                "native_table_catalog_decoding_available",
+                "row_level_decoding_available"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "execution-artifact-trusted-diff-required",
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:has-url",
+                "validation-check-failed:native-table-catalog-decoding-available",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
+            },
             "forensic_review": {
               "gap_id": "#10",
               "artifact_goal": "SRUM native ESE string pivot",
@@ -6949,6 +7346,69 @@
               "native_bam_system_hive_decode": false,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
+            },
+            "execution_analyst_review_profile": {
+              "profile_version": "execution-analyst-review-profile-v1",
+              "artifact_type": "srum-database-pivot",
+              "source_format": "ese-srum",
+              "severity": "info",
+              "summary": "SRUDB native string pivot; useful for search/correlation but not decoded row semantics.",
+              "evidence_interpretation": "app/path/URL string presence inside SRUDB.dat",
+              "not_proof_of": [
+                "usage timestamp",
+                "counter value",
+                "row ownership"
+              ],
+              "analyst_questions": [
+                "Which decoded SRUM row contains this string?",
+                "Does the app/URL appear in browser, DNS, or filesystem artifacts?",
+                "Is the string only a schema/resource marker or actual usage data?"
+              ],
+              "primary_pivots": [
+                "candidate_kind",
+                "candidate_value",
+                "app_id",
+                "url"
+              ],
+              "source_field_values": {
+                "candidate_kind": "string",
+                "candidate_value": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                "app_id": "powershell.exe"
+              },
+              "correlation_targets": [
+                "SrumECmd",
+                "Browser history",
+                "DNS",
+                "MFT/USN",
+                "EventLog"
+              ],
+              "risk_tags": [
+                "string-pivot",
+                "validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "has_url",
+                "native_table_catalog_decoding_available",
+                "row_level_decoding_available"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "execution-artifact-trusted-diff-required",
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:has-url",
+                "validation-check-failed:native-table-catalog-decoding-available",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
             },
             "forensic_review": {
               "gap_id": "#10",
@@ -7536,6 +7996,71 @@
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },
+            "execution_analyst_review_profile": {
+              "profile_version": "execution-analyst-review-profile-v1",
+              "artifact_type": "srum-row-candidate",
+              "source_format": "ese-srum",
+              "severity": "medium",
+              "summary": "SRUM row candidate clustered from nearby strings; validate ESE row decoding before reporting facts.",
+              "evidence_interpretation": "bounded native string cluster that resembles a SRUM usage row",
+              "not_proof_of": [
+                "decoded row fact",
+                "final counter/timestamp semantics"
+              ],
+              "analyst_questions": [
+                "Can a trusted SRUM parser confirm table, row, counters, and timestamp?",
+                "Do process/network artifacts corroborate the app and usage window?",
+                "Is this cluster a false positive from nearby strings?"
+              ],
+              "primary_pivots": [
+                "app_id",
+                "timestamp",
+                "table_family",
+                "bytes_received",
+                "bytes_sent",
+                "source_offset"
+              ],
+              "source_field_values": {
+                "app_id": "powershell.exe",
+                "timestamp": "2024-04-01T05:06:07+00:00",
+                "table_family": "network-usage",
+                "bytes_received": 2048,
+                "bytes_sent": 512,
+                "source_offset": 8192
+              },
+              "correlation_targets": [
+                "SrumECmd",
+                "libesedb",
+                "Process execution",
+                "Network artifacts",
+                "MFT/USN"
+              ],
+              "risk_tags": [
+                "row-candidate",
+                "srum-network-url-pivot",
+                "validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "row_level_decoding_available"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "execution-artifact-trusted-diff-required",
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "known-answer-row-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
+            },
             "forensic_review": {
               "gap_id": "#10",
               "artifact_goal": "SRUM native row candidate",
@@ -7983,6 +8508,61 @@
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
             },
+            "execution_analyst_review_profile": {
+              "profile_version": "execution-analyst-review-profile-v1",
+              "artifact_type": "srum-table-candidate",
+              "source_format": "ese-srum",
+              "severity": "info",
+              "summary": "SRUDB table-family candidate from native markers; validate catalog and row decoding before reporting.",
+              "evidence_interpretation": "bounded native marker cluster that suggests a SRUM table family",
+              "not_proof_of": [
+                "decoded table catalog",
+                "decoded row facts"
+              ],
+              "analyst_questions": [
+                "Does a dedicated ESE/SRUM parser confirm this table family?",
+                "Do decoded rows exist for this marker cluster?",
+                "Are marker offsets plausible within ESE page boundaries?"
+              ],
+              "primary_pivots": [
+                "table_family",
+                "matched_marker_count",
+                "source_offset"
+              ],
+              "source_field_values": {
+                "table_family": "network-usage",
+                "matched_marker_count": 8,
+                "source_offset": 8308
+              },
+              "correlation_targets": [
+                "SrumECmd",
+                "libesedb",
+                "SRUDB.dat row candidates"
+              ],
+              "risk_tags": [
+                "table-candidate",
+                "validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "row_level_decoding_available"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "execution-artifact-trusted-diff-required",
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
+            },
             "forensic_review": {
               "gap_id": "#10",
               "artifact_goal": "SRUM native table-family candidate",
@@ -8417,6 +8997,61 @@
               "native_bam_system_hive_decode": false,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
+            },
+            "execution_analyst_review_profile": {
+              "profile_version": "execution-analyst-review-profile-v1",
+              "artifact_type": "srum-table-candidate",
+              "source_format": "ese-srum",
+              "severity": "info",
+              "summary": "SRUDB table-family candidate from native markers; validate catalog and row decoding before reporting.",
+              "evidence_interpretation": "bounded native marker cluster that suggests a SRUM table family",
+              "not_proof_of": [
+                "decoded table catalog",
+                "decoded row facts"
+              ],
+              "analyst_questions": [
+                "Does a dedicated ESE/SRUM parser confirm this table family?",
+                "Do decoded rows exist for this marker cluster?",
+                "Are marker offsets plausible within ESE page boundaries?"
+              ],
+              "primary_pivots": [
+                "table_family",
+                "matched_marker_count",
+                "source_offset"
+              ],
+              "source_field_values": {
+                "table_family": "app-resource",
+                "matched_marker_count": 1,
+                "source_offset": 8334
+              },
+              "correlation_targets": [
+                "SrumECmd",
+                "libesedb",
+                "SRUDB.dat row candidates"
+              ],
+              "risk_tags": [
+                "table-candidate",
+                "validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "row_level_decoding_available"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "execution-artifact-trusted-diff-required",
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
             },
             "forensic_review": {
               "gap_id": "#10",
@@ -8854,6 +9489,61 @@
               "native_bam_system_hive_decode": false,
               "native_ese_catalog_decode": false,
               "native_srum_page_row_decode": false
+            },
+            "execution_analyst_review_profile": {
+              "profile_version": "execution-analyst-review-profile-v1",
+              "artifact_type": "srum-table-candidate",
+              "source_format": "ese-srum",
+              "severity": "info",
+              "summary": "SRUDB table-family candidate from native markers; validate catalog and row decoding before reporting.",
+              "evidence_interpretation": "bounded native marker cluster that suggests a SRUM table family",
+              "not_proof_of": [
+                "decoded table catalog",
+                "decoded row facts"
+              ],
+              "analyst_questions": [
+                "Does a dedicated ESE/SRUM parser confirm this table family?",
+                "Do decoded rows exist for this marker cluster?",
+                "Are marker offsets plausible within ESE page boundaries?"
+              ],
+              "primary_pivots": [
+                "table_family",
+                "matched_marker_count",
+                "source_offset"
+              ],
+              "source_field_values": {
+                "table_family": "user",
+                "matched_marker_count": 3,
+                "source_offset": 8334
+              },
+              "correlation_targets": [
+                "SrumECmd",
+                "libesedb",
+                "SRUDB.dat row candidates"
+              ],
+              "risk_tags": [
+                "table-candidate",
+                "validation-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "row_level_decoding_available"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "execution-artifact-trusted-diff-required",
+                "execution-artifact-validation-required",
+                "known-answer-execution-artifact-validation-required",
+                "native-amcache-schema-decoding-required",
+                "native-appcompatcache-layout-decoding-required",
+                "native-ese-catalog-decoding-required",
+                "native-ese-page-row-decoding-required",
+                "native-srum-row-decoding-required",
+                "native-system-hive-bam-decoding-required",
+                "validation-check-failed:requires-srum-parser",
+                "validation-check-failed:row-level-decoding-available"
+              ],
+              "report_guidance": "Use this row as an execution/resource-usage review pivot. Final reporting requires source hash, timestamp semantics, parser limitation wording, and trusted parser or known-answer validation."
             },
             "forensic_review": {
               "gap_id": "#10",
@@ -9397,6 +10087,52 @@
               "family:authentication"
             ],
             "event_description": "Authentication success",
+            "event_semantics_profile": {
+              "profile_version": "eventlog-analyst-semantics-v1",
+              "event_id": "4624",
+              "provider_name": "Microsoft-Windows-Security-Auditing",
+              "channel": "Security",
+              "category": "logon-success",
+              "catalog_key": "logon-success",
+              "event_family": "authentication",
+              "channel_family": "security",
+              "severity": "info",
+              "summary": "Successful authentication; verify source, logon type, account, and session context.",
+              "analyst_questions": [
+                "Is this logon type expected for the account and host?",
+                "Does the source IP/workstation match normal user activity?",
+                "Are nearby 4625, 4648, 4672, RDP, or process events present?"
+              ],
+              "primary_pivots": [
+                "target_user_name",
+                "subject_user_name",
+                "source_ip",
+                "workstation_name",
+                "logon_type"
+              ],
+              "source_field_values": {
+                "target_user_name": "alice",
+                "source_ip": "10.0.0.5",
+                "logon_type": "10"
+              },
+              "correlation_targets": [
+                "failed-logons",
+                "privileged-logons",
+                "rdp-session-events",
+                "process-creation",
+                "browser-downloads"
+              ],
+              "risk_tags": [
+                "authentication"
+              ],
+              "detected_terms": [],
+              "validation_requirements": [
+                "verify provider-rendered message text before quoting",
+                "correlate with at least one independent artifact family for conclusions",
+                "preserve source path, source hash, record ID, and timestamp in report citations"
+              ],
+              "report_guidance": "Use this profile to decide what to review next; final testimony still depends on source hash, provider-rendered message validation, and cross-artifact corroboration."
+            },
             "event_message": "An account successfully logged on. User=alice; logon_type=10; source=10.0.0.5.",
             "message_rendering": {
               "status": "rendered-builtin-template",
@@ -10208,6 +10944,75 @@
                 "trusted-user-activity-parser-diff-required"
               ]
             },
+            "registry_analyst_review_profile": {
+              "profile_version": "registry-analyst-review-profile-v1",
+              "artifact_type": "registry-user-activity",
+              "category": "shellbag",
+              "catalog_key": "shellbag",
+              "source_format": "reg",
+              "hive_name": "",
+              "hive_hint": "HKEY_CURRENT_USER",
+              "key_path": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+              "name": "",
+              "severity": "info",
+              "summary": "ShellBag registry location; decode shell items and correlate folder browsing with filesystem evidence.",
+              "analyst_questions": [
+                "Which folder path is represented after shell item decoding?",
+                "Does UsrClass/NTUSER transaction-log context change the interpretation?",
+                "Can filesystem or shortcut artifacts corroborate folder access?"
+              ],
+              "primary_pivots": [
+                "key_path",
+                "decoded_values",
+                "raw_preview"
+              ],
+              "source_field_values": {
+                "key_path": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+                "decoded_values": {
+                  "0": {
+                    "raw": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
+                    "value_name": "0",
+                    "mru_position": 0,
+                    "binary_payload": {
+                      "byte_count": 18,
+                      "sha256": "8d73b708f0070e92e700e38718dbf8fb09a01ecc43824c4d3e69de276694c550",
+                      "utf16le_strings": [
+                        "C:\\Cases",
+                        "㨀尀䌀愀猀攀猀"
+                      ],
+                      "decode_status": "bounded-payload-hash-and-string-scan"
+                    },
+                    "value": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
+                    "activity_value": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00"
+                  },
+                  "NodeSlot": {
+                    "raw": "dword:00000001",
+                    "value_name": "NodeSlot",
+                    "mru_position": null,
+                    "value": "dword:00000001",
+                    "activity_value": "dword:00000001"
+                  }
+                }
+              },
+              "correlation_targets": [
+                "shellbags-native",
+                "mft-usn",
+                "lnk",
+                "jumplist",
+                "removable-media"
+              ],
+              "risk_tags": [
+                "folder-browsing",
+                "folder-view-history",
+                "user-activity",
+                "user-activity:shellbag"
+              ],
+              "validation_required": false,
+              "transaction_log_status": "not-evaluated",
+              "report_grade_ready": false,
+              "commercial_blockers": [],
+              "report_guidance": "Use this registry row as a review/search pivot. Final reporting needs source hive hash, transaction-log handling, parser-version disclosure, and trusted parser or known-answer validation."
+            },
             "parser_confidence": 0.86,
             "evidence_strength": "registry-export-key",
             "risk_flags": [
@@ -10358,6 +11163,64 @@
                 "ntuser-usrclass-transaction-log-replay-required",
                 "trusted-user-activity-parser-diff-required"
               ]
+            },
+            "registry_analyst_review_profile": {
+              "profile_version": "registry-analyst-review-profile-v1",
+              "artifact_type": "registry-user-activity",
+              "category": "persistence",
+              "catalog_key": "persistence",
+              "source_format": "reg",
+              "hive_name": "",
+              "hive_hint": "HKEY_LOCAL_MACHINE",
+              "key_path": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+              "name": "",
+              "severity": "high",
+              "summary": "Registry persistence location; inspect command path, user scope, file creation, signer, and execution artifacts.",
+              "analyst_questions": [
+                "Does the value launch an executable or script from user-writable paths?",
+                "Can file creation, execution, or download artifacts corroborate it?",
+                "Is the key from HKCU, HKLM, policy, service, or a recovered/deleted cell?"
+              ],
+              "primary_pivots": [
+                "key_path",
+                "value_names",
+                "decoded_values",
+                "raw_preview"
+              ],
+              "source_field_values": {
+                "key_path": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                "decoded_values": {
+                  "SecurityUpdater": {
+                    "raw": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                    "value_name": "SecurityUpdater",
+                    "mru_position": null,
+                    "command": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                    "executable_hint": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe",
+                    "activity_value": "C:\\\\Users\\\\alice\\\\AppData\\\\Roaming\\\\security-updater.exe"
+                  }
+                }
+              },
+              "correlation_targets": [
+                "mft-usn",
+                "prefetch",
+                "amcache",
+                "bam-dam",
+                "srum",
+                "eventlog-process",
+                "defender"
+              ],
+              "risk_tags": [
+                "execution-review",
+                "persistence",
+                "suspicious-value:appdata",
+                "user-activity:persistence",
+                "user-hive-persistence"
+              ],
+              "validation_required": false,
+              "transaction_log_status": "not-evaluated",
+              "report_grade_ready": false,
+              "commercial_blockers": [],
+              "report_guidance": "Use this registry row as a review/search pivot. Final reporting needs source hive hash, transaction-log handling, parser-version disclosure, and trusted parser or known-answer validation."
             },
             "parser_confidence": 0.86,
             "evidence_strength": "registry-export-key",
@@ -11036,6 +11899,71 @@
               "native_space_tree_decode": false,
               "native_long_value_tree_decode": false
             },
+            "windows_search_analyst_review_profile": {
+              "profile_version": "windows-search-analyst-review-profile-v1",
+              "artifact_type": "windows-search-edb-file",
+              "source_format": "ese-edb",
+              "severity": "medium",
+              "summary": "Native Windows.edb inventory; page/string candidates support search triage but not decoded ESE row facts.",
+              "evidence_interpretation": "ESE header, page map, and bounded string/page-local candidates",
+              "not_proof_of": [
+                "decoded ESE row facts",
+                "authoritative deleted/index state",
+                "native row timestamp"
+              ],
+              "analyst_questions": [
+                "Which page-local candidate should be validated with a dedicated ESE parser?",
+                "Do MFT/USN/browser artifacts corroborate the path, URL, or content string?",
+                "Are deleted-state markers present only as strings or decoded from the actual row?"
+              ],
+              "primary_pivots": [
+                "path_candidate_count",
+                "url_candidate_count",
+                "content_candidate_count",
+                "row_candidate_count",
+                "page_count_scanned"
+              ],
+              "source_field_values": {
+                "path_candidate_count": 1,
+                "url_candidate_count": 1,
+                "content_candidate_count": 1,
+                "row_candidate_count": 1,
+                "page_count_scanned": 1
+              },
+              "correlation_targets": [
+                "libesedb/esedbexport",
+                "WinSearchDBAnalyzer",
+                "MFT",
+                "USN",
+                "Browser history"
+              ],
+              "risk_tags": [
+                "native-edb-triage",
+                "row-decoding-required"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "deleted_state_decoded_from_native_rows",
+                "ese_catalog_decoded",
+                "row_level_decoding_available",
+                "timestamps_decoded_from_native_rows"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-edb-trusted-parser-diff-required",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "report_guidance": "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state semantics, and trusted parser diffs are attached."
+            },
             "commercial_uplift_evidence": {
               "batch_id": "commercial-uplift-011-015",
               "item_numbers": [
@@ -11581,6 +12509,70 @@
               "native_space_tree_decode": false,
               "native_long_value_tree_decode": false
             },
+            "windows_search_analyst_review_profile": {
+              "profile_version": "windows-search-analyst-review-profile-v1",
+              "artifact_type": "windows-search-edb-page-candidate",
+              "source_format": "ese-edb",
+              "severity": "info",
+              "summary": "Windows Search artifact requiring source-specific validation.",
+              "evidence_interpretation": "search-index triage pivot",
+              "not_proof_of": [
+                "decoded native row fact without parser validation"
+              ],
+              "analyst_questions": [
+                "What original source file or URL should be opened?",
+                "Which source parser validates this row?",
+                "Is this a search lead or reportable evidence item?"
+              ],
+              "primary_pivots": [
+                "item_path",
+                "url",
+                "content_snippet"
+              ],
+              "source_field_values": {
+                "item_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+                "url": "https://example.com/search-hit",
+                "content_snippet": "rapid forensic case notes"
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Dedicated Windows.edb parser"
+              ],
+              "risk_tags": [
+                "ese-page-string:https://",
+                "search-index-page-path-candidate",
+                "search-index-page-url-candidate",
+                "search-index-review",
+                "windows-search-page-table:content-index",
+                "windows-search-page-table:deleted-state",
+                "windows-search-page-table:gather-path",
+                "windows-search-page-table:gather-record",
+                "windows-search-page-table:property-store"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "deleted_state_decoded_from_native_rows",
+                "ese_catalog_decoded",
+                "row_level_decoding_available",
+                "timestamps_decoded_from_native_rows"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-edb-trusted-parser-diff-required",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "report_guidance": "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state semantics, and trusted parser diffs are attached."
+            },
             "commercial_uplift_evidence": {
               "batch_id": "commercial-uplift-011-015",
               "item_numbers": [
@@ -11980,6 +12972,57 @@
               "native_space_tree_decode": false,
               "native_long_value_tree_decode": false
             },
+            "windows_search_analyst_review_profile": {
+              "profile_version": "windows-search-analyst-review-profile-v1",
+              "artifact_type": "windows-search-edb-pivot",
+              "source_format": "ese-edb",
+              "severity": "info",
+              "summary": "Windows Search artifact requiring source-specific validation.",
+              "evidence_interpretation": "search-index triage pivot",
+              "not_proof_of": [
+                "decoded native row fact without parser validation"
+              ],
+              "analyst_questions": [
+                "What original source file or URL should be opened?",
+                "Which source parser validates this row?",
+                "Is this a search lead or reportable evidence item?"
+              ],
+              "primary_pivots": [
+                "item_path",
+                "url",
+                "content_snippet"
+              ],
+              "source_field_values": {
+                "content_snippet": "rapid forensic case notes"
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Dedicated Windows.edb parser"
+              ],
+              "risk_tags": [
+                "search-index-content-pivot",
+                "search-index-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "has_path_or_url",
+                "row_level_decoding_available"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:has-path-or-url",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "windows-edb-trusted-parser-diff-required",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "report_guidance": "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state semantics, and trusted parser diffs are attached."
+            },
             "commercial_uplift_evidence": {
               "batch_id": "commercial-uplift-011-015",
               "item_numbers": [
@@ -12351,6 +13394,55 @@
               "native_space_tree_decode": false,
               "native_long_value_tree_decode": false
             },
+            "windows_search_analyst_review_profile": {
+              "profile_version": "windows-search-analyst-review-profile-v1",
+              "artifact_type": "windows-search-edb-pivot",
+              "source_format": "ese-edb",
+              "severity": "info",
+              "summary": "Windows Search artifact requiring source-specific validation.",
+              "evidence_interpretation": "search-index triage pivot",
+              "not_proof_of": [
+                "decoded native row fact without parser validation"
+              ],
+              "analyst_questions": [
+                "What original source file or URL should be opened?",
+                "Which source parser validates this row?",
+                "Is this a search lead or reportable evidence item?"
+              ],
+              "primary_pivots": [
+                "item_path",
+                "url",
+                "content_snippet"
+              ],
+              "source_field_values": {
+                "item_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+                "content_snippet": "C:\\Users\\alice\\Documents\\Case Notes.docx"
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Dedicated Windows.edb parser"
+              ],
+              "risk_tags": [
+                "search-index-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "row_level_decoding_available"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "windows-edb-trusted-parser-diff-required",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "report_guidance": "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state semantics, and trusted parser diffs are attached."
+            },
             "commercial_uplift_evidence": {
               "batch_id": "commercial-uplift-011-015",
               "item_numbers": [
@@ -12718,6 +13810,56 @@
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
               "native_long_value_tree_decode": false
+            },
+            "windows_search_analyst_review_profile": {
+              "profile_version": "windows-search-analyst-review-profile-v1",
+              "artifact_type": "windows-search-edb-pivot",
+              "source_format": "ese-edb",
+              "severity": "info",
+              "summary": "Windows Search artifact requiring source-specific validation.",
+              "evidence_interpretation": "search-index triage pivot",
+              "not_proof_of": [
+                "decoded native row fact without parser validation"
+              ],
+              "analyst_questions": [
+                "What original source file or URL should be opened?",
+                "Which source parser validates this row?",
+                "Is this a search lead or reportable evidence item?"
+              ],
+              "primary_pivots": [
+                "item_path",
+                "url",
+                "content_snippet"
+              ],
+              "source_field_values": {
+                "url": "https://example.com/search-hit",
+                "content_snippet": "https://example.com/search-hit"
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Dedicated Windows.edb parser"
+              ],
+              "risk_tags": [
+                "search-index-review",
+                "search-index-url-pivot"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "row_level_decoding_available"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "windows-edb-trusted-parser-diff-required",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "report_guidance": "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state semantics, and trusted parser diffs are attached."
             },
             "commercial_uplift_evidence": {
               "batch_id": "commercial-uplift-011-015",
@@ -13087,6 +14229,56 @@
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
               "native_long_value_tree_decode": false
+            },
+            "windows_search_analyst_review_profile": {
+              "profile_version": "windows-search-analyst-review-profile-v1",
+              "artifact_type": "windows-search-edb-pivot",
+              "source_format": "ese-edb",
+              "severity": "info",
+              "summary": "Windows Search artifact requiring source-specific validation.",
+              "evidence_interpretation": "search-index triage pivot",
+              "not_proof_of": [
+                "decoded native row fact without parser validation"
+              ],
+              "analyst_questions": [
+                "What original source file or URL should be opened?",
+                "Which source parser validates this row?",
+                "Is this a search lead or reportable evidence item?"
+              ],
+              "primary_pivots": [
+                "item_path",
+                "url",
+                "content_snippet"
+              ],
+              "source_field_values": {
+                "url": "https://example.com/search-hit",
+                "content_snippet": "https://example.com/search-hit"
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Dedicated Windows.edb parser"
+              ],
+              "risk_tags": [
+                "search-index-review",
+                "search-index-url-pivot"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "row_level_decoding_available"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "windows-edb-trusted-parser-diff-required",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "report_guidance": "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state semantics, and trusted parser diffs are attached."
             },
             "commercial_uplift_evidence": {
               "batch_id": "commercial-uplift-011-015",
@@ -13635,6 +14827,74 @@
               "native_space_tree_decode": false,
               "native_long_value_tree_decode": false
             },
+            "windows_search_analyst_review_profile": {
+              "profile_version": "windows-search-analyst-review-profile-v1",
+              "artifact_type": "windows-search-edb-row-candidate",
+              "source_format": "ese-edb",
+              "severity": "high",
+              "summary": "Page-local Windows.edb row candidate; strong search lead but still requires native ESE row validation.",
+              "evidence_interpretation": "correlated page-local path, URL, content, and table marker strings",
+              "not_proof_of": [
+                "decoded row ownership",
+                "final deleted state",
+                "native row timestamp"
+              ],
+              "analyst_questions": [
+                "Does a trusted Windows.edb parser decode this exact item?",
+                "Does the page offset/hash remain stable in the source image?",
+                "What original file/web artifact should be opened to verify the hit?"
+              ],
+              "primary_pivots": [
+                "item_path",
+                "file_name",
+                "url",
+                "content_snippet",
+                "page_offset",
+                "deleted_state"
+              ],
+              "source_field_values": {
+                "item_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+                "file_name": "Case Notes.docx",
+                "url": "https://example.com/search-hit",
+                "content_snippet": "rapid forensic case notes",
+                "page_offset": 8192,
+                "deleted_state": "candidate-marker-present"
+              },
+              "correlation_targets": [
+                "libesedb/esedbexport",
+                "WinSearchDBAnalyzer",
+                "MFT",
+                "USN",
+                "Browser history",
+                "Document viewer"
+              ],
+              "risk_tags": [
+                "page-local-candidate",
+                "search-index-url-row",
+                "search-result-review",
+                "windows-search-row-candidate"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "deleted_state_decoded_from_native_rows",
+                "row_level_decoding_available",
+                "timestamps_decoded_from_native_rows"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-edb-trusted-parser-diff-required",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "report_guidance": "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state semantics, and trusted parser diffs are attached."
+            },
             "commercial_uplift_evidence": {
               "batch_id": "commercial-uplift-011-015",
               "item_numbers": [
@@ -14127,6 +15387,60 @@
               "native_space_tree_decode": false,
               "native_long_value_tree_decode": false
             },
+            "windows_search_analyst_review_profile": {
+              "profile_version": "windows-search-analyst-review-profile-v1",
+              "artifact_type": "windows-search-edb-table-candidate",
+              "source_format": "ese-edb",
+              "severity": "info",
+              "summary": "Windows Search artifact requiring source-specific validation.",
+              "evidence_interpretation": "search-index triage pivot",
+              "not_proof_of": [
+                "decoded native row fact without parser validation"
+              ],
+              "analyst_questions": [
+                "What original source file or URL should be opened?",
+                "Which source parser validates this row?",
+                "Is this a search lead or reportable evidence item?"
+              ],
+              "primary_pivots": [
+                "item_path",
+                "url",
+                "content_snippet"
+              ],
+              "source_field_values": {
+                "content_snippet": "crawl gthrpth systemindex_gthrpth"
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Dedicated Windows.edb parser"
+              ],
+              "risk_tags": [
+                "search-index-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "deleted_state_decoded_from_native_rows",
+                "ese_catalog_decoded",
+                "row_level_decoding_available",
+                "timestamps_decoded_from_native_rows"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-edb-trusted-parser-diff-required",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "report_guidance": "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state semantics, and trusted parser diffs are attached."
+            },
             "commercial_uplift_evidence": {
               "batch_id": "commercial-uplift-011-015",
               "item_numbers": [
@@ -14614,6 +15928,60 @@
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
               "native_long_value_tree_decode": false
+            },
+            "windows_search_analyst_review_profile": {
+              "profile_version": "windows-search-analyst-review-profile-v1",
+              "artifact_type": "windows-search-edb-table-candidate",
+              "source_format": "ese-edb",
+              "severity": "info",
+              "summary": "Windows Search artifact requiring source-specific validation.",
+              "evidence_interpretation": "search-index triage pivot",
+              "not_proof_of": [
+                "decoded native row fact without parser validation"
+              ],
+              "analyst_questions": [
+                "What original source file or URL should be opened?",
+                "Which source parser validates this row?",
+                "Is this a search lead or reportable evidence item?"
+              ],
+              "primary_pivots": [
+                "item_path",
+                "url",
+                "content_snippet"
+              ],
+              "source_field_values": {
+                "content_snippet": "itemurl systemindex_gthr workid"
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Dedicated Windows.edb parser"
+              ],
+              "risk_tags": [
+                "search-index-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "deleted_state_decoded_from_native_rows",
+                "ese_catalog_decoded",
+                "row_level_decoding_available",
+                "timestamps_decoded_from_native_rows"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-edb-trusted-parser-diff-required",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "report_guidance": "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state semantics, and trusted parser diffs are attached."
             },
             "commercial_uplift_evidence": {
               "batch_id": "commercial-uplift-011-015",
@@ -15105,6 +16473,60 @@
               "native_space_tree_decode": false,
               "native_long_value_tree_decode": false
             },
+            "windows_search_analyst_review_profile": {
+              "profile_version": "windows-search-analyst-review-profile-v1",
+              "artifact_type": "windows-search-edb-table-candidate",
+              "source_format": "ese-edb",
+              "severity": "info",
+              "summary": "Windows Search artifact requiring source-specific validation.",
+              "evidence_interpretation": "search-index triage pivot",
+              "not_proof_of": [
+                "decoded native row fact without parser validation"
+              ],
+              "analyst_questions": [
+                "What original source file or URL should be opened?",
+                "Which source parser validates this row?",
+                "Is this a search lead or reportable evidence item?"
+              ],
+              "primary_pivots": [
+                "item_path",
+                "url",
+                "content_snippet"
+              ],
+              "source_field_values": {
+                "content_snippet": "system.datemodified system.filename system.itempathdisplay systemindex_propertystore"
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Dedicated Windows.edb parser"
+              ],
+              "risk_tags": [
+                "search-index-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "deleted_state_decoded_from_native_rows",
+                "ese_catalog_decoded",
+                "row_level_decoding_available",
+                "timestamps_decoded_from_native_rows"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-edb-trusted-parser-diff-required",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "report_guidance": "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state semantics, and trusted parser diffs are attached."
+            },
             "commercial_uplift_evidence": {
               "batch_id": "commercial-uplift-011-015",
               "item_numbers": [
@@ -15590,6 +17012,60 @@
               "native_timestamp_decode": false,
               "native_space_tree_decode": false,
               "native_long_value_tree_decode": false
+            },
+            "windows_search_analyst_review_profile": {
+              "profile_version": "windows-search-analyst-review-profile-v1",
+              "artifact_type": "windows-search-edb-table-candidate",
+              "source_format": "ese-edb",
+              "severity": "info",
+              "summary": "Windows Search artifact requiring source-specific validation.",
+              "evidence_interpretation": "search-index triage pivot",
+              "not_proof_of": [
+                "decoded native row fact without parser validation"
+              ],
+              "analyst_questions": [
+                "What original source file or URL should be opened?",
+                "Which source parser validates this row?",
+                "Is this a search lead or reportable evidence item?"
+              ],
+              "primary_pivots": [
+                "item_path",
+                "url",
+                "content_snippet"
+              ],
+              "source_field_values": {
+                "content_snippet": "contents system.search.contents"
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Dedicated Windows.edb parser"
+              ],
+              "risk_tags": [
+                "search-index-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "deleted_state_decoded_from_native_rows",
+                "ese_catalog_decoded",
+                "row_level_decoding_available",
+                "timestamps_decoded_from_native_rows"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-edb-trusted-parser-diff-required",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "report_guidance": "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state semantics, and trusted parser diffs are attached."
             },
             "commercial_uplift_evidence": {
               "batch_id": "commercial-uplift-011-015",
@@ -16081,6 +17557,60 @@
               "native_space_tree_decode": false,
               "native_long_value_tree_decode": false
             },
+            "windows_search_analyst_review_profile": {
+              "profile_version": "windows-search-analyst-review-profile-v1",
+              "artifact_type": "windows-search-edb-table-candidate",
+              "source_format": "ese-edb",
+              "severity": "info",
+              "summary": "Windows Search artifact requiring source-specific validation.",
+              "evidence_interpretation": "search-index triage pivot",
+              "not_proof_of": [
+                "decoded native row fact without parser validation"
+              ],
+              "analyst_questions": [
+                "What original source file or URL should be opened?",
+                "Which source parser validates this row?",
+                "Is this a search lead or reportable evidence item?"
+              ],
+              "primary_pivots": [
+                "item_path",
+                "url",
+                "content_snippet"
+              ],
+              "source_field_values": {
+                "content_snippet": "crawlstatus deleted isdeleted status"
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Dedicated Windows.edb parser"
+              ],
+              "risk_tags": [
+                "search-index-review"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [
+                "deleted_state_decoded_from_native_rows",
+                "ese_catalog_decoded",
+                "row_level_decoding_available",
+                "timestamps_decoded_from_native_rows"
+              ],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "validation-check-failed:deleted-state-decoded-from-native-rows",
+                "validation-check-failed:ese-catalog-decoded",
+                "validation-check-failed:requires-windows-search-parser",
+                "validation-check-failed:row-level-decoding-available",
+                "validation-check-failed:timestamps-decoded-from-native-rows",
+                "windows-edb-trusted-parser-diff-required",
+                "windows-search-table-schema-decoding-required",
+                "windows-search-validation-required"
+              ],
+              "report_guidance": "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state semantics, and trusted parser diffs are attached."
+            },
             "commercial_uplift_evidence": {
               "batch_id": "commercial-uplift-011-015",
               "item_numbers": [
@@ -16488,6 +18018,60 @@
               "native_space_tree_decode": false,
               "native_long_value_tree_decode": false
             },
+            "windows_search_analyst_review_profile": {
+              "profile_version": "windows-search-analyst-review-profile-v1",
+              "artifact_type": "windows-search-index-entry",
+              "source_format": "csv",
+              "severity": "medium",
+              "summary": "Windows Search export row; useful for indexed path/content review when source-tool provenance is preserved.",
+              "evidence_interpretation": "source-tool decoded Windows Search index row",
+              "not_proof_of": [
+                "file existence at acquisition time without filesystem corroboration",
+                "deleted-state certainty without source parser validation"
+              ],
+              "analyst_questions": [
+                "Does the source-tool export identify the same item path/content?",
+                "Does MFT/USN prove the file existed or changed near the indexed timestamp?",
+                "Should this hit be included in the evidence tray or only used as a search lead?"
+              ],
+              "primary_pivots": [
+                "item_path",
+                "file_name",
+                "url",
+                "content_snippet",
+                "modified_at"
+              ],
+              "source_field_values": {
+                "item_path": "C:\\Users\\alice\\Documents\\Case Notes.docx",
+                "file_name": "Case Notes.docx",
+                "content_snippet": "rapid forensic case notes",
+                "modified_at": "2024-03-05T06:07:08+00:00"
+              },
+              "correlation_targets": [
+                "MFT",
+                "USN",
+                "Browser history",
+                "Email",
+                "Document metadata"
+              ],
+              "risk_tags": [
+                "search-index-hit",
+                "source-tool-export"
+              ],
+              "validation_required": true,
+              "failed_validation_checks": [],
+              "report_grade_ready": false,
+              "commercial_blockers": [
+                "native-ese-catalog-decoding-required",
+                "row-level-path-url-content-decoding-required",
+                "row-level-timestamp-and-deleted-state-validation-required",
+                "source-tool-export-validation-required",
+                "validation-check-failed:source-tool-export-validation-required",
+                "windows-edb-trusted-parser-diff-required",
+                "windows-search-table-schema-decoding-required"
+              ],
+              "report_guidance": "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state semantics, and trusted parser diffs are attached."
+            },
             "commercial_grade_ready": false,
             "commercial_grade_blockers": [
               "native-ese-catalog-decoding-required",
@@ -16802,6 +18386,75 @@
                 "ntuser-usrclass-transaction-log-replay-required",
                 "trusted-user-activity-parser-diff-required"
               ]
+            },
+            "registry_analyst_review_profile": {
+              "profile_version": "registry-analyst-review-profile-v1",
+              "artifact_type": "registry-user-activity",
+              "category": "shellbag",
+              "catalog_key": "shellbag",
+              "source_format": "reg",
+              "hive_name": "",
+              "hive_hint": "HKEY_CURRENT_USER",
+              "key_path": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+              "name": "",
+              "severity": "info",
+              "summary": "ShellBag registry location; decode shell items and correlate folder browsing with filesystem evidence.",
+              "analyst_questions": [
+                "Which folder path is represented after shell item decoding?",
+                "Does UsrClass/NTUSER transaction-log context change the interpretation?",
+                "Can filesystem or shortcut artifacts corroborate folder access?"
+              ],
+              "primary_pivots": [
+                "key_path",
+                "decoded_values",
+                "raw_preview"
+              ],
+              "source_field_values": {
+                "key_path": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\BagMRU\\0",
+                "decoded_values": {
+                  "0": {
+                    "raw": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
+                    "value_name": "0",
+                    "mru_position": 0,
+                    "binary_payload": {
+                      "byte_count": 18,
+                      "sha256": "8d73b708f0070e92e700e38718dbf8fb09a01ecc43824c4d3e69de276694c550",
+                      "utf16le_strings": [
+                        "C:\\Cases",
+                        "㨀尀䌀愀猀攀猀"
+                      ],
+                      "decode_status": "bounded-payload-hash-and-string-scan"
+                    },
+                    "value": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00",
+                    "activity_value": "hex:43,00,3a,00,5c,00,43,00,61,00,73,00,65,00,73,00,00,00"
+                  },
+                  "NodeSlot": {
+                    "raw": "dword:00000001",
+                    "value_name": "NodeSlot",
+                    "mru_position": null,
+                    "value": "dword:00000001",
+                    "activity_value": "dword:00000001"
+                  }
+                }
+              },
+              "correlation_targets": [
+                "shellbags-native",
+                "mft-usn",
+                "lnk",
+                "jumplist",
+                "removable-media"
+              ],
+              "risk_tags": [
+                "folder-browsing",
+                "folder-view-history",
+                "user-activity",
+                "user-activity:shellbag"
+              ],
+              "validation_required": false,
+              "transaction_log_status": "not-evaluated",
+              "report_grade_ready": false,
+              "commercial_blockers": [],
+              "report_guidance": "Use this registry row as a review/search pivot. Final reporting needs source hive hash, transaction-log handling, parser-version disclosure, and trusted parser or known-answer validation."
             },
             "parser_confidence": 0.86,
             "evidence_strength": "registry-export-key",

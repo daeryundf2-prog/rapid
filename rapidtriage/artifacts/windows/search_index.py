@@ -49,6 +49,50 @@ WINDOWS_SEARCH_CAPABILITIES = {
     "native_space_tree_decode": False,
     "native_long_value_tree_decode": False,
 }
+WINDOWS_SEARCH_ANALYST_REVIEW_CATALOG = {
+    "windows-search-index-entry": {
+        "severity": "medium",
+        "summary": "Windows Search export row; useful for indexed path/content review when source-tool provenance is preserved.",
+        "evidence_interpretation": "source-tool decoded Windows Search index row",
+        "not_proof_of": ["file existence at acquisition time without filesystem corroboration", "deleted-state certainty without source parser validation"],
+        "primary_pivots": ["item_path", "file_name", "url", "content_snippet", "modified_at"],
+        "correlation_targets": ["MFT", "USN", "Browser history", "Email", "Document metadata"],
+        "analyst_questions": [
+            "Does the source-tool export identify the same item path/content?",
+            "Does MFT/USN prove the file existed or changed near the indexed timestamp?",
+            "Should this hit be included in the evidence tray or only used as a search lead?",
+        ],
+        "risk_tags": ["search-index-hit", "source-tool-export"],
+    },
+    "windows-search-edb-file": {
+        "severity": "medium",
+        "summary": "Native Windows.edb inventory; page/string candidates support search triage but not decoded ESE row facts.",
+        "evidence_interpretation": "ESE header, page map, and bounded string/page-local candidates",
+        "not_proof_of": ["decoded ESE row facts", "authoritative deleted/index state", "native row timestamp"],
+        "primary_pivots": ["path_candidate_count", "url_candidate_count", "content_candidate_count", "row_candidate_count", "page_count_scanned"],
+        "correlation_targets": ["libesedb/esedbexport", "WinSearchDBAnalyzer", "MFT", "USN", "Browser history"],
+        "analyst_questions": [
+            "Which page-local candidate should be validated with a dedicated ESE parser?",
+            "Do MFT/USN/browser artifacts corroborate the path, URL, or content string?",
+            "Are deleted-state markers present only as strings or decoded from the actual row?",
+        ],
+        "risk_tags": ["native-edb-triage", "row-decoding-required"],
+    },
+    "windows-search-edb-row-candidate": {
+        "severity": "high",
+        "summary": "Page-local Windows.edb row candidate; strong search lead but still requires native ESE row validation.",
+        "evidence_interpretation": "correlated page-local path, URL, content, and table marker strings",
+        "not_proof_of": ["decoded row ownership", "final deleted state", "native row timestamp"],
+        "primary_pivots": ["item_path", "file_name", "url", "content_snippet", "page_offset", "deleted_state"],
+        "correlation_targets": ["libesedb/esedbexport", "WinSearchDBAnalyzer", "MFT", "USN", "Browser history", "Document viewer"],
+        "analyst_questions": [
+            "Does a trusted Windows.edb parser decode this exact item?",
+            "Does the page offset/hash remain stable in the source image?",
+            "What original file/web artifact should be opened to verify the hit?",
+        ],
+        "risk_tags": ["search-result-review", "page-local-candidate"],
+    },
+}
 WINDOWS_SEARCH_TABLE_MARKERS = {
     "gather-path": ("systemindex_gthrpth", "gthrpth", "scope", "crawl", "file:"),
     "gather-record": ("systemindex_gthr", "workid", "documentid", "docid", "itemurl"),
@@ -250,6 +294,24 @@ def build_edb_inventory_record(path: Path) -> ArtifactRecord:
             "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
             "search_index_report_grade_assessment": report_grade,
             "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+            "windows_search_analyst_review_profile": windows_search_analyst_review_profile(
+                artifact_type="windows-search-edb-file",
+                source_format="ese-edb",
+                validation_checks=validation_checks,
+                report_grade=report_grade,
+                risk_flags=[
+                    f"ese-string:{value}"
+                    for value in ("powershell", "cmd.exe", "rundll32", "regsvr32", "wmic", "certutil")
+                    if any(value in str(candidate).lower() for candidate in pivots.get("suspicious_strings") or [])
+                ],
+                evidence_fields={
+                    "path_candidate_count": len(pivots.get("path_candidates") or []),
+                    "url_candidate_count": len(pivots.get("url_candidates") or []),
+                    "content_candidate_count": len(content_candidates),
+                    "row_candidate_count": len(row_candidates),
+                    "page_count_scanned": int(page_map.get("page_count_scanned") or 0),
+                },
+            ),
             "commercial_uplift_evidence": windows_search_commercial_uplift_evidence(
                 {
                     "source_path": str(path.resolve()),
@@ -391,6 +453,19 @@ def build_edb_pivot_records(path: Path, inventory_details: Mapping[str, object])
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+                    "windows_search_analyst_review_profile": windows_search_analyst_review_profile(
+                        artifact_type="windows-search-edb-pivot",
+                        source_format="ese-edb",
+                        validation_checks=validation_checks,
+                        report_grade=report_grade,
+                        risk_flags=risk_flags,
+                        evidence_fields={
+                            "item_path": item_path,
+                            "url": url,
+                            "content_snippet": candidate_value[:1000],
+                            "candidate_value": candidate_value[:1000],
+                        },
+                    ),
                     "commercial_uplift_evidence": windows_search_commercial_uplift_evidence(
                         {
                             "source_path": str(path.resolve()),
@@ -548,6 +623,18 @@ def build_edb_page_candidate_records(path: Path, inventory_details: Mapping[str,
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+                    "windows_search_analyst_review_profile": windows_search_analyst_review_profile(
+                        artifact_type="windows-search-edb-page-candidate",
+                        source_format="ese-edb",
+                        validation_checks=validation_checks,
+                        report_grade=report_grade,
+                        risk_flags=risk_flags,
+                        evidence_fields={
+                            "item_path": path_candidates[0] if path_candidates else "",
+                            "url": url_candidates[0] if url_candidates else "",
+                            "content_snippet": content_candidates[0][:1000] if content_candidates else "",
+                        },
+                    ),
                     "commercial_uplift_evidence": windows_search_commercial_uplift_evidence(
                         {
                             "source_path": str(path.resolve()),
@@ -670,6 +757,15 @@ def build_edb_table_candidate_records(path: Path, inventory_details: Mapping[str
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+                    "windows_search_analyst_review_profile": windows_search_analyst_review_profile(
+                        artifact_type="windows-search-edb-table-candidate",
+                        source_format="ese-edb",
+                        validation_checks=validation_checks,
+                        report_grade=report_grade,
+                        evidence_fields={
+                            "content_snippet": " ".join(matched)[:1000],
+                        },
+                    ),
                     "commercial_uplift_evidence": windows_search_commercial_uplift_evidence(
                         {
                             "source_path": str(path.resolve()),
@@ -828,6 +924,21 @@ def build_edb_row_candidate_records(path: Path, inventory_details: Mapping[str, 
                     "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
                     "search_index_report_grade_assessment": report_grade,
                     "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+                    "windows_search_analyst_review_profile": windows_search_analyst_review_profile(
+                        artifact_type="windows-search-edb-row-candidate",
+                        source_format="ese-edb",
+                        validation_checks=validation_checks,
+                        report_grade=report_grade,
+                        risk_flags=risk_flags,
+                        evidence_fields={
+                            "item_path": item_path,
+                            "file_name": file_name,
+                            "url": url,
+                            "content_snippet": content_snippet[:1000],
+                            "page_offset": candidate.get("page_offset", ""),
+                            "deleted_state": "candidate-marker-present" if has_deleted_markers else "not-decoded",
+                        },
+                    ),
                     "commercial_uplift_evidence": windows_search_commercial_uplift_evidence(
                         {
                             "source_path": str(path.resolve()),
@@ -968,6 +1079,19 @@ def build_search_index_entry(
         "search_index_validation_matrix": search_index_validation_matrix(validation_checks),
         "search_index_report_grade_assessment": report_grade,
         "search_index_native_capabilities": WINDOWS_SEARCH_CAPABILITIES,
+        "windows_search_analyst_review_profile": windows_search_analyst_review_profile(
+            artifact_type="windows-search-index-entry",
+            source_format=path.suffix.lower().lstrip("."),
+            validation_checks=validation_checks,
+            report_grade=report_grade,
+            evidence_fields={
+                "item_path": item_path,
+                "file_name": file_name,
+                "url": str(first_value(lowered, "URL", "System.ItemUrl", "ItemUrl") or ""),
+                "content_snippet": content[:1000],
+                "modified_at": normalize_timestamp(first_value(lowered, "System.DateModified", "DateModified", "Modified", "LastModified")),
+            },
+        ),
         "commercial_grade_ready": False,
         "commercial_grade_blockers": report_grade["blockers"],
         "raw": dict(row),
@@ -1415,6 +1539,79 @@ def search_row_field_presence_profile(
         "content_index_marker": "content-index" in marker_hits,
         "deleted_state_marker": "deleted-state" in marker_hits,
     }
+
+
+def windows_search_analyst_review_profile(
+    *,
+    artifact_type: str,
+    source_format: str,
+    validation_checks: Mapping[str, object],
+    report_grade: Mapping[str, object],
+    risk_flags: Sequence[str] | None = None,
+    evidence_fields: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    catalog = WINDOWS_SEARCH_ANALYST_REVIEW_CATALOG.get(artifact_type) or {
+        "severity": "info",
+        "summary": "Windows Search artifact requiring source-specific validation.",
+        "evidence_interpretation": "search-index triage pivot",
+        "not_proof_of": ["decoded native row fact without parser validation"],
+        "primary_pivots": ["item_path", "url", "content_snippet"],
+        "correlation_targets": ["MFT", "USN", "Dedicated Windows.edb parser"],
+        "analyst_questions": [
+            "What original source file or URL should be opened?",
+            "Which source parser validates this row?",
+            "Is this a search lead or reportable evidence item?",
+        ],
+        "risk_tags": ["search-index-review"],
+    }
+    values = dict(evidence_fields or {})
+    source_values: dict[str, object] = {}
+    for pivot in catalog.get("primary_pivots", []):
+        key = str(pivot)
+        value = values.get(key)
+        if value not in ("", None, [], {}):
+            source_values[key] = bounded_search_review_value(value)
+    failed_checks = sorted(str(key) for key, value in validation_checks.items() if not bool(value))
+    blockers = sorted(
+        set(str(item) for item in report_grade.get("blockers", []) if str(item))
+        | {"windows-edb-trusted-parser-diff-required"}
+    )
+    return {
+        "profile_version": "windows-search-analyst-review-profile-v1",
+        "artifact_type": artifact_type,
+        "source_format": source_format,
+        "severity": str(catalog.get("severity") or "info"),
+        "summary": str(catalog.get("summary") or ""),
+        "evidence_interpretation": str(catalog.get("evidence_interpretation") or ""),
+        "not_proof_of": list(catalog.get("not_proof_of") or []),
+        "analyst_questions": list(catalog.get("analyst_questions") or []),
+        "primary_pivots": list(catalog.get("primary_pivots") or []),
+        "source_field_values": source_values,
+        "correlation_targets": list(catalog.get("correlation_targets") or []),
+        "risk_tags": sorted(set([str(item) for item in catalog.get("risk_tags", [])] + [str(item) for item in risk_flags or []])),
+        "validation_required": bool(report_grade.get("status") != "report-grade-ready" or failed_checks),
+        "failed_validation_checks": failed_checks,
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "commercial_blockers": blockers,
+        "report_guidance": (
+            "Treat native Windows.edb rows as search/review pivots until row-level ESE decoding, deleted-state "
+            "semantics, and trusted parser diffs are attached."
+        ),
+    }
+
+
+def bounded_search_review_value(value: object) -> object:
+    if isinstance(value, str):
+        return value[:1000]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    try:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        return str(value)[:1000]
+    if len(text) <= 2000:
+        return value
+    return {"truncated_json_preview": text[:2000], "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
 
 
 def page_candidate_confidence(

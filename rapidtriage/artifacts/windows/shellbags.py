@@ -316,6 +316,7 @@ def build_native_shellbag_record(
         "risk_score": 45 if candidate_source == "native-key-tree" else 30,
         "raw_preview": source_key_path[:2000],
     }
+    details["shellbag_analyst_review_profile"] = shellbag_analyst_review_profile(details)
     details["shellbag_depth_manifest"] = shellbag_depth_manifest(details)
     details["shellbag_depth_manifest_hash"] = details["shellbag_depth_manifest"]["manifest_sha256"]
     if string_index is not None:
@@ -511,6 +512,57 @@ def shellbag_depth_manifest(details: Mapping[str, object]) -> dict[str, object]:
     }
     manifest_payload["manifest_sha256"] = shellbag_stable_sha256(manifest_payload)
     return manifest_payload
+
+
+def shellbag_analyst_review_profile(details: Mapping[str, object]) -> dict[str, object]:
+    report_grade = (
+        details.get("shellbag_report_grade_assessment")
+        if isinstance(details.get("shellbag_report_grade_assessment"), Mapping)
+        else {}
+    )
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    source_values = {
+        "source_key_path": str(details.get("source_key_path") or ""),
+        "shellbag_section": str(details.get("shellbag_section") or ""),
+        "user_hive_scope": str(details.get("user_hive_scope") or ""),
+        "bag_id_candidates": list(details.get("bag_id_candidates") or [])[:25],
+        "node_id_candidates": list(details.get("node_id_candidates") or [])[:25],
+        "timestamp_candidates": list(details.get("timestamp_candidates") or [])[:10],
+    }
+    failed_checks = sorted(str(key) for key, value in validation_checks.items() if not bool(value))
+    blockers = sorted(set(str(item) for item in report_grade.get("blockers", []) if str(item)) | set(SHELLBAG_BLOCKERS))
+    return {
+        "profile_version": "shellbag-analyst-review-profile-v1",
+        "artifact_type": "shellbag-native-candidate",
+        "severity": "medium",
+        "summary": "ShellBags folder-view-history pivot with key, BagMRU/Bags, and timestamp context.",
+        "evidence_interpretation": "folder view/access-related registry state candidate; shell item payload and transaction history still need validation",
+        "not_proof_of": ["user opened a folder at a precise time", "final shell-item path semantics", "deleted/slack recovery fact"],
+        "analyst_questions": [
+            "Does ShellBagsExplorer/SBECmd confirm the same key, bag ID, node ID, and timestamp?",
+            "Does NTUSER/UsrClass correlation support the same folder-view history?",
+            "Are transaction logs or deleted cells needed before reporting this folder access?",
+        ],
+        "primary_pivots": [
+            "source_key_path",
+            "shellbag_section",
+            "user_hive_scope",
+            "bag_id_candidates",
+            "node_id_candidates",
+            "timestamp_candidates",
+        ],
+        "source_field_values": {key: value for key, value in source_values.items() if value not in ("", None, [], {})},
+        "correlation_targets": ["Registry key tree", "MFT", "USN", "JumpList", "Recent files", "ShellBagsExplorer/SBECmd"],
+        "risk_tags": sorted(set([str(item) for item in details.get("risk_flags") or []] + ["folder-view-history"])),
+        "validation_required": bool(report_grade.get("status") != "report-grade-ready" or failed_checks),
+        "failed_validation_checks": failed_checks,
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "commercial_blockers": blockers,
+        "report_guidance": (
+            "Use ShellBags as folder-view-history review pivots. Final folder-access claims require shell-item payload "
+            "decoding, transaction/deleted-state validation, and trusted parser diff evidence."
+        ),
+    }
 
 
 def is_shellbag_source(value: str) -> bool:

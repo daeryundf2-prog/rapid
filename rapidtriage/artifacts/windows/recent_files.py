@@ -655,6 +655,7 @@ def jump_list_metadata(path: Path, artifact_type: str) -> dict[str, object]:
         **destlist_metadata,
         "note": "OLE Jump List streams are traversed when recoverable; DestList rows are exposed as metadata candidates and embedded Shell Link/path extraction is provided for triage search.",
     }
+    details["jumplist_analyst_review_profile"] = jumplist_analyst_review_profile(details)
     details["jumplist_destlist_depth_manifest"] = jumplist_destlist_depth_manifest(details)
     details["jumplist_destlist_depth_manifest_hash"] = details["jumplist_destlist_depth_manifest"]["manifest_sha256"]
     return details
@@ -980,6 +981,53 @@ def jumplist_destlist_depth_manifest(details: Mapping[str, object]) -> dict[str,
     }
     manifest_payload["manifest_sha256"] = recent_stable_sha256(manifest_payload)
     return manifest_payload
+
+
+def jumplist_analyst_review_profile(details: Mapping[str, object]) -> dict[str, object]:
+    report_grade = (
+        details.get("recent_report_grade_assessment")
+        if isinstance(details.get("recent_report_grade_assessment"), Mapping)
+        else {}
+    )
+    validation_checks = details.get("validation_checks") if isinstance(details.get("validation_checks"), Mapping) else {}
+    destinations = [item for item in details.get("destinations") or [] if isinstance(item, Mapping)]
+    source_values = {
+        "application_id_hash": str(details.get("application_id_hash") or ""),
+        "jumplist_kind": str(details.get("jumplist_kind") or ""),
+        "destination_count": int(details.get("destination_count") or 0),
+        "destlist_parse_status": str(details.get("destlist_parse_status") or ""),
+        "target_paths": [str(item.get("target_path") or "") for item in destinations if item.get("target_path")][:25],
+    }
+    failed_checks = sorted(str(key) for key, value in validation_checks.items() if not bool(value))
+    blockers = sorted(
+        set(str(item) for item in report_grade.get("blockers", []) if str(item))
+        | set(JUMPLIST_COMMERCIAL_BLOCKERS)
+    )
+    return {
+        "profile_version": "jumplist-analyst-review-profile-v1",
+        "artifact_type": str(details.get("artifact_type") or ""),
+        "severity": "medium" if destinations else "info",
+        "summary": "JumpList recent-destination pivot with OLE stream, DestList, and embedded LNK context.",
+        "evidence_interpretation": "recent destination/container evidence; DestList fields remain candidate-level until version validation",
+        "not_proof_of": ["file opened by a specific user without account/context validation", "final DestList semantics", "deleted entry recovery"],
+        "analyst_questions": [
+            "Which application does the AppID hash map to, and is that mapping documented?",
+            "Do embedded LNK targets match DestList entry candidates?",
+            "Does JLECmd/LECmd confirm the same destinations and MRU/pin semantics?",
+        ],
+        "primary_pivots": ["application_id_hash", "jumplist_kind", "destination_count", "destlist_parse_status", "target_paths"],
+        "source_field_values": {key: value for key, value in source_values.items() if value not in ("", None, [], {})},
+        "correlation_targets": ["LNK viewer", "MFT", "USN", "ShellBags", "Windows Search", "Application activity"],
+        "risk_tags": ["recent-destination", "destlist-validation-required"],
+        "validation_required": bool(report_grade.get("status") != "report-grade-ready" or failed_checks),
+        "failed_validation_checks": failed_checks,
+        "report_grade_ready": bool(report_grade.get("report_grade_ready")),
+        "commercial_blockers": blockers,
+        "report_guidance": (
+            "Use JumpList rows as recent-destination review leads. Final MRU, pin, account, or deleted-entry claims require "
+            "dedicated parser diff and OS-version-specific DestList validation."
+        ),
+    }
 
 
 def jumplist_core_accuracy_gates(details: dict[str, object]) -> list[dict[str, object]]:
