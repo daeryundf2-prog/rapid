@@ -77,6 +77,13 @@ class RapidTriageSearchAnalysisTests(unittest.TestCase):
         self.assertFalse(analysis["analysis_native_capabilities"]["full_case_reindex"])
         self.assertTrue(analysis["analysis_native_capabilities"]["search_hit_deduplication"])
         self.assertIn("#46", analysis["analysis_report_grade_assessment"]["commercial_gap_ids"])
+        analysis_review = analysis["analysis_analyst_review_profile"]
+        self.assertEqual(analysis_review["profile_version"], "analysis-analyst-review-profile-v1")
+        self.assertEqual(analysis_review["gap_ids"], ["#46", "#47", "#48", "#49", "#50", "#60"])
+        self.assertEqual(analysis_review["artifact_type"], "search-analysis-workbench")
+        self.assertIn("source viewer row verification", analysis_review["correlation_targets"])
+        self.assertIn("full-case reindex", analysis_review["not_proof_of"])
+        self.assertFalse(analysis_review["report_grade_ready"])
         analysis_gates = {gate["gap_id"]: gate for gate in analysis["core_accuracy_gates"]}
         self.assertIn("bounded cluster generation", analysis_gates["#46"]["satisfied_checks"])
         self.assertIn("representative match links", analysis_gates["#46"]["satisfied_checks"])

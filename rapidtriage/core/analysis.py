@@ -170,6 +170,16 @@ def build_search_analysis(
         ),
         "analysis_native_capabilities": dict(ANALYSIS_NATIVE_CAPABILITIES),
         "analysis_report_grade_assessment": report_grade,
+        "analysis_analyst_review_profile": analysis_analyst_review_profile(
+            matches=normalized_matches,
+            clusters=clusters,
+            entities=entities,
+            graph=graph,
+            timeline=timeline,
+            workbook=workbook,
+            deduplication=deduplication,
+            report_grade=report_grade,
+        ),
         "limitations": [
             "Analysis pivots are derived from bounded search results, not a full re-index.",
             "Entities and clusters are triage aids; verify source rows and hashes before reporting.",
@@ -2734,6 +2744,92 @@ def analysis_report_grade_assessment() -> dict[str, object]:
             "Validate clusters, entities, graph edges, and timeline anchors against source rows before report inclusion.",
             "Document analyst review decisions in the case workbook/bookmark workflow before treating hypotheses as findings.",
         ],
+    }
+
+
+def analysis_analyst_review_profile(
+    *,
+    matches: Sequence[Mapping[str, object]],
+    clusters: Mapping[str, object],
+    entities: Mapping[str, object],
+    graph: Mapping[str, object],
+    timeline: Mapping[str, object],
+    workbook: Mapping[str, object],
+    deduplication: Mapping[str, object],
+    report_grade: Mapping[str, object],
+) -> dict[str, object]:
+    cluster_summary = clusters.get("summary") if isinstance(clusters.get("summary"), Mapping) else {}
+    entity_summary = entities.get("summary") if isinstance(entities.get("summary"), Mapping) else {}
+    graph_summary = graph.get("summary") if isinstance(graph.get("summary"), Mapping) else {}
+    timeline_summary = timeline.get("summary") if isinstance(timeline.get("summary"), Mapping) else {}
+    workbook_summary = workbook.get("summary") if isinstance(workbook.get("summary"), Mapping) else {}
+    dedup_summary = deduplication.get("summary") if isinstance(deduplication.get("summary"), Mapping) else {}
+    source_counts = Counter(str(match.get("source") or "unknown") for match in matches)
+    top_sources = [
+        {"source": source, "match_count": count}
+        for source, count in source_counts.most_common(10)
+    ]
+    return {
+        "profile_version": "analysis-analyst-review-profile-v1",
+        "gap_ids": ANALYSIS_GAP_IDS,
+        "artifact_type": "search-analysis-workbench",
+        "severity": "high" if matches else "medium",
+        "summary": (
+            f"matches={len(matches)} clusters={cluster_summary.get('cluster_count', 0)} "
+            f"entities={entity_summary.get('entity_count', 0)} "
+            f"graph_edges={graph_summary.get('edge_count', 0)} "
+            f"timeline_events={timeline_summary.get('event_count', 0)}"
+        ),
+        "evidence_interpretation": "Bounded search-derived clustering/entity/graph/timeline/workbook review routing",
+        "not_proof_of": [
+            "full-case reindex",
+            "analyst-verified identity resolution",
+            "causal relationship proof",
+            "timezone or clock-skew validated timeline",
+            "final investigative findings",
+        ],
+        "analyst_questions": [
+            "Which clusters have enough representative hits to review first?",
+            "Which entities need merge/split decisions before reporting?",
+            "Which graph edges need source-row citation review?",
+            "Which timeline anchors need timezone/skew and parser-confidence validation?",
+            "Which workbook hypotheses should be converted to reviewed evidence items?",
+        ],
+        "primary_pivots": [
+            f"top_source:{item['source']}={item['match_count']}"
+            for item in top_sources[:5]
+        ],
+        "source_field_values": {
+            "match_count": len(matches),
+            "cluster_count": int(cluster_summary.get("cluster_count") or 0),
+            "entity_count": int(entity_summary.get("entity_count") or 0),
+            "graph_node_count": int(graph_summary.get("node_count") or 0),
+            "graph_edge_count": int(graph_summary.get("edge_count") or 0),
+            "timeline_event_count": int(timeline_summary.get("event_count") or 0),
+            "workbook_hypothesis_count": int(workbook_summary.get("hypothesis_count") or 0),
+            "duplicate_group_count": int(dedup_summary.get("duplicate_group_count") or 0),
+            "top_sources": top_sources,
+        },
+        "review_entrypoints": [
+            {"view": "clusters", "json_pointer": "/analysis/clusters/cluster_review_profile"},
+            {"view": "entities", "json_pointer": "/analysis/entities/entity_review_profile"},
+            {"view": "graph", "json_pointer": "/analysis/graph/graph_interaction_profile"},
+            {"view": "timeline", "json_pointer": "/analysis/timeline/timeline_correlation_profile"},
+            {"view": "workbook", "json_pointer": "/analysis/workbook/workbook_review_profile"},
+            {"view": "deduplication", "json_pointer": "/analysis/deduplication/dedup_review_profile"},
+        ],
+        "correlation_targets": [
+            "source viewer row verification",
+            "case review marks and evidence tray",
+            "entity merge/split workflow",
+            "timeline timezone/clock-skew validation",
+            "trusted analysis rubric diff",
+        ],
+        "risk_tags": ["analysis-validation-required", "bounded-search-result-derived"],
+        "validation_required": True,
+        "report_grade_ready": False,
+        "commercial_blockers": list(report_grade.get("blockers", ANALYSIS_REPORT_GRADE_BLOCKERS)),
+        "report_guidance": "Treat analysis output as a review-routing layer; report only source-verified rows with saved review decisions and citations.",
     }
 
 

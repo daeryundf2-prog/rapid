@@ -69,7 +69,7 @@
       "title": "Large-result clustering",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search analysis emits bounded clusters with representative match links, source/keyword grouping, truncation disclosure, #46 core_accuracy_gates, and reportability blockers for missing persistent review state and near-duplicate validation.",
+        "Search analysis emits bounded clusters with representative match links, source/keyword grouping, truncation disclosure, analysis_analyst_review_profile, #46 core_accuracy_gates, and reportability blockers for missing persistent review state and near-duplicate validation.",
         "build_analysis_trusted_diff compares cluster rows against hand-labeled cluster review rows before satisfying the #46 trusted diff gate."
       ],
       "remaining_external_validation": [
@@ -81,7 +81,7 @@
       "title": "Entity view for people/accounts/email/phone/IP/domain",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search analysis extracts supported entity pivots with source/path references, match links, risk flags, merge/split warnings, #47 core_accuracy_gates, and reportability blockers for missing analyst merge/split and false-positive validation.",
+        "Search analysis extracts supported entity pivots with source/path references, match links, risk flags, merge/split warnings, analysis_analyst_review_profile, #47 core_accuracy_gates, and reportability blockers for missing analyst merge/split and false-positive validation.",
         "build_analysis_trusted_diff compares entity rows against analyst-reviewed entity rows before satisfying the #47 trusted diff gate."
       ],
       "remaining_external_validation": [
@@ -93,7 +93,7 @@
       "title": "Graph view for account-file-URL-time relationships",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search analysis emits bounded relationship graph nodes/edges, source citation references, graph truncation disclosure, #48 core_accuracy_gates, and reportability blockers for missing server-side graph paging, saved layout, and source-row review.",
+        "Search analysis emits bounded relationship graph nodes/edges, source citation references, graph truncation disclosure, analysis_analyst_review_profile, #48 core_accuracy_gates, and reportability blockers for missing server-side graph paging, saved layout, and source-row review.",
         "build_analysis_trusted_diff compares graph edge rows against source-citation reviewed graph rows before satisfying the #48 trusted diff gate."
       ],
       "remaining_external_validation": [
@@ -105,7 +105,7 @@
       "title": "Unified timeline correlation",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search analysis extracts timestamp anchors, normalizes UTC timestamps, generates date buckets, preserves source match anchors, emits #49 core_accuracy_gates, and reportability blockers for missing full-case timeline joins plus timezone/skew validation.",
+        "Search analysis extracts timestamp anchors, normalizes UTC timestamps, generates date buckets, preserves source match anchors, emits analysis_analyst_review_profile, #49 core_accuracy_gates, and reportability blockers for missing full-case timeline joins plus timezone/skew validation.",
         "build_analysis_trusted_diff compares timeline rows against known-answer timeline rows before satisfying the #49 trusted diff gate."
       ],
       "remaining_external_validation": [
@@ -117,7 +117,7 @@
       "title": "Incident hypothesis/workbook feature",
       "test_files": ["tests/test_rapidtriage_search_analysis.py"],
       "assertions": [
-        "Search analysis generates draft hypotheses with cluster evidence links, review questions/tasks, report-readiness flags, persistence warnings, #50 core_accuracy_gates, and reportability blockers for missing editable workbook persistence, evidence attachments, reviewer assignment, and version history.",
+        "Search analysis generates draft hypotheses with cluster evidence links, review questions/tasks, report-readiness flags, persistence warnings, analysis_analyst_review_profile, #50 core_accuracy_gates, and reportability blockers for missing editable workbook persistence, evidence attachments, reviewer assignment, and version history.",
         "build_analysis_trusted_diff compares workbook hypothesis rows against rubric-reviewed workbook rows before satisfying the #50 trusted diff gate."
       ],
       "remaining_external_validation": [
